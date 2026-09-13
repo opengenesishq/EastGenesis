@@ -11,10 +11,11 @@ import { queryWorkflowEvidence } from '../task/workflow-ledger-api'
 import { readTaskSnapshotDatabase } from '../task/task-snapshot'
 import { findWorkflowAcceptance } from '../task/workflow-ledger-store'
 import { getMediaStore } from './media-store'
+import { reconcileUnappliedMediaCancellation } from './media-cancel-reconciliation'
 
 export type MediaJobOperationTarget = Extract<EffectTarget, { kind: 'media_job_operation' }>
 
-const OPERATIONS: MediaJobOperationTarget['operation'][] = ['submit', 'poll', 'download', 'cancel', 'asset_import', 'compose', 'export', 'continuity_check']
+const OPERATIONS: MediaJobOperationTarget['operation'][] = ['submit', 'poll', 'download', 'cancel', 'asset_import', 'compose', 'continuity_check']
 const STATUSES: MediaJobOperationTarget['expectedStatus'][] = [
   'submitting', 'running', 'downloading', 'succeeded', 'failed', 'cancelled', 'waiting_reconciliation'
 ]
@@ -35,10 +36,10 @@ export function buildMediaJobOperationTarget(input: Record<string, unknown>): Me
 }
 
 export async function reconcileMediaJobOperationTarget(
-  target: MediaJobOperationTarget
+  target: MediaJobOperationTarget,
+  rootDir: string = app.getPath('userData')
 ): Promise<EffectReconciliationResult> {
-  const rootDir = app.getPath('userData')
-  if (target.operation === 'asset_import' || target.operation === 'compose' || target.operation === 'export' || target.operation === 'continuity_check') {
+  if (target.operation === 'asset_import' || target.operation === 'compose' || target.operation === 'continuity_check') {
     return reconcileLocalMediaArtifact(target, rootDir)
   }
   const job = await getMediaStore(rootDir).getMediaJob(target.mediaJobId)
@@ -62,6 +63,8 @@ export async function reconcileMediaJobOperationTarget(
       reason: 'Media provider result is unknown and requires explicit reconciliation'
     })
   }
+  const cancellationOutcome = await reconcileUnappliedMediaCancellation(target, job, rootDir)
+  if (cancellationOutcome) return cancellationOutcome
   if (!statusSatisfies(job.status, target.expectedStatus)) {
     return unresolved({
       kind: target.kind,
@@ -138,6 +141,7 @@ async function reconcileDownloadedArtifact(
 }
 
 function statusSatisfies(actual: MediaJobStatus, expected: MediaJobOperationTarget['expectedStatus']): boolean {
+  if (expected === 'cancelled') return actual === 'cancelled'
   if (actual === expected) return true
   if (actual === 'failed' || actual === 'cancelled') return expected !== 'waiting_reconciliation'
   const order: MediaJobStatus[] = ['requested', 'submitting', 'running', 'downloading', 'succeeded']
@@ -165,5 +169,5 @@ function isSha256(value: unknown): value is string {
 }
 
 function operationCreatesArtifact(operation: MediaJobOperationTarget['operation']): boolean {
-  return operation === 'download' || operation === 'asset_import' || operation === 'compose' || operation === 'export' || operation === 'continuity_check'
+  return operation === 'download' || operation === 'asset_import' || operation === 'compose' || operation === 'continuity_check'
 }

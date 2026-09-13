@@ -1,3 +1,5 @@
+import { artifactCategoryLabel, artifactVerificationStatus } from './studio-result-artifact-labels'
+import OfficeArtifactRevision from './office-revision/OfficeArtifactRevision'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   StudioAuditTimelineItem,
@@ -72,6 +74,7 @@ export default function StudioResultPanel({
     <article
       className={`studio-result-panel ${standalone ? 'studio-result-panel-standalone' : ''}`}
       data-studio-result-panel
+      data-studio-result-session={sessionId ?? ''}
       data-studio-result-state={snapshot?.state ?? (loading ? 'loading' : 'empty')}
     >
       <header className="studio-result-header">
@@ -599,6 +602,7 @@ function ArtifactView({
   const historicalArtifacts = snapshot.artifacts.filter((artifact) => artifact.deliveryScope === 'historical')
   return (
     <div className="studio-result-content" role="tabpanel" data-studio-result-view="artifacts">
+      <OfficeArtifactRevision snapshot={snapshot} />
       {snapshot.artifacts.length === 0 ? <div className="studio-result-muted studio-result-list-empty">{labels.noArtifacts}</div> : (
         <>
           <section className="studio-result-section studio-result-current-artifacts" data-studio-result-current-artifacts>
@@ -641,32 +645,6 @@ function ArtifactView({
       )}
     </div>
   )
-}
-
-function artifactVerificationStatus(artifact: StudioResultArtifact, language: 'zh' | 'en'): { label: string; tone: 'good' | 'warn' | 'bad' } {
-  const statuses = language === 'en' ? {
-    ready: { label: 'ready to deliver', tone: 'good' as const },
-    verification_pending: { label: 'acceptance pending', tone: 'warn' as const },
-    evidence_missing: { label: 'evidence missing', tone: 'bad' as const },
-    failed: { label: 'acceptance failed', tone: 'bad' as const },
-    unavailable: { label: 'file unavailable', tone: 'bad' as const },
-    superseded: { label: 'historical', tone: 'warn' as const }
-  } : {
-    ready: { label: '可交付', tone: 'good' as const },
-    verification_pending: { label: '待验收', tone: 'warn' as const },
-    evidence_missing: { label: '缺少证据', tone: 'bad' as const },
-    failed: { label: '验收失败', tone: 'bad' as const },
-    unavailable: { label: '文件不可用', tone: 'bad' as const },
-    superseded: { label: '历史版本', tone: 'warn' as const }
-  }
-  return statuses[artifact.deliveryStatus]
-}
-
-function artifactCategoryLabel(artifact: StudioResultArtifact, language: 'zh' | 'en'): string {
-  const labels = language === 'en'
-    ? { office: 'Office', code: 'Code', media: 'Media', report: 'Report', package: 'Package', other: 'Artifact' }
-    : { office: 'Office 文档', code: '代码', media: '媒体', report: '报告', package: '交付包', other: '产物' }
-  return labels[artifact.deliveryCategory]
 }
 
 function ArtifactRow({
@@ -970,7 +948,7 @@ function TimelineView({
     return () => {
       if (requestRef.current === request) requestRef.current += 1
     }
-  }, [runId, sessionId, snapshot.verification.resultDigest])
+  }, [runId, sessionId, snapshot.verification.aggregateDigest])
 
   const loadMore = async (): Promise<void> => {
     if (!sessionId || page?.state !== 'ready' || !page.nextCursor || loadingMore) return

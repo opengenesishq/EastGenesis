@@ -39,10 +39,11 @@ const DIRECT_USER: EffectEntryPolicy = {
   impact: 'external', effect: 'direct_user', replay: 'never'
 }
 
-export const EFFECT_ENTRY_INVENTORY_VERSION = 30
+export const EFFECT_ENTRY_INVENTORY_VERSION = 31
 
 export const IPC_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
   policyGroup([
+    'assistantSearch:getAttempt',
     'attachments:ocr',
     'browser:listAnnotations', 'browser:observe', 'browser:pickElement',
     'dataRetention:evaluatePurge', 'dataRetention:get', 'dataRetention:pending',
@@ -68,7 +69,7 @@ export const IPC_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
     'routines:list', 'routines:listRuns', 'routines:listTemplates',
     'sessions:decomposeTask', 'sessions:list', 'sessions:outboundContextPreview', 'sessions:pendingPermissions',
     'sessions:suggestFiles', 'sessions:transcript',
-    'settings:get',
+    'settings-domain:get', 'settings-domain:routing:get', 'settings-domain:routing:preview',
     'startSuggestions:get',
     'taskSnapshots:list',
     'terminals:list',
@@ -109,7 +110,7 @@ export const IPC_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
     'routines:create', 'routines:delete', 'routines:markRun', 'routines:reviewRun', 'routines:update',
     'sessions:close', 'sessions:interrupt', 'sessions:permission', 'sessions:rename',
     'sessions:setModel', 'sessions:setPermissionMode',
-    'settings:update',
+    'settings-domain:update', 'settings-domain:routing:save',
     'supervisor:invoke',
     'taskSnapshots:delete', 'taskSnapshots:resolveDagFinalization', 'taskSnapshots:resolveEffect',
     'workflowLedger:createArtifact', 'workflowLedger:createArtifactAcceptance', 'workflowLedger:createArtifactEdge',
@@ -142,6 +143,9 @@ export const IPC_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
     'plugins:probeMcp',
     'terminals:close', 'terminals:resize', 'terminals:start', 'terminals:write'
   ], OPAQUE),
+  policyGroup(['assistantSearch:search'], {
+    ...OPAQUE, evidence: 'broker.search'
+  }),
   policyGroup(['migration:import'], {
     ...OPAQUE, evidence: 'executeMigrationImportEffect'
   }),
@@ -171,6 +175,7 @@ export const IPC_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
   delegatedPolicyGroup({
     'routines:runNow': 'runRoutineNow',
     'sessions:create': 'sessionManager.create',
+    'personalTasks:command': 'PersonalTaskService.submit -> sessionManager.send',
     'sessions:dispatchSubagents': 'sessionManager.dispatchSubagents',
     'sessions:dispatchTaskDag': 'sessionManager.dispatchTaskDag',
     'sessions:send': 'sessionManager.send',
@@ -179,16 +184,23 @@ export const IPC_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
 )
 
 export const AGENT_TOOL_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
+  policyGroup(['inspect_media', 'inspect_office_artifact', 'plan_office_revision'], READ_ONLY),
+  delegatedPolicyGroup({
+    create_video_production: 'MediaStore.createVideoProduction deterministic creation identity',
+    submit_media_job: 'MediaRuntime.submitMediaJob request budget and executeInteractiveOperationEffect',
+    advance_media_job: 'MediaRuntime.advanceMediaJob original MediaJob effect lease',
+    reconcile_media_job: 'MediaRuntime.reconcileMediaJob verified original-job query lease'
+  }),
   policyGroup([
     'browser_automation_status', 'browser_screenshot', 'browser_wait_for',
     'china_notify', 'draft_skill', 'find_file', 'genesis_orchestrate',
     'get_dependencies', 'git_diff', 'git_status', 'gitee_prepare',
     'gui_list_windows', 'gui_screenshot', 'list_dir', 'list_skills', 'load_skill',
     'memory_search', 'read_file', 'route_model', 'run_skill', 'search_code',
-    'search_symbol', 'task_decompose', 'view', 'web_search'
+    'search_symbol', 'task_decompose', 'view'
   ], READ_ONLY),
   policyGroup([
-    'create_document', 'create_pdf', 'create_presentation', 'create_spreadsheet',
+    'revise_office_artifact', 'create_document', 'create_pdf', 'create_presentation', 'create_spreadsheet',
     'edit_file', 'git_commit', 'git_create_issue', 'git_create_pr', 'git_merge',
     'git_push', 'git_stage', 'git_stage_all', 'write_file'
   ], QUERYABLE),
@@ -200,7 +212,7 @@ export const AGENT_TOOL_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
   policyGroup([
     'bash',
     'browser_click', 'browser_evaluate', 'browser_navigate', 'browser_type',
-    'mcp_builtin_servers', 'mcp_call_tool', 'mcp_discover', 'mcp_import_claude_desktop',
+    'mcp_builtin_servers', 'mcp_call_tool', 'mcp_discover',
     'memory_add', 'optimize_skill', 'send_notification',
     'task_decompose_and_dispatch_dag', 'task_dispatch_dag'
   ], OPAQUE)
@@ -212,7 +224,7 @@ export const GATEWAY_ACTION_EFFECT_ENTRY_POLICIES = {
       'authorization:get', 'collaborationInbox:list', 'comments:list', 'comments:listProject',
       'get', 'knowledge:preview', 'goals:get', 'goals:list', 'invitations:list', 'list',
       'members:get', 'members:list', 'sharedApprovals:get', 'sharedApprovals:list',
-      'portfolio:get', 'squads:get', 'squads:list', 'workItems:get', 'workItems:list'
+      'portfolio:get', 'squads:get', 'squads:list', 'workItems:get', 'workItems:list', 'contents:list'
     ], READ_ONLY),
     policyGroup([
       'connectors:mutate', 'knowledge:search',
@@ -267,11 +279,10 @@ export const GATEWAY_ACTION_EFFECT_ENTRY_POLICIES = {
   ),
   'appFeatures:invoke': mergePolicyGroups(
     policyGroup([
-      'session-query/query',
+      'office-revision/inspect', 'office-revision/plan',
+      'session-query/discover',
       'provider-profile/backups', 'provider-profile/backup-preview',
-      'provider-profile/cc-switch-backups', 'provider-profile/cc-switch-preview',
       'provider-profile/native-backups', 'provider-profile/native-codex-preview',
-      'provider-profile/native-config-backups', 'provider-profile/native-config-preview',
       'provider-profile/preview',
       'provider-profile-sync/status', 'provider-profile-sync/preview',
       'provider-profile-sync/webdav-config', 'provider-profile-sync/webdav-preview',
@@ -281,9 +292,7 @@ export const GATEWAY_ACTION_EFFECT_ENTRY_POLICIES = {
       'studio-result/audit', 'studio-result/export', 'studio-result/get', 'task-plan/get'
     ], READ_ONLY),
     policyGroup([
-      'provider-profile/cc-switch-apply', 'provider-profile/cc-switch-rollback',
       'provider-profile/export', 'provider-profile/native-codex-apply',
-      'provider-profile/native-config-apply', 'provider-profile/native-config-rollback',
       'provider-profile/native-rollback',
       'provider-profile-sync/choose-directory', 'provider-profile-sync/disconnect',
       'provider-profile-sync/webdav-save', 'provider-profile-sync/webdav-remove',
@@ -325,6 +334,24 @@ export const GATEWAY_ACTION_EFFECT_ENTRY_POLICIES = {
     })
   )
 } as const
+
+/**
+ * Resolve the inventory contract used by the native tool Effect runtime.
+ *
+ * IPC and gateway entries are intentionally not inferred from a tool name:
+ * they have an explicit channel/action boundary owned by their caller. Native
+ * tools, however, enter the Effect ledger with their canonical tool id, so a
+ * direct lookup is the only safe default. Unknown names stay unclassified and
+ * therefore retain the runtime's existing fail-closed target handling.
+ */
+export function effectEntryPolicyForTool(toolName: string): EffectEntryPolicy | undefined {
+  const id = toolName.trim()
+  return AGENT_TOOL_EFFECT_ENTRY_POLICIES[id] ?? IPC_EFFECT_ENTRY_POLICIES[id]
+}
+
+export function effectEntryReplayPolicyForTool(toolName: string): EffectEntryReplayPolicy | undefined {
+  return effectEntryPolicyForTool(toolName)?.replay
+}
 
 export const EFFECT_FREE_AGENT_TOOL_NAMES = Object.freeze(
   Object.entries(AGENT_TOOL_EFFECT_ENTRY_POLICIES)

@@ -14,11 +14,10 @@ import { PROVIDER_GATEWAY_TRANSLATIONS } from './i18n/providerGatewayTranslation
 import { PLUGIN_REGISTRY_TRANSLATIONS } from './i18n/pluginRegistryTranslations'
 import { CHAT_TRANSLATIONS } from './i18n/chatTranslations'
 import { DATA_RETENTION_TRANSLATIONS } from './i18n/dataRetentionTranslations'
-import { PROVIDER_HEALTH_TRANSLATIONS } from './i18n/providerHealthTranslations'
-/**
- * 轻量 i18n:按当前语言查字典,缺失回退中文再回退 key。
- * 支持 {name} 占位符插值:t('key', { name: 'x' })。
- */
+import { CONTROL_CENTER_TRANSLATIONS } from './i18n/controlCenterTranslations'
+import { WORKFLOW_LEDGER_TRANSLATIONS } from './i18n/workflowLedgerTranslations'
+import { OFFICE_TRANSLATIONS } from './i18n/officeTranslations'
+/** 轻量 i18n:按当前语言查字典,缺失回退中文再回退 key;支持 {name} 占位符插值。 */
 type Dict = Record<string, { zh: string; en: string }>
 const DICT: Dict = {
   // 导航 / 通用
@@ -27,6 +26,9 @@ const DICT: Dict = {
   ...PROVIDER_GATEWAY_TRANSLATIONS,
   ...PLUGIN_REGISTRY_TRANSLATIONS,
   ...DATA_RETENTION_TRANSLATIONS,
+  ...CONTROL_CENTER_TRANSLATIONS,
+  ...WORKFLOW_LEDGER_TRANSLATIONS,
+  ...OFFICE_TRANSLATIONS,
   contentSearchSection: { zh: '消息内容', en: 'Message content' },
   contentSearchEmpty: { zh: '消息内容无匹配', en: 'No matches in message content' },
   recoverableTasks: { zh: '可恢复任务', en: 'Recoverable tasks' },
@@ -158,9 +160,6 @@ const DICT: Dict = {
   welcomeCta: { zh: '选择项目目录,开始工作', en: 'Pick a project folder to start' },
   welcomeAsk: { zh: '今天想完成什么？', en: 'What do you want to get done today?' },
   welcomeInputPlaceholder: { zh: '描述你希望 CaoGen 完成的工作', en: 'Describe what you want CaoGen to do' },
-  welcomePresetStartsNow: { zh: '点击即开始', en: 'Click to start' },
-  welcomeResearchWeb: { zh: '联网查资料', en: 'Research the web' },
-  welcomeResearchWebPrompt: { zh: '请联网查找这个问题的最新可靠资料，给出结论、来源 URL、抓取时间和引用：', en: 'Research this question on the web with current reliable sources, URLs, retrieval times, and citations:' },
   firstTaskRecommended: { zh: '推荐', en: 'Recommended' },
   firstTaskProgressCompute: { zh: '算力', en: 'Compute' },
   firstTaskProgressRun: { zh: '任务', en: 'Task' },
@@ -285,10 +284,10 @@ const DICT: Dict = {
   creating: { zh: '创建中…', en: 'Creating…' },
   create: { zh: '创建', en: 'Create' },
   // CaoGen 控制室
-  officeTitle: { zh: 'CaoGen 控制室', en: 'CaoGen Control Room' },
+  officeTitle: { zh: 'CaoTaiHub · 3D 控制室', en: 'CaoTaiHub · 3D Control Room' },
   officeHint: {
-    zh: '助手 · 项目 · 视频统一运行状态',
-    en: 'Assistant, project and video operations'
+    zh: '跨业务线的统一运行状态',
+    en: 'Operations across all business lines'
   },
   officeReturnWorkspace: { zh: '返回工作区', en: 'Back to workspace' },
   newShort: { zh: '新建', en: 'New' },
@@ -302,11 +301,8 @@ const DICT: Dict = {
   officeBusinessProject: { zh: '项目', en: 'Projects' },
   officeBusinessVideo: { zh: '视频', en: 'Video' },
   officeMetricSessions: { zh: '会话', en: 'Sessions' },
-  officeMetricHiddenSessions: { zh: '隐藏', en: 'Hidden' },
-  officeHiddenSessionsAction: { zh: '查看其余 {count} 个运行', en: 'View {count} more runs' },
-  officeHiddenSessionsTitle: { zh: '其余运行', en: 'More runs' },
   officeMetricWorking: { zh: '运行', en: 'Running' },
-  officeMetricAwaiting: { zh: '待授权', en: 'Approvals' },
+  officeMetricAwaiting: { zh: '待处理', en: 'Awaiting action' },
   officeMetricCompleted: { zh: '完成', en: 'Done' },
   officeMetricFailed: { zh: '异常', en: 'Failed' },
   officeMetricPackets: { zh: '任务流', en: 'Task flow' },
@@ -324,10 +320,10 @@ const DICT: Dict = {
   officeMetricReconciliation: { zh: '待对账', en: 'Reconcile' },
   officeMetricMediaCost: { zh: '实际 / 估算', en: 'Actual / est.' },
   officePresetOverview: { zh: '总览', en: 'Overview' },
-  officePresetAgent: { zh: 'Agent', en: 'Agent' },
+  officePresetAgent: { zh: '执行者', en: 'Worker' },
   officePresetFacilities: { zh: '业务区', en: 'Zones' },
   officePresetIncidents: { zh: '异常', en: 'Incidents' },
-  officeSelectedAgent: { zh: '当前 Agent', en: 'Selected Agent' },
+  officeSelectedAgent: { zh: '当前执行者', en: 'Selected worker' },
   officeOpenSession: { zh: '进入会话', en: 'Open Session' },
   officeRouting: { zh: '路由', en: 'Routing' },
   officeRoutingBasis: { zh: '依据', en: 'Basis' },
@@ -622,8 +618,8 @@ const DICT: Dict = {
   notificationChannelDingTalk: { zh: '钉钉', en: 'DingTalk' },
   migrateTitle: { zh: '导入历史工具资产', en: 'Import existing tool assets' },
   migrateHint: {
-    zh: '扫描 Codex、Cline、OpenClaw、Hermes Agent 等本机资产。记忆仅进入待确认草稿，自动化强制禁用、计划模式且零预算，频道仅保留脱敏统计；Provider、凭据和发送权限不会自动复制。',
-    en: 'Scan local assets from Codex, Cline, OpenClaw, Hermes Agent, and others. Memories remain approval drafts, automations are disabled with plan-only permission and zero budget, and channels become sanitized indexes; providers, credentials, and send authority are never copied.'
+    zh: '扫描受支持的本机规则、MCP 和 Skill 资产。所有导入均需确认；Provider、凭据和发送权限不会自动复制。',
+    en: 'Scan supported local rule, MCP, and Skill assets. Every import requires confirmation; providers, credentials, and send authority are never copied.'
   },
   migrateScan: { zh: '扫描', en: 'Scan' },
   migrateScanning: { zh: '扫描中…', en: 'Scanning…' },
@@ -690,6 +686,11 @@ const DICT: Dict = {
   customRoutingRulesHint: {
     zh: '规则按顺序匹配。关键词、任务类型、最低风险和当前策略之间同时满足才命中;未配置的条件不限制。',
     en: 'Rules match in order. Configured keyword, task, minimum-risk, and active-strategy conditions must all match; blank conditions do not restrict the rule.'
+  },
+  openRoutingRules: { zh: '打开智能路由', en: 'Open smart routing' },
+  routingRulesManagedInRoutingTab: {
+    zh: '路由规则已迁移到“智能路由”页。请在那里使用版本化编辑器进行预演、迁移和保存；此页仅保留运行时偏好。',
+    en: 'Routing rules now live in the Smart routing tab. Use its versioned editor for preview, migration, and saving; this tab only keeps runtime preferences.'
   },
   addRoutingRule: { zh: '+ 添加规则', en: '+ Add rule' },
   routingRuleEnabled: { zh: '启用', en: 'Enabled' },
@@ -840,26 +841,17 @@ const DICT: Dict = {
   chatDensityComfortable: { zh: '舒展', en: 'Comfortable' },
   chatDensityCompact: { zh: '紧凑', en: 'Compact' },
   pluginsInfo: {
-    zh: '技能 / 插件 / MCP 服务器 / 子代理会自动从 ~/.claude 与项目 .claude 继承。把开源或自定义包放到那里即可被会话发现调用。',
-    en: 'Skills / plugins / MCP servers / subagents are inherited from ~/.claude and project .claude. Drop open-source or custom packages there to use them.'
+    zh: '技能、插件、MCP 服务器和子代理从用户及项目的 .caogen 目录加载。外部工具资产需先通过迁移中心导入并批准。',
+    en: 'Skills, plugins, MCP servers, and subagents load from user and project .caogen directories. Import and approve external tool assets in Migration first.'
   },
   addProvider: { zh: '+ 添加', en: '+ Add' },
   officialAnthropic: { zh: '未选择 Provider', en: 'No Provider selected' },
   providerEmpty: {
-    zh: '还没有可用服务',
-    en: 'No usable service yet'
+    zh: '尚未配置可用 Provider。新建会话前请先添加并填写 API key。',
+    en: 'No usable Provider is configured. Add one with an API key before starting a session.'
   },
-  providerEmptyHint: {
-    zh: '添加一个服务并验证连接，之后助手、项目和视频会共用它。',
-    en: 'Add and verify one service; Assistant, Projects, and Video will share it.'
-  },
-  providerEmptyAction: { zh: '添加 Provider', en: 'Add Provider' },
-  providerCompatibilityTitle: { zh: '从其他工具迁移（可选）', en: 'Migrate from other tools (optional)' },
-  providerCompatibilityHint: { zh: 'CC Switch 和 Codex 配置只在需要迁移时使用，不影响直接添加服务。', en: 'Use CC Switch or Codex import only when you need migration; direct setup stays above.' },
   providerProbe: { zh: '检测', en: 'Probe' },
   providerProbing: { zh: '检测中…', en: 'Probing…' },
-  providerSetDefault: { zh: '设为默认', en: 'Make default' },
-  providerSettingDefault: { zh: '设置中…', en: 'Setting…' },
   providerProbeOk: {
     zh: '连通性正常 · 获取 {n} 个模型 · {latencyMs}ms',
     en: 'Reachable · fetched {n} models · {latencyMs}ms'
@@ -869,7 +861,10 @@ const DICT: Dict = {
     en: 'Connection failed · {message}'
   },
   ...PROVIDER_PROFILE_TRANSLATIONS,
-  ...PROVIDER_HEALTH_TRANSLATIONS,
+  healthOkTip: { zh: '健康 · 成功 {s} 失败 {f} · 最近延迟 {latencyMs}ms', en: 'Healthy · {s} succeeded, {f} failed · latest latency {latencyMs}ms' },
+  healthBadTip: { zh: '异常 · 连续失败 {n} · {error}', en: 'Unhealthy · {n} consecutive failures · {error}' },
+  healthCircuitOpenTip: { zh: '已熔断 · 暂停自动路由 · {error}', en: 'Circuit open · excluded from automatic routing · {error}' },
+  healthCircuitHalfOpenTip: { zh: '半开恢复 · 仅允许受限探测请求', en: 'Half-open recovery · only a limited probe is allowed' },
   officialEndpoint: { zh: '未填写 Base URL', en: 'No Base URL' },
   modelsCount: { zh: '{n} 个模型', en: '{n} models' },
   // Provider 编辑器
@@ -878,10 +873,6 @@ const DICT: Dict = {
   providerEditTitle: { zh: '编辑 Provider', en: 'Edit Provider' },
   providerAddTitle: { zh: '添加 Provider', en: 'Add Provider' },
   providerQuickTitle: { zh: '快速开始', en: 'Quick start' },
-  providerQuickStepsLabel: { zh: 'Provider 配置步骤', en: 'Provider setup steps' },
-  providerQuickStepTemplate: { zh: '选择模板', en: 'Choose a template' },
-  providerQuickStepCredential: { zh: '填写凭据', en: 'Add credentials' },
-  providerQuickStepVerify: { zh: '验证并设为默认', en: 'Verify and make default' },
   providerQuickRecommended: { zh: '推荐', en: 'Recommended' },
   providerQuickName: { zh: 'CaoGen 快速服务', en: 'CaoGen Quick Service' },
   providerQuickKeyLabel: { zh: '主账号', en: 'Primary' },
@@ -994,18 +985,13 @@ const DICT: Dict = {
   errProviderModelRequired: { zh: '要继续首个任务，请填写至少一个模型', en: 'Add at least one model to continue your first task' },
   saving: { zh: '保存中…', en: 'Saving…' }
 }
-
-/** 可选参数:{name} 占位符替换,值为 string | number */
 export type TParams = Record<string, string | number>
-
 export function translate(lang: AppLanguage, key: string, params?: TParams): string {
   const entry = DICT[key]
   const raw = entry ? entry[lang] ?? entry.zh ?? key : key
   if (!params) return raw
   return raw.replace(/\{(\w+)\}/g, (m, name: string) => (name in params ? String(params[name]) : m))
 }
-
-/** 组件里用:const t = useT(); t('save') 或 t('fetchedModels', { n: 3 }) */
 export function useT(): (key: string, params?: TParams) => string {
   const lang = useStore((s) => s.settings.language)
   return useCallback((key: string, params?: TParams) => translate(lang, key, params), [lang])

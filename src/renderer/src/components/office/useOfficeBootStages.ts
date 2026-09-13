@@ -1,47 +1,31 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 
-const OFFICE_DETAIL_UPGRADE_DELAY_MS = 1_200
-
+/** Reveal useful geometry on rendered frames; no fixed wall-clock loading delay. */
 export function useOfficeBootStages(recordFrame: (frameMs: number) => void): {
   bootCharactersEnabled: boolean
-  bootCharactersReadyAt: number
   sceneDetailEnabled: boolean
   sceneAssetsEnabled: boolean
   handleOfficeFrame: (frameMs: number) => void
 } {
+  // The CPU geometry cache survives navigation, but Canvas creates a new WebGL
+  // context each time. Keep the first frame small even on a warm remount: GPU
+  // shader compilation and uploading all workers would otherwise block it.
   const [bootCharactersEnabled, setBootCharactersEnabled] = useState(false)
   const [sceneDetailEnabled, setSceneDetailEnabled] = useState(false)
   const [sceneAssetsEnabled, setSceneAssetsEnabled] = useState(false)
-  const bootFrameRenderedRef = useRef(false)
-  const bootCharactersReadyAtRef = useRef(0)
-  const detailUpgradeTimerRef = useRef<number | null>(null)
+  const stage = useRef(0)
+  const deferredFrames = useRef(0)
   const handleOfficeFrame = useCallback((frameMs: number): void => {
     recordFrame(frameMs)
-    if (bootFrameRenderedRef.current) return
-    bootFrameRenderedRef.current = true
-    bootCharactersReadyAtRef.current = performance.now()
-    setBootCharactersEnabled(true)
-    detailUpgradeTimerRef.current = window.setTimeout(
-      () => setSceneDetailEnabled(true),
-      OFFICE_DETAIL_UPGRADE_DELAY_MS
-    )
-  }, [recordFrame])
-
-  useEffect(() => () => {
-    if (detailUpgradeTimerRef.current !== null) window.clearTimeout(detailUpgradeTimerRef.current)
-  }, [])
-
-  useEffect(() => {
-    if (!sceneDetailEnabled || sceneAssetsEnabled) return
-    let secondFrame = 0
-    const firstFrame = window.requestAnimationFrame(() => {
-      secondFrame = window.requestAnimationFrame(() => setSceneAssetsEnabled(true))
-    })
-    return () => {
-      window.cancelAnimationFrame(firstFrame)
-      if (secondFrame) window.cancelAnimationFrame(secondFrame)
+    if (stage.current === 2) return
+    if (stage.current === 0) {
+      stage.current = 1; setBootCharactersEnabled(true); return
     }
-  }, [sceneAssetsEnabled, sceneDetailEnabled])
-
-  return { bootCharactersEnabled, bootCharactersReadyAt: bootCharactersReadyAtRef.current, sceneDetailEnabled, sceneAssetsEnabled, handleOfficeFrame }
+    // Give a busy first frame room to settle, with a bounded frame count to prevent starvation.
+    if (frameMs > 30 && ++deferredFrames.current < 3) return
+    stage.current = 2
+    setSceneDetailEnabled(true)
+    setSceneAssetsEnabled(true)
+  }, [recordFrame])
+  return { bootCharactersEnabled, sceneDetailEnabled, sceneAssetsEnabled, handleOfficeFrame }
 }

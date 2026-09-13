@@ -11,10 +11,8 @@ import {
   executeInteractiveOperationEffect,
   type InteractiveOperationEffectOutcome
 } from './task/operation-effect-gateway'
-import {
-  prepareCanonicalSystemOperation,
-  settleCanonicalSystemOperation
-} from './task/system-operation-context'
+import type { CanonicalSystemOperationContext } from './task/system-operation-context'
+import { TaskKernel } from './task/task-kernel'
 import { stableValueDigest } from './task/tool-idempotency'
 import type { ProjectPortableExportEffectTarget } from './project-export-effect-target'
 
@@ -26,15 +24,17 @@ export async function executeProjectPortableExportEffect(
   runOperation: OperationGateway = executeInteractiveOperationEffect
 ): Promise<ProjectAggregateDeliveryExportResult> {
   const operationId = randomUUID()
-  const context = await prepareCanonicalSystemOperation({
+  const kernel = new TaskKernel(rootDir)
+  const context = await kernel.plan(await kernel.create({
     rootDir,
     requestId: `project-export-${operationId}`,
     objective: '生成完整、脱敏、可验证且可重新导入的 Project 可移植包',
-    workspaceId: projectId
-  })
+    workspaceId: projectId,
+    deferExecution: true
+  }))
   const runId = `operation:${operationId}`
   const target = exportTarget(context, operationId, runId)
-  const outcome = await runOperation({
+  const outcome = await kernel.execute(context, () => runOperation({
     rootDir,
     operationId,
     kind: 'project_export',
@@ -55,9 +55,9 @@ export async function executeProjectPortableExportEffect(
       exportDigest: result.exportDigest,
       workflowArtifactId: result.workflowArtifactId
     })
-  })
+  }))
   const result = requireCompletedExport(outcome)
-  await settleCanonicalSystemOperation(context, {
+  await kernel.deliver(context, {
     status: 'passed',
     evidenceRefs: [result.workflowEvidenceId],
     verifiedBy: 'project-portable-export'
@@ -138,7 +138,7 @@ async function produceProjectPortableExport(
 }
 
 function exportTarget(
-  context: Awaited<ReturnType<typeof prepareCanonicalSystemOperation>>,
+  context: CanonicalSystemOperationContext,
   operationId: string,
   runId: string
 ): ProjectPortableExportEffectTarget {

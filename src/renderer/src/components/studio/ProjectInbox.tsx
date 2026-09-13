@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { RoutineRunRecord, WorkItem } from '../../../../shared/types'
 import { useStore } from '../../store'
+import { TEXT } from './projectWorkspaceStudioModel'
 
 const REFRESH_INTERVAL_MS = 15_000
 const INBOX_WORK_ITEM_STATUSES = new Set<WorkItem['status']>([
@@ -33,7 +34,7 @@ export function ProjectInbox({
   onRefreshProject: () => Promise<void>
   projectId: string
   workItems: WorkItem[]
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const runs = useStore((state) => state.workbench.routineRuns)
   const loading = useStore((state) => state.workbench.routineLoading)
   const error = useStore((state) => state.workbench.routineError)
@@ -43,6 +44,7 @@ export function ProjectInbox({
   const [reviewingRunId, setReviewingRunId] = useState('')
   const [reviewError, setReviewError] = useState('')
   const entries = useMemo(() => projectInboxEntries(projectId, workItems, runs), [projectId, runs, workItems])
+  const visibleEntries = entries.slice(0, 50)
 
   const review = async (entry: ProjectInboxEntry, decision: 'accept' | 'reject'): Promise<void> => {
     if (!entry.routineRunId || reviewingRunId) return
@@ -65,24 +67,33 @@ export function ProjectInbox({
     return () => window.clearInterval(timer)
   }, [active, projectId, refresh])
 
+  if (!loading && !error && entries.length === 0) return null
+
   return (
     <section className="pws-inbox" aria-labelledby={`project-inbox-${projectId}`} data-project-inbox={projectId}>
       <header className="pws-inbox-header">
         <div>
-          <h2 id={`project-inbox-${projectId}`}>项目收件箱</h2>
-          <span>{entries.length} 项需要关注</span>
+          <h2 id={`project-inbox-${projectId}`}>{TEXT.projectInbox}</h2>
+          <span>{TEXT.attentionItemCount(entries.length)}</span>
         </div>
         <button type="button" className="btn btn-ghost btn-sm" disabled={loading} onClick={() => void refresh()}>
-          {loading ? '刷新中...' : '刷新'}
+          {loading ? TEXT.refreshing : TEXT.refresh}
         </button>
       </header>
       {error && <p className="pws-inbox-error" role="alert">{error}</p>}
       {reviewError && <p className="pws-inbox-error" role="alert">{reviewError}</p>}
       {entries.length === 0 ? (
-        <p className="pws-inbox-empty">暂无待处理事项</p>
+        <p className="pws-inbox-empty">{TEXT.noInboxItems}</p>
       ) : (
-        <div className="pws-inbox-list" role="list">
-          {entries.slice(0, 50).map((entry) => {
+        <div
+          className="pws-inbox-list"
+          role="list"
+          aria-label={`${TEXT.projectInbox}: ${TEXT.attentionItemCount(entries.length)}`}
+          data-inbox-total={entries.length}
+          data-inbox-rendered={visibleEntries.length}
+          tabIndex={0}
+        >
+          {visibleEntries.map((entry) => {
             const canOpen = Boolean(entry.sessionId && sessions[entry.sessionId])
             return (
               <article key={entry.id} className="pws-inbox-row" role="listitem" data-inbox-state={entry.state}>
@@ -94,7 +105,7 @@ export function ProjectInbox({
                 <time dateTime={new Date(entry.updatedAt).toISOString()}>{formatInboxTime(entry.updatedAt)}</time>
                 {canOpen && entry.sessionId && (
                   <button type="button" className="btn btn-ghost btn-sm" onClick={() => selectSession(entry.sessionId!)}>
-                    打开会话
+                    {TEXT.openSession}
                   </button>
                 )}
                 {entry.reviewable && (
@@ -104,13 +115,13 @@ export function ProjectInbox({
                       className="btn btn-primary btn-sm"
                       disabled={Boolean(reviewingRunId)}
                       onClick={() => void review(entry, 'accept')}
-                    >验收通过</button>
+                    >{TEXT.acceptReview}</button>
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
                       disabled={Boolean(reviewingRunId)}
                       onClick={() => void review(entry, 'reject')}
-                    >驳回</button>
+                    >{TEXT.rejectReview}</button>
                   </span>
                 )}
               </article>
@@ -185,10 +196,10 @@ function workItemInboxState(item: WorkItem): ProjectInboxEntry['state'] {
 }
 
 function inboxStateLabel(state: ProjectInboxEntry['state']): string {
-  if (state === 'waiting_approval') return '待审批'
-  if (state === 'needs_review') return '待验收'
-  if (state === 'failed') return '异常'
-  return '运行中'
+  if (state === 'waiting_approval') return TEXT.inboxAwaitingApproval
+  if (state === 'needs_review') return TEXT.inboxAwaitingAcceptance
+  if (state === 'failed') return TEXT.inboxException
+  return TEXT.inboxRunning
 }
 
 function inboxPriority(state: ProjectInboxEntry['state']): number {

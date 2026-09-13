@@ -13,6 +13,7 @@ import type {
   ProviderGenerationProbeResult,
   ProviderModelFetchInput,
   ProviderModelFetchResult,
+  ProviderModelProfile,
   ProviderView
 } from '../shared/types'
 import { recordProbeFailure, recordProbeSuccess } from './scheduler'
@@ -69,10 +70,11 @@ import {
 import { normalizeBaseUrl } from './provider/providerBaseUrl'
 import { normalizeProviderAuthMode } from './provider/providerAuthMode'
 import { normalizeProviderAdvancedConfig, normalizeProviderAuthorization } from './provider/providerAdvancedConfig'
+import { sanitizeUnsupportedProviderAuthorization } from './provider/provider-authorization-sanitization'
 import {
   assertProviderCredentialInput,
   inspectCredentialHeaderNames,
-  normalizedCredentialHeaderNames, normalizedAuthorizationHeaders,
+  normalizedCredentialHeaderNames,
   normalizedCustomHeaders,
   providerCredentialHeaderLines,
   providerCredentialHeaders,
@@ -83,6 +85,18 @@ import {
   ProviderStoreRepository
 } from './provider/providerStoreRepository'
 import { writeAutomaticProviderProfileBackup } from './provider/providerProfileAutoBackup'
+import { persistedProviders } from './provider/providerPersistenceProjection'
+import { resolveProviderEngine } from './provider/providerEngine'
+import { assignProviderConnectionIdentity, type ProviderConnectionTransitionOptions } from './provider/providerConnectionIdentity'
+import { EMPTY_AUTHORIZATION_POOL_DIGEST } from './provider/providerAuthorizationPoolIdentity'
+import { migrateLegacyEngineRecord } from './native-engine-migration'
+import { assertPreparedProviderConnections, migrateProviderConnectionIdentity, prepareProviderConnectionSet, providerConnectionStore } from './provider/providerConnectionStore'
+export { persistedProviders } from './provider/providerPersistenceProjection'
+export {
+  PROVIDER_ENGINE_BLOCKED_UNKNOWN,
+  ProviderEngineResolutionError,
+  resolveProviderEngine
+} from './provider/providerEngine'
 
 export { normalizeBaseUrl } from './provider/providerBaseUrl'
 export {
@@ -104,6 +118,11 @@ const providerStore = new ProviderStoreRepository(
     sanitize: sanitizeLoadedProvidersForRuntime
   }
 )
+
+const connectionStore = providerConnectionStore({ load, diskDigest: readProviderProfileStoreDigestStrict, digest: persistedProviderStoreDigest,
+  mutate: (action, operation) => withProviderStoreMutation(action, {}, operation), replace: (providers) => providerStore.replace(providers), persist: persistUnlocked })
+export const getProviderConnectionIdentity = connectionStore.identity
+export const stageProviderAuthorizationPoolDigest = connectionStore.stageAuthorizationPool
 
 export interface ProviderProfileStoreCommitOptions {
   operationId?: string
@@ -131,34 +150,6 @@ function persistUnlocked(): void {
   providerStore.persist()
 }
 
-export function persistedProviders(providers: Provider[]): Provider[] {
-  return providers.map((provider) => {
-    const noAuth = providerAuthMode(provider) === 'none'
-    const apiKeys = noAuth
-      ? []
-      : normalizedProviderKeys(provider)
-        .filter((key) => key.sessionOnly !== true && Boolean(key.encryptedToken))
-        .map(({ sessionOnly: _sessionOnly, ...key }) => key)
-    const activeKey = apiKeys.find((key) => key.id === provider.activeKeyId && !key.disabled)
-      ?? apiKeys.find((key) => !key.disabled)
-    const legacyActiveToken = activeKey?.encryptedToken.startsWith('b64:') === true
-      ? ''
-      : activeKey?.encryptedToken ?? ''
-    const safeHeaders = inspectProviderCustomHeaders(provider.customHeaders ?? '').safeValue.trim()
-    const safeBaseUrl = inspectProviderBaseUrl(provider.baseUrl).safeValue
-    const managedCredentialHeaders = resolvedProviderCredentialHeaderNames(provider)
-    return {
-      ...provider,
-      baseUrl: safeBaseUrl,
-      customHeaders: safeHeaders || undefined,
-      credentialHeaderNames: managedCredentialHeaders.length > 0 ? managedCredentialHeaders : undefined,
-      // 旧 b64 只保留 apiKeys 中的一份，避免持久化时再生成可逆镜像。
-      encryptedToken: noAuth ? '' : legacyActiveToken,
-      apiKeys,
-      activeKeyId: activeKey?.id
-    }
-  })
-}
 
 export function migrateLoadedProviders(providers: Provider[]): { providers: Provider[]; changed: boolean } {
   const credentialMigration = migrateProviderCredentials(providers, {
@@ -170,11 +161,9 @@ export function migrateLoadedProviders(providers: Provider[]): { providers: Prov
   let changed = credentialMigration.changed
   const migratedProviders = credentialMigration.providers.map((provider) => {
     const migratedEngine = migrateLegacyProviderEngine(provider)
-    if (migratedEngine !== provider) changed = true
-    const sanitized = sanitizeLoadedProviderAuthMode(migratedEngine)
-    if (sanitized !== provider) changed = true
-    const defaulted = withDefaultProviderCredentialHeaders(sanitized)
-    if (defaulted !== sanitized) changed = true
+    const sanitized = sanitizeLoadedProviderAuthMode(sanitizeUnsupportedProviderAuthorization(migratedEngine))
+    const defaulted = migrateProviderConnectionIdentity(provider, withDefaultProviderCredentialHeaders(sanitized))
+    if (defaulted !== provider) changed = true
     return defaulted
   })
   return { providers: migratedProviders, changed }
@@ -187,14 +176,13 @@ function sanitizeLoadedProvidersForRuntime(providers: Provider[]): Provider[] {
   })
   return sanitizedCredentials
     .map(migrateLegacyProviderEngine)
+    .map(sanitizeUnsupportedProviderAuthorization)
     .map(sanitizeLoadedProviderAuthMode)
     .map(withNormalizedProviderCredentialRouting)
 }
 
 function migrateLegacyProviderEngine(provider: Provider): Provider {
-  const engine = (provider as unknown as { engine?: string }).engine
-  if (engine !== 'claude') return provider
-  return { ...provider, engine: 'anthropic' }
+  return migrateLegacyEngineRecord(provider as Provider & { engine?: string }) as Provider
 }
 
 function sanitizeLoadedProviderAuthMode(provider: Provider): Provider {
@@ -670,11 +658,20 @@ export function commitProviderProfileStore(
   options: ProviderProfileStoreCommitOptions = {}
 ): void {
   const previous = providerStore.cached()
+  // Direct main-process fixtures and legacy callers may still provide records
+  // from before connection identities existed. Stamp those records through the
+  // same transition helper before the journal digest is checked; imported
+  // identity fields are never trusted as-is.
+  const desired = providers.some((provider) => provider.connectionIdentity === undefined
+    || provider.connectionAuthorizationPoolDigest === undefined)
+    ? prepareProviderConnectionSet(previous ?? [], providers)
+    : providers
   withProviderStoreMutation('提交 Provider Profile', {
     operationId: options.operationId,
     expectedWriteDigest: options.expectedWriteDigest
   }, () => {
-    providerStore.replace(providers)
+    assertPreparedProviderConnections(previous ?? [], desired)
+    providerStore.replace(desired)
     try {
       persistUnlocked()
     } catch (error) {
@@ -700,14 +697,6 @@ export function getProvider(id: string): Provider | undefined {
   return load().find((p) => p.id === id)
 }
 
-export function resolveProviderEngine(provider: Pick<Provider, 'engine' | 'name' | 'baseUrl' | 'models' | 'openaiProtocol'>): EngineKind {
-  const engine = (provider as unknown as { engine?: string }).engine
-  if (engine === 'openai' || engine === 'anthropic' || engine === 'gemini') return engine
-  if (engine === 'claude') return 'anthropic'
-  if (provider.openaiProtocol === 'chat') return 'openai'
-  const identity = `${provider.name}\n${provider.baseUrl}\n${provider.models.join('\n')}`.toLowerCase()
-  return /anthropic|claude|\/anthropic(?:\/|$)/.test(identity) ? 'anthropic' : 'openai'
-}
 
 export function createProvider(input: ProviderInput): ProviderView {
   const providerId = randomUUID()
@@ -733,7 +722,7 @@ export function createProvider(input: ProviderInput): ProviderView {
       const apiKeys = appendNewKeys(providerId, primary ? [primary] : [], input.additionalTokens)
       const activeKeyId = apiKeys.find((key) => !key.disabled && keyIsAvailable(providerId, key))?.id
       const activeKey = apiKeys.find((key) => key.id === activeKeyId)
-      const provider: Provider = {
+      const provider: Provider = assignProviderConnectionIdentity(undefined, {
         id: providerId,
         name: input.name,
         baseUrl,
@@ -752,7 +741,7 @@ export function createProvider(input: ProviderInput): ProviderView {
         authorization,
         advancedConfig,
         createdAt: Date.now()
-      }
+      }, { authorizationPoolDigest: EMPTY_AUTHORIZATION_POOL_DIGEST })
       writeAutomaticProviderProfileBackup(app.getPath('userData'), 'provider-create', list, persistedProviders(list))
       providerStore.replace([...list, provider])
       persistUnlocked()
@@ -765,7 +754,11 @@ export function createProvider(input: ProviderInput): ProviderView {
   })
 }
 
-export function updateProvider(id: string, patch: Partial<ProviderInput>, options: { allowAuthorizationHeaders?: boolean } = {}): ProviderView {
+export function updateProvider(id: string, patch: Partial<ProviderInput>): ProviderView { return updateProviderConnection(id, patch) }
+export function updateProviderForVerifiedOAuthRefresh(id: string, patch: Partial<ProviderInput>, principal: { service: string; accountId: string }): ProviderView {
+  return updateProviderConnection(id, patch, { verifiedOAuthRefresh: principal })
+}
+function updateProviderConnection(id: string, patch: Partial<ProviderInput>, identityOptions: ProviderConnectionTransitionOptions = {}): ProviderView {
   const list = load()
   const idx = list.findIndex((p) => p.id === id)
   if (idx === -1) throw new Error('Provider 不存在')
@@ -776,7 +769,7 @@ export function updateProvider(id: string, patch: Partial<ProviderInput>, option
     normalizedCredentialHeaderNames,
     normalizeBaseUrl,
     resolveProviderEngine
-  }, options.allowAuthorizationHeaders ? { customHeadersNormalizer: normalizedAuthorizationHeaders } : undefined)
+  })
   const nextEngine = patch.engine ?? resolveProviderEngine(prev)
   const authorization = patch.authorization === undefined
     ? prev.authorization
@@ -795,8 +788,9 @@ export function updateProvider(id: string, patch: Partial<ProviderInput>, option
         { normalizeBudget, resolveProviderEngine })
       next.authorization = authorization
       next.advancedConfig = advancedConfig
-      const view = toView(next)
-      const nextList = [...list.slice(0, idx), next, ...list.slice(idx + 1)]
+      const identified = assignProviderConnectionIdentity(prev, next, { ...identityOptions, credentialReplacement: patch.token !== undefined })
+      const view = toView(identified)
+      const nextList = [...list.slice(0, idx), identified, ...list.slice(idx + 1)]
       if (persistedProviderStoreDigest(list) === persistedProviderStoreDigest(nextList)) { providerStore.replace(nextList); return view }
       writeAutomaticProviderProfileBackup(app.getPath('userData'), 'provider-update', list, persistedProviders(list))
       providerStore.replace(nextList)
@@ -874,7 +868,57 @@ export async function fetchModels(opts: ProviderModelFetchInput): Promise<Provid
 export async function probeProviderGeneration(
   opts: ProviderGenerationProbeInput
 ): Promise<ProviderGenerationProbeResult> {
-  return probeProviderGenerationTarget(opts, providerDiagnosticsDependencies)
+  const providerId = opts.providerId?.trim()
+  // Explicit credentials may target an unsaved editor draft even when a saved
+  // providerId is supplied. Such a request cannot verify the saved connection.
+  const initial = providerId && !opts.token?.trim() ? getProvider(providerId) : undefined
+  const model = opts.model.trim()
+  const target = initial && probeModelProfiles(initial).find((profile) => matchesProbeModel(profile, model))
+  const identity = target && initial ? getProviderConnectionIdentity(initial.id) : undefined
+  const initialModels = initial ? JSON.stringify(initial.models) : undefined
+  const probeKey = target && initial ? JSON.stringify([initial.id, target.model]) : undefined
+  const attempt = Symbol('provider-generation-probe')
+  if (probeKey) pendingGenerationVerifications.set(probeKey, attempt)
+  try {
+    const result = await probeProviderGenerationTarget(opts, providerDiagnosticsDependencies)
+    if (!initial || !target || !identity || !probeKey) return result
+    const provider = getProvider(initial.id)
+    if (!provider || JSON.stringify(provider.models) !== initialModels
+      || pendingGenerationVerifications.get(probeKey) !== attempt) throw staleGenerationProbeError()
+    const currentIdentity = getProviderConnectionIdentity(provider.id)
+    if (currentIdentity.generationId !== identity.generationId || currentIdentity.revision !== identity.revision) {
+      throw staleGenerationProbeError()
+    }
+    const profiles = probeModelProfiles(provider).map((profile) =>
+      profile.model === target.model && matchesProbeModel(profile, model)
+        ? { ...profile, verification: {
+          generation: result.ok ? 'passed' as const : 'failed' as const,
+          outcome: result.outcome,
+          protocol: result.protocol,
+          responseValidation: result.responseValidation,
+          verifiedAt: Date.now()
+        } }
+        : profile)
+    updateProvider(provider.id, { advancedConfig: { ...(provider.advancedConfig ?? { schemaVersion: 1 }), modelProfiles: profiles } })
+    return result
+  } finally {
+    if (probeKey && pendingGenerationVerifications.get(probeKey) === attempt) pendingGenerationVerifications.delete(probeKey)
+  }
+}
+
+const pendingGenerationVerifications = new Map<string, symbol>()
+
+function matchesProbeModel(profile: ProviderModelProfile, model: string): boolean {
+  return profile.model === model || profile.aliases?.includes(model) === true
+}
+
+function probeModelProfiles(provider: Provider): ProviderModelProfile[] {
+  const profiles = provider.advancedConfig?.modelProfiles ?? []
+  return [...profiles, ...provider.models.filter((model) => !profiles.some((profile) => matchesProbeModel(profile, model))).map((model) => ({ model }))]
+}
+
+function staleGenerationProbeError(): Error {
+  return new Error('探测期间 Provider 配置或验证请求已变化；本次结果未保存，请使用当前配置重新验证。')
 }
 
 const providerDiagnosticsDependencies: ProviderDiagnosticsDependencies = {

@@ -97,18 +97,8 @@ export async function saveAnnotation(rootDir: string, input: BrowserAnnotationIn
   await mkdir(sessionDir, { recursive: true })
 
   const filePath = annotationJsonPath(root, annotation.sessionId, annotation.id)
-  const content = `${JSON.stringify(storedAnnotation(annotation), null, JSON_INDENT)}\n`
-  try {
-    await writeDurableFile(filePath, content, { replace: false })
-    return annotation
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    const existing = parseStoredAnnotation(await readFile(filePath, 'utf8'), filePath, annotation.sessionId, annotation.id).annotation
-    if (JSON.stringify(storedAnnotation(existing)) !== JSON.stringify(storedAnnotation(annotation))) {
-      throw new BrowserAnnotationValidationError(`annotation id 已存在且内容不同: ${annotation.id}`)
-    }
-    return existing
-  }
+  await atomicWriteText(filePath, `${JSON.stringify(storedAnnotation(annotation), null, JSON_INDENT)}\n`)
+  return annotation
 }
 
 export async function listAnnotations(rootDir: string, sessionId: string): Promise<BrowserAnnotation[]> {

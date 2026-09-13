@@ -26,7 +26,7 @@ export function prepareActiveSessionEngines(
     prepared.push({
       record,
       meta,
-      projectPath: !meta.unassigned && !meta.projectId ? meta.sourceCwd ?? meta.cwd : undefined,
+      projectPath: !meta.unassigned && !meta.workspaceId && !meta.projectId ? meta.sourceCwd ?? meta.cwd : undefined,
       bufferedEvents,
       engine: createEngine(
         meta.engine,

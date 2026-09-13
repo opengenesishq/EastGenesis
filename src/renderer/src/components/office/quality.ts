@@ -17,8 +17,8 @@ export const OFFICE_QUALITY_PROFILES: Record<OfficeQualityTier, OfficeQualityPro
     dpr: [1, 1.5],
     shadows: true,
     shadowMapSize: 1024,
-    contactShadows: 'dynamic',
-    contactShadowFrames: Infinity,
+    contactShadows: 'static',
+    contactShadowFrames: 2,
     contactShadowResolution: 512
   },
   balanced: {
@@ -37,6 +37,21 @@ export const OFFICE_QUALITY_PROFILES: Record<OfficeQualityTier, OfficeQualityPro
     contactShadowFrames: 0,
     contactShadowResolution: 256
   }
+}
+
+export function officeResolutionDpr(tier: OfficeQualityTier, mode: 'sharp' | 'adaptive', deviceRatio: number): number | [number, number] {
+  if (mode === 'adaptive') {
+    // Adaptive mode is the performance contract for integrated GPUs. Keep the
+    // explicit sharp mode at native density, while giving the control room a
+    // bounded lower pixel budget before it has to hide real task actors.
+    if (tier === 'balanced') return [0.7, 0.82]
+    if (tier === 'low') return 0.6
+    // Adaptive High keeps realtime shadow quality while capping pixel fill on
+    // integrated GPUs. Sharp mode remains native Retina/native-DPR when the
+    // user explicitly requests it; this bound only applies to adaptive mode.
+    return [0.7, 0.85]
+  }
+  return Math.max(1, Math.min(2, Number.isFinite(deviceRatio) ? deviceRatio : 1))
 }
 
 export interface OfficeFrameSummary {
@@ -69,7 +84,7 @@ const AUTO_THRESHOLDS: Record<
   { degradeMedianMs: number; degradeP95Ms: number; upgradeMedianMs: number; upgradeP95Ms: number }
 > = {
   high: { degradeMedianMs: 24, degradeP95Ms: 35, upgradeMedianMs: 0, upgradeP95Ms: 0 },
-  balanced: { degradeMedianMs: 45, degradeP95Ms: 65, upgradeMedianMs: 18, upgradeP95Ms: 26 },
+  balanced: { degradeMedianMs: 34, degradeP95Ms: 50, upgradeMedianMs: 18, upgradeP95Ms: 26 },
   low: { degradeMedianMs: Infinity, degradeP95Ms: Infinity, upgradeMedianMs: 30, upgradeP95Ms: 42 }
 }
 

@@ -1,3 +1,4 @@
+import { officeRevisionReplayDigest, type OfficeRevisionReplayTarget } from '../office-revision/replay'
 import { createHash } from 'node:crypto'
 import { constants, existsSync, mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { lstat, open } from 'node:fs/promises'
@@ -7,10 +8,7 @@ import { isAbsolute, join, resolve } from 'node:path'
 import type { EffectRecord, EffectTarget, FileSystemIdentity } from '../../shared/types'
 import { reconcileMcpEffectTarget } from '../mcp/mcp-effect'
 import { reconcileWebhookMessageEffectTarget } from '../notification/notification-effect'
-import {
-  reconcileOfficeArtifactEffectTarget,
-  type OfficeArtifactReplayTarget
-} from '../agent/tools/office-artifact'
+import { isOfficeOutputTarget, reconcileOfficeOutputTarget, type OfficeArtifactReplayTarget } from '../office-revision/reconciliation'
 import { reconcileGuiPostconditionEffectTarget } from '../gui/gui-effect'
 import {
   gitAlternateObjectDirectories,
@@ -79,7 +77,8 @@ export interface EffectDescriptor {
 }
 
 /** Stable external resource identity used only to suppress confirmed failover replays. */
-export function effectReplayTargetDigest(target: EffectTarget | OfficeArtifactReplayTarget): string {
+export function effectReplayTargetDigest(target: EffectTarget | OfficeArtifactReplayTarget | OfficeRevisionReplayTarget): string {
+  if (target.kind === 'office_artifact_revision') return officeRevisionReplayDigest(target)
   if (target.kind === 'office_artifact') {
     return stableValueDigest({
       kind: target.kind,
@@ -170,7 +169,7 @@ export async function reconcileEffect(
     }
     if (effect.target.kind === 'mcp_tool_call') return await reconcileMcpEffectTarget(effect.target)
     if (effect.target.kind === 'webhook_message_send') return reconcileWebhookMessageEffectTarget(effect.target)
-    if (effect.target.kind === 'office_artifact') return reconcileOfficeArtifactEffectTarget(effect.target)
+    if (isOfficeOutputTarget(effect.target)) return reconcileOfficeOutputTarget(effect.target, rootDir)
     if (effect.target.kind === 'project_portable_export') {
       return await reconcileProjectPortableExportEffectTarget(effect.target, rootDir)
     }
@@ -184,7 +183,7 @@ export async function reconcileEffect(
       return await reconcileProviderProfileOperationTarget(effect.target, rootDir)
     }
     if (effect.target.kind === 'media_job_operation') {
-      return await reconcileMediaJobOperationTarget(effect.target)
+      return await reconcileMediaJobOperationTarget(effect.target, rootDir)
     }
     if (effect.target.kind === 'unsupported') {
       return unresolved({

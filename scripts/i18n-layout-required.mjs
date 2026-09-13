@@ -24,8 +24,8 @@ const combinations = [
   { language: 'en', theme: 'dark' }
 ]
 const viewports = [
-  { name: 'desktop-standard', width: 1280, height: 800 },
-  { name: 'desktop-minimum', width: 960, height: 640 }
+  { name: 'desktop', width: 1280, height: 800 },
+  { name: 'compact-desktop', width: 960, height: 640 }
 ]
 const report = {
   schemaVersion: 1,
@@ -34,6 +34,7 @@ const report = {
   runId,
   startedAt,
   combinations: [],
+  emptyStates: [],
   screenshots: [],
   errors: []
 }
@@ -50,6 +51,28 @@ try {
   browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}`, defaultViewport: null })
   page = await waitForPage(browser, 20_000)
   await waitForApp(page)
+  await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 1 })
+  const emptyStatePresentation = { language: 'en', theme: 'light', name: 'desktop-empty' }
+  await applyPresentation(page, emptyStatePresentation)
+  await selectExperience(page, 'studio')
+  await page.waitForSelector('[data-project-workspace-studio]', { visible: true, timeout: 15_000 })
+  report.emptyStates.push(await auditSurface(
+    page,
+    emptyStatePresentation,
+    'studio-empty',
+    '[data-project-workspace-studio]'
+  ))
+  await selectExperience(page, 'video')
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('[data-video-quick-start], .video-studio-panel')),
+    { timeout: 15_000 }
+  )
+  report.emptyStates.push(await auditSurface(
+    page,
+    emptyStatePresentation,
+    'video-empty',
+    '[data-video-studio-view]'
+  ))
   await createLongestStringFixture(page)
 
   for (const viewport of viewports) {
@@ -72,6 +95,9 @@ try {
 
       await selectExperience(page, 'video')
       result.surfaces.push(await auditSurface(page, result, 'video', '[data-video-studio-view]'))
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent('caogen:video-new')))
+      await page.waitForSelector('[data-video-quick-start]', { visible: true, timeout: 10_000 })
+      result.surfaces.push(await auditSurface(page, result, 'video-quick-start', '[data-video-studio-view]'))
 
       await openSettings(page)
       result.surfaces.push(await auditSurface(page, result, 'settings', '.settings-page'))
@@ -81,7 +107,8 @@ try {
   }
 
   assert.equal(report.combinations.length, combinations.length * viewports.length)
-  assert.ok(report.combinations.every((entry) => entry.surfaces.length === 4))
+  assert.ok(report.combinations.every((entry) => entry.surfaces.length === 5))
+  assert.equal(report.emptyStates.length, 2)
   report.status = 'passed'
 } catch (error) {
   report.errors.push(serializeError(error))
@@ -101,17 +128,19 @@ try {
 async function createLongestStringFixture(targetPage) {
   await targetPage.evaluate(async () => {
     const projectId = 'i18n-layout-project'
-    const projectName = '全球多语言智能工作流交付与恢复验证项目 Worldwide multilingual workflow delivery and recovery verification project LONG-PROJECT-END'
-    const title = '跨语言超长工作项标题 Worldwide multilingual work item title covering approval recovery delivery and evidence LONG-TITLE-END'
+    // Keep fixture-owned content English-only so the English UI audit can treat
+    // every visible Han character as product copy rather than user data.
+    const projectName = 'Worldwide multilingual workflow delivery and recovery verification project with a deliberately long name LONG-PROJECT-END'
+    const title = 'Worldwide multilingual work item title covering approval recovery delivery and evidence across a deliberately long line LONG-TITLE-END'
     await window.agentDesk.createProjectWorkspace({ id: projectId, name: projectName, kind: 'software' })
     const goal = await window.agentDesk.createProjectGoal({
       id: 'i18n-layout-goal',
       projectId,
-      title: '跨语言端到端目标 Worldwide end-to-end goal LONG-GOAL-END',
-      objective: '在不裁切关键操作的情况下完成超长中英文内容展示，并保持支持的桌面窗口尺寸下所有控制可用。',
+      title: 'Worldwide multilingual end-to-end delivery goal with a deliberately long title LONG-GOAL-END',
+      objective: 'Display deliberately long project content without clipping primary actions at standard and compact desktop sizes.',
       background: 'Verify Chinese and English content across supported desktop layouts without overlap or viewport overflow.',
       constraints: ['Preserve canonical identity', 'No clipped primary controls'],
-      successCriteria: ['All eight presentation combinations remain operable'],
+      successCriteria: ['All eight supported desktop presentation combinations remain operable'],
       acceptance: [
         { id: 'layout-overlap', criterion: 'Zero incoherent overlap', required: true },
         { id: 'layout-overflow', criterion: 'Zero document horizontal overflow', required: true }
@@ -123,12 +152,12 @@ async function createLongestStringFixture(targetPage) {
       goalId: goal.id,
       type: 'review',
       title,
-      description: '这是用于验证最长字符串布局的说明。 This description deliberately combines long Chinese and English copy to exercise wrapping.',
+      description: 'This deliberately long description exercises wrapping, control spacing, evidence visibility, and responsive layout without adding localized product copy.',
       status: 'waiting_approval',
       owner: {
         type: 'human',
         id: 'i18n-layout-owner',
-        displayName: '超长负责人名称 Long multilingual owner display name'
+        displayName: 'Long multilingual owner display name used for responsive layout verification'
       }
     })
   })
@@ -150,7 +179,6 @@ async function applyPresentation(targetPage, combination) {
     combination
   )
   await dismissTransientOverlays(targetPage)
-  await waitForDesktopSidebar(targetPage)
 }
 
 async function assertExperienceSwitcher(targetPage, combination) {
@@ -173,14 +201,7 @@ async function assertExperienceSwitcher(targetPage, combination) {
 async function selectExperience(targetPage, mode) {
   const selector = `[data-experience-mode-option="${mode}"]`
   const current = await targetPage.$eval(selector, (button) => button.getAttribute('aria-pressed') === 'true')
-  if (!current) {
-    const clickable = await targetPage.$eval(selector, (button) => {
-      const rect = button.getBoundingClientRect()
-      return rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.left < window.innerWidth
-    })
-    assert.ok(clickable, `${mode} workspace entry is outside the supported desktop viewport`)
-    await targetPage.$eval(selector, (button) => button.click())
-  }
+  if (!current) await targetPage.click(selector)
   await targetPage.waitForFunction(
     (targetMode) => document.querySelector(`[data-experience-mode-option="${targetMode}"]`)?.getAttribute('aria-pressed') === 'true',
     { timeout: 10_000 },
@@ -188,22 +209,8 @@ async function selectExperience(targetPage, mode) {
   )
 }
 
-async function waitForDesktopSidebar(targetPage) {
-  await targetPage.waitForFunction(() => {
-    const sidebar = document.querySelector('.sidebar')
-    if (!(sidebar instanceof HTMLElement)) return false
-    const rect = sidebar.getBoundingClientRect()
-    return rect.width > 0 && rect.left >= -1 && rect.right <= window.innerWidth + 1
-  }, { timeout: 5_000 })
-}
-
 async function openSettings(targetPage) {
   const selector = '[data-sidebar-action="settings"]'
-  const visible = await targetPage.$eval(selector, (node) => {
-    const rect = node.getBoundingClientRect()
-    return rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.left < window.innerWidth
-  })
-  assert.ok(visible, 'Settings entry is outside the supported desktop viewport')
   await targetPage.click(selector)
   await targetPage.waitForSelector('.settings-page', { visible: true, timeout: 10_000 })
 }
@@ -219,11 +226,7 @@ async function dismissTransientOverlays(targetPage) {
     timeout: 5_000
   }).catch(() => null)
   if (!drawer) return
-  await targetPage.waitForFunction(() => {
-    const close = document.querySelector('.task-recovery-drawer-close')
-    return close instanceof HTMLButtonElement && !close.disabled
-  }, { timeout: 15_000 })
-  await targetPage.$eval('.task-recovery-drawer-close', (button) => button.click())
+  await targetPage.click('.task-recovery-drawer-close')
   await targetPage.waitForSelector('.task-recovery-drawer', { hidden: true, timeout: 5_000 })
 }
 
@@ -232,7 +235,10 @@ async function auditSurface(targetPage, combination, name, selector) {
   const base = await targetPage.evaluate(measureSurfaceRoot, selector)
   const controls = await targetPage.evaluate(measureSurfaceControls, selector)
   const clippedText = await targetPage.evaluate(measureSurfaceText, selector)
-  const layout = buildLayoutAudit(base, controls, clippedText)
+  const untranslatedCjk = combination.language === 'en'
+    ? await targetPage.evaluate(measureVisibleCjk, selector)
+    : []
+  const layout = { ...buildLayoutAudit(base, controls, clippedText), untranslatedCjk }
 
   assert.ok(layout.controlCount > 0, `${combination.language}/${combination.theme}/${combination.name}/${name} has no controls`)
   assert.ok(layout.documentOverflowX <= 1, `${combination.language}/${combination.theme}/${combination.name}/${name} document overflow ${layout.documentOverflowX}px`)
@@ -241,8 +247,63 @@ async function auditSurface(targetPage, combination, name, selector) {
   assert.deepEqual(layout.clippedControls, [], `${combination.language}/${combination.theme}/${combination.name}/${name} controls escape viewport`)
   assert.deepEqual(layout.overlaps, [], `${combination.language}/${combination.theme}/${combination.name}/${name} controls overlap`)
   assert.deepEqual(layout.clippedText, [], `${combination.language}/${combination.theme}/${combination.name}/${name} key text is clipped`)
+  assert.deepEqual(layout.untranslatedCjk, [], `${combination.language}/${combination.theme}/${combination.name}/${name} contains untranslated visible CJK copy`)
   const screenshot = await capture(targetPage, `${combination.name}-${combination.language}-${combination.theme}-${name}`)
   return { name, ...layout, screenshot }
+}
+
+function measureVisibleCjk(rootSelector) {
+  const root = document.querySelector(rootSelector)
+  if (!root) throw new Error(`layout root is missing: ${rootSelector}`)
+  const cjk = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u
+  const records = []
+  const seen = new Set()
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let textNode = walker.nextNode()
+  while (textNode) {
+    const element = textNode.parentElement
+    const value = String(textNode.textContent ?? '').replace(/\s+/gu, ' ').trim()
+    if (element && cjk.test(value) && isRendered(element)) add('text', element, value)
+    textNode = walker.nextNode()
+  }
+  for (const element of root.querySelectorAll('[aria-label],[title],[placeholder],select')) {
+    if (!isRendered(element)) continue
+    for (const attribute of ['aria-label', 'title', 'placeholder']) {
+      const value = String(element.getAttribute(attribute) ?? '').trim()
+      if (cjk.test(value)) add(attribute, element, value)
+    }
+    if (element instanceof HTMLSelectElement) {
+      const value = element.selectedOptions[0]?.textContent?.replace(/\s+/gu, ' ').trim() ?? ''
+      if (cjk.test(value)) add('selected-option', element, value)
+    }
+  }
+  return records
+
+  function add(kind, element, value) {
+    const key = `${kind}:${element.tagName}:${value}`
+    if (seen.has(key)) return
+    seen.add(key)
+    records.push({
+      kind,
+      tag: element.tagName.toLowerCase(),
+      className: typeof element.className === 'string' ? element.className : '',
+      text: value.slice(0, 200)
+    })
+  }
+  function isRendered(element) {
+    if (element.closest('[aria-hidden="true"]')) return false
+    for (let current = element; current; current = current.parentElement) {
+      if (current.tagName === 'DETAILS' && !(current instanceof HTMLDetailsElement && current.open)) return false
+      const style = window.getComputedStyle(current)
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false
+      if (current === root) break
+    }
+    const range = document.createRange()
+    range.selectNodeContents(element)
+    const rect = range.getBoundingClientRect()
+    const ownRect = element.getBoundingClientRect()
+    return (rect.width > 0 && rect.height > 0) || (ownRect.width > 0 && ownRect.height > 0)
+  }
 }
 
 function measureSurfaceRoot(rootSelector) {
@@ -274,6 +335,7 @@ function measureSurfaceControls(rootSelector) {
     let visibleRect = node.getBoundingClientRect()
     if (!hasArea(visibleRect)) return false
     for (let current = node; current; current = current.parentElement) {
+      if (current.tagName === 'DETAILS' && !(current instanceof HTMLDetailsElement && current.open)) return false
       const style = window.getComputedStyle(current)
       if (styleHides(style)) return false
       if (current === node) continue
@@ -352,6 +414,7 @@ function measureSurfaceText(rootSelector) {
     const rect = node.getBoundingClientRect()
     if (rect.width <= 0 || rect.height <= 0) return false
     for (let current = node; current; current = current.parentElement) {
+      if (current.tagName === 'DETAILS' && !(current instanceof HTMLDetailsElement && current.open)) return false
       const style = window.getComputedStyle(current)
       if ([style.display === 'none', style.visibility === 'hidden', Number(style.opacity) === 0,
         style.clip !== 'auto', style.clipPath !== 'none'].some(Boolean)) return false

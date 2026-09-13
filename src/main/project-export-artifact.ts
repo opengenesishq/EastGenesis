@@ -1,7 +1,7 @@
 import type { EffectRecord } from '../shared/types'
 import { getPersistedArtifactLifecycle } from './task/artifact-lifecycle-api'
 import type { ArtifactLifecycleRecord } from './task/artifact-lifecycle-types'
-import { settleCanonicalSystemOperation } from './task/system-operation-context'
+import { TaskKernel } from './task/task-kernel'
 import type { ProjectPortableExportEffectTarget } from './project-export-effect-target'
 
 type ConfirmedProjectPortableExportEffect = EffectRecord & {
@@ -24,7 +24,7 @@ export async function recoverConfirmedProjectPortableExportArtifact(
       lifecycle.workItemId !== effect.target.workItemId || lifecycle.runId !== effect.target.runId) {
     throw new Error(`confirmed Project export Artifact is missing or crosses ownership:${effect.id}`)
   }
-  await settleCanonicalSystemOperation({
+  await new TaskKernel(rootDir).deliver({
     rootDir,
     goalId: effect.target.goalId,
     workItemId: effect.target.workItemId

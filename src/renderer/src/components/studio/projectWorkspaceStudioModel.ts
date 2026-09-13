@@ -23,13 +23,46 @@ import type {
   WorkItemStatus,
   WorkItemType
 } from '../../../../shared/types'
+import {
+  COLLAB_TEXT,
+  GOAL_RISK_OPTIONS,
+  GOAL_STATUS_LABELS,
+  PROJECT_KIND_OPTIONS,
+  PROJECT_RESOURCE_OPTIONS,
+  PROJECT_STATUS_LABELS,
+  RESOURCE_DATA_CLASS_OPTIONS,
+  RESOURCE_EGRESS_OPTIONS,
+  TEXT,
+  WORK_ITEM_STATUSES,
+  WORK_ITEM_STATUS_LABELS,
+  WORK_ITEM_TYPE_OPTIONS,
+  currentLanguage,
+  localized,
+  type ResourceDraftKind
+} from './projectWorkspaceStudioLocale'
+
+export {
+  COLLAB_TEXT,
+  GOAL_RISK_OPTIONS,
+  GOAL_STATUS_LABELS,
+  PROJECT_KIND_OPTIONS,
+  PROJECT_RESOURCE_OPTIONS,
+  PROJECT_STATUS_LABELS,
+  RESOURCE_DATA_CLASS_OPTIONS,
+  RESOURCE_EGRESS_OPTIONS,
+  TEXT,
+  WORK_ITEM_STATUSES,
+  WORK_ITEM_STATUS_LABELS,
+  WORK_ITEM_TYPE_OPTIONS,
+  type ResourceDraftKind
+}
+
 
 export type StudioView = 'list' | 'board'
 export type StudioCreateForm = 'project' | 'goal' | 'workItem' | null
 export type StudioMutationKind = Exclude<StudioCreateForm, null> | 'import'
 export type ProjectLifecyclePanel = 'edit' | 'resource' | null
 export type ProjectLifecycleMutation = 'update' | 'resource' | 'archive' | 'restore' | 'export' | 'delete' | 'purge'
-export type ResourceDraftKind = 'directory' | 'file_set' | 'repository' | 'connector'
 
 export type WorkItemControlAction =
   | { kind: 'transition'; status: WorkItemStatus }
@@ -116,368 +149,6 @@ export interface AcceptancePresentation {
   label: string
 }
 
-export const TEXT = {
-  title: '项目工作台',
-  project: '项目',
-  projects: '项目',
-  selectProject: '选择项目',
-  createProject: '新建项目',
-  importProject: '导入项目',
-  importingProject: '导入中...',
-  createGoal: '新建目标',
-  createWorkItem: '新建工作项',
-  refresh: '刷新',
-  refreshing: '刷新中...',
-  creating: '创建中...',
-  startGoalTask: '开始',
-  startingGoalTask: '启动中...',
-  goalTaskPlaceholder: '想完成什么？',
-  goalTaskStarted: '工作流草案已生成，待审批后执行',
-  cancel: '取消',
-  closeForm: '关闭创建表单',
-  projectName: '项目名称',
-  projectKind: '项目类型',
-  projectCreated: '项目已创建',
-  projectCreatedTemplatePending: '项目已创建，但模板初始化未完成；项目已保留，可重试模板初始化',
-  projectImported: '项目已导入',
-  goalCreated: '目标已创建',
-  goalUpdated: '目标契约已更新',
-  workItemCreated: '工作项已创建',
-  createProjectSubmit: '创建项目',
-  createGoalSubmit: '创建目标',
-  editGoal: '编辑目标',
-  editGoalTitle: '编辑目标契约',
-  saveGoal: '保存目标',
-  archiveGoal: '归档目标',
-  restoreGoal: '恢复目标',
-  goalControls: '目标控制',
-  goalControlFailed: '目标操作失败',
-  createWorkItemSubmit: '创建工作项',
-  noProjects: '还没有项目',
-  noGoals: '还没有目标',
-  noWorkItems: '还没有工作项',
-  noMatchingWorkItems: '没有符合筛选条件的工作项',
-  loadingProjects: '正在载入项目...',
-  loadingContents: '正在载入项目内容...',
-  retry: '重试',
-  goals: '目标契约',
-  workItems: '工作项',
-  list: '列表',
-  board: '看板',
-  switchWorkItemView: '切换工作项视图',
-  filterWorkItems: '筛选工作项',
-  searchWorkItems: '搜索名称、说明、负责人或 ID',
-  allStatuses: '全部状态',
-  allGoals: '全部目标',
-  allOwners: '全部负责人',
-  unassignedOwner: '未分配',
-  humanOwner: '人员负责人',
-  digitalWorkerOwner: '数字员工负责人',
-  clearFilters: '清除筛选',
-  filteredItemCount: (visible: number, total: number) => `${visible} / ${total} 项`,
-  moveWorkItemUp: '上移工作项',
-  moveWorkItemDown: '下移工作项',
-  reorderFailed: '重排失败',
-  goalTitle: '目标名称',
-  objective: '目标',
-  background: '背景',
-  constraints: '限制（每行一项）',
-  successCriteria: '成功标准（每行一项）',
-  acceptanceCriteria: '验收标准（每行一项）',
-  forbiddenActions: '禁止事项（每行一项）',
-  risk: '风险等级',
-  dueDate: '截止日期',
-  budgetAmount: '预算金额',
-  budgetCurrency: '币种',
-  budgetRuns: '最多执行次数',
-  budgetConcurrentRuns: '最大并发 Run',
-  budgetTokens: '最多 Token 数',
-  workItemTitle: '工作项名称',
-  description: '说明',
-  linkedGoal: '所属目标',
-  noLinkedGoal: '不关联目标',
-  workItemType: '类型',
-  priority: '优先级',
-  ownerType: '负责人类型',
-  ownerHuman: '人员',
-  ownerDigitalWorker: '数字员工',
-  ownerId: '负责人标识',
-  ownerName: '负责人名称',
-  parentWorkItem: '上级工作项',
-  noParent: '无上级工作项',
-  dependencies: '前置工作项',
-  noDependencies: '暂无可选工作项',
-  status: '状态',
-  acceptance: '验收',
-  owner: '负责人',
-  goal: '目标',
-  type: '类型',
-  due: '截止',
-  updated: '更新',
-  untitledOwner: '未分配',
-  noDueDate: '未设置',
-  goalDetails: '查看目标契约',
-  acceptanceUnset: '未设验收',
-  acceptancePending: '待验收',
-  acceptancePassed: '已通过',
-  acceptanceFailed: '未通过',
-  acceptanceWaived: '已豁免',
-  workItemControls: '工作项控制',
-  transitionTo: (status: string) => `转为${status}`,
-  acquireLease: '获取执行租约',
-  renewLease: '续租',
-  releaseLease: '释放租约',
-  leaseActive: '租约有效',
-  leaseMissing: '未持有租约',
-  controlFailed: '控制操作失败',
-  transferWorkItem: '转交',
-  transferWorkItemTitle: '转交工作项',
-  transferTargetType: '转交给',
-  transferTargetId: '人员标识',
-  transferTargetName: '显示名称（可选）',
-  transferReason: '转交原因',
-  transferReasonPlaceholder: '说明为什么转交',
-  transferSubmit: '确认转交',
-  transferring: '转交中...',
-  transferFailed: '转交失败',
-  transferNoWorkers: '当前项目没有可用的数字员工',
-  transferWorkerLoading: '正在载入数字员工...',
-  acceptanceItems: (count: number) => `${count} 项`,
-  itemCount: (count: number) => `${count} 项`,
-  projectSummary: (goals: number, workItems: number) => `${goals} 个目标 · ${workItems} 个工作项`,
-  projectKindSummary: (kind: string) => `${kind}项目`,
-  projectSettings: '项目设置',
-  projectStatus: '项目状态',
-  editProject: '编辑项目',
-  saveProject: '保存项目',
-  ownerIdOptional: '项目负责人标识（可选）',
-  rulesRefOptional: '规则引用（可选）',
-  resources: '关联资源',
-  addResource: '关联资源',
-  addResourceSubmit: '添加资源',
-  resourceKind: '资源类型',
-  resourceLabel: '资源名称（可选）',
-  resourceLocation: '路径或地址',
-  resourceDataClass: '数据等级',
-  resourceEgressPolicy: 'Provider 外发',
-  resourceEgressAllow: '允许发送到所选 Provider',
-  resourceEgressLocalOnly: '仅允许本机模型',
-  resourceEgressDeny: '禁止进入任何 Provider 请求',
-  resourceDirectory: '本地目录',
-  resourceFileSet: '文件集合',
-  resourceRepository: '本地仓库',
-  resourceConnector: '连接器',
-  noResources: '暂未关联资源',
-  removeResource: (label: string) => `移除资源：${label}`,
-  projectUpdated: '项目信息已更新',
-  resourceAdded: '资源已关联',
-  resourceRemoved: '资源已移除',
-  connectorRefreshRequested: '已请求连接器刷新',
-  connectorCachePurged: '连接器缓存已清理',
-  connectorAuthorizationRestored: '连接器授权已启用',
-  connectorAuthorizationRevoked: '连接器授权已撤销',
-  connectorEnabled: '连接器已启用',
-  connectorDisabled: '连接器已停用',
-  archiveProject: '归档',
-  restoreProject: '恢复',
-  exportManifest: '导出项目',
-  manifestTitle: '项目完整数据',
-  manifestDigest: 'SHA-256 摘要',
-  copyManifest: '复制 JSON',
-  downloadManifest: '下载 JSON',
-  closeManifest: '关闭',
-  manifestCopied: '项目数据 JSON 已复制',
-  projectArchived: '项目已归档',
-  projectRestored: '项目已恢复',
-  deleteProject: '删除项目',
-  purgeProject: '永久删除',
-  deleteProjectTitle: '确认删除项目',
-  purgeProjectTitle: '确认永久删除项目',
-  deleteProjectHint: '项目将进入已删除状态，可稍后恢复。关联的本地目录、仓库和外部数据不会被删除。',
-  purgeProjectHint: '项目及其 CaoGen 下属记录将被永久移除，且无法恢复。关联的本地目录、仓库和外部数据不会被删除。',
-  confirmProjectName: (name: string) => `输入“${name}”以确认`,
-  confirmDelete: '确认删除',
-  confirmPurge: '确认永久删除',
-  archivedProjectNotice: '此项目已归档。恢复后才能继续创建或编辑项目内容。',
-  deletedProjectNotice: '此项目已软删除。可恢复项目，或永久删除 CaoGen 中的项目记录。',
-  projectDetails: '项目详情',
-  projectDetailsDescription: '项目组合、项目设置、资源和知识',
-  expandAsNeeded: '按需展开',
-  deliverySection: '交付与验收',
-  deliverySectionDescription: '产物、证据和验收状态',
-  executionSection: '执行控制',
-  executionSectionDescription: '运行、暂停、恢复和重试',
-  collaborationSection: '协作与成员',
-  collaborationSectionDescription: '成员、评论、转交和共享审批',
-  unknownError: '操作未完成，请重试'
-} as const
-
-export const PROJECT_KIND_OPTIONS: ReadonlyArray<{ value: ProjectWorkspaceKind; label: string }> = [
-  { value: 'personal', label: '个人' },
-  { value: 'office', label: '办公' },
-  { value: 'education', label: '教育' },
-  { value: 'research', label: '研究' },
-  { value: 'software', label: '软件' },
-  { value: 'opc', label: '一人公司' },
-  { value: 'custom', label: '自定义' }
-]
-
-export const PROJECT_STATUS_LABELS: Record<ProjectWorkspaceStatus, string> = {
-  active: '进行中',
-  archived: '已归档',
-  deleted: '已删除'
-}
-
-export const COLLAB_TEXT = {
-  collaborationInbox: '协作待办',
-  inboxMember: '待办成员',
-  inboxScope: '待办范围',
-  allMembers: '全部成员',
-  unread: '未读',
-  all: '全部',
-  read: '已读',
-  handled: '已处理',
-  noUnreadInbox: '没有未读协作待办',
-  noInbox: '没有协作待办',
-  openWorkItem: '定位工作项',
-  markRead: '标记已读',
-  markHandled: '标记已处理',
-  inboxAssignment: '任务分配',
-  inboxMention: '评论提及',
-  inboxApproval: '共享审批',
-  members: '项目成员',
-  invitations: '项目邀请',
-  principalId: '成员标识',
-  invitationToken: '邀请码',
-  createInvitation: '创建邀请',
-  acceptInvitation: '接受邀请',
-  copyInvitation: '复制邀请码',
-  invitationCopied: '邀请码已复制',
-  invitationAccepted: '邀请已接受，成员权限已生效',
-  newMember: '添加成员',
-  noProjectMembers: '暂无项目成员',
-  chooseMember: '选择项目成员',
-  revoke: '撤销',
-  squads: '协作小组',
-  cancel: '取消',
-  newSquad: '新建小组',
-  name: '名称',
-  description: '说明',
-  create: '创建',
-  noSquads: '暂无协作小组',
-  addMember: '添加成员',
-  archive: '归档',
-  restore: '恢复',
-  noMembers: '暂无成员',
-  digitalWorker: '数字员工',
-  human: '人员',
-  removeMember: '移除成员',
-  chooseWorker: '选择数字员工',
-  humanId: '人员标识',
-  displayName: '显示名称',
-  role: '职责',
-  add: '添加',
-  comments: '工作项评论',
-  createWorkItemFirst: '创建工作项后可开始协作',
-  workItem: '工作项',
-  owner: '负责人',
-  unassigned: '未分配',
-  runHistory: '运行历史',
-  noComments: '暂无评论',
-  save: '保存',
-  edit: '编辑',
-  delete: '删除',
-  writeComment: '写评论',
-  mentions: '提及成员',
-  send: '发送',
-  sharedApprovals: '共享审批',
-  newApproval: '发起审批',
-  approvalTitle: '审批事项',
-  quorum: '通过人数',
-  quorumProgress: '已通过 {approved} / {required}',
-  noApprovals: '暂无共享审批',
-  chooseApprover: '选择审批人',
-  approve: '通过',
-  reject: '拒绝',
-  pending: '待决定',
-  approved: '已通过',
-  rejected: '已拒绝',
-  expired: '已过期',
-  revoked: '已撤销'
-} as const
-
-export const PROJECT_RESOURCE_OPTIONS: ReadonlyArray<{ value: ResourceDraftKind; label: string }> = [
-  { value: 'directory', label: TEXT.resourceDirectory },
-  { value: 'file_set', label: TEXT.resourceFileSet },
-  { value: 'repository', label: TEXT.resourceRepository },
-  { value: 'connector', label: TEXT.resourceConnector }
-]
-
-export const RESOURCE_DATA_CLASS_OPTIONS: ReadonlyArray<{ value: OutboundDataClass; label: string }> = [
-  { value: 'S0', label: 'S0 · 公开' },
-  { value: 'S1', label: 'S1 · 内部' },
-  { value: 'S2', label: 'S2 · 机密' },
-  { value: 'S3', label: 'S3 · 高敏感' },
-  { value: 'S4', label: 'S4 · 控制与证据' }
-]
-
-export const RESOURCE_EGRESS_OPTIONS: ReadonlyArray<{
-  value: ProjectResourceEgressPolicy
-  label: string
-}> = [
-  { value: 'allow', label: TEXT.resourceEgressAllow },
-  { value: 'local_only', label: TEXT.resourceEgressLocalOnly },
-  { value: 'deny', label: TEXT.resourceEgressDeny }
-]
-
-export const GOAL_RISK_OPTIONS: ReadonlyArray<{ value: GoalRiskLevel; label: string }> = [
-  { value: 'low', label: '低' },
-  { value: 'medium', label: '中' },
-  { value: 'high', label: '高' },
-  { value: 'critical', label: '严重' }
-]
-
-export const WORK_ITEM_TYPE_OPTIONS: ReadonlyArray<{ value: WorkItemType; label: string }> = [
-  { value: 'research', label: '调研' },
-  { value: 'analysis', label: '分析' },
-  { value: 'planning', label: '规划' },
-  { value: 'writing', label: '写作' },
-  { value: 'design', label: '设计' },
-  { value: 'coding', label: '开发' },
-  { value: 'review', label: '审查' },
-  { value: 'testing', label: '测试' },
-  { value: 'documentation', label: '文档' },
-  { value: 'operations', label: '运营' },
-  { value: 'delivery', label: '交付' },
-  { value: 'custom', label: '其他' }
-]
-
-export const GOAL_STATUS_LABELS: Record<GoalStatus, string> = {
-  draft: '草稿',
-  planned: '已规划',
-  running: '进行中',
-  waiting_approval: '待批准',
-  blocked: '受阻',
-  verifying: '验收中',
-  completed: '已完成',
-  failed: '失败',
-  cancelled: '已取消',
-  archived: '已归档'
-}
-
-export const WORK_ITEM_STATUS_LABELS: Record<WorkItemStatus, string> = {
-  backlog: '待安排',
-  ready: '已就绪',
-  running: '进行中',
-  waiting_approval: '待批准',
-  blocked: '受阻',
-  verifying: '验收中',
-  done: '已完成',
-  failed: '失败',
-  cancelled: '已取消'
-}
-
-export const WORK_ITEM_STATUSES = Object.keys(WORK_ITEM_STATUS_LABELS) as WorkItemStatus[]
 
 export const GOAL_TRANSITIONS: Record<GoalStatus, readonly GoalStatus[]> = {
   draft: ['planned', 'cancelled'],
@@ -691,9 +362,9 @@ export function resourceEgressPolicy(resource: ProjectResource): ProjectResource
 
 export function resourceEgressLabel(resource: ProjectResource): string {
   const policy = resourceEgressPolicy(resource)
-  if (policy === 'deny') return '禁止外发'
-  if (policy === 'local_only') return '仅本机'
-  return '允许外发'
+  if (policy === 'deny') return localized('禁止外发', 'Egress blocked')
+  if (policy === 'local_only') return localized('仅本机', 'Local only')
+  return localized('允许外发', 'Egress allowed')
 }
 
 export function resourceKindLabel(resource: ProjectResource): string {
@@ -704,9 +375,9 @@ export function resourceKindLabel(resource: ProjectResource): string {
   if (resource.kind === 'directory') return TEXT.resourceDirectory
   if (resource.kind === 'file_set') return TEXT.resourceFileSet
   if (resource.kind === 'connector') return TEXT.resourceConnector
-  if (resource.kind === 'knowledge_base') return '知识库'
-  if (resource.kind === 'url') return '网址'
-  return '其他'
+  if (resource.kind === 'knowledge_base') return localized('知识库', 'Knowledge base')
+  if (resource.kind === 'url') return localized('网址', 'URL')
+  return localized('其他', 'Other')
 }
 
 export function resourceLocation(resource: ProjectResource): string {
@@ -741,18 +412,22 @@ export function projectWorkItems(items: readonly WorkItem[], filters: WorkItemFi
 
 export function formatDate(timestamp?: number): string {
   if (timestamp === undefined) return TEXT.noDueDate
-  return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' }).format(timestamp)
+  return new Intl.DateTimeFormat(currentLanguage() === 'en' ? 'en-US' : 'zh-CN', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  }).format(timestamp)
 }
 
 export function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message.trim() : typeof error === 'string' ? error.trim() : ''
   const normalized = message.toLowerCase()
-  if (normalized.includes('stale_revision')) return '内容已被更新，请刷新后再试'
-  if (normalized.includes('cross_project')) return '所选内容不属于当前项目'
-  if (normalized.includes('contract_violation')) return '工作项与目标约定不一致'
-  if (normalized.includes('not_found')) return '没有找到所选内容，请刷新后再试'
-  if (normalized.includes('invalid_input')) return '请检查填写内容后再试'
-  if (normalized.includes('already_exists')) return '已经存在相同内容'
+  if (normalized.includes('stale_revision')) return localized('内容已被更新，请刷新后再试', 'The content changed. Refresh and try again.')
+  if (normalized.includes('cross_project')) return localized('所选内容不属于当前项目', 'The selected content does not belong to this project.')
+  if (normalized.includes('contract_violation')) return localized('工作项与目标约定不一致', 'The work item does not match the goal contract.')
+  if (normalized.includes('not_found')) return localized('没有找到所选内容，请刷新后再试', 'The selected content was not found. Refresh and try again.')
+  if (normalized.includes('invalid_input')) return localized('请检查填写内容后再试', 'Check the entered information and try again.')
+  if (normalized.includes('already_exists')) return localized('已经存在相同内容', 'The same content already exists.')
   if (message) return message
   return TEXT.unknownError
 }

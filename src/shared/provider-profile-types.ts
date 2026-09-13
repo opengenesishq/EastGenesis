@@ -12,7 +12,6 @@ import type {
   ProviderPricingCatalogFetchResult,
   ProviderView
 } from './types'
-import type { CcSwitchProviderImportApi } from './cc-switch-import-types'
 import type { ProviderProfileWebDavApi } from './provider-profile-webdav-types'
 import type { ProviderProfileS3Api } from './provider-profile-s3-types'
 
@@ -202,7 +201,7 @@ export interface LocalComputeActivationResult {
   startedService?: boolean
 }
 
-export interface ProviderProfileApi extends ProviderManagementApi, CcSwitchProviderImportApi, ProviderProfileWebDavApi, ProviderProfileS3Api {
+export interface ProviderProfileApi extends ProviderManagementApi, ProviderProfileWebDavApi, ProviderProfileS3Api {
   exportProviderProfile(): Promise<ProviderProfileExportResult>
   previewProviderProfileImport(): Promise<ProviderProfileImportPreview | null>
   applyProviderProfileImport(
@@ -235,13 +234,4 @@ export interface ProviderProfileApi extends ProviderManagementApi, CcSwitchProvi
   rollbackProviderNativeImportBackup(
     backupId: string
   ): Promise<import('./provider-native-import-types').ProviderNativeImportRollbackResult>
-  previewCodexNativeConfig(): Promise<import('./codex-native-config-types').CodexNativeConfigPreview>
-  applyCodexNativeConfig(
-    previewId: string,
-    editedText: string
-  ): Promise<import('./codex-native-config-types').CodexNativeConfigApplyResult>
-  listCodexNativeConfigBackups(): Promise<import('./codex-native-config-types').CodexNativeConfigBackupView[]>
-  rollbackCodexNativeConfigBackup(
-    backupId: string
-  ): Promise<import('./codex-native-config-types').CodexNativeConfigRollbackResult>
 }

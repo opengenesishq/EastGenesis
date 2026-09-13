@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { newBusinessLineId } from '../business-line-ownership'
+import { assertActiveBusinessLine } from '../business-line-registry-reader'
 import type {
   AcceptanceResult,
   Goal,
@@ -47,6 +49,7 @@ export interface ProjectWorkspaceCommandRepository {
   archiveGoal(id: string, options?: MutationOptions | number): Promise<Goal>
   restoreGoal(id: string, options?: MutationOptions | number): Promise<Goal>
   createWorkItem(input: WorkItemInput, options?: MutationOptions | number): Promise<WorkItem>
+  getWorkItem?(id: string): Promise<WorkItem | undefined>
   updateWorkItem(id: string, patch: WorkItemPatch, options?: MutationOptions | number): Promise<WorkItem>
   reorderWorkItem(id: string, targetId: string, placement: WorkItemReorderPlacement, options?: MutationOptions | number): Promise<WorkItem>
   setWorkItemAcceptance(id: string, result: AcceptanceResult, options?: MutationOptions | number): Promise<WorkItem>
@@ -127,10 +130,13 @@ export class ProjectWorkspaceCommandService {
     )
   }
 
-  createWorkItem(input: WorkItemInput, options?: MutationOptions | number): Promise<WorkItem> {
+  async createWorkItem(input: WorkItemInput, options?: MutationOptions | number): Promise<WorkItem> {
     const id = optionalId(input.id, 'work item id') ?? randomUUID()
     const projectId = requiredId(input.projectId, 'work item projectId')
-    const normalized = { ...input, id, projectId }
+    const parent = input.parentId ? await this.repository.getWorkItem?.(input.parentId) : undefined
+    const businessLineId = newBusinessLineId(input.businessLineId, parent ? parent.businessLineId ?? 'studio' : undefined)
+    assertActiveBusinessLine(businessLineId, this.repository.rootDir)
+    const normalized = { ...input, id, projectId, businessLineId }
     return this.execute(
       { command: 'work_item.create', entityType: 'work_item', entityId: id, workspaceId: projectId },
       () => this.repository.createWorkItem(normalized, options)

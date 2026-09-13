@@ -21,8 +21,6 @@ import { openProjectWorkspaceStore } from '../../project-workspace/store'
 import { verifyProductionProjectMutation } from '../../project-aggregate/project-mutation-ingress'
 import { searchProjectKnowledge } from '../../project-workspace/project-knowledge-search'
 import { taskRuntimeRegistry } from '../../task/task-runtime-registry'
-import { SearchBroker } from '../../search/search-broker'
-import { executeWebSearch as executeSearchTool } from '../../search/search-web-tool'
 
 export const P2_TOOL_NAMES = [
   'draft_skill',
@@ -30,7 +28,6 @@ export const P2_TOOL_NAMES = [
   'route_model',
   'china_notify',
   'send_notification',
-  'web_search',
   'project_knowledge_search',
   'work_item_comment',
   'gitee_prepare'
@@ -47,9 +44,6 @@ export interface P2ToolExecutionContext {
   sessionMeta?: SessionMeta
   userDataRoot?: string
   toolUseId?: string
-  runId?: string
-  /** Optional injected broker for deterministic Assistant/engine execution. */
-  searchBroker?: SearchBroker
 }
 
 export const P2_TOOLS: ToolDefinition[] = [
@@ -86,25 +80,6 @@ export const P2_TOOLS: ToolDefinition[] = [
           linkUrl: { type: 'string' }
         },
         required: ['title', 'text']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'web_search',
-      description: '通过 CaoGen 自有 Search Broker 执行通用联网搜索。每个成功结果都必须重新抓取并返回 URL、抓取时间、摘要、内容 SHA-256、引用和 Evidence；无结果、超时、无凭据、出口拒绝、Provider 失败或未知结果会明确返回失败状态。',
-      parameters: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          query: { type: 'string', description: '要搜索的问题或关键词' },
-          mode: { type: 'string', enum: ['model_native', 'byok_search_adapter'], description: '默认 model_native；需要独立 BYOK 时显式选择 byok_search_adapter。' },
-          operationId: { type: 'string', description: '可选稳定操作身份；用于重启后的幂等重放。' },
-          artifactId: { type: 'string', description: '可选；把来源 Evidence 绑定到已存在的 canonical Artifact。' },
-          limit: { type: 'number', description: '返回来源数量，默认 5，最多 20。' }
-        },
-        required: ['query']
       }
     }
   },
@@ -315,7 +290,6 @@ export async function executeP2Tool(
   }
 
   if (name === 'china_notify') return executeChinaNotifyPreview(args)
-  if (name === 'web_search') return executeWebSearch(args, context)
   if (name === 'project_knowledge_search') return executeProjectKnowledgeSearch(args, context)
   if (name === 'work_item_comment') return executeWorkItemComment(args, context)
   if (name === 'send_notification') {
@@ -326,10 +300,6 @@ export async function executeP2Tool(
     return { ok: result.ok, output: JSON.stringify(result, null, 2) }
   }
   return executeGiteePreview(args)
-}
-
-function executeWebSearch(args: Record<string, unknown>, context: P2ToolExecutionContext): Promise<P2ToolResult> {
-  return executeSearchTool(args, context, requiredString, optionalString, optionalNumber)
 }
 
 async function executeProjectKnowledgeSearch(
@@ -566,6 +536,8 @@ function providerView(value: unknown): ProviderView | undefined {
   const name = optionalString(value.name)
   const models = stringArray(value.models)
   if (!id || !name || !models) return undefined
+  const engine = providerEngine(value.engine)
+  if (!engine) return undefined
   const hasToken = value.hasToken === true
   const baseUrl = valueOr(optionalString(value.baseUrl), '')
   const authMode = providerAuthMode(value.authMode, baseUrl)
@@ -576,7 +548,7 @@ function providerView(value: unknown): ProviderView | undefined {
     models,
     authMode,
     ready: providerReady(authMode, hasToken),
-    engine: providerEngine(value.engine),
+    engine,
     budgetUsd: valueOr(optionalNumber(value.budgetUsd), 0),
     customHeaders: optionalString(value.customHeaders),
     credentialHeaderNames: stringArray(value.credentialHeaderNames),
@@ -601,9 +573,11 @@ function providerReady(authMode: ProviderView['authMode'], hasToken: boolean): b
   return authMode === 'none' || hasToken
 }
 
-function providerEngine(value: unknown): ProviderView['engine'] {
+function providerEngine(value: unknown): ProviderView['engine'] | undefined {
   if (value === 'anthropic' || value === 'claude') return 'anthropic'
-  return value === 'gemini' ? 'gemini' : 'openai'
+  if (value === 'gemini') return 'gemini'
+  if (value === 'openai') return 'openai'
+  return undefined
 }
 
 function providerOpenAiProtocol(value: unknown): ProviderView['openaiProtocol'] {

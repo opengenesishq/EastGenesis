@@ -1,7 +1,7 @@
+import { attachmentRoot, isInsideAttachmentRoot, normalizeSendPayload } from './ipc/session-message-input'
 ﻿import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import { homedir } from 'node:os'
-import { existsSync, readdirSync, type Dirent } from 'node:fs'
 import { sessionManager } from './sessionManager'
 import { sessionReadyHandler } from './ipc/session-ready-handler'
 import { previewOutboundContext } from './project-workspace/outbound-context-policy'
@@ -9,7 +9,6 @@ import { applySessionModelSwitch } from './ipc/session-model-switch-handler'
 import { createUnassignedSession } from './ipc/unassigned-session'
 import { resolveWorkspaceSessionCwd } from './project-workspace/workspace-session-cwd'
 import { activateLocalCompute } from './provider/localCompute'
-import { configureProviderCircuitBreaker } from './providerHealth'
 import { queryProviderUsage } from './provider/providerUsage'
 import { removeProviderAuthorizations } from './provider/providerAuthorizationService'
 import { registerProviderAuthorizationIpc } from './ipc/provider-authorization-handlers'
@@ -19,9 +18,8 @@ import { inspectProviderBalance, queryProviderBalance } from './provider/provide
 import { fetchProviderPricingCatalog } from './provider/providerPricingCatalog'
 import { registerInteractiveMutationIpc } from './ipc/interactive-mutation-handlers'
 import { registerAppFeatureIpc } from './ipc/app-feature-handlers'
-import { getSettings, updateSettings } from './settings'
+import { registerSettingsDomainIpc } from './ipc/settings-domain-handlers'
 import {
-  revokeAllGuiAutomationGrants,
   revokeGuiAutomationGrantsForSession,
   revokeToolCapabilityGrantsForSession
 } from './permission/permission-manager'
@@ -98,11 +96,11 @@ import { registerMcpProbeIpc } from './ipc/mcp-probe-ipc'
 import { registerPluginInstallIpc } from './ipc/plugin-install-ipc'
 import { registerTerminalMutationIpc } from './ipc/terminal-mutation-ipc'
 import { registerBrowserMutationIpc } from './ipc/browser-mutation-ipc'
+import { registerAssistantSearchIpc } from './ipc/assistant-search-handlers'
 import { executeInteractiveOperationEffect } from './task/operation-effect-gateway'
 import { executeProviderOperationEffect } from './provider/providerOperationEffect'
 import { terminalManager } from './terminal'
 import { browserViewManager } from './browserView'
-import { sessionImageAttachmentsRoot } from './attachmentOps'
 import { ocrImage } from './imageOcr'
 import {
   approvePluginRegistryItem,
@@ -112,8 +110,10 @@ import {
   setPluginRegistryItemEnabled,
   writePluginRegistryState
 } from './pluginRegistry'
-import { defaultClaudeDesktopConfigPath } from './mcp/mcp-client'
-import { caogenManagedPluginsRoot } from './plugin/caogen-extension-roots'
+import {
+  caogenExtensionRegistryRoots,
+  caogenManagedPluginsRoot
+} from './plugin/caogen-extension-roots'
 import { listRoutines, markRun, updateRoutine, createRoutine, deleteRoutine } from './routineStore'
 import { runRoutineNow } from './routines/routine-executor'
 import { listRoutineRuns } from './routines/routine-runner'
@@ -121,7 +121,6 @@ import { reviewRoutineRun } from './routines/routine-review'
 import { listRoutineTemplates } from './routines/routine-templates'
 import { registerQuickbarIpc } from './quickbar'
 import type {
-  AppSettings,
   BrowserBounds,
   BrowserPickResult,
   CreateRoutineInput,
@@ -170,58 +169,6 @@ function shouldEmitMemorySuggestion(sessionId: string, text: string, now = Date.
   return true
 }
 
-function attachmentRoot(sessionId: string): string {
-  return sessionImageAttachmentsRoot(app.getPath('userData'), sessionId)
-}
-
-function normalizeSendPayload(sessionId: string, raw: unknown): SendMessagePayload | null {
-  if (typeof raw === 'string') {
-    const text = raw.trim()
-    return text ? { text } : null
-  }
-  if (!raw || typeof raw !== 'object') return null
-  const record = raw as Record<string, unknown>
-  const text = typeof record.text === 'string' ? record.text.trim() : ''
-  const images = Array.isArray(record.images)
-    ? record.images.filter((image): image is ImageAttachmentView => {
-        return isImageAttachmentView(image) && isInsideAttachmentRoot(sessionId, image.path)
-      })
-    : undefined
-  const documents = Array.isArray(record.documents)
-    ? record.documents.filter((document): document is DocumentAttachmentView => {
-        return isDocumentAttachmentView(document) &&
-          isExpectedDocumentAttachmentPath(sessionId, document)
-      })
-    : undefined
-  if (!text && (!images || images.length === 0) && (!documents || documents.length === 0)) return null
-  return {
-    text,
-    ...(images && images.length > 0 ? { images } : {}),
-    ...(documents && documents.length > 0 ? { documents } : {})
-  }
-}
-
-function isInsideAttachmentRoot(sessionId: string, fullPath: string): boolean {
-  const root = resolve(attachmentRoot(sessionId))
-  const target = resolve(fullPath)
-  const rel = relative(root, target)
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
-}
-
-function isImageAttachmentView(value: unknown): value is ImageAttachmentView {
-  if (!value || typeof value !== 'object') return false
-  const record = value as Record<string, unknown>
-  return (
-    typeof record.id === 'string' &&
-    typeof record.hash === 'string' &&
-    typeof record.path === 'string' &&
-    typeof record.mime === 'string' &&
-    typeof record.bytes === 'number' &&
-    Number.isFinite(record.bytes) &&
-    typeof record.createdAt === 'string'
-  )
-}
-
 function isPluginRegistryItem(value: unknown): value is PluginRegistryItem {
   if (!value || typeof value !== 'object') return false
   const record = value as Record<string, unknown>
@@ -234,49 +181,11 @@ function isPluginRegistryItem(value: unknown): value is PluginRegistryItem {
 }
 
 function pluginRegistryRoots(sessionId?: string): string[] {
-  const roots: string[] = []
   const session = typeof sessionId === 'string' ? sessionManager.get(sessionId) : undefined
   const projectCwds = [session?.meta.sourceCwd, session?.meta.cwd].filter(
     (cwd): cwd is string => typeof cwd === 'string' && cwd.trim().length > 0
   )
-  for (const cwd of projectCwds) roots.push(join(cwd, '.claude'))
-  for (const cwd of projectCwds) roots.push(join(cwd, '.caogen', 'skills'))
-  roots.push(caogenManagedPluginsRoot())
-  roots.push(join(homedir(), '.claude'))
-  roots.push(join(homedir(), '.caogen', 'skills'))
-  roots.push(dirname(defaultClaudeDesktopConfigPath()))
-  roots.push(join(homedir(), '.codex', 'skills'))
-  roots.push(...codexPluginPackageRoots())
-  return roots
-}
-
-function codexPluginPackageRoots(): string[] {
-  const cacheRoot = join(homedir(), '.codex', 'plugins', 'cache')
-  const roots: string[] = []
-  const maxDepth = 5
-  const maxRoots = 500
-
-  const walk = (dir: string, depth: number): void => {
-    if (roots.length >= maxRoots || depth > maxDepth) return
-    if (existsSync(join(dir, '.codex-plugin', 'plugin.json')) || existsSync(join(dir, 'plugin.json'))) {
-      roots.push(dir)
-      return
-    }
-    let entries: Dirent<string>[]
-    try {
-      entries = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
-    } catch {
-      return
-    }
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name === 'node_modules' || entry.name === '.git') continue
-      walk(join(dir, entry.name), depth + 1)
-      if (roots.length >= maxRoots) return
-    }
-  }
-
-  walk(cacheRoot, 0)
-  return roots
+  return caogenExtensionRegistryRoots(projectCwds)
 }
 
 function normalizePluginScanOptions(options?: PluginRegistryScanOptions): PluginRegistryScanOptions {
@@ -284,7 +193,6 @@ function normalizePluginScanOptions(options?: PluginRegistryScanOptions): Plugin
     maxFiles: clampPositiveInt(options?.maxFiles, 3000, 5000),
     maxDepth: clampPositiveInt(options?.maxDepth, 6, 12),
     maxReadBytes: clampPositiveInt(options?.maxReadBytes, 256 * 1024, 1024 * 1024),
-    includeSiblingProjectMcp: options?.includeSiblingProjectMcp ?? true,
     managedRoot: caogenPluginsRoot()
   }
 }
@@ -321,9 +229,6 @@ function canRevealPluginPath(targetPath: string, sessionId?: string): boolean {
   for (const root of pluginRegistryRoots(sessionId)) {
     const resolvedRoot = resolve(root)
     if (isInsidePath(resolvedRoot, target)) return true
-    if (basename(resolvedRoot) === '.claude' && target === resolve(dirname(resolvedRoot), '.mcp.json')) {
-      return true
-    }
   }
   return false
 }
@@ -384,6 +289,10 @@ function effectIntentDescription(snapshot: TaskSnapshotRecord, effect: EffectRec
 export function registerIpc(): void {
   configureMigrationOperationBackupRoot(migrationBackupRoot())
   for (const register of [registerQuickbarIpc, registerTaskRecoveryIpc, registerWorkflowLedgerIpc, registerProjectWorkspaceIpc, registerDataRetentionIpc, registerDigitalWorkerIpc, registerSupervisorIpc, registerInteractiveMutationIpc, registerAppFeatureIpc, registerProviderGatewayIpc, registerFileIntelligenceIpc, registerPermissionGrantIpc]) register()
+  // Search adapters are resolved only by an explicit main-process factory. The
+  // default production wiring therefore fails closed with no_credentials until
+  // a provider-aware factory is intentionally supplied.
+  registerAssistantSearchIpc()
   registerAttachmentMutationIpc(attachmentRoot)
   registerProjectContextMutationIpc()
   registerMcpProbeIpc({
@@ -401,7 +310,11 @@ export function registerIpc(): void {
     manager: browserViewManager
   })
 
-  ipcMain.handle('sessions:list', () => sessionManager.list())
+  ipcMain.handle('sessions:list', (event) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return sessionManager.list()
+  })
+
   ipcMain.handle('sessions:pendingPermissions', (_e, id: string) =>
     sessionManager.get(id)?.pendingPermissions() ?? []
   )
@@ -674,14 +587,7 @@ export function registerIpc(): void {
     )
   })
 
-  ipcMain.handle('settings:get', () => getSettings())
-
-  ipcMain.handle('settings:update', async (_e, patch: Partial<AppSettings>) => {
-    const next = updateSettings(patch ?? {})
-    if (!next.guiAutomationEnabled) revokeAllGuiAutomationGrants()
-    configureProviderCircuitBreaker(next.providerCircuitBreaker)
-    return next
-  })
+  registerSettingsDomainIpc(ipcMain)
 
   ipcMain.handle('notificationConnectors:list', () => listNotificationConnectors())
   ipcMain.handle('notificationConnectors:create', (_e, input: NotificationConnectorInput) =>
@@ -815,9 +721,9 @@ export function registerIpc(): void {
     createRoutine(routineStoreRoot(), input)
   )
 
-  ipcMain.handle('routines:delete', (_e, id: string, expectedRevision?: number) => {
+  ipcMain.handle('routines:delete', (_e, id: string) => {
     if (typeof id !== 'string' || id.trim().length === 0) return false
-    return deleteRoutine(routineStoreRoot(), id, expectedRevision)
+    return deleteRoutine(routineStoreRoot(), id)
   })
 
   ipcMain.handle('routines:update', (_e, id: string, patch: UpdateRoutineInput) => {
@@ -1021,7 +927,7 @@ export function registerIpc(): void {
   ipcMain.handle('memory:layeredUpdate', (_e, entryId: string, input: MemoryUpdateInput) =>
     updateLayeredMemoryEntry(memoryRoot(), entryId, input ?? {})
   )
-  ipcMain.handle('memory:layeredDelete', (_e, entryId: string, revision?: number) => deleteLayeredMemoryEntry(memoryRoot(), entryId, revision))
+  ipcMain.handle('memory:layeredDelete', (_e, entryId: string) => deleteLayeredMemoryEntry(memoryRoot(), entryId))
 
   ipcMain.handle(
     'providers:fetchModels',
@@ -1056,41 +962,4 @@ function pluginTrustError(item: PluginRegistryItem): string {
   if (item.trust.status === 'invalid') return `无法验证 ${item.name} 的内容摘要，已阻止使用`
   if (item.trust.status === 'changed') return `${item.name} 的内容或能力已变更，需要重新批准`
   return `${item.name} 尚未批准，已阻止使用`
-}
-
-function isDocumentAttachmentView(value: unknown): value is DocumentAttachmentView {
-  if (!value || typeof value !== 'object') return false
-  const record = value as Record<string, unknown>
-  return (
-    typeof record.id === 'string' &&
-    typeof record.hash === 'string' &&
-    record.id === record.hash &&
-    /^[a-f0-9]{64}$/.test(record.hash) &&
-    typeof record.path === 'string' &&
-    typeof record.name === 'string' &&
-    isSafeDocumentAttachmentName(record.name) &&
-    record.mime === 'text/plain; charset=utf-8' &&
-    typeof record.bytes === 'number' &&
-    Number.isFinite(record.bytes) &&
-    typeof record.createdAt === 'string' &&
-    (record.dataClass === 'S2' || record.dataClass === 'S3')
-  )
-}
-
-function isSafeDocumentAttachmentName(name: string): boolean {
-  const normalized = name.replace(/\\/g, '/')
-  return name.length > 0 &&
-    name.length <= 1024 &&
-    !isAbsolute(name) &&
-    !name.includes('\0') &&
-    !/[\r\n]/.test(name) &&
-    !normalized.split('/').some((segment) => segment === '..')
-}
-
-function isExpectedDocumentAttachmentPath(
-  sessionId: string,
-  document: DocumentAttachmentView
-): boolean {
-  const expected = resolve(attachmentRoot(sessionId), 'documents', document.dataClass, `${document.hash}.txt`)
-  return resolve(document.path) === expected
 }

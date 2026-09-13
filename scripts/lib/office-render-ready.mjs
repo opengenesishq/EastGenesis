@@ -10,6 +10,68 @@ export async function focusElectronPage(page, focusSession) {
   await page.bringToFront()
 }
 
+export async function readOfficeLoadMeasurement(page) {
+  return page.evaluate(() => {
+    const measurement = window.__caogenOfficeLoadMeasurement
+    if (!measurement) throw new Error('Office load phase measurement disappeared')
+    if (measurement.rafId) window.cancelAnimationFrame(measurement.rafId)
+    const milliseconds = (value) => Number.isFinite(value) ? Number(value.toFixed(1)) : null
+    const durations = measurement.workerProbeDurationsMs
+    const result = {
+      kind: measurement.kind,
+      expectedAgents: measurement.expectedAgents,
+      expectedRenderedAgents: measurement.expectedRenderedAgents,
+      expectedQuality: measurement.expectedQuality,
+      startedAtEpochMs: Math.round(measurement.startedAtEpochMs),
+      shellReadyMs: milliseconds(measurement.shellReadyMs),
+      canvasReadyMs: milliseconds(measurement.canvasReadyMs),
+      basicNonblankMs: milliseconds(measurement.basicNonblankMs),
+      sceneAssetsReadyMs: milliseconds(measurement.sceneAssetsReadyMs),
+      charactersReadyMs: milliseconds(measurement.charactersReadyMs),
+      interactiveReadyMs: milliseconds(measurement.interactiveReadyMs),
+      debugTimeline: Array.isArray(measurement.debugTimeline)
+        ? measurement.debugTimeline.map((entry) => ({ ...entry }))
+        : [],
+      workerProbeDurationMs: {
+        samples: durations.length,
+        maximum: milliseconds(Math.max(0, ...durations)),
+        mean: milliseconds(durations.length > 0
+          ? durations.reduce((sum, value) => sum + value, 0) / durations.length
+          : 0)
+      },
+      prewarm: window.__caogenOfficePrewarm ? {
+        firstTrigger: window.__caogenOfficePrewarm.firstTrigger,
+        triggers: window.__caogenOfficePrewarm.triggers,
+        moduleRequestedAtEpochMs: window.__caogenOfficePrewarm.moduleRequestedAtEpochMs,
+        moduleReadyAtEpochMs: window.__caogenOfficePrewarm.moduleReadyAtEpochMs,
+        shellMountedAtEpochMs: window.__caogenOfficePrewarm.shellMountedAtEpochMs,
+        moduleRequestCount: window.__caogenOfficePrewarm.moduleRequestCount
+      } : null,
+      observed: measurement.observed
+    }
+    delete window.__caogenOfficeLoadMeasurement
+    return result
+  })
+}
+
+export async function closeOfficeAndWaitForContextRelease(page) {
+  await page.evaluate(() => {
+    const canvas = document.querySelector('.office-canvas-wrap canvas')
+    if (!(canvas instanceof HTMLCanvasElement)) throw new Error('Office WebGL canvas unavailable')
+    const release = { observed: false }
+    window.__caogenOfficeContextRelease = release
+    canvas.addEventListener('webglcontextlost', (event) => {
+      event.preventDefault()
+      release.observed = true
+    }, { once: true })
+  })
+  await page.click('.office-actions .btn-primary')
+  await page.waitForFunction(() => !document.querySelector('.office-canvas-wrap'), { timeout: 10_000 })
+  await page.waitForFunction(() => typeof window.__caogenOfficePerformance === 'undefined', { timeout: 5_000 })
+  await page.waitForFunction(() => window.__caogenOfficeContextRelease?.observed === true, { timeout: 5_000 })
+  await page.evaluate(() => { delete window.__caogenOfficeContextRelease })
+}
+
 export async function startOfficeViewDiagnostics(page) {
   await page.evaluate(() => {
     const target = window
@@ -24,7 +86,7 @@ export async function startOfficeViewDiagnostics(page) {
         officeEmpty: Boolean(document.querySelector('.office-empty')),
         officeLoading: Boolean(document.querySelector('.office-loading')),
         settings: Boolean(document.querySelector('.settings-page')),
-        list: Boolean(document.querySelector('[data-sidebar-action="control-room"]')),
+        list: Boolean(document.querySelector('[data-experience-mode-switcher]')),
         focused: document.hasFocus(),
         hidden: document.hidden
       }

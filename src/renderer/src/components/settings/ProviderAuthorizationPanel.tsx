@@ -15,9 +15,6 @@ export default function ProviderAuthorizationPanel({ provider }: { provider: Pro
   const t = useT()
   const refreshProviders = useStore((state) => state.refreshProviders)
   const [authorization, setAuthorization] = useState<ProviderAuthorization | undefined>(provider.authorization)
-  const [selectedService, setSelectedService] = useState<ProviderAuthorizationService>(
-    provider.authorization?.provider ?? 'codex-oauth'
-  )
   const [accounts, setAccounts] = useState<ProviderAuthorizationAccountView[]>([])
   const [flow, setFlow] = useState<ProviderDeviceAuthorizationView | null>(null)
   const [nextPollAt, setNextPollAt] = useState(0)
@@ -26,7 +23,7 @@ export default function ProviderAuthorizationPanel({ provider }: { provider: Pro
   const [quota, setQuota] = useState<ProviderAuthorizationQuotaView | null>(null)
   const [quotaLoading, setQuotaLoading] = useState(false)
   const [quotaError, setQuotaError] = useState('')
-  const service = authorization?.provider ?? selectedService
+  const service: ProviderAuthorizationService = authorization?.provider ?? 'xai-oauth'
   const authorized = Boolean(authorization?.provider) && authorization?.status === 'authorized'
   const quotaUnavailableText = t('providerAuthorizationQuotaUnavailable')
 
@@ -40,7 +37,6 @@ export default function ProviderAuthorizationPanel({ provider }: { provider: Pro
 
   useEffect(() => {
     setAuthorization(provider.authorization)
-    if (provider.authorization?.provider) setSelectedService(provider.authorization.provider)
   }, [provider.id, provider.authorization])
 
   const loadQuota = useCallback(async (): Promise<void> => {
@@ -110,7 +106,7 @@ export default function ProviderAuthorizationPanel({ provider }: { provider: Pro
     setBusy(true)
     setError('')
     try {
-      const started = await window.agentDesk.startProviderAuthorization(provider.id, selectedService)
+      const started = await window.agentDesk.startProviderAuthorization(provider.id, 'xai-oauth')
       setFlow(started)
       setNextPollAt(Date.now())
       window.open(started.verificationUri, '_blank', 'noopener,noreferrer')
@@ -162,22 +158,6 @@ export default function ProviderAuthorizationPanel({ provider }: { provider: Pro
           </button>
         )}
       </div>
-
-      {!authorized && !flow && (
-        <div className="provider-authorization-service-picker" role="group" aria-label={t('providerAuthorizationService')}>
-          {(['codex-oauth', 'github-copilot', 'xai-oauth'] as const).map((candidate) => (
-            <button
-              type="button"
-              className={`btn btn-sm ${selectedService === candidate ? 'btn-primary' : 'btn-ghost'}`}
-              aria-pressed={selectedService === candidate}
-              key={candidate}
-              onClick={() => setSelectedService(candidate)}
-            >
-              {serviceLabel(candidate, t)}
-            </button>
-          ))}
-        </div>
-      )}
 
       {flow && (
         <div className="provider-authorization-device" data-provider-authorization-flow>
@@ -254,9 +234,5 @@ function serviceLabel(
   service: ProviderAuthorizationService,
   t: (key: string, params?: Record<string, string | number>) => string
 ): string {
-  return service === 'github-copilot'
-    ? t('providerAuthorizationServiceGitHub')
-    : service === 'xai-oauth'
-      ? t('providerAuthorizationServiceXai')
-      : t('providerAuthorizationServiceCodex')
+  return service === 'xai-oauth' ? t('providerAuthorizationServiceXai') : ''
 }

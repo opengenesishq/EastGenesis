@@ -6,6 +6,10 @@ import type { MediaJobRecord, MediaProviderProfile, MediaRemoteJobObservation } 
 import { getProvider, issueProviderCredentialLease } from '../providers'
 import { fetchWithProviderCredentialLease } from '../providerRuntimeAuth'
 import { resolveProviderRuntimeTarget } from '../provider/providerRuntimeTarget'
+import { boundMediaCredentialKey, resolveMediaExecutionTarget } from './media-execution-target'
+import { mediaEndpointUrl } from './media-endpoint-url'
+import { missingMediaReconciliationIdentity } from './media-reconciliation-identity'
+import { mediaTransportFailure } from './media-transport-failure'
 import { parseProviderHeaders } from '../provider/openai-provider-utils'
 import { assertRoutingExpertTargetAllowed } from '../model/routing-expert-policy'
 import { getSettings } from '../settings'
@@ -19,10 +23,6 @@ export interface MediaProviderRuntimeDependencies {
   now?: () => number
 }
 
-const CANCELLED_REMOTE_STATUSES = new Set(['cancelled', 'canceled', 'cancelled_by_user'])
-const FAILED_REMOTE_STATUSES = new Set(['failed', 'failure', 'error', 'expired'])
-const COMPLETED_REMOTE_STATUSES = new Set(['succeeded', 'success', 'complete', 'completed', 'done'])
-
 export async function executeRemoteMediaOperation(
   profile: MediaProviderProfile,
   job: MediaJobRecord,
@@ -33,15 +33,17 @@ export async function executeRemoteMediaOperation(
   if (!profile.providerId) throw new Error('Remote media Provider is missing a CaoGen Provider binding')
   const provider = getProvider(profile.providerId)
   if (!provider) throw new Error('Bound CaoGen Provider was not found')
-  assertRoutingExpertTargetAllowed(provider.id, provider.baseUrl, getSettings().routingExpertPolicy)
-  const target = resolveProviderRuntimeTarget(provider, { appId: 'caogen-media', model: job.model ?? profile.model })
+  const target = resolveMediaExecutionTarget(provider, profile, job)
+  assertRoutingExpertTargetAllowed(provider.id, target.baseUrl, getSettings().routingExpertPolicy)
   const scope = {
     providerId: provider.id,
     projectId: job.projectId,
     sessionId: `media:${job.id}`,
     operationId: `${job.id}:${operation}:${job.attempt}`
   }
-  const selection = issueProviderCredentialLease(provider, scope, { ttlMs: Math.min(profile.requestTimeoutMs ?? 30_000, 60_000) })
+  const unresolved = missingMediaReconciliationIdentity(job, operation)
+  if (unresolved) return unresolved
+  const selection = issueProviderCredentialLease(provider, scope, { ttlMs: Math.min(profile.requestTimeoutMs ?? 30_000, 60_000) }, boundMediaCredentialKey(provider, job))
   if (provider.authMode !== 'none' && (!selection.available || !selection.lease)) throw new Error('Media Provider credential is unavailable')
   const base = target.baseUrl.replace(/\/+$/, '')
   if (operation === 'download' && job.preparedOutputPath && job.preparedOutputDigest && job.preparedOutputSizeBytes) {
@@ -71,14 +73,7 @@ export async function executeRemoteMediaOperation(
       fetch: dependencies.fetch
     })
   } catch {
-    return {
-      status: operation === 'download' ? 'downloading' : 'waiting_reconciliation',
-      externalJobId: job.providerExternalJobId ?? job.externalJobId,
-      reason: operation === 'download'
-        ? 'Remote media download paused and will resume from its durable offset'
-        : 'Remote media request ended without a trustworthy result',
-      ...(operation === 'download' && partialBytes > 0 ? { downloadReceivedBytes: partialBytes } : {})
-    }
+    return mediaTransportFailure(job, operation, partialBytes)
   }
   if (operation === 'download') {
     if (!response.ok) return failedHttpObservation(response, job)
@@ -92,7 +87,7 @@ export async function executeRemoteMediaOperation(
   }
   const bodyBytes = await readBoundedResponse(response, 64 * 1024 * 1024)
   const body = parseJson(bodyBytes)
-  if (operation === 'cancel') return { status: 'cancelled', externalJobId: job.providerExternalJobId ?? job.externalJobId }
+  if (operation === 'cancel') return mediaCancellationObservation(body, bodyBytes, job)
   return parseObservation(profile, job, operation, body, bodyBytes, rootDir, base)
 }
 
@@ -105,10 +100,10 @@ async function mediaRequest(
   rootDir: string
 ): Promise<{ url: string; method: string; headers?: Record<string, string>; body?: RequestInit['body'] }> {
   const externalId = job.providerExternalJobId ?? job.externalJobId
-  if (operation === 'cancel') return { url: `${base}${renderMediaPath(profile.cancelPathTemplate ?? '/v1/videos/{id}', externalId)}`, method: 'DELETE' }
-  if (operation === 'poll') return { url: `${base}${renderMediaPath(profile.statusPathTemplate ?? '/v1/videos/{id}', externalId)}`, method: 'GET' }
+  if (operation === 'cancel') return { url: mediaEndpointUrl(base, renderMediaPath(profile.cancelPathTemplate ?? '/v1/videos/{id}', externalId)), method: 'DELETE' }
+  if (operation === 'poll') return { url: mediaEndpointUrl(base, renderMediaPath(profile.statusPathTemplate ?? '/v1/videos/{id}', externalId)), method: 'GET' }
   if (operation === 'download') {
-    return { url: safeDownloadUrl(job.remoteOutputRef, base) ?? `${base}${renderMediaPath(profile.downloadPathTemplate ?? '/v1/videos/{id}/content', externalId)}`, method: 'GET' }
+    return { url: safeDownloadUrl(job.remoteOutputRef, base) ?? mediaEndpointUrl(base, renderMediaPath(profile.downloadPathTemplate ?? '/v1/videos/{id}/content', externalId)), method: 'GET' }
   }
   if (profile.endpointClass === 'openai-image') {
     if (job.operation === 'image.edit') {
@@ -118,9 +113,9 @@ async function mediaRequest(
       form.set('model', target.model)
       form.set('prompt', job.requestPrompt ?? '')
       form.set('image', await openAsBlob(inputs[0].path, { type: inputs[0].mediaType }), inputs[0].fileName)
-      return { url: `${base}${profile.submitPath ?? '/v1/images/edits'}`, method: 'POST', body: form }
+      return { url: mediaEndpointUrl(base, profile.submitPath ?? '/v1/images/edits'), method: 'POST', body: form }
     }
-    return jsonRequest(`${base}${profile.submitPath ?? '/v1/images/generations'}`, {
+    return jsonRequest(mediaEndpointUrl(base, profile.submitPath ?? '/v1/images/generations'), {
       model: target.model, prompt: job.requestPrompt ?? '', response_format: 'b64_json',
       ...(job.parameters.width && job.parameters.height ? { size: `${job.parameters.width}x${job.parameters.height}` } : {}),
       ...(job.parameters.quality ? { quality: job.parameters.quality } : {}),
@@ -129,7 +124,7 @@ async function mediaRequest(
     })
   }
   if (profile.endpointClass === 'openai-speech') {
-    return jsonRequest(`${base}${profile.submitPath ?? '/v1/audio/speech'}`, {
+    return jsonRequest(mediaEndpointUrl(base, profile.submitPath ?? '/v1/audio/speech'), {
       model: target.model, input: job.requestPrompt ?? '', voice: job.voice ?? 'alloy', response_format: 'mp3',
       ...(job.parameters.speechSpeed ? { speed: job.parameters.speechSpeed } : {})
     })
@@ -149,7 +144,7 @@ async function mediaRequest(
       if (inputs.length === 0) throw new Error(`${job.operation} requires a canonical reference asset`)
       form.set('input_reference', await openAsBlob(inputs[0].path, { type: inputs[0].mediaType }), inputs[0].fileName)
     }
-    return { url: `${base}${profile.submitPath ?? '/v1/videos'}`, method: 'POST', headers: { 'Idempotency-Key': job.idempotencyKey }, body: form }
+    return { url: mediaEndpointUrl(base, profile.submitPath ?? '/v1/videos'), method: 'POST', headers: { 'Idempotency-Key': job.idempotencyKey }, body: form }
   }
   if (profile.endpointClass === 'generic-async' && job.inputAssetIds?.length) {
     const form = new FormData()
@@ -161,12 +156,12 @@ async function mediaRequest(
     for (const [index, input] of (await resolveInputFiles(job, rootDir)).entries()) {
       form.append('input', await openAsBlob(input.path, { type: input.mediaType }), `${index}-${input.fileName}`)
     }
-    return { url: `${base}${profile.submitPath ?? '/v1/media/jobs'}`, method: 'POST', body: form }
+    return { url: mediaEndpointUrl(base, profile.submitPath ?? '/v1/media/jobs'), method: 'POST', body: form }
   }
   if (profile.endpointClass === 'anthropic-compatible') {
-    return jsonRequest(`${base}/v1/messages`, { model: target.model, max_tokens: 256, messages: [{ role: 'user', content: job.requestPrompt ?? `${job.operation}: ${job.shotId ?? job.id}` }] }, { 'anthropic-version': '2023-06-01' })
+    return jsonRequest(mediaEndpointUrl(base, '/v1/messages'), { model: target.model, max_tokens: 256, messages: [{ role: 'user', content: job.requestPrompt ?? `${job.operation}: ${job.shotId ?? job.id}` }] }, { 'anthropic-version': '2023-06-01' })
   }
-  return jsonRequest(`${base}${profile.submitPath ?? '/v1/videos'}`, {
+  return jsonRequest(mediaEndpointUrl(base, profile.submitPath ?? '/v1/videos'), {
     model: target.model, operation: job.operation,
     prompt: job.requestPrompt ?? `${job.operation} for ${job.shotId ?? job.id}`,
     seconds: job.parameters.durationSeconds ?? 5, idempotency_key: job.idempotencyKey, voice: job.voice, parameters: job.parameters
@@ -182,11 +177,11 @@ async function parseObservation(
   rootDir: string,
   base: string
 ): Promise<MediaRemoteJobObservation> {
-  const externalJobId = extractExternalJobId(body) ?? job.providerExternalJobId ?? job.externalJobId
+  const externalJobId = typeof body.id === 'string' && body.id.trim() ? body.id : job.providerExternalJobId ?? job.externalJobId
   const billing = providerBilling(body, bytes)
-  const status = extractRemoteStatus(body)
-  if (CANCELLED_REMOTE_STATUSES.has(status)) return { status: 'cancelled', externalJobId, ...billing }
-  if (FAILED_REMOTE_STATUSES.has(status)) return { status: 'failed', externalJobId, reason: providerError(body), ...billing }
+  const status = typeof body.status === 'string' ? body.status.toLowerCase() : ''
+  if (status === 'cancelled' || status === 'canceled') return { status: 'cancelled', externalJobId, ...billing }
+  if (status === 'failed' || status === 'error') return { status: 'failed', externalJobId, reason: providerError(body), ...billing }
   const output = extractJsonOutput(body)
   if (output.base64) {
     const decoded = Buffer.from(output.base64, 'base64')
@@ -196,16 +191,10 @@ async function parseObservation(
     const persisted = await persistRemoteBytes(decoded, rootDir, job, output.mediaType)
     return { status: 'downloading', externalJobId, ...persisted, ...billing }
   }
-  if (output.url || COMPLETED_REMOTE_STATUSES.has(status)) {
+  if (output.url || status === 'succeeded' || status === 'completed') {
     const outputUrl = output.url ? safeDownloadUrl(output.url, base) : undefined
     if (output.url && !outputUrl) return { status: 'failed', externalJobId, reason: 'Remote media output URL is outside the bound Provider origin', ...billing }
     return { status: 'downloading', externalJobId, ...(outputUrl ? { outputUrl } : {}), mediaType: output.mediaType, ...billing }
-  }
-  // A provider can acknowledge a request with an implementation-specific
-  // status. Keep it explicit and require a user/scheduler reconciliation
-  // instead of allowing an unrecognized value to look like progress forever.
-  if (status && !isKnownRemoteProgressStatus(status)) {
-    return { status: 'waiting_reconciliation', externalJobId, reason: `Remote media Provider returned an unknown status: ${status}`, ...billing }
   }
   return { status: 'running', externalJobId, ...billing }
 }
@@ -379,95 +368,46 @@ async function readBoundedResponse(response: Response, maxBytes: number): Promis
 }
 
 function extractJsonOutput(body: Record<string, unknown>): { url?: string; base64?: string; mediaType?: string } {
-  let rawUrl: string | undefined
-  let base64: string | undefined
-  let mediaType: string | undefined
-  for (const candidate of remoteEnvelopeCandidates(body)) {
-    const output = candidate.output && typeof candidate.output === 'object' && !Array.isArray(candidate.output)
-      ? candidate.output as Record<string, unknown>
-      : undefined
-    rawUrl ??= firstString(candidate.output_url, candidate.video_url, candidate.download_url, candidate.url, output?.output_url, output?.video_url, output?.download_url, output?.url)
-    base64 ??= firstString(candidate.b64_json, candidate.base64, output?.b64_json, output?.base64)
-    mediaType ??= firstString(candidate.media_type, candidate.content_type, candidate.mime_type, output?.media_type, output?.content_type, output?.mime_type)
-  }
+  const data = Array.isArray(body.data) && body.data[0] && typeof body.data[0] === 'object'
+    ? body.data[0] as Record<string, unknown>
+    : undefined
+  const output = body.output && typeof body.output === 'object' && !Array.isArray(body.output)
+    ? body.output as Record<string, unknown>
+    : undefined
+  const rawUrl = firstString(body.output_url, body.url, data?.url, output?.url)
+  const base64 = firstString(body.b64_json, data?.b64_json, output?.b64_json)
   return {
     ...(rawUrl ? { url: rawUrl } : {}),
     ...(base64 ? { base64 } : {}),
-    ...(mediaType ? { mediaType } : {})
+    ...(firstString(body.media_type, body.content_type, data?.media_type, output?.media_type) ? {
+      mediaType: firstString(body.media_type, body.content_type, data?.media_type, output?.media_type)
+    } : {})
   }
 }
 
 function providerBilling(body: Record<string, unknown>, bytes: Buffer): Pick<MediaRemoteJobObservation, 'actualUsd' | 'billingReceiptDigest'> {
-  const candidates = remoteEnvelopeCandidates(body)
-  const raw = firstNumber(...candidates.flatMap((candidate) => {
-    const billing = candidate.billing && typeof candidate.billing === 'object' && !Array.isArray(candidate.billing)
-      ? candidate.billing as Record<string, unknown>
-      : undefined
-    return [candidate.actual_cost_usd, candidate.cost_usd, billing?.actual_usd, billing?.cost_usd]
-  }))
+  const billing = body.billing && typeof body.billing === 'object' && !Array.isArray(body.billing)
+    ? body.billing as Record<string, unknown>
+    : undefined
+  const raw = body.actual_cost_usd ?? body.cost_usd ?? billing?.actual_usd ?? billing?.cost_usd
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0 || raw > 1_000_000) return {}
   return { actualUsd: raw, billingReceiptDigest: `sha256:${createHash('sha256').update(bytes).digest('hex')}` }
 }
 
+function mediaCancellationObservation(body: Record<string, unknown>, bytes: Buffer, job: MediaJobRecord): MediaRemoteJobObservation {
+  const state = typeof body.status === 'string' ? body.status.toLowerCase() : ''
+  const cancelled = state === 'cancelled' || state === 'canceled' || body.deleted === true
+  return { status: cancelled ? 'cancelled' : 'running', externalJobId: job.providerExternalJobId ?? job.externalJobId,
+    ...providerBilling(body, bytes), ...(cancelled ? {} : { reason: '厂商已响应取消请求，尚未确认任务取消；请继续查询原任务。' }) }
+}
+
 function providerError(body: Record<string, unknown>): string {
-  for (const candidate of remoteEnvelopeCandidates(body)) {
-    if (typeof candidate.error === 'string' && candidate.error.trim()) return candidate.error.trim()
-    if (candidate.error && typeof candidate.error === 'object' && !Array.isArray(candidate.error)) {
-      const error = candidate.error as Record<string, unknown>
-      const message = firstString(error.message, error.detail, error.code)
-      if (message) return message
-    }
-    const message = firstString(candidate.message, candidate.detail)
-    if (message) return message
+  if (typeof body.error === 'string' && body.error.trim()) return body.error.trim()
+  if (body.error && typeof body.error === 'object' && !Array.isArray(body.error)) {
+    const message = (body.error as Record<string, unknown>).message
+    if (typeof message === 'string' && message.trim()) return message.trim()
   }
   return 'Remote media Provider reported failure'
-}
-
-function extractExternalJobId(body: Record<string, unknown>): string | undefined {
-  for (const candidate of remoteEnvelopeCandidates(body)) {
-    const id = firstString(candidate.id, candidate.task_id, candidate.taskId, candidate.request_id, candidate.requestId, candidate.video_id, candidate.videoId)
-    if (id) return id
-  }
-  return undefined
-}
-
-function extractRemoteStatus(body: Record<string, unknown>): string {
-  for (const candidate of remoteEnvelopeCandidates(body)) {
-    const status = firstString(candidate.status, candidate.state)
-    if (status) return status.toLowerCase().replace(/[\s-]+/g, '_')
-  }
-  return ''
-}
-
-function isKnownRemoteProgressStatus(status: string): boolean {
-  return ['queued', 'pending', 'submitted', 'created', 'accepted', 'processing', 'in_progress', 'running'].includes(status)
-}
-
-function remoteEnvelopeCandidates(body: Record<string, unknown>): Record<string, unknown>[] {
-  const candidates: Record<string, unknown>[] = []
-  const seen = new Set<Record<string, unknown>>()
-  const envelopeKeys = ['data', 'result', 'output', 'video', 'videos', 'response', 'content', 'metadata', 'payload', 'billing']
-  const visit = (value: unknown, depth: number): void => {
-    if (!value || typeof value !== 'object') return
-    if (Array.isArray(value)) {
-      // A media response can contain multiple outputs; the first one is the
-      // canonical output for a single MediaJob. Bound traversal for safety.
-      for (const item of value.slice(0, 4)) visit(item, depth)
-      return
-    }
-    const candidate = value as Record<string, unknown>
-    if (seen.has(candidate)) return
-    seen.add(candidate)
-    candidates.push(candidate)
-    if (depth >= 3) return
-    for (const key of envelopeKeys) visit(candidate[key], depth + 1)
-  }
-  visit(body, 0)
-  return candidates
-}
-
-function firstNumber(...values: unknown[]): number | undefined {
-  return values.find((value): value is number => typeof value === 'number' && Number.isFinite(value))
 }
 
 function firstString(...values: unknown[]): string | undefined {

@@ -15,6 +15,8 @@ import {
 import { useT } from '../i18n'
 import ProviderAnthropicRuntimeSection from './ProviderAnthropicRuntimeSection'
 import ProviderGeminiRuntimeSection from './ProviderGeminiRuntimeSection'
+import ProviderMediaModelFields from './ProviderMediaModelFields'
+import ProviderModelCapabilitySummary from './ProviderModelCapabilitySummary'
 
 interface Props {
   value: string
@@ -256,6 +258,9 @@ function EndpointSection({ endpoints, update }: { endpoints: ProviderEndpointPro
           <select className="select" aria-label={t('providerEndpointProtocol')} value={endpoint.protocol ?? ''} onChange={(event) => update((draft) => updateEndpoint(draft, index, { protocol: event.target.value ? event.target.value as ProviderEndpointProfile['protocol'] : undefined }))}>
             <option value="">{t('providerDefault')}</option><option value="responses">Responses</option><option value="chat">Chat</option>
           </select>
+          <input className="input" aria-label={t('providerEndpointRegion')} value={endpoint.region ?? ''} onChange={(event) => update((draft) => updateEndpoint(draft, index, { region: event.target.value || undefined }))} placeholder={t('providerEndpointRegion')} />
+          <input className="input" aria-label={t('providerEndpointDomain')} value={endpoint.domain ?? ''} onChange={(event) => update((draft) => updateEndpoint(draft, index, { domain: event.target.value || undefined }))} placeholder={t('providerEndpointDomain')} />
+          <input className="input" aria-label={t('providerEndpointPermissionTags')} value={(endpoint.permissionTags ?? []).join(', ')} onChange={(event) => update((draft) => updateEndpoint(draft, index, { permissionTags: splitList(event.target.value) }))} placeholder={t('providerEndpointPermissionTags')} />
           <input className="input" type="number" step="1" aria-label={t('providerEndpointPriority')} value={endpoint.priority ?? ''} onChange={(event) => update((draft) => updateEndpoint(draft, index, { priority: numberOrUndefined(event.target.value) }))} placeholder={t('providerEndpointPriority')} />
           <label className="settings-check"><input type="checkbox" checked={endpoint.enabled !== false} onChange={(event) => update((draft) => updateEndpoint(draft, index, { enabled: event.target.checked }))} /> {t('providerEnabled')}</label>
           <button type="button" className="btn btn-ghost btn-sm" aria-label={t('providerRemoveEndpoint')} onClick={() => update((draft) => removeAt(draft, 'endpoints', index))}>{t('providerRemoveEndpoint')}</button>
@@ -389,6 +394,7 @@ function ModelSection({
         </div>
       </div>
       <div className="provider-model-catalog-note">{t('providerPricingCatalogPrivacy')}</div>
+      <ProviderModelCapabilitySummary profiles={models} compact />
       {notice && <div className={`field-hint ${notice.tone === 'ok' ? 'field-hint-ok' : 'field-hint-warning'}`}>{notice.text}</div>}
       {models.length === 0 && <div className="field-hint">{t('providerModelProfilesEmpty')}</div>}
       {models.map((model, index) => (
@@ -403,6 +409,7 @@ function ModelSection({
             <input className="input" type="number" min="1" aria-label={t('providerModelContextWindow')} value={model.contextWindow ?? ''} onChange={(event) => update((draft) => updateModel(draft, index, { contextWindow: numberOrUndefined(event.target.value) }))} placeholder={t('providerModelContextWindow')} />
             <input className="input" aria-label={t('providerModelCapabilities')} value={(model.capabilities ?? []).join(', ')} onChange={(event) => update((draft) => updateModel(draft, index, { capabilities: splitList(event.target.value) }))} placeholder={t('providerModelCapabilitiesPlaceholder')} />
           </div>
+          <ProviderMediaModelFields model={model} onChange={(patch) => update((draft) => updateModel(draft, index, patch))} />
           <div className="provider-advanced-pricing">
             <div className="provider-pricing-meta">
               <span className="provider-pricing-unit">USD / 1M tokens</span>

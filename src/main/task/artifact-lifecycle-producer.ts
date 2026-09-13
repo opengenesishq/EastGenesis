@@ -1,3 +1,6 @@
+import { isConfirmedOfficeArtifactEffect, registerOfficeArtifactLifecycle } from './office-artifact-producer'
+export { deriveOfficeAcceptanceStatus, officeArtifactEffectHasOutputBinding } from './office-artifact-producer'
+import { isConfirmedOfficeRevisionEffect, registerOfficeRevisionLifecycle } from '../office-revision/producer'
 import { readFile } from 'node:fs/promises'
 import { basename, extname, relative, resolve, sep } from 'node:path'
 import type { EffectRecord, TaskRunRecord } from '../../shared/types'
@@ -21,7 +24,6 @@ import {
 } from './workflow-ledger-store'
 import { WorkflowLedgerCorruptionError } from './workflow-ledger-errors'
 import { effectRecordIntegrityMatches } from './effect-record-integrity'
-import { runOfficeSelfCheck, type OfficeSelfCheckResult } from '../agent/tools/office-self-check'
 import { stableValueDigest } from './tool-idempotency'
 import { registerCanonicalProducedArtifact } from './artifact-production-boundary'
 import { registerSessionProducedArtifacts } from './session-artifact-producer'
@@ -57,12 +59,11 @@ import {
   isConfirmedProviderProfileOperationEffect,
   recoverConfirmedProviderProfileOperationArtifact
 } from '../provider/provider-profile-operation-artifact'
-import { openProjectWorkspaceStore } from '../project-workspace/store'
 import { resolveArtifactProjectionAuthority } from './artifact-projection-authority'
 
 export async function registerConfirmedRunArtifactLifecycles(run: TaskRunRecord, rootDir?: string): Promise<ArtifactLifecycleRecord[]> {
   const effects = (run.effects ?? []).filter((effect) =>
-    isConfirmedCodeForgePatchEffect(effect) || isConfirmedOfficeArtifactEffect(effect) ||
+    isConfirmedCodeForgePatchEffect(effect) || isConfirmedOfficeArtifactEffect(effect) || isConfirmedOfficeRevisionEffect(effect) ||
     isConfirmedFileArtifactEffect(effect) || isConfirmedPullRequestEffect(effect) ||
     isConfirmedIssueEffect(effect) || isConfirmedGitDeliveryEffect(effect) ||
     isConfirmedNotificationDeliveryEffect(effect) || isConfirmedMigrationOperationEffect(effect) ||
@@ -96,16 +97,8 @@ export async function registerConfirmedRunArtifactLifecycles(run: TaskRunRecord,
       ))
       continue
     }
-    if (isConfirmedOfficeArtifactEffect(effect)) {
-      records.push(await registerOfficeArtifactLifecycle(
-        run,
-        effect,
-        workflowRun,
-        authority.provenance,
-        rootDir
-      ))
-      continue
-    }
+    const officeArtifact = await registerConfirmedOfficeOutput({ run, effect, workflowRun, provenance: authority.provenance, rootDir })
+    if (officeArtifact) { records.push(officeArtifact); continue }
     if (isConfirmedFileArtifactEffect(effect)) {
       records.push(await registerFileArtifactLifecycle(
         run, effect, workflowRun, workItem, authority, rootDir
@@ -285,7 +278,6 @@ async function registerFileArtifactLifecycle(
 ): Promise<ArtifactLifecycleRecord> {
   assertEffectOwnership(run, effect)
   const outputPath = resolvedFileArtifactPath(effect)
-  const outputBytes = await readFile(outputPath)
   const kind = inferFileArtifactKind(outputPath, workItem)
   const [binding] = await registerSessionProducedArtifacts({
     sessionId: run.sessionId,
@@ -296,8 +288,8 @@ async function registerFileArtifactLifecycle(
       kind,
       title: basename(outputPath),
       content: {
-        storageKind: 'blob',
-        bytes: outputBytes,
+        storageKind: 'source_ref',
+        sourceRef: outputPath,
         expectedDigest: `sha256:${effect.target.expectedSha256}`
       },
       lineageKey: `file:${effect.target.relativePath}`,
@@ -308,15 +300,14 @@ async function registerFileArtifactLifecycle(
         effectId: effect.id,
         toolUseId: effect.toolUseId,
         relativePath: effect.target.relativePath,
-        expectedBytes: effect.target.expectedBytes,
-        workspaceSourcePath: outputPath
+        expectedBytes: effect.target.expectedBytes
       },
       evidenceKind: workItem.type === 'testing' ? 'test_result' : 'delivery_check',
       evidenceSummary:
         'The confirmed file output is available and matches the exact bytes frozen by its Effect.',
       evidenceVerifier: 'file-effect-runtime',
       acceptanceCriterion:
-        'The produced file snapshot is available and matches its confirmed Effect digest, size and Project ownership.',
+        'The produced file is available and matches its confirmed Effect digest, size and Project ownership.',
       attachToStage: authority.attachToStage,
       createdAt: effect.terminalAt ?? effect.updatedAt
     }],
@@ -936,165 +927,6 @@ function isRemoteArtifactManifest(value: unknown): value is RemoteArtifactManife
     typeof record.bodyDigest === 'string'
 }
 
-type OfficeArtifactEffect = EffectRecord & {
-  target: Extract<EffectRecord['target'], { kind: 'office_artifact' }>
-}
-
-function isConfirmedOfficeArtifactEffect(effect: EffectRecord): effect is OfficeArtifactEffect {
-  return effect.status === 'confirmed' && officeArtifactEffectHasOutputBinding(effect)
-}
-
-export function officeArtifactEffectHasOutputBinding(effect: EffectRecord): effect is OfficeArtifactEffect {
-  return effect.target.kind === 'office_artifact' && effect.target.outputBindingVersion === 1 &&
-    Array.isArray(effect.target.sourceSnapshots) &&
-    typeof effect.target.expectedSha256 === 'string' &&
-    /^sha256:[a-f0-9]{64}$/.test(effect.target.expectedSha256) &&
-    Number.isSafeInteger(effect.target.expectedBytes) && (effect.target.expectedBytes as number) >= 0
-}
-
-/** 由 self-check 结果派生 Acceptance 状态：绿→passed，红→failed（默认采纳 B/C）。 */
-export function deriveOfficeAcceptanceStatus(selfCheck: OfficeSelfCheckResult): 'passed' | 'failed' {
-  return selfCheck.ok ? 'passed' : 'failed'
-}
-
-async function registerOfficeArtifactLifecycle(
-  run: TaskRunRecord,
-  effect: OfficeArtifactEffect,
-  workflowRun: WorkflowRunRecord & { projectId: string },
-  provenance: WorkflowProjectionSource,
-  rootDir?: string
-): Promise<ArtifactLifecycleRecord> {
-  assertOfficeEffectOwnership(run, effect)
-  const expectedOutput = requiredOfficeEffectOutput(effect)
-  const artifactId = `artifact:office:${effect.id}`
-  const existing = await getPersistedArtifactLifecycle(artifactId, rootDir)
-  if (existing) {
-    assertExistingOfficeArtifact(
-      existing,
-      run.id,
-      effect.target.artifactKind,
-      effect.target.workspacePath,
-      expectedOutput
-    )
-  }
-  const selfCheck = await runOfficeSelfCheck({
-    workspacePath: effect.target.workspacePath,
-    expectedSha256: effect.target.expectedSha256,
-    artifactKind: effect.target.artifactKind,
-    mediaType: effect.target.mediaType,
-    sourceRefs: effect.target.sourceRefs,
-    sourceSnapshots: effect.target.sourceSnapshots,
-    runtimeTraceable: true
-  })
-  const status = deriveOfficeAcceptanceStatus(selfCheck)
-  const observedAt = existing?.createdAt ?? effect.terminalAt ?? effect.updatedAt
-  const workspaceRoot = resolveLifecycleRoots(rootDir).workspaceRoot
-  const hasProjectWorkspace = Boolean(
-    await (await openProjectWorkspaceStore(workspaceRoot)).getWorkspace(workflowRun.projectId)
-  )
-  const registered = await registerCanonicalProducedArtifact({
-    lifecycle: {
-      id: artifactId,
-      projectId: workflowRun.projectId,
-      goalId: workflowRun.goalId,
-      workItemId: workflowRun.workItemId,
-      runId: workflowRun.id,
-      lineageId: `lineage:office:${effect.id}`,
-      kind: effect.target.artifactKind,
-      title: effect.target.title,
-      version: existing?.version ?? 1,
-      provenance,
-      mediaType: effect.target.mediaType,
-      retention: { mode: 'retain' },
-      content: {
-        storageKind: 'source_ref',
-        sourceRef: effect.target.workspacePath,
-        expectedDigest: expectedOutput.sha256
-      },
-      metadata: {
-        producer: 'office_delivery',
-        effectId: effect.id,
-        toolUseId: effect.toolUseId,
-        artifactKind: effect.target.artifactKind,
-        sourceRefs: effect.target.sourceRefs,
-        outputBindingVersion: 1,
-        expectedSha256: expectedOutput.sha256,
-        expectedBytes: expectedOutput.bytes
-      },
-      createdAt: observedAt
-    },
-    evidence: {
-      id: `evidence:artifact:office:${effect.id}`,
-      kind: 'delivery_check',
-      title: `Office delivery integrity: ${effect.target.title}`,
-      summary: selfCheck.ok
-        ? `The Office output is parseable and matches its frozen type, digest, byte length and ${effect.target.sourceRefs.length} source reference(s).`
-        : `The Office output failed its structural, byte or source-traceability check: ${selfCheck.reason}`,
-      verifier: 'office-delivery',
-      metadata: {
-        artifactKind: effect.target.artifactKind,
-        mediaType: effect.target.mediaType,
-        selfCheck
-      }
-    },
-    acceptance: {
-      id: `acceptance:artifact:office:${effect.id}`,
-      criterionId: `criterion:artifact:office:${effect.id}:deliverable`,
-      criterion: 'The Office output is parseable and its type, bytes, Project ownership and source traceability match the frozen Effect.',
-      status,
-      verifier: 'office-delivery'
-    },
-    attachToStage: hasProjectWorkspace
-  }, rootDir)
-  assertExistingOfficeArtifact(
-    registered.lifecycle,
-    run.id,
-    effect.target.artifactKind,
-    effect.target.workspacePath,
-    expectedOutput
-  )
-  return registered.lifecycle
-}
-
-function assertOfficeEffectOwnership(run: TaskRunRecord, effect: EffectRecord): void {
-  if (effect.runId !== run.id || effect.sessionId !== run.sessionId) {
-    throw new WorkflowLedgerCorruptionError(
-      `confirmed Office Artifact Effect ownership differs from Run: ${effect.id}`
-    )
-  }
-}
-
-function assertExistingOfficeArtifact(
-  record: ArtifactLifecycleRecord,
-  runId: string,
-  artifactKind: 'document' | 'spreadsheet' | 'presentation' | 'pdf',
-  sourceRef: string,
-  expectedOutput: { sha256: string; bytes: number }
-): void {
-  if (
-    record.runId !== runId ||
-    record.kind !== artifactKind ||
-    record.storageKind !== 'source_ref' ||
-    record.sourceRef !== sourceRef ||
-    record.digest !== expectedOutput.sha256 ||
-    record.sizeBytes !== expectedOutput.bytes
-  ) {
-    throw new WorkflowLedgerCorruptionError(
-      `confirmed Office Artifact lifecycle differs from producer output: ${record.artifactId}`
-    )
-  }
-}
-
-function requiredOfficeEffectOutput(effect: OfficeArtifactEffect): { sha256: string; bytes: number } {
-  const { expectedSha256, expectedBytes } = effect.target
-  if (!officeArtifactEffectHasOutputBinding(effect) || !expectedSha256 || expectedBytes === undefined) {
-    throw new WorkflowLedgerCorruptionError(
-      `confirmed Office Artifact Effect lacks frozen output identity: ${effect.id}`
-    )
-  }
-  return { sha256: assertSha256Digest(expectedSha256), bytes: expectedBytes }
-}
-
 function assertEffectOwnership(run: TaskRunRecord, effect: EffectRecord): void {
   if (effect.runId !== run.id || effect.sessionId !== run.sessionId) {
     throw new WorkflowLedgerCorruptionError(
@@ -1121,4 +953,11 @@ function assertExistingProducerArtifact(
       `confirmed Code Forge Artifact lifecycle differs from producer output: ${record.artifactId}`
     )
   }
+}
+
+async function registerConfirmedOfficeOutput(input: { run: TaskRunRecord; effect: EffectRecord; workflowRun: WorkflowRunRecord & { projectId: string }; provenance: WorkflowProjectionSource; rootDir?: string }): Promise<ArtifactLifecycleRecord | undefined> {
+  const { run, effect, workflowRun, provenance, rootDir } = input
+  if (isConfirmedOfficeRevisionEffect(effect)) return registerOfficeRevisionLifecycle({ ...input, effect })
+  if (isConfirmedOfficeArtifactEffect(effect)) return registerOfficeArtifactLifecycle(run, effect, workflowRun, provenance, rootDir)
+  return undefined
 }

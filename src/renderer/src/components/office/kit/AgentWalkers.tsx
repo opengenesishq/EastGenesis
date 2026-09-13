@@ -3,11 +3,12 @@ import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
 import type { Group } from 'three'
 import type { AvatarRefs } from './AvatarRig'
-import ArticulatedDigitalWorkerRig from './ArticulatedDigitalWorkerRig'
+import ArticulatedDigitalWorkerRig from './ming-characters/MingCharacterRig'
 import { animateWalkerRig } from './WalkerRigAnimation'
+import { buildPalaceWalkRoute, samplePalaceWalkRoute } from './palace/palaceWalkRoute'
 import type { WatercolorCharacterRole } from '../../../../../shared/watercolor-character'
 
-export type AgentWalkReason = 'assistant' | 'approval' | 'project' | 'video'
+export type AgentWalkReason = 'assistant' | 'approval' | 'project' | 'video' | 'business'
 
 export interface AgentWalkerSpec {
   id: string
@@ -16,6 +17,7 @@ export interface AgentWalkerSpec {
   homeLookAt: [number, number, number]
   target: [number, number, number]
   targetLookAt: [number, number, number]
+  waypoints?: Array<[number, number, number]>
   reason: AgentWalkReason
   providerName?: string
   providerBaseUrl?: string
@@ -38,25 +40,27 @@ type WalkStage = 'toTarget' | 'target' | 'toHome' | 'home'
 
 const SPEED = 1.05
 const MIN_TRAVEL_SECONDS = 2.8
-const MAX_TRAVEL_SECONDS = 6
 const GAIT_STRIDE_LENGTH = 0.82
 const GAIT_STEP_HEIGHT = 0.105
 const GAIT_FOOT_SPACING = 0.105
 const GAIT_LANDING_LEAD = GAIT_STRIDE_LENGTH * 0.54
 const TAU = Math.PI * 2
 const DWELL_SECONDS: Record<AgentWalkReason, number> = {
+  business: 7.5,
   assistant: 6.5,
   approval: 8.5,
   project: 7.5,
   video: 10.5
 }
 const REST_SECONDS: Record<AgentWalkReason, number> = {
+  business: 11,
   assistant: 9.5,
   approval: 12,
   project: 11,
   video: 13
 }
 const ROUTE_COLOR: Record<AgentWalkReason, string> = {
+  business: '#92aaa6',
   assistant: '#8fb8c6',
   approval: '#6f8fa0',
   project: '#8ba88f',
@@ -334,6 +338,7 @@ function OneAgentWalker({
   const homeLookAt = useMemo(() => new Vector3(...spec.homeLookAt), [spec.homeLookAt])
   const target = useMemo(() => new Vector3(...spec.target), [spec.target])
   const targetLookAt = useMemo(() => new Vector3(...spec.targetLookAt), [spec.targetLookAt])
+  const route = useMemo(() => buildPalaceWalkRoute(home, target, spec.waypoints), [home, target, spec.waypoints])
   const position = useMemo(() => home.clone(), [home])
   const previousPositionRef = useRef(home.clone())
   const walkedDistanceRef = useRef(0)
@@ -343,14 +348,14 @@ function OneAgentWalker({
   const forwardRef = useRef(new Vector3(0, 0, 1))
   const rightRef = useRef(new Vector3(1, 0, 0))
   const travelSeconds = useMemo(
-    () => clamp(home.distanceTo(target) / SPEED, MIN_TRAVEL_SECONDS, MAX_TRAVEL_SECONDS),
-    [home, target]
+    () => Math.max(route.length / SPEED, MIN_TRAVEL_SECONDS),
+    [route]
   )
   const gaitStrideLength = useMemo(() => {
-    const routeDistance = home.distanceTo(target)
+    const routeDistance = route.length
     const strideCount = Math.max(1, Math.round(routeDistance / GAIT_STRIDE_LENGTH))
     return Math.max(0.1, routeDistance / strideCount)
-  }, [home, target])
+  }, [route])
   const cycleSeconds =
     travelSeconds * 2 + DWELL_SECONDS[spec.reason] + REST_SECONDS[spec.reason]
 
@@ -406,8 +411,7 @@ function OneAgentWalker({
       nextStage = 'home'
     } else if (local < travelSeconds) {
       const k = smoothstep(local / travelSeconds)
-      position.copy(home).lerp(target, k)
-      desiredFacing = facingFromTo(home, target, desiredFacing)
+      desiredFacing = samplePalaceWalkRoute(route, k, position)
       nextStage = 'toTarget'
       walking = true
     } else if (spec.reason === 'approval' || spec.holdAtTarget || local < dwellEnd) {
@@ -416,8 +420,7 @@ function OneAgentWalker({
       nextStage = 'target'
     } else if (local < backEnd) {
       const k = smoothstep((local - dwellEnd) / travelSeconds)
-      position.copy(target).lerp(home, k)
-      desiredFacing = facingFromTo(target, home, desiredFacing)
+      desiredFacing = samplePalaceWalkRoute(route, 1 - k, position) + Math.PI
       nextStage = 'toHome'
       walking = true
     } else {
@@ -494,7 +497,7 @@ function OneAgentWalker({
 
   return (
     <>
-      <WalkerRouteTrail home={home} target={target} reason={spec.reason} accent={WALKER_ACCENT} />
+      {route.segments.map((segment, index) => <WalkerRouteTrail key={index} home={segment.from} target={segment.to} reason={spec.reason} accent={WALKER_ACCENT} />)}
       <group ref={leftFootTargetRef} name="walker-left-foot-contact-target" />
       <group ref={rightFootTargetRef} name="walker-right-foot-contact-target" />
       <group
@@ -530,7 +533,7 @@ function OneAgentWalker({
           </>
         )}
         <ArticulatedDigitalWorkerRig
-          ref={rigRef} sessionId={spec.sessionId} role={spec.watercolorRole}
+          ref={rigRef} sessionId={spec.sessionId} role={spec.watercolorRole} state={stage}
           providerName={spec.providerName} providerBaseUrl={spec.providerBaseUrl} modelName={spec.modelName}
           loadModel detailLevel="full" scale={active ? 1 : 0.96} />
         {stage === 'target' && <AgentStatusMarker reason={spec.reason} accent={WALKER_ACCENT} />}

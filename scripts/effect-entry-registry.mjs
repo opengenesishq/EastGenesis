@@ -82,12 +82,13 @@ const readOnlyToolNames = [
   'draft_skill', 'find_file', 'genesis_orchestrate', 'get_dependencies', 'git_diff',
   'git_status', 'gitee_prepare', 'gui_list_windows', 'gui_screenshot', 'list_dir',
   'list_skills', 'load_skill', 'memory_search', 'read_file', 'route_model', 'run_skill',
-  'search_code', 'search_symbol', 'task_decompose', 'view', 'web_search'
+  'search_code', 'search_symbol', 'task_decompose', 'view',
+  'inspect_media', 'inspect_office_artifact', 'plan_office_revision'
 ]
 
 const opaqueToolNames = [
   'bash', 'browser_click', 'browser_evaluate', 'browser_navigate', 'browser_type',
-  'mcp_builtin_servers', 'mcp_call_tool', 'mcp_discover', 'mcp_import_claude_desktop',
+  'mcp_builtin_servers', 'mcp_call_tool', 'mcp_discover',
   'memory_add', 'optimize_skill', 'send_notification'
 ]
 
@@ -97,7 +98,7 @@ const durableToolNames = [
 ]
 
 const readOnlyIpcChannels = [
-  'attachments:ocr', 'browser:listAnnotations', 'browser:observe', 'dialog:pickDirectory',
+  'assistantSearch:getAttempt', 'attachments:ocr', 'browser:listAnnotations', 'browser:observe', 'dialog:pickDirectory',
   'dataRetention:evaluatePurge', 'dataRetention:get', 'dataRetention:pending',
   'engines:list', 'files:intelligence',
   'git:status', 'history:list', 'learning:list',
@@ -113,7 +114,8 @@ const readOnlyIpcChannels = [
   'quickbar:getState', 'quickbar:getWindowContext', 'quickbar:pickFiles',
   'quickbar:readClipboard', 'routines:list', 'routines:listRuns', 'routines:listTemplates',
   'sessions:list', 'sessions:outboundContextPreview', 'sessions:pendingPermissions',
-  'sessions:suggestFiles', 'sessions:transcript', 'settings:get', 'startSuggestions:get',
+  'sessions:suggestFiles', 'sessions:transcript',
+  'settings-domain:get', 'settings-domain:routing:get', 'settings-domain:routing:preview', 'startSuggestions:get',
   'taskSnapshots:list', 'terminals:list', 'transcripts:search', 'workflowLedger:diagnose',
   'workflowLedger:export', 'workflowLedger:list', 'workflowLedger:listArtifactEdges',
   'workflowLedger:listArtifactLocations', 'workflowLedger:listEvidence',
@@ -145,7 +147,7 @@ const durableIpcChannels = [
   'routines:create', 'routines:delete',
   'routines:markRun', 'routines:reviewRun', 'routines:update', 'sessions:close',
   'sessions:create', 'sessions:rename', 'sessions:setModel', 'sessions:setPermissionMode',
-  'settings:update', 'supervisor:invoke', 'taskSnapshots:delete', 'taskSnapshots:recover',
+  'settings-domain:routing:save', 'settings-domain:update', 'supervisor:invoke', 'taskSnapshots:delete', 'taskSnapshots:recover',
   'taskSnapshots:resolveDagFinalization', 'taskSnapshots:resolveEffect',
   'workflowLedger:createArtifact', 'workflowLedger:createArtifactAcceptance', 'workflowLedger:createArtifactEdge',
   'workflowLedger:createArtifactLocation', 'workflowLedger:createEvidence',
@@ -157,7 +159,7 @@ const durableIpcChannels = [
 ]
 
 const opaqueIpcChannels = [
-  'attachments:copyDocument', 'browser:back', 'browser:close', 'browser:forward',
+  'assistantSearch:search', 'attachments:copyDocument', 'browser:back', 'browser:close', 'browser:forward',
   'browser:navigate', 'browser:open',
   'browser:pickElement', 'browser:reload', 'migration:import', 'plugins:installLocal', 'plugins:probeMcp',
   'plugins:setEnabled', 'plugins:uninstall', 'quickbar:captureScreenshot',
@@ -215,7 +217,7 @@ const readOnlyProjectWorkspaceActions = [
   'authorization:get', 'collaborationInbox:list', 'comments:list', 'comments:listProject',
   'get', 'knowledge:preview', 'goals:get', 'goals:list', 'invitations:list', 'list',
   'members:get', 'members:list', 'sharedApprovals:get', 'sharedApprovals:list',
-  'portfolio:get', 'squads:get', 'squads:list', 'workItems:get', 'workItems:list'
+  'portfolio:get', 'squads:get', 'squads:list', 'workItems:get', 'workItems:list', 'contents:list'
 ]
 const durableProjectWorkspaceActions = [
   'connectors:mutate', 'knowledge:search',
@@ -242,11 +244,10 @@ const durableSupervisorActions = [
 ]
 
 const readOnlyAppFeatureActions = [
-  'session-query/query',
+  'office-revision/inspect', 'office-revision/plan',
+  'session-query/discover',
   'provider-profile/backups', 'provider-profile/backup-preview', 'provider-profile/native-backups',
-  'provider-profile/cc-switch-backups', 'provider-profile/cc-switch-preview',
-  'provider-profile/native-codex-preview', 'provider-profile/native-config-backups',
-  'provider-profile/native-config-preview', 'provider-profile/preview',
+  'provider-profile/native-codex-preview', 'provider-profile/preview',
   'provider-profile-sync/status', 'provider-profile-sync/preview',
   'provider-profile-sync/webdav-config', 'provider-profile-sync/webdav-preview',
   'provider-profile-sync/webdav-history-list', 'provider-profile-sync/webdav-history-preview',
@@ -256,9 +257,7 @@ const readOnlyAppFeatureActions = [
   'studio-result/audit', 'studio-result/get', 'task-plan/get'
 ]
 const durableAppFeatureActions = [
-  'provider-profile/cc-switch-apply', 'provider-profile/cc-switch-rollback',
   'provider-profile/export', 'provider-profile/native-codex-apply',
-  'provider-profile/native-config-apply', 'provider-profile/native-config-rollback',
   'provider-profile/native-rollback',
   'provider-profile-sync/choose-directory', 'provider-profile-sync/disconnect',
   'provider-profile-sync/webdav-save', 'provider-profile-sync/webdav-remove',
@@ -296,6 +295,12 @@ export const EFFECT_ENTRY_REGISTRY = [
     queryable(['gui_postcondition'], 'src/main/gui/gui-effect.ts')),
   ...entries(tools(['create_document', 'create_pdf', 'create_presentation', 'create_spreadsheet']),
     queryable(['office_artifact'], 'src/main/agent/tools/office-artifact.ts')),
+  ...entries(tools(['revise_office_artifact']),
+    queryable(['office_artifact_revision'], 'src/main/office-revision/effect.ts')),
+  ...entries(tools(['create_video_production', 'submit_media_job', 'advance_media_job', 'reconcile_media_job']),
+    contract('mutation', 'delegated', 'downstream_barrier', 'src/main/media/media-runtime.ts',
+      'The exact native media tools delegate through trusted task scope to deterministic media storage and frozen per-job Effect leases.',
+      { evidence: 'executeMediaTool -> validateMediaAgentMutation -> MediaRuntime -> prepareEffectExecution/media store durable identities' })),
   ...entries(tools(['git_stage', 'git_stage_all']),
     queryable(['git_index_update'], 'src/main/git/git-index-effect.ts')),
   ...entries(tools(['git_commit']), queryable(['git_commit'], 'src/main/task/effect-reconciler.ts')),
@@ -309,6 +314,7 @@ export const EFFECT_ENTRY_REGISTRY = [
     queryable(['code_forge_patch'], 'src/main/code-forge/patch-effect.ts')),
 
   ...entries(ipc(readOnlyIpcChannels), readOnlyIpc),
+  ...entries(ipc(['personalTasks:command']), delegatedIpc('PersonalTaskService.submit -> sessionManager.send')),
   ...entries(ipc(durableIpcChannels), durableIpc),
   ...entries(ipc(opaqueIpcChannels), opaqueIpc),
   ...entries(ipc(ephemeralIpcChannels), ephemeralIpc),

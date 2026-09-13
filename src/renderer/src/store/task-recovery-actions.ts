@@ -89,18 +89,14 @@ export async function requireMcpProbeResults(
   throw new Error(outcome.error)
 }
 
-export function createTaskRecoveryActions(
+function createWorkflowAttentionRefresh(
   set: (update: TaskRecoveryStateUpdate) => void,
   get: () => TaskRecoveryState
-): TaskRecoveryActions {
-  return {
-    modelAttemptReconciliations: [],
-    workflowAttentionWorkItems: [],
-    workflowAttentionSupervisorRuns: [],
-    workflowAttentionLoading: false,
-    workflowAttentionActionError: undefined,
-
-    async refreshWorkflowAttention() {
+): () => Promise<void> {
+  let workflowAttentionFlight: Promise<void> | null = null
+  return async function refreshWorkflowAttention(): Promise<void> {
+    if (workflowAttentionFlight) return workflowAttentionFlight
+    const flight = (async () => {
       set({ workflowAttentionLoading: true, workflowAttentionError: undefined })
       const [workItemsResult, supervisorResult] = await Promise.allSettled([
         window.agentDesk.listProjectWorkItems(undefined, { includeArchived: true }),
@@ -123,7 +119,29 @@ export function createTaskRecoveryActions(
         workflowAttentionLoading: false,
         workflowAttentionError: errors.length > 0 ? errors.join('\n') : undefined
       })
-    },
+    })()
+    workflowAttentionFlight = flight
+    try {
+      await flight
+    } finally {
+      if (workflowAttentionFlight === flight) workflowAttentionFlight = null
+    }
+  }
+}
+
+export function createTaskRecoveryActions(
+  set: (update: TaskRecoveryStateUpdate) => void,
+  get: () => TaskRecoveryState
+): TaskRecoveryActions {
+  const refreshWorkflowAttention = createWorkflowAttentionRefresh(set, get)
+  return {
+    modelAttemptReconciliations: [],
+    workflowAttentionWorkItems: [],
+    workflowAttentionSupervisorRuns: [],
+    workflowAttentionLoading: false,
+    workflowAttentionActionError: undefined,
+
+    refreshWorkflowAttention,
 
     async controlWorkflowSupervisorRun(run, action) {
       set({ workflowAttentionActionError: undefined })

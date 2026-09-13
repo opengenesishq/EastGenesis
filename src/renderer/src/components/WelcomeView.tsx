@@ -5,12 +5,10 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
-  Globe2,
   GitPullRequest,
   ListChecks,
   LoaderCircle,
   SearchCode,
-  Settings2,
   type LucideIcon
 } from 'lucide-react'
 import { modelOptionsForProvider, useStore } from '../store'
@@ -23,6 +21,9 @@ import type {
   TaskStrategy
 } from '../../../shared/types'
 import { useExperienceProjection } from './experience/ExperienceProjection'
+import { startWelcomeTask } from './experience/welcome-personal-task'
+import PersonalTaskRecoveryPanel from './experience/PersonalTaskRecoveryPanel'
+import { PersonalTaskSubmissionError } from '../lib/personal-task-submission'
 import AssistantStartNotice from './experience/AssistantStartNotice'
 import TaskStrategyControl from './experience/TaskStrategyControl'
 import WelcomeRoutingControls, {
@@ -47,7 +48,6 @@ import {
   patchFirstTaskOnboardingRecord,
   runFirstTaskSubmissionExclusive
 } from './experience/first-task-onboarding'
-import BoundedSelect from './BoundedSelect'
 
 type WelcomeStoreState = ReturnType<typeof useStore.getState>
 type WelcomeProjection = ReturnType<typeof useExperienceProjection>
@@ -112,18 +112,11 @@ function welcomeRecoveryKind(validationKey: string): WelcomeRecoveryKind | null 
 
 const WELCOME_TOOLS: WelcomeTool[] = [
   {
-    key: 'research',
-    labelKey: 'welcomeResearchWeb',
-    promptKey: 'welcomeResearchWebPrompt',
-    icon: Globe2,
-    taskStrategy: 'execute'
-  },
-  {
     key: 'understand',
     labelKey: 'welcomeUnderstandProject',
     promptKey: 'welcomeUnderstandProjectPrompt',
     icon: SearchCode,
-    requiresWorkspace: false,
+    requiresWorkspace: true,
     taskStrategy: 'view'
   },
   {
@@ -131,7 +124,7 @@ const WELCOME_TOOLS: WelcomeTool[] = [
     labelKey: 'welcomeReviewChanges',
     promptKey: 'welcomeReviewChangesPrompt',
     icon: GitPullRequest,
-    requiresWorkspace: false,
+    requiresWorkspace: true,
     taskStrategy: 'view'
   },
   {
@@ -202,6 +195,10 @@ function useWelcomeSubmitAction(
     await runFirstTaskSubmissionExclusive(async () => {
       feedback.setBusy(true)
       const draft = { ...input.sessionDraft, taskStrategy: selectedStrategy }
+      // Selecting a project directory from the Assistant entry changes the
+      // execution contract: this is a Project task and must use explicit
+      // Provider routing instead of silently requiring local compute.
+      const effectiveProjection: WelcomeProjection = draft.unassigned ? input.projection : 'studio'
       try {
         const workspaceValidationKey = welcomeWorkspaceValidationKey(draft)
         if (workspaceValidationKey) {
@@ -212,11 +209,11 @@ function useWelcomeSubmitAction(
         }
         let available = input.computeAvailable
         let localResult: LocalComputeActivationResult | undefined
-        if (input.projection === 'assistant' && !available) {
+        if (effectiveProjection === 'assistant' && !available) {
           localResult = await input.ensureLocalCompute(true)
           available = localResult.status === 'activated'
         }
-        const validationKey = welcomeValidationKey(input.projection, draft, available)
+        const validationKey = welcomeValidationKey(effectiveProjection, draft, available)
         if (validationKey) {
           feedback.setError(t(localResult ? localComputeValidationKey(localResult.reason) : validationKey))
           feedback.setRecoveryKind(welcomeRecoveryKind(validationKey))
@@ -226,6 +223,7 @@ function useWelcomeSubmitAction(
         feedback.setError('')
         feedback.setRecoveryKind(null)
         feedback.setComputeReason(null)
+        const savedDraft = JSON.stringify(useStore.getState().welcomeDraft)
         const options = welcomeSessionOptions(input.projection, draft, prompt)
         const candidateSessionId = await input.startSessionWithPrompt(
           title ? { ...options, title } : options,
@@ -238,9 +236,9 @@ function useWelcomeSubmitAction(
             : 'custom',
           startedAt: Date.now()
         })
-        useStore.getState().clearWelcomeDraft()
+        if (JSON.stringify(useStore.getState().welcomeDraft) === savedDraft) useStore.getState().clearWelcomeDraft()
       } catch (err) {
-        const safeKey = assistantSafeStartError(input.projection, err)
+        const safeKey = err instanceof PersonalTaskSubmissionError ? null : assistantSafeStartError(input.projection, err)
         feedback.setError(safeKey ? t(safeKey) : err instanceof Error ? err.message : String(err))
         feedback.setRecoveryKind(safeStartRecoveryKind(safeKey))
         feedback.setComputeReason(null)
@@ -349,19 +347,19 @@ function WelcomeProjectSelector({
   return (
     <div className="welcome-project-bar" data-welcome-project-context hidden={hidden}>
       <Folder size={15} strokeWidth={1.8} aria-hidden="true" />
-      <BoundedSelect
-        ariaLabel={t('project')}
-        nativeClassName="welcome-project-select"
-        rootClassName="welcome-bounded-select-project"
+      <select
+        className="welcome-project-select"
+        aria-label={t('project')}
         title={cwd || t('welcomePickProject')}
         value={projectChoice}
-        onChange={onProjectChange}
-        options={[
-          { value: UNASSIGNED, label: t('directStartNoProject') },
-          ...availableProjects.map((project) => ({ value: project.id, label: project.name })),
-          { value: NEW_PROJECT_SESSION_CHOICE, label: t('newProjectDirectory') }
-        ]}
-      />
+        onChange={(event) => onProjectChange(event.target.value)}
+      >
+        <option value={UNASSIGNED}>{t('directStartNoProject')}</option>
+        {availableProjects.map((project) => (
+          <option key={project.id} value={project.id}>{project.name}</option>
+        ))}
+        <option value={NEW_PROJECT_SESSION_CHOICE}>{t('newProjectDirectory')}</option>
+      </select>
       {projectChoice === NEW_PROJECT_SESSION_CHOICE ? (
         <>
           <input
@@ -480,7 +478,6 @@ function WelcomeComposerBar({
   fixedModelOptions,
   localComputeStatus,
   onProjectPickerToggle,
-  onOpenSettings,
   onRoutingModeChange,
   projectPickerOpen,
   projection,
@@ -495,7 +492,6 @@ function WelcomeComposerBar({
   fixedModelOptions: WelcomeModelOptions
   localComputeStatus: ReturnType<typeof useLocalComputeActivation>['localComputeStatus']
   onProjectPickerToggle: () => void
-  onOpenSettings: () => void
   onRoutingModeChange: (mode: WelcomeRoutingMode) => void
   projectPickerOpen: boolean
   projection: WelcomeProjection
@@ -527,24 +523,11 @@ function WelcomeComposerBar({
           <FolderPlus size={16} strokeWidth={1.8} aria-hidden="true" />
         </button>
       )}
-      {projection === 'assistant' && !welcomeDraft.forkFromSdkSessionId ? (
-        <>
-          <AssistantComputeIndicator
-            available={computeAvailable || localComputeStatus === 'ready'}
-            checking={localComputeStatus === 'checking'}
-          />
-          {!computeAvailable && localComputeStatus !== 'checking' && localComputeStatus !== 'ready' && (
-            <button
-              type="button"
-              className="welcome-connect-service"
-              data-assistant-setup-action="configure-provider"
-              onClick={onOpenSettings}
-            >
-              <Settings2 size={14} aria-hidden="true" />
-              <span>{t('assistantConfigureCompute')}</span>
-            </button>
-          )}
-        </>
+      {projection === 'assistant' && !welcomeDraft.forkFromSdkSessionId && !hasProjectContext ? (
+        <AssistantComputeIndicator
+          available={computeAvailable || localComputeStatus === 'ready'}
+          checking={localComputeStatus === 'checking'}
+        />
       ) : (
         <WelcomeRoutingControls
           driveMode={welcome.driveMode}
@@ -657,7 +640,6 @@ function WelcomeComposer({
           fixedModelOptions={fixedModelOptions}
           localComputeStatus={localComputeStatus}
           onProjectPickerToggle={() => setProjectPickerOpen((open) => !open)}
-          onOpenSettings={onOpenSettings}
           onRoutingModeChange={onRoutingModeChange}
           projectPickerOpen={projectPickerOpen}
           projection={projection}
@@ -668,6 +650,7 @@ function WelcomeComposer({
           welcomeDraft={welcomeDraft}
         />
       </div>
+      <PersonalTaskRecoveryPanel refreshKey={actions.busy} />
       <AssistantStartNotice
         busy={actions.busy}
         computeReason={actions.computeReason}
@@ -691,7 +674,7 @@ export default function WelcomeView(): React.JSX.Element {
   const projects = useStore((state) => state.projects)
   const welcomeDraft = useStore((state) => state.welcomeDraft)
   const requestedProjectId = useStore((state) => state.newSessionProjectId)
-  const startSessionWithPrompt = useStore((state) => state.startSessionWithPrompt)
+  const startSessionWithPrompt = startWelcomeTask
   const refreshProviders = useStore((state) => state.refreshProviders)
   const activateLocalCompute = useStore((state) => state.activateLocalCompute)
   const setShowSettings = useStore((state) => state.setShowSettings)

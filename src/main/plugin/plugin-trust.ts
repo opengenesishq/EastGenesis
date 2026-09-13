@@ -143,9 +143,7 @@ export function pluginRegistryProvenance(
         ? 'project_local'
         : sourceKind === 'user'
           ? 'user_local'
-          : sourceKind === 'codex'
-            ? 'codex_local'
-            : 'other_local',
+          : 'other_local',
     sourceKind,
     managed
   }

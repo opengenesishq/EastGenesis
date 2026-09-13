@@ -18,6 +18,7 @@ import {
   sessionCreationJournalRecordsFromDocument
 } from '../session-creation-journal-format'
 import { writeDurableFileSync } from '../durable-file'
+import { runtimeContinuationReceiptPath } from '../session-runtime-continuation-path'
 import {
   inspectManagedWorktreeRegistryRecord,
   purgeRemovedManagedWorktreeRecordAtRoot
@@ -143,6 +144,7 @@ export function purgeProjectSessionData(
     removeOwned(root, join(root, 'preview-annotations', component), removedPaths)
     removeOwned(root, join(root, 'task-audit', `${component}.jsonl`), removedPaths)
     removeOwned(root, join(root, 'patches', `${component}.patch`), removedPaths)
+    removeOwned(root, runtimeContinuationReceiptPath(root, sessionId), removedPaths)
     removeOwnedTimestampedPatches(root, component, removedPaths)
   }
   for (const sdkSessionId of sdkSessionIds) {
@@ -196,6 +198,7 @@ export function scanProjectSessionResiduals(
       join(root, 'browser-annotations', component),
       join(root, 'preview-annotations', component),
       join(root, 'task-audit', `${component}.jsonl`),
+      runtimeContinuationReceiptPath(root, sessionId),
       join(root, 'patches', `${component}.patch`)
     ]) if (existsSync(target)) counts.ownedPaths += 1
     counts.ownedPaths += countTimestampedPatches(root, component)
@@ -285,6 +288,7 @@ export function purgeStandaloneSessionFiles(
     join(root, 'task-audit', `${component}.jsonl`),
     join(root, 'patches', `${component}.patch`),
     join(root, 'transcripts', `${sdkComponent}.jsonl`),
+    runtimeContinuationReceiptPath(root, sessionId),
     join(root, 'event-receipts', `${sdkComponent}.jsonl`)
   ]) removeOwned(root, target, removedPaths)
   removeOwnedTimestampedPatches(root, component, removedPaths)
@@ -319,6 +323,7 @@ export function scanStandaloneSessionResiduals(
     join(root, 'task-audit', `${component}.jsonl`),
     join(root, 'patches', `${component}.patch`),
     join(root, 'transcripts', `${sdkComponent}.jsonl`),
+    runtimeContinuationReceiptPath(root, sessionId),
     join(root, 'event-receipts', `${sdkComponent}.jsonl`)
   ]) if (existsSync(target)) counts.ownedPaths += 1
   counts.ownedPaths += countTimestampedPatches(root, component)

@@ -42,6 +42,7 @@ import {
   resolveProviderPatchFields
 } from './providerUpdate'
 import { normalizeBaseUrl } from './providerBaseUrl'
+import { prepareProviderConnectionSet } from './providerConnectionStore'
 import { normalizeProviderAuthMode } from './providerAuthMode'
 import { normalizeProviderAdvancedConfig, normalizeProviderAuthorization } from './providerAdvancedConfig'
 import {
@@ -97,7 +98,8 @@ export function prepareAtomicProviderBatch(
     restoreBatchCredentialSnapshots(state.credentialSnapshots)
     throw error
   }
-  return batchPreparation(before, state)
+  const replacements = new Set(mutations.flatMap((item) => item.action === 'update' && item.patch.token !== undefined ? [item.providerId] : []))
+  return batchPreparation(before, state, replacements)
 }
 
 function applyBatchMutation(
@@ -162,8 +164,10 @@ function applyUpdate(
 
 function batchPreparation(
   before: Provider[],
-  state: Parameters<typeof applyBatchMutation>[0]
+  state: Parameters<typeof applyBatchMutation>[0],
+  replacements: ReadonlySet<string>
 ): AtomicProviderBatchPreparation {
+  state.desired = prepareProviderConnectionSet(before, state.desired, replacements)
   const credentialsToForgetAfterCommit = state.items
     .filter((item) => item.action === 'delete' || item.provider?.authMode === 'none')
     .map((item) => item.providerId)

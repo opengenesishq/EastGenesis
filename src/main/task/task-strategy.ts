@@ -4,6 +4,7 @@ import { normalizeToolName } from './tool-idempotency'
 export const DEFAULT_TASK_STRATEGY: TaskStrategy = 'execute'
 
 const VIEW_TOOLS = new Set([
+  'inspect_media', 'inspect_office_artifact', 'plan_office_revision',
   'read_file',
   'view',
   'list_dir',

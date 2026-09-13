@@ -49,6 +49,7 @@ export interface InteractiveOperationEffectSpec<T> {
   execute: (effect: EffectRecord) => T | Promise<T>
   isSuccess: (result: T) => boolean
   resultSummary?: (result: T) => string
+  failureDisposition?: () => 'failed' | 'waiting_reconciliation'
 }
 
 export type InteractiveOperationEffectOutcome<T> =

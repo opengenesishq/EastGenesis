@@ -202,6 +202,11 @@ class ContractBoundEngine implements NativeRuntimeBoundEngine {
     await this.engine.dispose()
   }
 
+  async retireForContinuation(): Promise<void> {
+    if (!this.engine.retireForContinuation) throw new Error('引擎不支持安全交接')
+    await this.engine.retireForContinuation()
+  }
+
   bindNativeRun(run: TaskRunRecord): void {
     this.runtime.bindRun(run)
   }

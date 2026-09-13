@@ -24,24 +24,12 @@ export async function createProjectWorkspaceWithTemplate(
 ): Promise<ProjectWorkspace> {
   const store = await openProjectWorkspaceStore(rootDir)
   const created = await store.createWorkspace(input, options)
-  try {
-    await applyProjectWorkspaceTemplate(rootDir, {
-      requestId: `project-create-template:${created.id}`,
-      projectId: created.id,
-      templateId: created.kind
-    })
-    return created
-  } catch (cause) {
-    try {
-      await store.purgeWorkspace(created.id, { expectedRevision: created.revision })
-    } catch (rollbackCause) {
-      throw new AggregateError(
-        [cause, rollbackCause],
-        `Project template initialization failed and rollback was incomplete: ${created.id}`
-      )
-    }
-    throw cause
-  }
+  await applyProjectWorkspaceTemplate(rootDir, {
+    requestId: `project-create-template:${created.id}`,
+    projectId: created.id,
+    templateId: created.kind
+  })
+  return created
 }
 
 export async function applyProjectWorkspaceTemplate(

@@ -1,5 +1,4 @@
 import { memo, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
-import { ClipboardCheck, GitBranch, GitCommitHorizontal, RotateCcw, Terminal, TestTube2 } from 'lucide-react'
 import type { AcceptanceResult, Goal, GoalPatch, ProjectSquad, ProjectWorkspace, ProjectWorkspaceLeaseOptions, WorkItem, WorkItemComment, WorkItemOwner } from '../../../../shared/types'
 import {
   GoalCreateForm,
@@ -14,7 +13,6 @@ import { ProjectSupervisorView } from './ProjectSupervisorView'
 import ProjectWorkspaceLifecycle from './ProjectWorkspaceLifecycle'
 import {
   projectKindLabel,
-  PROJECT_STATUS_LABELS,
   TEXT,
   type GoalControlAction,
   type StudioCreateForm,
@@ -33,6 +31,7 @@ import { RemoteContinuationPanel } from './RemoteContinuationPanel'
 import { ProjectDeliveryWorkbench } from './ProjectDeliveryWorkbench'
 import ProjectPicker from './ProjectPicker'
 import { useStore } from '../../store'
+import type { ProjectWorkspaceFocus } from './projectWorkspaceNavigation'
 
 export interface ProjectWorkspaceStudioProps {
   active?: boolean
@@ -43,6 +42,8 @@ export interface ProjectWorkspaceStudioProps {
   onProjectChange?: (project: ProjectWorkspace | null) => void
   onWorkItemsChange?: (workItems: WorkItem[]) => void
   onContextChange?: (context: ProjectWorkspaceStudioContext) => void
+  requestedFocus?: ProjectWorkspaceFocus
+  requestedWorkItemId?: string
 }
 
 export interface ProjectWorkspaceStudioContext {
@@ -58,10 +59,6 @@ type ProjectContentsState = ReturnType<typeof useProjectContents>
 type StudioCreateActions = ReturnType<typeof useStudioCreateActions>
 type GoalTaskStarterState = ReturnType<typeof useProjectGoalTaskStart>
 
-function activeProjectContentsId(project: ProjectWorkspace | null, selectedProjectId: string): string {
-  return project?.status === 'active' ? selectedProjectId : ''
-}
-
 function projectWorkspaceShellState(
   className: string | undefined,
   workspace: WorkspaceSelection,
@@ -75,6 +72,10 @@ function projectWorkspaceShellState(
   }
 }
 
+function activeProjectContentsId(project: ProjectWorkspace | null, selectedProjectId: string): string {
+  return project?.status === 'active' ? selectedProjectId : ''
+}
+
 export function ProjectWorkspaceStudio({
   active = true,
   className,
@@ -83,14 +84,18 @@ export function ProjectWorkspaceStudio({
   remoteContinuationEnabled = false,
   onContextChange,
   onProjectChange,
-  onWorkItemsChange
+  onWorkItemsChange,
+  requestedFocus,
+  requestedWorkItemId
 }: ProjectWorkspaceStudioProps): React.JSX.Element {
   const titleId = useId()
+  const language = useStore((state) => state.settings.language)
   const [form, setForm] = useState<StudioCreateForm>(null)
   const [view, setView] = useState<StudioView>(() => readStoredStudioView())
+  const [workspaceFocus, setWorkspaceFocus] = useState<ProjectWorkspaceFocus | undefined>(requestedFocus)
   const workspace = useWorkspaceSelection(active, initialProjectId, onProjectChange)
-  const selectedProject = workspace.selectedProject
-  const contents = useProjectContents(active, activeProjectContentsId(selectedProject, workspace.selectedProjectId))
+  useEffect(() => setWorkspaceFocus(requestedFocus), [requestedFocus])
+  const contents = useProjectContents(active, activeProjectContentsId(workspace.selectedProject, workspace.selectedProjectId))
   const closeForm = useCallback(() => setForm(null), [])
   const actions = useStudioCreateActions({
     onSuccess: closeForm,
@@ -112,7 +117,7 @@ export function ProjectWorkspaceStudio({
   useEffect(() => {
     onWorkItemsChange?.(contents.workItems)
     onContextChange?.({
-      project: selectedProject,
+      project: workspace.selectedProject,
       goals: contents.goals,
       workItems: contents.workItems,
       squads: contents.squads,
@@ -125,7 +130,7 @@ export function ProjectWorkspaceStudio({
     contents.workItems,
     onContextChange,
     onWorkItemsChange,
-    selectedProject
+    workspace.selectedProject
   ])
 
   const openForm = (next: Exclude<StudioCreateForm, null>): void => { actions.clearFeedback(); setForm((current) => current === next ? null : next) }
@@ -134,22 +139,23 @@ export function ProjectWorkspaceStudio({
     await workspace.refreshProjects(workspace.selectedProjectId)
     if (workspace.selectedProjectId) await contents.refreshContents()
   }
-  const retry = (): void => {
-    if (workspace.error || !workspace.selectedProjectId) void workspace.refreshProjects(workspace.selectedProjectId)
-    else void contents.refreshContents()
-  }
+  const retry = (): void => workspace.error || !workspace.selectedProjectId
+    ? void workspace.refreshProjects(workspace.selectedProjectId)
+    : void contents.refreshContents()
 
   const { rootClassName, loading } = projectWorkspaceShellState(className, workspace, contents, actions, goalTaskStarter)
   return (
-    <section className={rootClassName} aria-labelledby={titleId} aria-busy={loading} data-project-workspace-studio>
+    <section className={rootClassName} aria-labelledby={titleId} aria-busy={loading} data-project-workspace-studio data-language={language} data-project-workspace-focus={workspaceFocus ?? ''}>
+      {workspaceFocus && <div className="pws-navigation-notice" data-project-workspace-navigation-focus={workspaceFocus} data-project-workspace-navigation-work-item={requestedWorkItemId ?? ''} role="status">
+        {workspaceFocus === 'code' ? '代码工作区已定位到当前项目；绑定 Session 后可打开文件面板。' : workspaceFocus === 'diff' ? '差异审查已定位到当前项目；绑定 Session 后可打开差异面板。' : `工作区已定位到 WorkItem ${requestedWorkItemId ?? ''}。`}
+      </div>}
       <StudioHeader
         titleId={titleId}
         projects={workspace.projects}
-        selectedProject={selectedProject}
+        selectedProject={workspace.selectedProject}
         selectedProjectId={workspace.selectedProjectId}
         goalCount={contents.goals.length}
         workItemCount={contents.workItems.length}
-        authorization={contents.authorization}
         disabled={loading}
         importing={actions.busy === 'import'}
         refreshing={workspace.loading || contents.loading}
@@ -157,12 +163,6 @@ export function ProjectWorkspaceStudio({
         onImport={actions.importProject}
         onRefresh={() => void refresh()}
         onSelect={workspace.selectProject}
-      />
-
-      <ProjectFlowRail
-        project={selectedProject}
-        goalCount={contents.goals.length}
-        workItemCount={contents.workItems.length}
       />
 
       <WorkspaceStatus
@@ -189,25 +189,24 @@ export function ProjectWorkspaceStudio({
         onWorkItemReorder={controls.reorderWorkItem}
         onWorkItemTransfer={controls.transferWorkItem}
         onViewChange={setView}
-        project={selectedProject}
+        project={workspace.selectedProject}
+        requestedWorkItemId={requestedWorkItemId}
         starter={goalTaskStarter}
         view={view}
       />
-      {selectedProject && (
-        <ProjectDetails
-          key={selectedProject.id}
-          active={active}
-          project={selectedProject}
-          projectId={workspace.selectedProjectId}
-          projects={workspace.projects}
-          goals={contents.goals}
-          workItems={contents.workItems}
-          remoteContinuationEnabled={remoteContinuationEnabled}
-          onSelectProject={workspace.selectProject}
-          refreshContents={contents.refreshContents}
-          refreshProjects={workspace.refreshProjects}
-        />
-      )}
+      {workspace.selectedProject && <ProjectDetails
+        key={workspace.selectedProject.id}
+        active={active}
+        project={workspace.selectedProject}
+        projectId={workspace.selectedProjectId}
+        projects={workspace.projects}
+        goals={contents.goals}
+        workItems={contents.workItems}
+        remoteContinuationEnabled={remoteContinuationEnabled}
+        onSelectProject={workspace.selectProject}
+        refreshContents={contents.refreshContents}
+        refreshProjects={workspace.refreshProjects}
+      />}
     </section>
   )
 }
@@ -237,30 +236,23 @@ function ProjectDetails({
 }): React.JSX.Element {
   const [mounted, setMounted] = useState(false)
   const refreshToken = `${projects.map((item) => `${item.id}:${item.revision}`).join('|')}|${goals.map((item) => `${item.id}:${item.revision}`).join('|')}|${workItems.map((item) => `${item.id}:${item.revision}`).join('|')}`
-  return (
-    <details
-      className="pws-advanced-section pws-project-details"
-      data-project-secondary-details
-      onToggle={(event) => {
-        if (event.currentTarget.open) setMounted(true)
-      }}
-    >
-      <summary>
-        <span className="pws-advanced-summary-copy">
-          <strong>{TEXT.projectDetails}</strong>
-          <small>{TEXT.projectDetailsDescription}</small>
-        </span>
-        <span className="pws-advanced-summary-hint">{TEXT.expandAsNeeded}</span>
-      </summary>
-      {mounted && (
-        <div className="pws-advanced-section-content">
-          <ProjectPortfolioView active={active} refreshToken={refreshToken} onSelectProject={onSelectProject} />
-          {remoteContinuationEnabled && <RemoteContinuationPanel active={active} projectId={projectId} />}
-          <ProjectWorkspaceLifecycle project={project} refreshContents={refreshContents} refreshProjects={refreshProjects} />
-        </div>
-      )}
-    </details>
-  )
+  return <details
+    className="pws-advanced-section pws-project-details"
+    data-project-secondary-details
+    onToggle={(event) => {
+      if (event.currentTarget.open) setMounted(true)
+    }}
+  >
+    <summary>
+      <span className="pws-advanced-summary-copy"><strong>{TEXT.projectDetails}</strong><small>{TEXT.projectDetailsDescription}</small></span>
+      <span className="pws-advanced-summary-hint">{TEXT.expandAsNeeded}</span>
+    </summary>
+    {mounted && <div className="pws-advanced-section-content">
+      <ProjectPortfolioView active={active} refreshToken={refreshToken} onSelectProject={onSelectProject} />
+      {remoteContinuationEnabled && <RemoteContinuationPanel active={active} projectId={projectId} />}
+      <ProjectWorkspaceLifecycle project={project} refreshContents={refreshContents} refreshProjects={refreshProjects} />
+    </div>}
+  </details>
 }
 
 function useStudioEntityActions(refreshContents: () => Promise<void>): {
@@ -384,6 +376,7 @@ function ProjectContents({
   onWorkItemTransfer,
   onViewChange,
   project,
+  requestedWorkItemId,
   starter,
   view
 }: {
@@ -401,6 +394,7 @@ function ProjectContents({
   onWorkItemTransfer: (item: WorkItem, target: WorkItemOwner, reason: string, requestId: string) => Promise<void>
   onViewChange: (view: StudioView) => void
   project: ProjectWorkspace | null
+  requestedWorkItemId?: string
   starter: GoalTaskStarterState
   view: StudioView
 }): React.JSX.Element | null {
@@ -426,9 +420,26 @@ function ProjectContents({
           {form === 'workItem' && (
             <WorkItemCreateForm projectId={project.id} goals={contents.goals.filter((goal) => goal.status !== 'archived')} workItems={contents.workItems} busy={actions.busy} onCancel={onCloseForm} onSubmit={actions.createWorkItem} />
           )}
-          <div data-project-flow-step="goals"><GoalsView goals={contents.goals} onCreate={() => onOpenForm('goal')} onControl={onGoalControl} onUpdate={onGoalUpdate} /></div>
-          <div data-project-flow-step="work"><WorkItemsView key={project.id} projectId={project.id} goals={contents.goals} items={contents.workItems} view={view} onViewChange={onViewChange} onCreate={() => onOpenForm('workItem')} onControl={onWorkItemControl} onAcceptance={onWorkItemAcceptance} onReorder={onWorkItemReorder} onTransfer={onWorkItemTransfer} /></div>
-          <ProgressiveProjectSection key={`${project.id}-supervisor`} projectId={project.id} label={TEXT.executionSection} description={TEXT.executionSectionDescription} dataKey="supervisor">
+          <GoalsView goals={contents.goals} onCreate={() => onOpenForm('goal')} onControl={onGoalControl} onUpdate={onGoalUpdate} />
+          <WorkItemsView key={project.id} projectId={project.id} goals={contents.goals} items={contents.workItems} view={view} requestedWorkItemId={requestedWorkItemId} onViewChange={onViewChange} onCreate={() => onOpenForm('workItem')} onControl={onWorkItemControl} onAcceptance={onWorkItemAcceptance} onReorder={onWorkItemReorder} onTransfer={onWorkItemTransfer} />
+          <ProgressiveProjectSection
+            key={`${project.id}:delivery`}
+            label={TEXT.deliverySection}
+            description={TEXT.deliverySectionDescription}
+            dataKey="delivery"
+          >
+            <ProjectDeliveryWorkbench
+              active={active}
+              projectId={project.id}
+              refreshToken={contents.workItems.map((item) => `${item.id}:${item.revision}`).join('|')}
+            />
+          </ProgressiveProjectSection>
+          <ProgressiveProjectSection
+            key={`${project.id}:supervisor`}
+            label={TEXT.executionSection}
+            description={TEXT.executionSectionDescription}
+            dataKey="supervisor"
+          >
             <ProjectSupervisorView
               active={active}
               projectId={project.id}
@@ -437,27 +448,30 @@ function ProjectContents({
               onRefreshProject={contents.refreshContents}
             />
           </ProgressiveProjectSection>
-          <ProjectExecutionActions projectId={project.id} />
-          <ProgressiveProjectSection key={`${project.id}-delivery`} projectId={project.id} label={TEXT.deliverySection} description={TEXT.deliverySectionDescription} dataKey="delivery">
-            <ProjectDeliveryWorkbench
-              active={active}
-              projectId={project.id}
-              refreshToken={contents.workItems.map((item) => `${item.id}:${item.revision}`).join('|')}
-            />
-          </ProgressiveProjectSection>
-          <ProgressiveProjectSection key={`${project.id}-collaboration`} projectId={project.id} label={TEXT.collaborationSection} description={TEXT.collaborationSectionDescription} dataKey="collaboration">
-            <ProjectCollaborationView
-              projectId={project.id}
-              workItems={contents.workItems}
-              squads={contents.squads}
-              members={contents.members}
-              invitations={contents.invitations}
-              comments={contents.comments}
-              sharedApprovals={contents.sharedApprovals}
-              inboxItems={contents.collaborationInbox}
-              authorization={contents.authorization}
-              onRefresh={contents.refreshContents}
-            />
+          <ProgressiveProjectSection
+            key={`${project.id}:collaboration`}
+            label={TEXT.collaborationSection}
+            description={TEXT.collaborationSectionDescription}
+            dataKey="collaboration"
+            onOpen={() => void contents.refreshCollaborationContents()}
+          >
+            {contents.collaborationError && (
+              <ErrorNotice message={contents.collaborationError} onRetry={contents.refreshCollaborationContents} />
+            )}
+            {contents.collaborationLoading
+              ? <LoadingState message={TEXT.loadingContents} />
+              : <ProjectCollaborationView
+                  projectId={project.id}
+                  workItems={contents.workItems}
+                  squads={contents.squads}
+                  members={contents.members}
+                  invitations={contents.invitations}
+                  comments={contents.comments}
+                  sharedApprovals={contents.sharedApprovals}
+                  inboxItems={contents.collaborationInbox}
+                  authorization={contents.authorization}
+                  onRefresh={contents.refreshCollaborationContents}
+                />}
           </ProgressiveProjectSection>
         </>
       )}
@@ -470,30 +484,22 @@ function ProgressiveProjectSection({
   dataKey,
   description,
   label,
-  projectId
+  onOpen
 }: {
   children: ReactNode
   dataKey: 'delivery' | 'supervisor' | 'collaboration'
   description: string
   label: string
-  projectId: string
+  onOpen?: () => void
 }): React.JSX.Element {
-  const storageKey = `caogen.project-workspace.section.${projectId}.${dataKey}.open.v1`
-  const [open, setOpen] = useState(() => readSectionOpen(storageKey))
-  const [mounted, setMounted] = useState(open)
+  const [mounted, setMounted] = useState(false)
+  const handleToggle = (event: React.SyntheticEvent<HTMLDetailsElement>): void => {
+    if (!event.currentTarget.open || mounted) return
+    setMounted(true)
+    onOpen?.()
+  }
   return (
-    <details
-      open={open}
-      className="pws-advanced-section"
-      data-project-advanced-section={dataKey}
-      data-project-flow-step={dataKey}
-      onToggle={(event) => {
-        const nextOpen = event.currentTarget.open
-        setOpen(nextOpen)
-        if (nextOpen) setMounted(true)
-        try { window.localStorage.setItem(storageKey, String(nextOpen)) } catch { /* preference persistence is best effort */ }
-      }}
-    >
+    <details className="pws-advanced-section" data-project-advanced-section={dataKey} onToggle={handleToggle}>
       <summary>
         <span className="pws-advanced-summary-copy">
           <strong>{label}</strong>
@@ -503,72 +509,6 @@ function ProgressiveProjectSection({
       </summary>
       {mounted && <div className="pws-advanced-section-content">{children}</div>}
     </details>
-  )
-}
-
-function readSectionOpen(storageKey: string): boolean {
-  try { return window.localStorage.getItem(storageKey) === 'true' } catch { return false }
-}
-
-/**
- * Project 主路径的操作入口。底层能力仍由现有工作台面板提供，但入口和
- * Goal/WorkItem/Run/Delivery 放在同一条路径，避免用户在多个侧栏工具中找功能。
- */
-function ProjectExecutionActions({ projectId }: { projectId: string }): React.JSX.Element {
-  const activeId = useStore((state) => state.activeId)
-  const activeSession = useStore((state) => (activeId ? state.sessions[activeId]?.meta : undefined))
-  const openPanel = useStore((state) => state.openPanel)
-  const openLatestRewindPanel = useStore((state) => state.openLatestRewindPanel)
-  const setStudioSurface = useStore((state) => state.setStudioSurface)
-  const hasSession = Boolean(activeSession && (activeSession.workspaceId === projectId || activeSession.projectId === projectId))
-  const openSessionPanel = (panel: Parameters<typeof openPanel>[0], context?: Parameters<typeof openPanel>[1]): void => {
-    setStudioSurface('session')
-    openPanel(panel, context)
-  }
-  const scrollToDelivery = (): void => {
-    const target = document.querySelector<HTMLElement>('[data-project-flow-step="delivery"]')
-    if (target instanceof HTMLDetailsElement) target.open = true
-    target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-  return (
-    <section className="pws-project-execution-actions" data-project-execution-actions aria-labelledby="project-execution-actions-title">
-      <div className="pws-project-execution-heading">
-        <div>
-          <h2 id="project-execution-actions-title">执行与交付</h2>
-          <p>{hasSession ? '当前会话已绑定，可直接检查改动、运行测试并回退。' : '先从目标启动一次执行，随后这里会出现可检查的会话。'}</p>
-        </div>
-        <span className={`pws-project-session-state ${hasSession ? 'is-ready' : 'is-empty'}`}>{hasSession ? '会话已就绪' : '等待执行'}</span>
-      </div>
-      <div className="pws-project-execution-toolbar" role="toolbar" aria-label="项目执行操作">
-        <button type="button" className="btn btn-ghost btn-sm" data-project-execution-action="diff" disabled={!hasSession} onClick={() => openSessionPanel('diff')}>
-          <GitCommitHorizontal size={14} aria-hidden="true" />
-          Diff / 提交
-        </button>
-        <button type="button" className="btn btn-ghost btn-sm" data-project-execution-action="tests" disabled={!hasSession} onClick={() => openSessionPanel('files', { developerView: 'tests' })}>
-          <TestTube2 size={14} aria-hidden="true" />
-          运行测试
-        </button>
-        <button type="button" className="btn btn-ghost btn-sm" data-project-execution-action="rewind" disabled={!hasSession} onClick={() => {
-          setStudioSurface('session')
-          openLatestRewindPanel('button')
-        }}>
-          <RotateCcw size={14} aria-hidden="true" />
-          撤销检查点
-        </button>
-        <button type="button" className="btn btn-ghost btn-sm" data-project-execution-action="worktree" disabled={!hasSession} onClick={() => openSessionPanel('worktree')}>
-          <GitBranch size={14} aria-hidden="true" />
-          Worktree
-        </button>
-        <button type="button" className="btn btn-ghost btn-sm" data-project-execution-action="terminal" disabled={!hasSession} onClick={() => openSessionPanel('terminal')}>
-          <Terminal size={14} aria-hidden="true" />
-          终端
-        </button>
-        <button type="button" className="btn btn-primary btn-sm" data-project-execution-action="delivery" onClick={scrollToDelivery}>
-          <ClipboardCheck size={14} aria-hidden="true" />
-          验收交付
-        </button>
-      </div>
-    </section>
   )
 }
 
@@ -585,7 +525,7 @@ function GoalTaskStarter({
     if (await state.start(projectId, objective)) setObjective('')
   }
   return (
-    <form className="pws-goal-task-starter" onSubmit={(event) => void submit(event)} data-goal-task-starter data-project-flow-step="goal-task-starter">
+    <form className="pws-goal-task-starter" onSubmit={(event) => void submit(event)} data-goal-task-starter>
       <label className="pws-visually-hidden" htmlFor={`goal-task-${projectId}`}>{TEXT.goalTaskPlaceholder}</label>
       <input
         id={`goal-task-${projectId}`}
@@ -607,40 +547,6 @@ function GoalTaskStarter({
   )
 }
 
-function ProjectFlowRail({
-  project,
-  goalCount,
-  workItemCount
-}: {
-  project: ProjectWorkspace | null
-  goalCount: number
-  workItemCount: number
-}): React.JSX.Element {
-  const steps = [
-    { id: 'goal-task-starter', label: '目标', detail: project ? (goalCount > 0 ? `${goalCount} 个` : '先描述目标') : '先创建项目' },
-    { id: 'work', label: '任务', detail: workItemCount > 0 ? `${workItemCount} 个` : '自动拆解或新增' },
-    { id: 'supervisor', label: '执行', detail: '分配数字员工' },
-    { id: 'delivery', label: '验收交付', detail: 'Diff · Test · Evidence' }
-  ]
-  const goTo = (id: string): void => {
-    const target = document.querySelector<HTMLElement>(`[data-project-flow-step="${id}"]`)
-    if (target instanceof HTMLDetailsElement) target.open = true
-    target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-  return (
-    <nav className="pws-flow-rail" aria-label="项目执行流程" data-project-flow-rail>
-      {steps.map((step, index) => (
-        <span className="pws-flow-step-wrap" key={step.id}>
-          <button type="button" className="pws-flow-step" onClick={() => goTo(step.id)} disabled={!project && index > 0} data-project-flow-nav={step.id}>
-            <strong>{index + 1}. {step.label}</strong><small>{step.detail}</small>
-          </button>
-          {index < steps.length - 1 && <span className="pws-flow-arrow" aria-hidden="true">→</span>}
-        </span>
-      ))}
-    </nav>
-  )
-}
-
 function StudioHeader({
   disabled,
   goalCount,
@@ -653,7 +559,6 @@ function StudioHeader({
   refreshing,
   selectedProject,
   selectedProjectId,
-  authorization,
   titleId,
   workItemCount
 }: {
@@ -668,7 +573,6 @@ function StudioHeader({
   refreshing: boolean
   selectedProject: ProjectWorkspace | null
   selectedProjectId: string
-  authorization: import('../../../../shared/types').ProjectAuthorizationView | null
   titleId: string
   workItemCount: number
 }): React.JSX.Element {
@@ -685,7 +589,7 @@ function StudioHeader({
       <div className="pws-heading">
         <h1 id={titleId}>{TEXT.title}</h1>
         {selectedProject && (
-          <p>{TEXT.projectKindSummary(projectKindLabel(selectedProject.kind))} · {TEXT.projectSummary(goalCount, workItemCount)}{authorization && ` · 角色：${authorization.role} · 权限：${authorization.capabilities.length}`}</p>
+          <p>{TEXT.projectKindSummary(projectKindLabel(selectedProject.kind))} · {TEXT.projectSummary(goalCount, workItemCount)}</p>
         )}
       </div>
       <div className="pws-project-controls">

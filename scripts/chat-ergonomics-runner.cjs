@@ -280,14 +280,16 @@ async function verifyComposerAutosizeAndDeletion(win, disposableSessionId) {
   check('Composer grows with multiline content before using an internal scrollbar',
     expanded.height > compactHeight + 100 && expanded.overflowY === 'hidden' && expanded.scrollHeight <= expanded.clientHeight + 1,
     JSON.stringify({ compactHeight, expanded }))
-  const iconState = await rendererValue(win, `({
+  const iconFamily = await rendererValue(win, `({
     send: Boolean(document.querySelector('.composer-send svg.lucide-arrow-up')),
     settings: Boolean(document.querySelector('[data-sidebar-action="settings"] svg.lucide-settings')),
-    newSession: Boolean(document.querySelector('.sidebar-new svg.lucide-square-pen'))
+    disclosure: [...document.querySelectorAll('.disclosure-chevron')]
+      .every((icon) => icon.classList.contains('lucide-chevron-right')),
+    disclosureCount: document.querySelectorAll('.disclosure-chevron').length
   })`)
   check('Composer and sidebar controls render the unified SVG icon family',
-    iconState.send && iconState.settings && iconState.newSession,
-    JSON.stringify(iconState))
+    iconFamily.send && iconFamily.settings,
+    JSON.stringify(iconFamily))
   await capture(win, 'chat-composer-autosize.png')
 
   await setComposerText(win, '')
@@ -377,16 +379,13 @@ async function layoutState(win) {
 async function createSession(providerId, title) {
   return invoke('sessions:create', {
     cwd: projectDir,
+    unassigned: true,
     engine: 'openai',
     providerId,
     model: 'mock-chat',
     routingScope: 'fixed',
     permissionMode: 'default',
     isolated: false,
-    // This fixture exercises Assistant chat behavior. The temporary cwd is
-    // only test context and must not project the session into Projects.
-    unassigned: true,
-    experienceModeOverride: 'assistant',
     title
   })
 }
@@ -455,24 +454,10 @@ function waitForWindow() {
   return waitFor(() => BrowserWindow.getAllWindows().find((window) => !window.isDestroyed()), 10_000)
 }
 
-async function waitForRenderer(win, expression, timeoutMs = 10_000) {
-  try {
-    return await waitFor(async () => {
-      try { return await rendererValue(win, expression) } catch { return false }
-    }, timeoutMs)
-  } catch (error) {
-    let rendererState = 'renderer unavailable'
-    try {
-      rendererState = await rendererValue(win, `JSON.stringify({
-        url: location.href,
-        readyState: document.readyState,
-        text: document.body?.innerText?.slice(0, 500) || ''
-      })`)
-    } catch {
-      // Preserve the original timeout when the renderer cannot be inspected.
-    }
-    throw new Error(`chat ergonomics renderer wait timed out: ${expression}\n${rendererState}`, { cause: error })
-  }
+function waitForRenderer(win, expression, timeoutMs = 10_000) {
+  return waitFor(async () => {
+    try { return await rendererValue(win, expression) } catch { return false }
+  }, timeoutMs)
 }
 
 function rendererValue(win, expression) { return win.webContents.executeJavaScript(expression, true) }

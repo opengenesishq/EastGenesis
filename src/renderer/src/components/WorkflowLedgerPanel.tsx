@@ -11,6 +11,7 @@ import {
   useWorkflowAcceptanceAuthoring
 } from './WorkflowAcceptanceAuthoring'
 import { WorkflowAcceptanceRow } from './WorkflowAcceptanceRow'
+import { useT } from '../i18n'
 
 const EMPTY_SCOPE = { limit: 25 }
 
@@ -120,11 +121,12 @@ function WorkflowLedgerHeader({
   onToggleAuthoring: () => void
   onRefresh: () => Promise<void>
 }): React.JSX.Element {
+  const t = useT()
   return (
     <div className="settings-section-head">
       <div>
-        <h3 id="workflow-ledger-title" className="settings-h3">Workflow Ledger</h3>
-        <p className="settings-hint">Goal · WorkItem · Run · Event</p>
+        <h3 id="workflow-ledger-title" className="settings-h3">{t('workflowLedgerTitle')}</h3>
+        <p className="settings-hint">{t('workflowLedgerSubtitle')}</p>
       </div>
       <div className="workflow-ledger-actions">
         <button
@@ -132,18 +134,18 @@ function WorkflowLedgerHeader({
           className="btn btn-primary btn-sm"
           onClick={onToggleAuthoring}
           disabled={!hasWorkItems}
-          title="创建带 Evidence policy 的 pending Acceptance"
+          title={t('workflowLedgerCreateAcceptanceTitle')}
         >
-          {authoring ? '关闭作者' : '新建验收'}
+          {authoring ? t('workflowLedgerCloseAuthoring') : t('workflowLedgerNewAcceptance')}
         </button>
         <button
           type="button"
           className="btn btn-ghost btn-sm"
           onClick={() => void onRefresh()}
           disabled={loading}
-          title="刷新 Workflow Ledger"
+          title={t('workflowLedgerRefreshTitle')}
         >
-          {loading ? '刷新中...' : '刷新'}
+          {loading ? t('workflowLedgerRefreshing') : t('refresh')}
         </button>
       </div>
     </div>
@@ -157,24 +159,26 @@ function WorkflowLedgerSummary({
   ledger: WorkflowLedgerRendererSelection | null
   verification: WorkflowLedgerVerification | null
 }): React.JSX.Element {
+  const t = useT()
   return (
     <div className="workflow-ledger-summary" aria-live="polite">
-      <span>Goals {ledger?.goals.total ?? 0}</span>
-      <span>WorkItems {ledger?.workItems.total ?? 0}</span>
-      <span>Runs {ledger?.runs.total ?? 0}</span>
-      <span>Artifacts {ledger?.artifacts.total ?? 0}</span>
-      <span>Acceptance {ledger?.acceptances.total ?? 0}</span>
-      <span>Events {verification?.events ?? ledger?.events.total ?? 0}</span>
+      <span>{t('workflowLedgerGoals')} {ledger?.goals.total ?? 0}</span>
+      <span>{t('workflowLedgerWorkItems')} {ledger?.workItems.total ?? 0}</span>
+      <span>{t('workflowLedgerRuns')} {ledger?.runs.total ?? 0}</span>
+      <span>{t('workflowLedgerArtifacts')} {ledger?.artifacts.total ?? 0}</span>
+      <span>{t('workflowLedgerAcceptance')} {ledger?.acceptances.total ?? 0}</span>
+      <span>{t('workflowLedgerEvents')} {verification?.events ?? ledger?.events.total ?? 0}</span>
       <span className={verification ? 'workflow-ledger-valid' : 'workflow-ledger-pending'}>
-        {verification ? '链校验通过' : '等待校验'}
+        {verification ? t('workflowLedgerChainValid') : t('workflowLedgerAwaitingVerification')}
       </span>
     </div>
   )
 }
 
 function WorkflowWorkItemList({ workItems }: { workItems: WorkflowWorkItemRecord[] }): React.JSX.Element {
+  const t = useT()
   if (workItems.length === 0) {
-    return <p className="settings-hint workflow-ledger-empty">暂无 WorkItem 投影</p>
+    return <p className="settings-hint workflow-ledger-empty">{t('workflowLedgerNoWorkItems')}</p>
   }
   return (
     <div className="workflow-ledger-list">
@@ -184,6 +188,7 @@ function WorkflowWorkItemList({ workItems }: { workItems: WorkflowWorkItemRecord
 }
 
 function WorkflowWorkItemRow({ item }: { item: WorkflowWorkItemRecord }): React.JSX.Element {
+  const t = useT()
   return (
     <div className="workflow-ledger-row">
       <div className="workflow-ledger-row-main">
@@ -192,7 +197,9 @@ function WorkflowWorkItemRow({ item }: { item: WorkflowWorkItemRecord }): React.
       </div>
       <div className="workflow-ledger-row-side">
         <span className={`workflow-ledger-status workflow-ledger-status-${item.status}`}>{item.status}</span>
-        <span className="workflow-ledger-meta">r{item.revision} · {item.runIds.length} run</span>
+        <span className="workflow-ledger-meta">
+          {t('workflowLedgerRevisionRuns', { revision: item.revision, count: item.runIds.length })}
+        </span>
       </div>
     </div>
   )
@@ -207,11 +214,12 @@ function WorkflowAcceptanceList({
   evidence: WorkflowEvidenceRecord[]
   onRefresh: () => Promise<void>
 }): React.JSX.Element {
+  const t = useT()
   return (
-    <div className="workflow-acceptance-list" aria-label="Acceptance 列表">
+    <div className="workflow-acceptance-list" aria-label={t('workflowLedgerAcceptanceList')}>
       <div className="workflow-acceptance-list-head">
-        <h4>Acceptance policies</h4>
-        <span className="workflow-ledger-meta">已保存记录只读展示</span>
+        <h4>{t('workflowLedgerAcceptancePolicies')}</h4>
+        <span className="workflow-ledger-meta">{t('workflowLedgerSavedRecordsReadonly')}</span>
       </div>
       {acceptances.map((acceptance) => (
         <WorkflowAcceptanceRow

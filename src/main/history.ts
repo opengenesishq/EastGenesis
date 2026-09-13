@@ -19,6 +19,7 @@ import {
   historyStoreDocument
 } from './history-store-format'
 import { normalizeTaskStrategy } from './task/task-strategy'
+import { migrateLegacyEngineRecord } from './native-engine-migration'
 
 const MAX_ENTRIES = 100
 
@@ -48,8 +49,7 @@ function normalizeHistoryEntry(entry: HistoryEntry): HistoryEntry {
 }
 
 function migrateLegacyHistoryEngine(entry: HistoryEntry): HistoryEntry {
-  const engine = (entry as unknown as { engine?: string }).engine
-  return engine === 'claude' ? { ...entry, engine: 'anthropic' } : entry
+  return migrateLegacyEngineRecord(entry as HistoryEntry & { engine?: string }) as HistoryEntry
 }
 
 function persist(next: HistoryEntry[]): void {

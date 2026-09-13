@@ -7,6 +7,7 @@ import type {
   LocalComputeActivationOptions,
   LocalComputeActivationResult,
   LocalComputeService,
+  ProviderModelProfile,
   ProviderView
 } from '../../shared/types'
 import { createProvider, listProviders, updateProvider } from '../providers'
@@ -17,12 +18,15 @@ interface LocalComputeCandidate {
   name: string
   baseUrl: string
   modelsPath: string
+  /** Optional runtime-owned model detail endpoint. Missing capability evidence stays unknown. */
+  modelDetailsPath?: string
 }
 
 const MAX_RESPONSE_BYTES = 1024 * 1024
 const PROBE_TIMEOUT_MS = 900
 const STARTUP_TIMEOUT_MS = 8_000
 const STARTUP_POLL_MS = 200
+const LOCAL_COMPUTE_PROVIDER_NOTE = 'CaoGen 自动发现的本机模型服务'
 let activation: Promise<LocalComputeActivationResult> | null = null
 let activationCanStart = false
 
@@ -60,7 +64,7 @@ async function activate(startInstalled: boolean): Promise<LocalComputeActivation
     probe: await probeModels(candidate)
   })))
   const match = results.find((result) => result.probe.models.length > 0)
-  if (match) return activatedResult(checkedAt, match.candidate, match.probe.models)
+  if (match) return activatedResult(checkedAt, match.candidate, match.probe.models, match.probe.modelProfiles)
 
   const reachable = results.find((result) => result.probe.reachable)
   if (reachable) {
@@ -85,7 +89,7 @@ async function activate(startInstalled: boolean): Promise<LocalComputeActivation
   const probe = await waitForModels(ollama)
   if (probe.models.length > 0) {
     return {
-      ...activatedResult(checkedAt, ollama, probe.models),
+      ...activatedResult(checkedAt, ollama, probe.models, probe.modelProfiles),
       startedService: true
     }
   }
@@ -101,9 +105,10 @@ async function activate(startInstalled: boolean): Promise<LocalComputeActivation
 function activatedResult(
   checkedAt: number,
   candidate: LocalComputeCandidate,
-  models: string[]
+  models: string[],
+  modelProfiles?: ProviderModelProfile[]
 ): LocalComputeActivationResult {
-  const provider = ensureProvider(candidate, models)
+  const provider = ensureProvider(candidate, models, modelProfiles)
   return {
     status: 'activated',
     checkedAt,
@@ -112,11 +117,12 @@ function activatedResult(
   }
 }
 
-function ensureProvider(candidate: LocalComputeCandidate, models: string[]): ProviderView {
+function ensureProvider(candidate: LocalComputeCandidate, models: string[], modelProfiles?: ProviderModelProfile[]): ProviderView {
   const existing = listProviders().find((provider) =>
     canonicalTarget(provider.baseUrl) === canonicalTarget(candidate.baseUrl)
     && provider.engine === 'openai'
   )
+  const managed = !existing || existing.note === LOCAL_COMPUTE_PROVIDER_NOTE
   const input = {
     name: candidate.name,
     baseUrl: candidate.baseUrl,
@@ -124,7 +130,19 @@ function ensureProvider(candidate: LocalComputeCandidate, models: string[]): Pro
     engine: 'openai' as const,
     openaiProtocol: 'chat' as const,
     authMode: 'none' as const,
-    note: 'CaoGen 自动发现的本机模型服务'
+    note: LOCAL_COMPUTE_PROVIDER_NOTE,
+    // Replace the auto-discovered profile set on every probe. If the runtime
+    // stops advertising tools, stale evidence must disappear on the next
+    // activation; a missing declaration remains fail-closed. A provider with
+    // a user-owned note keeps its manually configured advanced profile.
+    ...(managed
+      ? {
+          advancedConfig: {
+            ...(existing?.advancedConfig ?? { schemaVersion: 1 as const }),
+            modelProfiles: modelProfiles ?? []
+          }
+        }
+      : {})
   }
   return existing ? updateProvider(existing.id, input) : createProvider(input)
 }
@@ -132,6 +150,7 @@ function ensureProvider(candidate: LocalComputeCandidate, models: string[]): Pro
 interface LocalComputeProbe {
   reachable: boolean
   models: string[]
+  modelProfiles?: ProviderModelProfile[]
 }
 
 async function probeModels(candidate: LocalComputeCandidate): Promise<LocalComputeProbe> {
@@ -147,12 +166,70 @@ async function probeModels(candidate: LocalComputeCandidate): Promise<LocalCompu
     if (Number.isFinite(length) && length > MAX_RESPONSE_BYTES) return { reachable: true, models: [] }
     const text = await response.text()
     if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) return { reachable: true, models: [] }
-    return { reachable: true, models: modelNames(JSON.parse(text), candidate.service) }
+    const models = modelNames(JSON.parse(text), candidate.service)
+    const modelProfiles = candidate.modelDetailsPath
+      ? await probeModelProfiles(candidate, models)
+      : []
+    return { reachable: true, models, ...(modelProfiles.length > 0 ? { modelProfiles } : {}) }
   } catch {
     return { reachable: false, models: [] }
   } finally {
     clearTimeout(timer)
   }
+}
+
+/**
+ * Ollama exposes model capabilities through /api/show. Only values explicitly
+ * returned by that endpoint become a saved profile; a missing/failed detail
+ * probe deliberately leaves the model unknown so routing remains fail-closed.
+ */
+async function probeModelProfiles(
+  candidate: LocalComputeCandidate,
+  models: string[]
+): Promise<ProviderModelProfile[]> {
+  if (!candidate.modelDetailsPath || models.length === 0) return []
+  const profiles = await Promise.all(models.map(async (model): Promise<ProviderModelProfile | undefined> => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
+    try {
+      const response = await fetch(`${candidate.baseUrl}${candidate.modelDetailsPath}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: model }),
+        signal: controller.signal
+      })
+      if (!response.ok) return undefined
+      const length = Number(response.headers.get('content-length') || 0)
+      if (Number.isFinite(length) && length > MAX_RESPONSE_BYTES) return undefined
+      const text = await response.text()
+      if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) return undefined
+      const root = recordValue(JSON.parse(text))
+      const capabilities = Array.isArray(root?.capabilities)
+        ? root.capabilities.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim()).slice(0, 32)
+        : []
+      const contextWindow = modelContextWindow(root?.model_info)
+      if (capabilities.length === 0 && contextWindow === undefined) return undefined
+      return {
+        model,
+        ...(capabilities.length > 0 ? { capabilities } : {}),
+        ...(contextWindow === undefined ? {} : { contextWindow })
+      }
+    } catch {
+      return undefined
+    } finally {
+      clearTimeout(timer)
+    }
+  }))
+  return profiles.filter((profile): profile is ProviderModelProfile => Boolean(profile))
+}
+
+function modelContextWindow(value: unknown): number | undefined {
+  const record = recordValue(value)
+  if (!record) return undefined
+  const candidate = Object.entries(record).find(([key, raw]) =>
+    /context(?:_|-)?length/i.test(key) && typeof raw === 'number' && Number.isInteger(raw) && raw > 0
+  )?.[1]
+  return typeof candidate === 'number' ? candidate : undefined
 }
 
 async function waitForModels(candidate: LocalComputeCandidate): Promise<LocalComputeProbe> {
@@ -176,7 +253,10 @@ function ollamaStartCommand(): LocalRuntimeCommand | null {
   if (testMode) {
     const executable = existingFile(process.env.CAOGEN_LOCAL_COMPUTE_TEST_RUNTIME_EXECUTABLE)
     const script = existingFile(process.env.CAOGEN_LOCAL_COMPUTE_TEST_RUNTIME_SCRIPT)
-    return executable && script ? { executable, args: [script, 'serve'] } : null
+    const controlUrl = loopbackBaseUrl(process.env.CAOGEN_LOCAL_COMPUTE_TEST_CONTROL_URL)
+    return executable && script && controlUrl
+      ? { executable, args: [script, 'serve', controlUrl] }
+      : null
   }
   const executable = findOllamaExecutable()
   return executable ? { executable, args: ['serve'] } : null
@@ -268,7 +348,8 @@ function localComputeCandidates(): LocalComputeCandidate[] {
       service: 'ollama',
       name: 'Ollama（本机）',
       baseUrl: testUrl,
-      modelsPath: '/api/tags'
+      modelsPath: '/api/tags',
+      modelDetailsPath: '/api/show'
     }]
   }
   return [
@@ -276,7 +357,8 @@ function localComputeCandidates(): LocalComputeCandidate[] {
       service: 'ollama',
       name: 'Ollama（本机）',
       baseUrl: 'http://127.0.0.1:11434',
-      modelsPath: '/api/tags'
+      modelsPath: '/api/tags',
+      modelDetailsPath: '/api/show'
     },
     {
       service: 'lm-studio',

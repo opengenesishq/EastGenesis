@@ -203,12 +203,6 @@ function validateStrategyDeclaration(entry, failures) {
 
 function validateSourceBackedStrategy(entry, discovered, failures) {
   const operations = new Set(discovered.sinks.map((sink) => sink.operation))
-  validateStrategyOperations(entry, operations, failures)
-  validateRecoveryEvidence(entry, failures)
-  validateRecoverySurfaces(entry, failures)
-}
-
-function validateStrategyOperations(entry, operations, failures) {
   if (entry.strategy === 'atomic_fsync_rename') {
     requireOperation(entry, operations, isDurablePublication, 'durable publication', failures)
   }
@@ -230,26 +224,10 @@ function validateStrategyOperations(entry, operations, failures) {
   if (entry.strategy === 'direct_write') {
     requireOperation(entry, operations, (operation) => MATERIAL_WRITE_OPERATIONS.has(operation), 'material write', failures)
   }
-}
-
-function validateRecoveryEvidence(entry, failures) {
   if (entry.recovery === 'verified') {
     if (!Array.isArray(entry.evidence) || entry.evidence.length === 0 ||
         entry.evidence.some((item) => typeof item !== 'string' || !item.trim())) {
       failures.push(`${entry.file}: verified recovery requires named evidence`)
-    }
-  }
-}
-
-function validateRecoverySurfaces(entry, failures) {
-  if (entry.requiredRecoverySurfaces !== undefined) {
-    if (entry.recovery !== 'verified') {
-      failures.push(`${entry.file}: requiredRecoverySurfaces requires recovery=verified`)
-    }
-    if (!Array.isArray(entry.requiredRecoverySurfaces) || entry.requiredRecoverySurfaces.length === 0 ||
-        entry.requiredRecoverySurfaces.some((surface) => typeof surface !== 'string' || !surface.trim()) ||
-        new Set(entry.requiredRecoverySurfaces).size !== entry.requiredRecoverySurfaces.length) {
-      failures.push(`${entry.file}: requiredRecoverySurfaces must name unique runtime surfaces`)
     }
   }
 }

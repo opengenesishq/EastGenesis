@@ -103,7 +103,7 @@ export async function measureStudioDataReady(page, fixture, phase, timeoutMs = 1
 function surfaceChunkName(url) {
   try {
     const name = new URL(url).pathname.split('/').pop() || ''
-    return /^(StudioView|VideoStudioView|OfficeView)-.+\.js$/.test(name) ? name : ''
+    return /^(StudioView|StudioResultPanel|VideoStudioView|OfficeView)-.+\.js$/.test(name) ? name : ''
   } catch {
     return ''
   }

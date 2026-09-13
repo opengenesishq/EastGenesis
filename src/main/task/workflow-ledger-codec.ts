@@ -1,4 +1,7 @@
-import { createHash } from 'node:crypto'
+import { canonicalJson, digest } from './workflow-ledger-canonical'
+export { canonicalJson, digest } from './workflow-ledger-canonical'
+import { isBusinessLineId } from '../../shared/business-line-types'
+import { storedBusinessLineId } from '../business-line-ownership'
 import type { TaskRunRecord } from '../../shared/types'
 import type {
   WorkflowAcceptanceInput,
@@ -125,6 +128,7 @@ export function normalizeWorkItemInput(input: WorkflowWorkItemProjectionInput): 
     projectId: normalizeOptionalId(input.projectId),
     goalId: normalizeOptionalId(input.goalId),
     parentId: normalizeOptionalId(input.parentId),
+    businessLineId: storedBusinessLineId(input.businessLineId),
     type,
     title,
     description: optionalText(input.description, 'work item description'),
@@ -272,6 +276,7 @@ export function isWorkflowWorkItem(value: unknown): value is WorkflowWorkItemRec
   if (!isRecord(value)) return false
   const record = value
   return hasIdentity(record) && hasOptionalIds(record, ['projectId', 'goalId', 'parentId']) &&
+    (record.businessLineId === undefined || isBusinessLineId(record.businessLineId)) &&
     hasWorkItemFields(record)
 }
 
@@ -593,22 +598,6 @@ export function eventImmutable(record: WorkflowEventInput | WorkflowEventRecord)
     ...('runId' in record ? { runId: record.runId } : {}),
     ...('sessionId' in record ? { sessionId: record.sessionId } : {})
   }
-}
-
-export function digest(value: unknown): string {
-  return createHash('sha256').update(canonicalJson(value)).digest('hex')
-}
-
-export function canonicalJson(value: unknown): string {
-  if (value === undefined) return 'null'
-  if (value === null || typeof value !== 'object') return JSON.stringify(value)
-  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(',')}]`
-  const object = value as Record<string, unknown>
-  const entries = Object.keys(object)
-    .filter((key) => object[key] !== undefined)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`)
-  return `{${entries.join(',')}}`
 }
 
 export function decodePayload<T>(

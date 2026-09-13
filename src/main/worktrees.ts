@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
@@ -317,6 +317,7 @@ export function exportManagedWorktreePatch(sessionId: string): WorktreePatchResu
     if (record.state !== 'active' || !existsSync(record.worktreePath)) {
       return { ok: false, error: 'worktree 已不存在或已移除' }
     }
+    const headSha = git(record.worktreePath, ['rev-parse', 'HEAD'])
     // 相对基线的完整改动 = 已提交(baseSha..HEAD)+ 工作区未提交(HEAD 相对工作树)。
     // 用 `git diff --binary baseSha`(不带 -- 的三点/两点)对比"基线↔当前工作树",
     // 它同时涵盖已提交与未提交改动,一步到位;再叠加未跟踪文件。
@@ -326,11 +327,24 @@ export function exportManagedWorktreePatch(sessionId: string): WorktreePatchResu
     ]
       .filter(Boolean)
       .join('\n')
+    if (git(record.worktreePath, ['rev-parse', 'HEAD']) !== headSha) {
+      return { ok: false, error: '导出期间 worktree HEAD 已变化，请重新导出' }
+    }
     mkdirSync(patchesRoot(), { recursive: true })
-    const patchPath = join(patchesRoot(), `${safePathSegment(record.sessionId)}-${Date.now()}.patch`)
+    const patchPath = join(patchesRoot(), `${safePathSegment(record.sessionId)}-${randomUUID()}.patch`)
     // git() 帮手会 trim 输出末尾换行,而 git apply 要求 patch 以换行结尾(否则 corrupt patch)
-    writeFileSync(patchPath, patch ? `${patch}\n` : patch)
-    return { ok: true, path: patchPath, bytes: statSync(patchPath).size }
+    const bytes = Buffer.from(patch ? `${patch}\n` : patch, 'utf8')
+    writeFileSync(patchPath, bytes, { flag: 'wx' })
+    return {
+      ok: true,
+      path: patchPath,
+      bytes: bytes.length,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      repoRoot: record.repoRoot,
+      worktreePath: record.worktreePath,
+      baseSha: record.baseSha,
+      headSha
+    }
   } catch (err) {
     return { ok: false, error: errorText(err) }
   }

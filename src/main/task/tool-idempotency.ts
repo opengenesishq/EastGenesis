@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
 import { EFFECT_FREE_AGENT_TOOL_NAMES } from './effect-entry-inventory'
+import { isDownstreamMediaEffectTool } from '../../shared/media-tool-contract'
 
 export const OPENAI_PERMISSION_READ_ONLY_TOOLS = new Set([
+  'inspect_media', 'inspect_office_artifact', 'plan_office_revision',
   'read_file',
   'view',
   'list_dir',
@@ -20,7 +22,6 @@ export const OPENAI_PERMISSION_READ_ONLY_TOOLS = new Set([
   'china_notify',
   'gitee_prepare',
   'memory_search',
-  'web_search',
   'browser_automation_status',
   'git_status',
   'git_diff'
@@ -98,7 +99,8 @@ export function normalizeToolName(toolName: string): string {
 }
 
 export function isSideEffectingTool(toolName: string): boolean {
-  return !EFFECT_FREE_TOOLS.has(normalizeToolName(toolName))
+  const name = normalizeToolName(toolName)
+  return !isDownstreamMediaEffectTool(name) && !EFFECT_FREE_TOOLS.has(name)
 }
 
 export function isSideEffectingToolCall(toolName: string, toolInput: unknown): boolean {

@@ -1,18 +1,11 @@
 import { app } from 'electron'
-import { randomUUID } from 'node:crypto'
-import {
-  closeSync,
-  existsSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync
-} from 'node:fs'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
+import { compareAndWriteSettingsFile, readSettingsFileSnapshot, SETTINGS_SCHEMA_VERSION, UnsupportedSettingsSchemaError } from './settings-file-storage'
+import { createSettingsRoutingBoundary } from './routing-settings/settings-boundary'
+import { preserveRoutingSettingsDomain, assertOrdinaryRoutingPatchAllowed } from './routing-settings/routing-settings-state'
+import type { RoutingSettingsDocument } from './routing-settings/routing-settings-types'
 import { normalizeCaoGenDriveMode } from '../shared/types'
+import { mergeBusinessLineSettings, normalizeBusinessLineSettings, validateBusinessLinePatch } from './business-line-settings'
 import { migrateLegacyPermissionRules, normalizePermissionRules } from './permission/tool-permission'
 import type {
   AppSettings,
@@ -26,14 +19,13 @@ import type {
 } from '../shared/types'
 
 const SIDEBAR_MIN_WIDTH = 208
-const SIDEBAR_MAX_WIDTH = 360
+const SIDEBAR_MAX_WIDTH = 420
 const WORKBENCH_SIDE_MIN_WIDTH = 320
 const WORKBENCH_SIDE_MAX_WIDTH = 720
 const WORKBENCH_DOCK_MIN_HEIGHT = 220
 const WORKBENCH_DOCK_MAX_HEIGHT = 520
 const CHAT_SCALE_MIN = 0.85
 const CHAT_SCALE_MAX = 1.25
-const SETTINGS_SCHEMA_VERSION = 1
 const MODEL_ROUTING_TASK_KINDS = new Set<ModelRoutingTaskKind>([
   'chat',
   'coding',
@@ -52,7 +44,7 @@ const MODEL_ROUTING_TASK_KINDS = new Set<ModelRoutingTaskKind>([
 const DEFAULTS: AppSettings = {
   driveMode: 'core',
   defaultTaskStrategy: 'execute',
-  experienceMode: 'assistant',
+  ...normalizeBusinessLineSettings({ experienceMode: 'assistant' }),
   experienceRecommendationDismissedId: '',
   defaultModel: '',
   defaultPermissionMode: 'default',
@@ -79,7 +71,7 @@ const DEFAULTS: AppSettings = {
   modelRoutingRules: [],
   smartModelRoutingEnabled: false,
   modelCrossValidationAutoRunEnabled: false,
-  routingExpertPolicy: { allowedProviderIds: [], locality: 'any' },
+  routingExpertPolicy: { allowedProviderIds: [], locality: 'any', allowedRegions: [], allowedDomains: [], requiredPermissions: [] },
   budgetUsdPerSession: 0,
   budgetUsdPerMonth: 0,
   failoverEnabled: true,
@@ -110,7 +102,7 @@ const DEFAULTS: AppSettings = {
   preventDisplaySleep: true,
   autoSkillLearningEnabled: false,
   office: {
-    qualityMode: 'auto', showBadges: true, liveliness: 1, catEars: false,
+    qualityMode: 'auto', resolutionMode: 'adaptive', showBadges: true, liveliness: 1, catEars: false,
     spaceTheme: 'control-room', outfitPalette: 'role-default', hairStyle: 'role-default', teamLayout: 'grid'
   },
   layout: {
@@ -169,6 +161,11 @@ function normalizeOffice(raw: unknown, fallback: AppSettings['office']): AppSett
   const office = raw && typeof raw === 'object' ? (raw as Partial<AppSettings['office']>) : {}
   return {
     qualityMode: normalizeOfficeQualityMode(office.qualityMode, fallback.qualityMode),
+    resolutionMode: office.resolutionMode === 'adaptive'
+      ? 'adaptive'
+      : office.resolutionMode === 'sharp'
+        ? 'sharp'
+        : fallback.resolutionMode ?? (office.qualityMode === 'auto' ? 'adaptive' : 'sharp'),
     showBadges: typeof office.showBadges === 'boolean' ? office.showBadges : fallback.showBadges,
     liveliness: clampNumber(office.liveliness, fallback.liveliness, 0.2, 1.2, 1),
     catEars: typeof office.catEars === 'boolean' ? office.catEars : fallback.catEars,
@@ -197,10 +194,16 @@ function normalizeRoutingExpertPolicy(
       .map((item) => item.trim())
       .filter(Boolean))].slice(0, 100)
     : fallback.allowedProviderIds
-  const locality = value.locality === 'prefer_local' || value.locality === 'local_only'
+  const locality = value.locality === 'any' || value.locality === 'prefer_local' || value.locality === 'local_only'
     ? value.locality
-    : 'any'
-  return { allowedProviderIds, locality }
+    : fallback.locality
+  const normalizeList = (raw: unknown, fallbackValue: string[] | undefined): string[] => Array.isArray(raw)
+    ? [...new Set(raw.filter((item): item is string => typeof item === 'string').map((item) => item.trim().toLowerCase()).filter(Boolean))].slice(0, 100)
+    : [...(fallbackValue ?? [])]
+  return { allowedProviderIds, locality,
+    allowedRegions: normalizeList(value.allowedRegions, fallback.allowedRegions),
+    allowedDomains: normalizeList(value.allowedDomains, fallback.allowedDomains),
+    requiredPermissions: normalizeList(value.requiredPermissions, fallback.requiredPermissions) }
 }
 
 function normalizeDefaultTaskStrategy(
@@ -208,13 +211,6 @@ function normalizeDefaultTaskStrategy(
   fallback: AppSettings['defaultTaskStrategy']
 ): AppSettings['defaultTaskStrategy'] {
   return raw === 'view' || raw === 'plan' || raw === 'execute' ? raw : fallback
-}
-
-function normalizeExperienceMode(
-  raw: unknown,
-  fallback: AppSettings['experienceMode']
-): AppSettings['experienceMode'] {
-  return raw === 'assistant' || raw === 'studio' || raw === 'video' ? raw : fallback
 }
 
 function normalizeProviderCircuitBreaker(
@@ -311,56 +307,53 @@ function settingsFile(): string {
   return join(app.getPath('userData'), 'settings.json')
 }
 
+export function normalizeSettingsDocument(document: RoutingSettingsDocument): AppSettings {
+  const { routingRuleSet: _mainOwnedRuleSet, ...publicDocument } = document
+  const persisted = publicDocument as Partial<AppSettings> & { _schemaVersion?: unknown; sandboxDockerImage?: unknown; chinaDockerRegistryMirror?: unknown }
+  const {
+    _schemaVersion: _schemaVersion,
+    sandboxMode,
+    sandboxDockerImage: _legacyDockerImage,
+    chinaDockerRegistryMirror: _legacyDockerRegistryMirror,
+    ...raw
+  } = persisted
+  return {
+    ...DEFAULTS,
+    ...raw,
+    ...normalizeBusinessLineSettings(raw),
+    driveMode: normalizeCaoGenDriveMode(raw.driveMode),
+    defaultTaskStrategy: normalizeDefaultTaskStrategy(raw.defaultTaskStrategy, DEFAULTS.defaultTaskStrategy),
+    experienceRecommendationDismissedId: normalizeRecommendationId(raw.experienceRecommendationDismissedId),
+    sandboxMode: normalizeSandboxMode(sandboxMode),
+    schedulerStrategy: normalizeSchedulerStrategy(raw.schedulerStrategy, DEFAULTS.schedulerStrategy),
+    modelRoutingRules: normalizeModelRoutingRules(raw.modelRoutingRules),
+    routingExpertPolicy: normalizeRoutingExpertPolicy(raw.routingExpertPolicy, DEFAULTS.routingExpertPolicy),
+    providerCircuitBreaker: normalizeProviderCircuitBreaker(
+      raw.providerCircuitBreaker,
+      DEFAULTS.providerCircuitBreaker
+    ),
+    permissionAllowlist: '',
+    permissionDenylist: '',
+    permissionTemporaryAllowlist: '',
+    allowedTools: '',
+    disallowedTools: '',
+    permissionRulesVersion: 2,
+    permissionRules: mergePermissionRules(
+      normalizePermissionRules(raw.permissionRules, false),
+      migrateLegacyPermissionRules(raw)
+    ),
+    // Legacy global grants are invalidated during migration. Scoped GUI grants
+    // are runtime capabilities and are never persisted in settings.json.
+    guiAutomationTemporaryGrantUntil: 0,
+    office: normalizeOffice(raw.office, DEFAULTS.office),
+    layout: normalizeLayout(raw.layout)
+  }
+}
+
 export function getSettings(): AppSettings {
   if (cache) return cache
   try {
-    const persisted = JSON.parse(readFileSync(settingsFile(), 'utf8')) as Partial<AppSettings> & {
-      _schemaVersion?: unknown
-      sandboxMode?: unknown
-      sandboxDockerImage?: unknown
-      chinaDockerRegistryMirror?: unknown
-    }
-    if (persisted._schemaVersion !== undefined && persisted._schemaVersion !== SETTINGS_SCHEMA_VERSION) {
-      throw new UnsupportedSettingsSchemaError(persisted._schemaVersion)
-    }
-    const {
-      _schemaVersion: _schemaVersion,
-      sandboxMode,
-      sandboxDockerImage: _legacyDockerImage,
-      chinaDockerRegistryMirror: _legacyDockerRegistryMirror,
-      ...raw
-    } = persisted
-    cache = {
-      ...DEFAULTS,
-      ...raw,
-      driveMode: normalizeCaoGenDriveMode(raw.driveMode),
-      defaultTaskStrategy: normalizeDefaultTaskStrategy(raw.defaultTaskStrategy, DEFAULTS.defaultTaskStrategy),
-      experienceMode: normalizeExperienceMode(raw.experienceMode, DEFAULTS.experienceMode),
-      experienceRecommendationDismissedId: normalizeRecommendationId(raw.experienceRecommendationDismissedId),
-      sandboxMode: normalizeSandboxMode(sandboxMode),
-      schedulerStrategy: normalizeSchedulerStrategy(raw.schedulerStrategy, DEFAULTS.schedulerStrategy),
-      modelRoutingRules: normalizeModelRoutingRules(raw.modelRoutingRules),
-      routingExpertPolicy: normalizeRoutingExpertPolicy(raw.routingExpertPolicy, DEFAULTS.routingExpertPolicy),
-      providerCircuitBreaker: normalizeProviderCircuitBreaker(
-        raw.providerCircuitBreaker,
-        DEFAULTS.providerCircuitBreaker
-      ),
-      permissionAllowlist: '',
-      permissionDenylist: '',
-      permissionTemporaryAllowlist: '',
-      allowedTools: '',
-      disallowedTools: '',
-      permissionRulesVersion: 2,
-      permissionRules: mergePermissionRules(
-        normalizePermissionRules(raw.permissionRules, false),
-        migrateLegacyPermissionRules(raw)
-      ),
-      // Legacy global grants are invalidated during migration. Scoped GUI grants
-      // are runtime capabilities and are never persisted in settings.json.
-      guiAutomationTemporaryGrantUntil: 0,
-      office: normalizeOffice(raw.office, DEFAULTS.office),
-      layout: normalizeLayout(raw.layout)
-    }
+    cache = normalizeSettingsDocument(readSettingsFileSnapshot(settingsFile()).document)
   } catch (error) {
     if (error instanceof UnsupportedSettingsSchemaError) throw error
     cache = {
@@ -375,7 +368,10 @@ export function getSettings(): AppSettings {
 }
 
 export function updateSettings(patch: Partial<AppSettings>): AppSettings {
-  const prev = getSettings()
+  validateBusinessLinePatch(patch)
+  const snapshot = readSettingsFileSnapshot(settingsFile())
+  assertOrdinaryRoutingPatchAllowed(snapshot.document, patch)
+  const prev = normalizeSettingsDocument(snapshot.document)
   const migratedLegacyRules = migrateLegacyPermissionRules(patch)
   const permissionRules = mergePermissionRules(
     patch.permissionRules === undefined ? prev.permissionRules : normalizePermissionRules(patch.permissionRules),
@@ -384,13 +380,11 @@ export function updateSettings(patch: Partial<AppSettings>): AppSettings {
   const next = {
     ...prev,
     ...patch,
+    ...mergeBusinessLineSettings(prev, patch),
     driveMode: patch.driveMode === undefined ? prev.driveMode : normalizeCaoGenDriveMode(patch.driveMode),
     defaultTaskStrategy: patch.defaultTaskStrategy === undefined
       ? prev.defaultTaskStrategy
       : normalizeDefaultTaskStrategy(patch.defaultTaskStrategy, prev.defaultTaskStrategy),
-    experienceMode: patch.experienceMode === undefined
-      ? prev.experienceMode
-      : normalizeExperienceMode(patch.experienceMode, prev.experienceMode),
     experienceRecommendationDismissedId: patch.experienceRecommendationDismissedId === undefined
       ? prev.experienceRecommendationDismissedId
       : normalizeRecommendationId(patch.experienceRecommendationDismissedId),
@@ -418,8 +412,11 @@ export function updateSettings(patch: Partial<AppSettings>): AppSettings {
     layout: normalizeLayout({ ...prev.layout, ...(patch.layout ?? {}) })
   }
   try {
-    writeSettingsAtomic(settingsFile(), { _schemaVersion: SETTINGS_SCHEMA_VERSION, ...next })
+    const document = preserveRoutingSettingsDomain({ authoritative: snapshot.document, requestedPatch: patch, candidate: { _schemaVersion: SETTINGS_SCHEMA_VERSION, ...next } })
+    const receipt = compareAndWriteSettingsFile(settingsFile(), { expectedToken: snapshot.token, document })
+    if (receipt.status === 'conflict') throw new Error('Settings changed before save; reload before retrying.')
   } catch (err) {
+    cache = null
     console.error('[agent-desk] 保存设置失败:', err)
     throw err
   }
@@ -433,43 +430,7 @@ function normalizeRecommendationId(value: unknown): string {
   return normalized.length <= 500 && /^[A-Za-z0-9:._-]*$/.test(normalized) ? normalized : ''
 }
 
-class UnsupportedSettingsSchemaError extends Error {
-  constructor(version: unknown) {
-    super(`Unsupported settings schema version: ${String(version)}`)
-    this.name = 'UnsupportedSettingsSchemaError'
-  }
-}
-
-function writeSettingsAtomic(file: string, value: Record<string, unknown>): void {
-  const directory = dirname(file)
-  const temporary = join(directory, `.settings.${process.pid}.${randomUUID()}.tmp`)
-  let descriptor: number | undefined
-  try {
-    mkdirSync(directory, { recursive: true })
-    descriptor = openSync(temporary, 'wx', 0o600)
-    writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
-    fsyncSync(descriptor)
-    closeSync(descriptor)
-    descriptor = undefined
-    renameSync(temporary, file)
-    syncSettingsDirectory(directory)
-  } catch (error) {
-    if (descriptor !== undefined) {
-      try { closeSync(descriptor) } catch { /* best effort */ }
-    }
-    if (existsSync(temporary)) {
-      try { unlinkSync(temporary) } catch { /* canonical settings remain authoritative */ }
-    }
-    throw error
-  }
-}
-
-function syncSettingsDirectory(directory: string): void {
-  if (process.platform === 'win32') return
-  try {
-    const descriptor = openSync(directory, 'r')
-    try { fsyncSync(descriptor) } finally { closeSync(descriptor) }
-  } catch {
-    // The file is fsynced; some filesystems reject directory fsync.
-  }
+/** Main-only boundary for the versioned rule service; no renderer mutation is registered here. */
+export function getRoutingSettingsBoundary() {
+  return createSettingsRoutingBoundary({ file: settingsFile, invalidateCache: () => { cache = null } })
 }

@@ -21,6 +21,10 @@ import type {
   pickProviderModelFailoverTarget
 } from '../scheduler'
 import { synchronizeProviderReliabilityPolicies } from '../providerHealth'
+import { assertNativeRecoveryTargetAllowed, evaluateNativeRecoveryTarget, filterNativeRecoveryModels } from '../model/native-recovery-eligibility'
+import { frozenRetryAllows, type NativeSessionRecoveryContext } from '../model/native-recovery-session'
+import type { RoutingRetryReason } from '../../shared/routing-policy-types'
+import { ModelRouteError } from '../model/model-route-error'
 
 type RecoveryEvent = Extract<AgentEvent, {
   kind: 'provider-key-failover' | 'provider-model-failover' | 'failover'
@@ -48,6 +52,7 @@ export interface AnthropicRecoveryResult {
 }
 
 export interface AnthropicRecoveryInput {
+  recovery: NativeSessionRecoveryContext
   current: AnthropicMessagesTarget
   failure: FailureClass
   settings: RecoverySettings
@@ -61,6 +66,7 @@ export interface AnthropicRecoveryInput {
   pickFailoverTarget: typeof pickFailoverTarget
   pickProviderModelFailoverTarget: typeof pickProviderModelFailoverTarget
   engineKind?: EngineKind
+  nativeRetryReason?: RoutingRetryReason
 }
 
 export function createAnthropicRecoveryState(providerId?: string): AnthropicRecoveryState {
@@ -86,6 +92,9 @@ export function recoverAnthropicTarget(input: AnthropicRecoveryInput): Anthropic
   const reliability = provider?.advancedConfig?.reliability
   if (!isAnthropicRecoveryEnabled(input.current.providerId, input.settings.failoverEnabled, input.providers)) return undefined
   if (reliability?.maxRetries !== undefined && input.state.attempts >= reliability.maxRetries) return undefined
+  if (input.recovery.frozenRetry && !input.nativeRetryReason) return undefined
+  if (input.recovery.frozenRetry && input.recovery.frozenRetry.effectivePolicy.failure.kind !== 'pause'
+    && input.state.attempts >= input.recovery.frozenRetry.effectivePolicy.failure.maxAdditionalAttempts) return undefined
   const recovery = recoverProviderKey(input) ?? recoverProviderModel(input) ?? recoverProvider(input)
   if (recovery) input.state.attempts += 1
   return recovery
@@ -102,6 +111,7 @@ export function isAnthropicRecoveryEnabled(
 
 function recoverProviderKey(input: AnthropicRecoveryInput): AnthropicRecoveryResult | undefined {
   const { current, failure, state } = input
+  if (input.recovery.frozenRetry && !frozenRetryAllows({ recovery: input.recovery, providerId: current.providerId, model: current.model, protocol: recoveryProtocol(input), attempt: state.attempts + 1, refusal: input.nativeRetryReason ? { outcome: input.nativeRetryReason } : undefined })) return undefined
   if (!current.keyId || !input.canRotateProviderKey(failure)) return undefined
   const triedKeyIds = attemptedValues(state.triedProviderKeys, current.providerId)
   const rotation = input.rotateProviderKey({
@@ -115,6 +125,7 @@ function recoverProviderKey(input: AnthropicRecoveryInput): AnthropicRecoveryRes
   try {
     target = input.resolveTarget({ providerId: current.providerId, model: current.model })
     assertRoutingExpertTargetAllowed(target.providerId, target.baseUrl, input.settings.routingExpertPolicy)
+    assertRecoveryTarget(input, target)
   } catch {
     triedKeyIds.add(rotation.toKeyId)
     return undefined
@@ -146,7 +157,7 @@ function recoverProviderModel(input: AnthropicRecoveryInput): AnthropicRecoveryR
   const provider = providers.find((candidate) =>
     candidate.id === current.providerId && candidate.engine === (input.engineKind ?? 'anthropic') && candidate.hasToken
   )
-  if (!provider || !providerAllowedByRoutingExpertPolicy(provider, input.settings.routingExpertPolicy)) return undefined
+  if (!provider || !recoveryProviderAllowed(input, provider)) return undefined
   const models = resolvableModels(input, provider)
   const selected = input.pickProviderModelFailoverTarget({
     providerId: current.providerId,
@@ -161,9 +172,11 @@ function recoverProviderModel(input: AnthropicRecoveryInput): AnthropicRecoveryR
   try {
     target = input.resolveTarget({ providerId: current.providerId, model: selected.model })
     assertRoutingExpertTargetAllowed(target.providerId, target.baseUrl, input.settings.routingExpertPolicy)
+    assertRecoveryTarget(input, target)
   } catch {
     return undefined
   }
+  if (input.recovery.frozenRetry && !frozenRetryAllows({ recovery: input.recovery, providerId: target.providerId, model: target.model, protocol: recoveryProtocol(input), attempt: state.attempts + 1, refusal: input.nativeRetryReason ? { outcome: input.nativeRetryReason } : undefined })) return undefined
   const triedModels = attemptedValues(state.triedProviderModels, current.providerId)
   if (target.model === current.model || triedModels.has(target.model)) return undefined
   rememberAnthropicRecoveryTarget(state, target)
@@ -189,13 +202,14 @@ function recoverProvider(input: AnthropicRecoveryInput): AnthropicRecoveryResult
   if (!failure.switchable) return undefined
   const candidates = providers
     .filter((provider) => provider.engine === (input.engineKind ?? 'anthropic') && provider.hasToken)
-    .filter((provider) => providerAllowedByRoutingExpertPolicy(provider, input.settings.routingExpertPolicy))
+    .filter((provider) => recoveryProviderAllowed(input, provider))
     .filter((provider) => providerAllowedByOutboundContext(
       input.outboundContext,
       provider,
       current.model
     ))
-    .map((provider) => ({ id: provider.id, name: provider.name, models: provider.models }))
+    .map((provider) => ({ id: provider.id, name: provider.name, models: resolvableModels(input, provider) }))
+    .filter((provider) => provider.models.length > 0)
   const selected = input.pickFailoverTarget({
     candidates,
     exclude: state.triedProviders,
@@ -209,9 +223,11 @@ function recoverProvider(input: AnthropicRecoveryInput): AnthropicRecoveryResult
   try {
     target = input.resolveTarget({ providerId: selected.providerId, model: selected.model })
     assertRoutingExpertTargetAllowed(target.providerId, target.baseUrl, input.settings.routingExpertPolicy)
+    assertRecoveryTarget(input, target)
   } catch {
     return undefined
   }
+  if (input.recovery.frozenRetry && !frozenRetryAllows({ recovery: input.recovery, providerId: target.providerId, model: target.model, protocol: recoveryProtocol(input), attempt: state.attempts + 1, refusal: input.nativeRetryReason ? { outcome: input.nativeRetryReason } : undefined })) return undefined
   input.meta.providerId = target.providerId
   if (input.meta.model !== AUTO_MODEL) input.meta.model = target.model
   rememberAnthropicRecoveryTarget(state, target)
@@ -233,7 +249,7 @@ function recoverProvider(input: AnthropicRecoveryInput): AnthropicRecoveryResult
 }
 
 function resolvableModels(input: AnthropicRecoveryInput, provider: ProviderView): string[] {
-  return provider.models
+  return filterNativeRecoveryModels({ ...input.recovery, provider })
     .map((model) => {
       try {
         return input.resolveTarget({ providerId: provider.id, model }).model
@@ -241,7 +257,27 @@ function resolvableModels(input: AnthropicRecoveryInput, provider: ProviderView)
         return ''
       }
     })
-    .filter((model) => model && providerAllowedByOutboundContext(input.outboundContext, provider, model))
+    .filter((model) => model && providerAllowedByOutboundContext(input.outboundContext, provider, model)
+      && evaluateNativeRecoveryTarget({ ...input.recovery, provider, model }).allowed
+      && (!input.recovery.frozenRetry || frozenRetryAllows({ recovery: input.recovery, providerId: provider.id,
+        model, protocol: recoveryProtocol(input), attempt: input.state.attempts + 1,
+        refusal: input.nativeRetryReason ? { outcome: input.nativeRetryReason } : undefined })))
+}
+
+function recoveryProtocol(input: Pick<AnthropicRecoveryInput, 'engineKind'>): 'anthropic.messages' | 'google.generative-language' {
+  return input.engineKind === 'gemini' ? 'google.generative-language' : 'anthropic.messages'
+}
+
+function assertRecoveryTarget(input: AnthropicRecoveryInput, target: AnthropicMessagesTarget): void {
+  assertRoutingExpertTargetAllowed(target.providerId, target.baseUrl, input.recovery.initialExpertPolicy)
+  const provider = input.providers.find((item) => item.id === target.providerId)
+  if (!provider) throw new ModelRouteError('ROUTING_MANUAL_TARGET_UNAVAILABLE', '故障备用连接已不存在。')
+  assertNativeRecoveryTargetAllowed({ ...input.recovery, provider, model: target.model })
+}
+
+function recoveryProviderAllowed(input: AnthropicRecoveryInput, provider: ProviderView): boolean {
+  return providerAllowedByRoutingExpertPolicy(provider, input.settings.routingExpertPolicy)
+    && providerAllowedByRoutingExpertPolicy(provider, input.recovery.initialExpertPolicy)
 }
 
 function attemptedValues(store: Map<string, Set<string>>, providerId: string): Set<string> {

@@ -10,7 +10,6 @@ export const PLUGIN_REGISTRY_TRANSLATIONS = {
   pluginRegistryAllSources: { zh: '全部来源', en: 'All sources' },
   pluginRegistryProjectSource: { zh: '项目', en: 'Project' },
   pluginRegistryUserSource: { zh: '用户', en: 'User' },
-  pluginRegistryCodexSource: { zh: 'Codex', en: 'Codex' },
   pluginRegistryOtherSource: { zh: '其他', en: 'Other' },
   pluginRegistryEnabled: { zh: '已启用', en: 'Enabled' },
   pluginRegistryDisabled: { zh: '已停用', en: 'Disabled' },

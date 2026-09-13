@@ -11,11 +11,16 @@ import {
   WebGLRenderer
 } from 'three'
 
-let outcome: boolean | null = null
+let attempted = false
 
-export function prewarmOfficeGraphics(): boolean {
-  if (outcome !== null || typeof document === 'undefined') return outcome ?? false
-  outcome = false
+/**
+ * Compiles the small set of shaders used by the Office boot scene while the
+ * list view is idle. This work is intentionally scheduled before navigation;
+ * it must never run from the Office click handler.
+ */
+export function prepareOfficeGpu(): void {
+  if (attempted || typeof document === 'undefined') return
+  attempted = true
 
   try {
     const canvas = document.createElement('canvas')
@@ -53,9 +58,7 @@ export function prewarmOfficeGraphics(): boolean {
     standardMaterial.dispose()
     renderer.dispose()
     renderer.forceContextLoss()
-    outcome = true
   } catch {
     // Office still opens normally when WebGL is unavailable during background prefetch.
   }
-  return outcome
 }

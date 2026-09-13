@@ -234,18 +234,9 @@ export class ProjectPortfolioStore {
       const state = await this.read()
       const workspace = await openProjectWorkspaceStore(this.rootDir).then((store) => store.getState())
       assertExpected(state.revision, options)
-      const before = canonicalJson(state)
       const result = callback(state, workspace, now())
-      if (canonicalJson(state) === before) return clone(result)
       state.revision += 1
-      try {
-        await writeDurableFile(this.filePath, `${canonicalJson(state)}\n`, { mode: 0o600 })
-      } catch (error) {
-        // Publication may have succeeded before a directory fsync error surfaced.
-        // Force the next read to reconcile the canonical file instead of replaying cached state.
-        this.state = undefined
-        throw error
-      }
+      await writeDurableFile(this.filePath, `${canonicalJson(state)}\n`, { mode: 0o600 })
       this.state = state
       return clone(result)
     } finally {
@@ -404,19 +395,8 @@ export class ProjectPortfolioStore {
       assertProject(workspace, projectId, 'milestone')
       projectGoal(workspace, input.goalId, projectId, 'milestone')
       projectWorkItem(workspace, input.workItemId, projectId, 'milestone')
-      const milestoneId = optionalText(input.id, 'milestone id') ?? randomUUID()
-      const goalId = input.goalId ? requiredId(input.goalId, 'milestone goalId') : undefined
-      const workItemId = input.workItemId ? requiredId(input.workItemId, 'milestone workItemId') : undefined
-      const title = requiredText(input.title, 'milestone title')
-      const dueAt = validDate(input.dueAt, 'milestone dueAt')
-      const existing = state.milestones.find((candidate) => candidate.id === milestoneId)
-      if (existing) {
-        const sameIdentity = existing.projectId === projectId && existing.goalId === goalId &&
-          existing.workItemId === workItemId && existing.title === title && existing.dueAt === dueAt
-        if (sameIdentity) return existing
-        throw new Error(`Project milestone ${milestoneId} already exists with different content`)
-      }
-      const milestone: ProjectMilestone = { schemaVersion: PROJECT_PORTFOLIO_SCHEMA_VERSION, id: milestoneId, projectId, ...(goalId ? { goalId } : {}), ...(workItemId ? { workItemId } : {}), title, dueAt, status: 'planned', createdAt: at, updatedAt: at, revision: 1 }
+      const milestone: ProjectMilestone = { schemaVersion: PROJECT_PORTFOLIO_SCHEMA_VERSION, id: optionalText(input.id, 'milestone id') ?? randomUUID(), projectId, ...(input.goalId ? { goalId: requiredId(input.goalId, 'milestone goalId') } : {}), ...(input.workItemId ? { workItemId: requiredId(input.workItemId, 'milestone workItemId') } : {}), title: requiredText(input.title, 'milestone title'), dueAt: validDate(input.dueAt, 'milestone dueAt'), status: 'planned', createdAt: at, updatedAt: at, revision: 1 }
+      if (state.milestones.some((candidate) => candidate.id === milestone.id)) throw new Error(`Project milestone ${milestone.id} already exists`)
       state.milestones.push(milestone)
       return milestone
     })

@@ -40,10 +40,6 @@ interface StoredNotificationConnector {
   updatedAt: number
 }
 
-interface RetiredWeComConnector extends Omit<StoredNotificationConnector, 'channel'> {
-  channel: 'wecom'
-}
-
 export interface ResolvedNotificationConnector extends NotificationConnectorView {
   webhookUrl: string
   secret?: string
@@ -51,7 +47,6 @@ export interface ResolvedNotificationConnector extends NotificationConnectorView
 
 const credentialBroker = new ProviderCredentialBroker(protectedStorage)
 let cache: StoredNotificationConnector[] | null = null
-let retiredWeComCache: RetiredWeComConnector[] = []
 
 export function listNotificationConnectors(): NotificationConnectorView[] {
   return load().map(toView).sort((left, right) => Number(right.isDefault) - Number(left.isDefault) || left.name.localeCompare(right.name))
@@ -153,23 +148,16 @@ function load(): StoredNotificationConnector[] {
   const file = connectorsFile()
   if (!existsSync(file)) {
     cache = []
-    retiredWeComCache = []
     return cache
   }
   try {
     if (process.platform !== 'win32') chmodSync(file, 0o600)
     const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown
-    if (!Array.isArray(parsed)) {
+    if (!Array.isArray(parsed) || !parsed.every(isStoredConnector)) {
       throw new Error('连接器记录格式无效')
     }
-    const retired = parsed.filter(isRetiredWeComConnector)
-    const supported = parsed.filter((item) => !isRetiredWeComConnector(item))
-    if (!supported.every(isStoredConnector)) throw new Error('连接器记录格式无效')
-    if (retired.length + supported.length !== parsed.length) throw new Error('连接器记录格式无效')
-    assertConnectorSet(supported)
-    assertUniqueConnectorIds([...supported, ...retired])
-    cache = cloneConnectors(supported)
-    retiredWeComCache = cloneRetiredWeComConnectors(retired)
+    assertConnectorSet(parsed)
+    cache = cloneConnectors(parsed)
   } catch (error) {
     throw new Error(`通知连接器存储损坏，已拒绝覆盖:${errorText(error)}`)
   }
@@ -178,14 +166,13 @@ function load(): StoredNotificationConnector[] {
 
 function persist(value: StoredNotificationConnector[]): void {
   assertConnectorSet(value)
-  assertUniqueConnectorIds([...value, ...retiredWeComCache])
   const file = connectorsFile()
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
   const temp = `${file}.tmp-${process.pid}-${randomUUID()}`
   try {
     const fd = openSync(temp, 'wx', 0o600)
     try {
-      writeFileSync(fd, `${JSON.stringify([...retiredWeComCache, ...value], null, 2)}\n`, 'utf8')
+      writeFileSync(fd, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
       fsyncSync(fd)
     } finally {
       closeSync(fd)
@@ -227,14 +214,6 @@ function toView(stored: StoredNotificationConnector): NotificationConnectorView 
 }
 
 function cloneConnectors(value: StoredNotificationConnector[]): StoredNotificationConnector[] {
-  return value.map((item) => ({
-    ...item,
-    webhook: { ...item.webhook },
-    ...(item.secret ? { secret: { ...item.secret } } : {})
-  }))
-}
-
-function cloneRetiredWeComConnectors(value: RetiredWeComConnector[]): RetiredWeComConnector[] {
   return value.map((item) => ({
     ...item,
     webhook: { ...item.webhook },
@@ -287,44 +266,19 @@ function ref(id: string, keyId: 'webhook' | 'secret'): { providerId: string; key
 }
 
 function isStoredConnector(value: unknown): value is StoredNotificationConnector {
-  return isStoredConnectorShape(value) && (value.channel === 'feishu' || value.channel === 'dingtalk')
-}
-
-function isRetiredWeComConnector(value: unknown): value is RetiredWeComConnector {
-  return isStoredConnectorShape(value) && value.channel === 'wecom'
-}
-
-function isStoredConnectorShape(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const record = value as Record<string, unknown>
-  return hasStoredConnectorIdentity(record) &&
-    hasStoredConnectorCredentials(record) &&
-    hasStoredConnectorRevision(record) &&
-    hasStoredConnectorTimestamps(record)
-}
-
-function hasStoredConnectorIdentity(record: Record<string, unknown>): boolean {
   return record.schemaVersion === 1 &&
     safeStoredText(record.id, 200) &&
     safeStoredText(record.name, 80) &&
-    typeof record.channel === 'string' &&
+    (record.channel === 'feishu' || record.channel === 'dingtalk') &&
     typeof record.enabled === 'boolean' &&
-    typeof record.isDefault === 'boolean'
-}
-
-function hasStoredConnectorCredentials(record: Record<string, unknown>): boolean {
-  return isCredentialRecord(record.webhook) &&
+    typeof record.isDefault === 'boolean' &&
+    isCredentialRecord(record.webhook) &&
     (record.secret === undefined || isCredentialRecord(record.secret)) &&
-    typeof record.webhookDigest === 'string' &&
-    /^[a-f0-9]{64}$/.test(record.webhookDigest)
-}
-
-function hasStoredConnectorRevision(record: Record<string, unknown>): boolean {
-  return typeof record.revision === 'number' && Number.isSafeInteger(record.revision) && record.revision >= 1
-}
-
-function hasStoredConnectorTimestamps(record: Record<string, unknown>): boolean {
-  return typeof record.createdAt === 'number' && Number.isFinite(record.createdAt) && record.createdAt >= 0 &&
+    typeof record.webhookDigest === 'string' && /^[a-f0-9]{64}$/.test(record.webhookDigest) &&
+    typeof record.revision === 'number' && Number.isSafeInteger(record.revision) && record.revision >= 1 &&
+    typeof record.createdAt === 'number' && Number.isFinite(record.createdAt) && record.createdAt >= 0 &&
     typeof record.updatedAt === 'number' && Number.isFinite(record.updatedAt) && record.updatedAt >= record.createdAt
 }
 
@@ -348,14 +302,6 @@ function assertConnectorSet(value: StoredNotificationConnector[]): void {
     if (!item.isDefault) continue
     if (defaults.has(item.channel)) throw new Error(`通知渠道存在多个默认连接器:${item.channel}`)
     defaults.add(item.channel)
-  }
-}
-
-function assertUniqueConnectorIds(value: Array<StoredNotificationConnector | RetiredWeComConnector>): void {
-  const ids = new Set<string>()
-  for (const item of value) {
-    if (ids.has(item.id)) throw new Error(`通知连接器 ID 重复:${item.id}`)
-    ids.add(item.id)
   }
 }
 

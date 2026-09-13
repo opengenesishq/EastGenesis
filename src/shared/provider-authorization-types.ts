@@ -1,6 +1,6 @@
 import type { ProviderCredentialRoutingMode, ProviderCredentialStorage, ProviderView } from './types'
 
-export type ProviderAuthorizationService = 'codex-oauth' | 'github-copilot' | 'xai-oauth'
+export type ProviderAuthorizationService = 'xai-oauth'
 
 export type ProviderAuthorizationMethod = 'api-key' | 'oauth' | 'device-code' | 'none'
 export type ProviderAuthorizationStatus = 'unconfigured' | 'authorized' | 'expired' | 'revoked' | 'error'

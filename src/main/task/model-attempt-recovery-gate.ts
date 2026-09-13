@@ -30,6 +30,12 @@ export class ModelAttemptRecoveryGate {
   private readonly replayAllowances = new Map<string, number>()
   private rootDir: string | undefined
 
+  async refreshBeforeSend(_sessionId: string): Promise<void> {
+    if (!this.rootDir) return
+    const state = await this.readState({}, this.rootDir)
+    this.replaceAll(state.reconciliations, state.retryAuthorizations)
+  }
+
   async initialize(rootDir: string): Promise<PersistedModelAttemptRecoveryState> {
     this.rootDir = rootDir
     const state = await reconcilePersistedModelAttemptRecoveryState(rootDir)

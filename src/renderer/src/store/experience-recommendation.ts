@@ -1,3 +1,4 @@
+import { resolveBusinessLineId } from '../../../shared/business-line-types'
 import type { AppSettings, HistoryEntry, SessionMeta } from '../../../shared/types'
 
 export interface ExperiencePreferenceRecommendation {
@@ -16,7 +17,7 @@ export function recommendExperiencePreferences(input: {
   history: readonly HistoryEntry[]
   projectCount: number
 }): ExperiencePreferenceRecommendation | undefined {
-  const records = uniqueTaskRecords(input.sessions, input.history).slice(0, 40)
+  const records = uniqueTaskRecords(input.sessions, input.history).filter((record) => ['assistant', 'studio'].includes(resolveBusinessLineId(record))).slice(0, 40)
   const projectTaskCount = records.filter(isProjectTask).length
   const conversationTaskCount = records.filter((record) => !isProjectTask(record)).length
   const studioScore = records.reduce((score, record) => score + recordScore(record), 0)
@@ -69,18 +70,13 @@ function taskTimestamp(record: SessionMeta | HistoryEntry): number {
 }
 
 function isProjectTask(record: SessionMeta | HistoryEntry): boolean {
-  return Boolean(record.workspaceId || record.goalId || record.workItemId)
+  return resolveBusinessLineId(record) === 'studio'
 }
 
 function recordScore(record: SessionMeta | HistoryEntry): number {
-  let score = 0
-  if (record.experienceModeOverride === 'studio') score += 4
-  if (record.experienceModeOverride === 'assistant') score -= 4
-  if (isProjectTask(record)) score += 2
-  if (record.goalId || record.workItemId) score += 1
-  if (record.taskStrategy === 'plan') score += 1
-  if (record.unassigned && !isProjectTask(record)) score -= 2
-  return score
+  // Managed personal tasks also own Goals and WorkItems; those IDs are not project preference signals.
+  if (!isProjectTask(record)) return -4
+  return 4 + (record.taskStrategy === 'plan' ? 1 : 0)
 }
 
 function recommendedMode(

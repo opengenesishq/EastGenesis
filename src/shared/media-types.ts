@@ -1,3 +1,7 @@
+import type { VideoStoryboardDraft } from './video-storyboard-types'
+import type { BusinessLineBinding } from './business-line-types'
+import type { MediaExecutionBinding, MediaRoutingPreference, ProviderMediaPricing } from './media-routing-types'
+export type { MediaExecutionBinding, MediaRouteDecision, MediaRoutingPreference, ProviderMediaPricing } from './media-routing-types'
 export const MEDIA_SCHEMA_VERSION = 12 as const
 
 export type MediaCapability = 'image' | 'video' | 'tts' | 'synthesis'
@@ -10,6 +14,17 @@ export type MediaOperation =
   | 'speech.synthesize'
   | 'speech.voice-clone'
   | 'media.compose'
+
+/** Main-owned evidence for a media capability. Declarations alone stay unknown. */
+export type MediaCapabilityVerificationState = 'verified' | 'failed' | 'unknown'
+export interface MediaCapabilityVerification {
+  state: MediaCapabilityVerificationState
+  /** Operations covered by the bounded verification, when known. */
+  operations?: MediaOperation[]
+  verifiedAt?: number
+  reason?: string
+}
+
 export interface MediaProviderProfile {
   schemaVersion: typeof MEDIA_SCHEMA_VERSION
   id: string
@@ -35,6 +50,9 @@ export interface MediaProviderProfile {
   downloadPathTemplate?: string
   cancelPathTemplate?: string
   estimatedCostUsd?: number
+  mediaPricing?: ProviderMediaPricing
+  verification?: MediaCapabilityVerification
+  source?: 'manual' | 'provider-catalog'
   credentialRef?: string
   enabled: boolean
   createdAt: number
@@ -102,7 +120,7 @@ export interface MediaGenerationParameters {
 export interface MediaCostRecord {
   schemaVersion: typeof MEDIA_SCHEMA_VERSION
   currency: 'USD'
-  estimatedUsd: number
+  estimatedUsd?: number
   actualUsd?: number
   status: 'estimated' | 'settled' | 'unavailable'
   source: 'non_billable_local' | 'mock_zero' | 'catalog_estimate' | 'provider_reported'
@@ -309,7 +327,9 @@ export interface VideoEpisode {
   updatedAt: number
 }
 
-export interface VideoProduction {
+export interface VideoProduction extends BusinessLineBinding {
+  /** Immutable initial request fingerprint, retained across later production revisions. */
+  creationRequestDigest?: string
   schemaVersion: typeof MEDIA_SCHEMA_VERSION
   id: string
   projectId: string
@@ -364,7 +384,9 @@ export interface MediaRemoteJobObservation {
   downloadTotalBytes?: number
 }
 
-export interface MediaJobRecord {
+export interface MediaJobRecord extends BusinessLineBinding {
+  agentOrigin?: import('./media-agent-types').MediaAgentOrigin
+  budgetReservationId?: string
   schemaVersion: typeof MEDIA_SCHEMA_VERSION
   id: string
   projectId: string
@@ -383,6 +405,7 @@ export interface MediaJobRecord {
   providerId: string
   mediaProviderId?: string
   providerMode: 'mock' | 'remote'
+  executionBinding?: MediaExecutionBinding
   externalJobId: string
   providerExternalJobId?: string
   idempotencyKey: string
@@ -455,6 +478,7 @@ export interface MediaProviderProfileInput {
   downloadPathTemplate?: string
   cancelPathTemplate?: string
   estimatedCostUsd?: number
+  verification?: MediaCapabilityVerification
   enabled?: boolean
 }
 
@@ -462,17 +486,20 @@ export interface MediaProviderProfileDeleteInput {
   id: string
 }
 
-export interface MediaProductionInput {
+export interface MediaProductionInput extends BusinessLineBinding {
   id?: string
   projectId: string
   title: string
   script: string
   autoStructure?: boolean
+  storyboardDraft?: VideoStoryboardDraft
 }
 
 export interface MediaProductionRevisionInput {
   productionId: string
   script: string
+  storyboardDraft?: VideoStoryboardDraft
+  expectedRevision?: number
 }
 
 export interface MediaShotInput {
@@ -684,26 +711,6 @@ export interface MediaCompositionResult {
   cost: MediaCostRecord
 }
 
-export interface MediaExportInput {
-  projectId: string
-  productionId: string
-  assetId?: string
-  /** Main-process callers may omit this to open the native Save dialog. */
-  destinationPath?: string
-}
-
-export interface MediaExportResult {
-  canceled: boolean
-  filePath?: string
-  sourceArtifactId?: string
-  artifactId?: string
-  evidenceId?: string
-  acceptanceId?: string
-  digest?: string
-  sizeBytes?: number
-  mediaType?: string
-}
-
 export interface MediaFfmpegInfo {
   available: boolean
   version?: string
@@ -712,7 +719,7 @@ export interface MediaFfmpegInfo {
   binaryDigest?: string
 }
 
-export interface MediaJobInput {
+export interface MediaJobInput extends BusinessLineBinding {
   projectId: string
   productionId: string
   shotId?: string
@@ -728,6 +735,7 @@ export interface MediaJobInput {
   voice?: string
   parameters?: MediaGenerationParameters
   mockScenario?: MediaMockScenario
+  routingPreference?: MediaRoutingPreference
 }
 
 export interface MediaApi {
@@ -758,7 +766,6 @@ export interface MediaApi {
   bindMediaAsset(input: MediaAssetBindingInput): Promise<MediaAssetBinding>
   setMediaAdoption(input: MediaAdoptionInput): Promise<VideoProduction>
   composeMediaProduction(input: MediaCompositionInput): Promise<MediaCompositionResult>
-  exportMediaProduction(input: MediaExportInput): Promise<MediaExportResult>
   submitMediaJob(input: MediaJobInput): Promise<MediaJobRecord>
   advanceMediaJob(jobId: string): Promise<MediaJobRecord>
   reconcileMediaJob(jobId: string): Promise<MediaJobRecord>

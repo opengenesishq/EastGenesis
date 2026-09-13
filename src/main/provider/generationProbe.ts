@@ -9,6 +9,7 @@ import type {
 } from '../../shared/types'
 import { inspectProviderBaseUrl } from '../providerCredentialBroker'
 import { openAiEndpoint } from './openai-provider-utils'
+import { validateGenerationProbeResponse } from './generationProbeResponse'
 
 export interface ProviderGenerationProbeCredentials {
   headers: Record<string, string>
@@ -50,6 +51,7 @@ export async function executeProviderGenerationProbe(
   let status: number | undefined
   let outcome: ProviderGenerationProbeOutcome
   try {
+    const signal = AbortSignal.timeout(20_000)
     const response = await fetchImpl(request.url, {
       method: 'POST',
       headers: {
@@ -59,11 +61,15 @@ export async function executeProviderGenerationProbe(
         ...credentials.headers
       },
       body: JSON.stringify(request.body),
-      signal: AbortSignal.timeout(20_000)
+      signal
     })
     status = response.status
     outcome = classifyStatus(response.status)
-    await response.body?.cancel().catch(() => undefined)
+    if (outcome === 'success') {
+      if (!await validateGenerationProbeResponse(response, protocol, signal)) outcome = 'invalid_response'
+    } else {
+      void response.body?.cancel().catch(() => undefined)
+    }
   } catch {
     outcome = 'network'
   }
@@ -79,6 +85,7 @@ export async function executeProviderGenerationProbe(
     outcome,
     status,
     latencyMs: Date.now() - startedAt,
+    ...(outcome === 'success' ? { responseValidation: 'protocol-json-v1' as const } : {}),
     billableRequest: true
   }
 }

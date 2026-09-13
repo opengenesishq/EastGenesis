@@ -1,3 +1,6 @@
+import { ACADEMY_COURTYARD_SLOTS } from './ming/academyLayout'
+import { PALACE_WORLD_LAYOUT } from './palace/palaceWorldLayout'
+
 export type ControlRoomVector = [number, number, number]
 
 export interface ControlRoomZoneLayout {
@@ -9,43 +12,24 @@ export interface ControlRoomZoneLayout {
   cameraTarget: ControlRoomVector
 }
 
+export function courtyardZoneLayout(station: ControlRoomVector): ControlRoomZoneLayout {
+  const [x, , z] = station
+  return { station, approach: [x + (x < 0 ? 1.8 : -1.8), 0, z],
+    lookAt: [x, 1.0, z], hit: [x, 1.4, z],
+    cameraPosition: [x + (x < 0 ? 8 : -8), 10, z + 13], cameraTarget: [x, 1.3, z - 3] }
+}
+
 export const CONTROL_ROOM_LAYOUT = {
-  overview: {
-    position: [0.2, 7.1, 16.8] as ControlRoomVector,
-    target: [0, 0.75, 0.15] as ControlRoomVector,
-    fov: 48
-  },
-  zoneOverview: {
-    position: [0, 6.35, 15.8] as ControlRoomVector,
-    target: [0, 0.92, 0.1] as ControlRoomVector
-  },
-  assistant: {
-    station: [-6.25, 0, 1.75],
-    approach: [-4.82, 0, 1.75],
-    lookAt: [-6.25, 0.95, 1.75],
-    hit: [-6.25, 1.35, 1.75],
-    cameraPosition: [-2.85, 3.35, 6.25],
-    cameraTarget: [-6.15, 1.0, 1.68]
-  } satisfies ControlRoomZoneLayout,
-  project: {
-    station: [0, 0, -6.15],
-    approach: [0, 0, -4.72],
-    lookAt: [0, 1.15, -6.15],
-    hit: [-1.55, 2.12, -6.15],
-    cameraPosition: [0, 3.65, -1.55],
-    cameraTarget: [0, 1.15, -6.12]
-  } satisfies ControlRoomZoneLayout,
-  video: {
-    station: [6.25, 0, 1.75],
-    approach: [4.82, 0, 1.75],
-    lookAt: [6.25, 1.0, 1.75],
-    hit: [6.25, 1.4, 1.75],
-    cameraPosition: [2.85, 3.35, 6.25],
-    cameraTarget: [6.15, 1.0, 1.68]
-  } satisfies ControlRoomZoneLayout,
-  command: [0, 0, 4.55] as ControlRoomVector,
-  approval: [2.45, 0, 4.55] as ControlRoomVector,
-  approvalApproach: [2.45, 0, 3.35] as ControlRoomVector,
-  artifact: [-8.35, 0, -4.55] as ControlRoomVector,
-  infrastructure: [8.35, 0, -4.55] as ControlRoomVector
+  overview: PALACE_WORLD_LAYOUT.workingCamera,
+  zoneOverview: PALACE_WORLD_LAYOUT.palaceCamera,
+  assistant: courtyardZoneLayout(ACADEMY_COURTYARD_SLOTS[0]),
+  project: courtyardZoneLayout(ACADEMY_COURTYARD_SLOTS[1]),
+  video: courtyardZoneLayout(ACADEMY_COURTYARD_SLOTS[2]),
+  command: PALACE_WORLD_LAYOUT.command,
+  plan: PALACE_WORLD_LAYOUT.plan,
+  approval: PALACE_WORLD_LAYOUT.approval,
+  approvalApproach: [13, 0, 7.4] as ControlRoomVector,
+  artifact: PALACE_WORLD_LAYOUT.artifact,
+  recovery: PALACE_WORLD_LAYOUT.recovery,
+  infrastructure: PALACE_WORLD_LAYOUT.infrastructure
 }

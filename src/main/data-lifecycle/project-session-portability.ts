@@ -18,6 +18,7 @@ import {
   activeSessionRegistryDocument
 } from '../active-session-registry-format'
 import { writeDurableFileSync } from '../durable-file'
+import { runtimeContinuationReceiptPath } from '../session-runtime-continuation-path'
 import { historyEntriesFromDocument, historyStoreDocument } from '../history-store-format'
 import {
   sessionCreationJournalDocument,
@@ -210,6 +211,7 @@ function collectOwnedFiles(
       join(root, 'attachments', component),
       join(root, 'preview-annotations', component),
       join(root, 'task-audit', `${component}.jsonl`),
+      runtimeContinuationReceiptPath(root, sessionId),
       join(root, 'patches', `${component}.patch`)
     )
   }
@@ -260,6 +262,7 @@ function allowedPathRules(
     directories.push(`attachments/${component}/`, `preview-annotations/${component}/`)
     exact.add(`task-audit/${component}.jsonl`)
     exact.add(`patches/${component}.patch`)
+    exact.add(portablePath(runtimeContinuationReceiptPath('', sessionId)))
   }
   for (const sdkSessionId of sdkSessionIds) {
     const component = safeComponent(sdkSessionId, 'sdkSessionId')

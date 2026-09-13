@@ -329,11 +329,7 @@ export function verifyRecoveryUiAndTray(repoRoot) {
   assert(storeSource.includes('effectStatus: ev.effectStatus'), 'store should preserve live effect status')
   const toolCardSource = read('src/renderer/src/components/ToolCallCard.tsx')
   assert(toolCardSource.includes("effectStatus === 'waiting_reconciliation'"), 'tool card should distinguish reconciliation')
-  assert(
-    toolCardSource.includes("reconciliation: 'toolWaitingReconciliation'") &&
-      toolCardSource.includes('return t(labels[status])'),
-    'tool card should map reconciliation to its translated label'
-  )
+  assert(toolCardSource.includes("t('toolWaitingReconciliation')"), 'tool card should label reconciliation')
   const mainSource = read('src/main/index.ts')
   for (const marker of ['Tray', 'hasRunningSessions', 'win.hide()', 'updateTray']) {
     assert(mainSource.includes(marker), `main process missing tray marker ${marker}`)

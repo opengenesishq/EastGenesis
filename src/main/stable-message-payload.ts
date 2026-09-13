@@ -1,6 +1,8 @@
+import { normalizeOfficeIntent } from './office-revision/input'
 import type { DocumentAttachmentView, ImageAttachmentView, SendMessagePayload } from '../shared/types'
 
 export interface StableMessagePayload {
+  officeRevisionIntent?: SendMessagePayload['officeRevisionIntent']
   text: string
   images: ImageAttachmentView[]
   documents: DocumentAttachmentView[]
@@ -14,6 +16,7 @@ export function normalizeStableMessagePayload(input: string | SendMessagePayload
     text: typeof input.text === 'string' ? input.text.trim() : '',
     images: Array.isArray(input.images) ? input.images.filter(isImageAttachmentView) : [],
     documents: Array.isArray(input.documents) ? input.documents.filter(isDocumentAttachmentView) : [],
+    ...(input.officeRevisionIntent === undefined ? {} : { officeRevisionIntent: normalizeOfficeIntent(input.officeRevisionIntent) }),
     ...(messageId ? { messageId } : {})
   }
 }

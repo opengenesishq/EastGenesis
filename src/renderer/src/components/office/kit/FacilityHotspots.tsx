@@ -1,58 +1,12 @@
 import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
+import { Html } from '@react-three/drei'
 import type { MeshStandardMaterial } from 'three'
-import { CONTROL_ROOM_LAYOUT } from './controlRoomLayout'
+import { useOfficeReducedMotion } from '../useOfficeReducedMotion'
 
-export type OfficeFacilityKey = 'assistant' | 'project' | 'video'
-
-export interface OfficeFacilitySpec {
-  key: OfficeFacilityKey
-  labelKey: string
-  statusKey: string
-  accent: string
-  position: [number, number, number]
-  hit: [number, number, number]
-  cameraPosition: [number, number, number]
-  cameraTarget: [number, number, number]
-}
-
-export const OFFICE_FACILITY_OVERVIEW_CAMERA = {
-  position: CONTROL_ROOM_LAYOUT.zoneOverview.position as [number, number, number],
-  target: CONTROL_ROOM_LAYOUT.zoneOverview.target as [number, number, number]
-}
-
-export const OFFICE_FACILITY_SPECS: OfficeFacilitySpec[] = [
-  {
-    key: 'assistant',
-    labelKey: 'officeZoneAssistant',
-    statusKey: 'officeZoneLive',
-    accent: '#8fb8c6',
-    position: CONTROL_ROOM_LAYOUT.assistant.station,
-    hit: CONTROL_ROOM_LAYOUT.assistant.hit,
-    cameraPosition: CONTROL_ROOM_LAYOUT.assistant.cameraPosition,
-    cameraTarget: CONTROL_ROOM_LAYOUT.assistant.cameraTarget
-  },
-  {
-    key: 'project',
-    labelKey: 'officeZoneProject',
-    statusKey: 'officeZoneLive',
-    accent: '#8ba88f',
-    position: CONTROL_ROOM_LAYOUT.project.station,
-    hit: CONTROL_ROOM_LAYOUT.project.hit,
-    cameraPosition: CONTROL_ROOM_LAYOUT.project.cameraPosition,
-    cameraTarget: CONTROL_ROOM_LAYOUT.project.cameraTarget
-  },
-  {
-    key: 'video',
-    labelKey: 'officeZoneVideo',
-    statusKey: 'officeZoneLive',
-    accent: '#c39b73',
-    position: CONTROL_ROOM_LAYOUT.video.station,
-    hit: CONTROL_ROOM_LAYOUT.video.hit,
-    cameraPosition: CONTROL_ROOM_LAYOUT.video.cameraPosition,
-    cameraTarget: CONTROL_ROOM_LAYOUT.video.cameraTarget
-  }
-]
+export { OFFICE_FACILITY_OVERVIEW_CAMERA, OFFICE_FACILITY_SPECS } from './facilityCatalog'
+export type { OfficeFacilityKey, OfficeFacilitySpec } from './facilityCatalog'
+import type { OfficeFacilityKey, OfficeFacilitySpec } from './facilityCatalog'
 
 interface FacilityHotspotsProps {
   specs: OfficeFacilitySpec[]
@@ -74,9 +28,10 @@ function FacilityHotspot({
 }): React.JSX.Element {
   const pulseRef = useRef<MeshStandardMaterial>(null)
   const ringRef = useRef<MeshStandardMaterial>(null)
+  const reducedMotion = useOfficeReducedMotion()
 
   useFrame((state) => {
-    const t = state.clock.getElapsedTime()
+    const t = reducedMotion ? 0 : state.clock.getElapsedTime()
     if (pulseRef.current) {
       pulseRef.current.emissiveIntensity = (active ? 0.24 : 0.08) + Math.sin(t * 2.4) * (active ? 0.05 : 0.02)
       pulseRef.current.opacity = (active ? 0.36 : 0.12) + Math.sin(t * 2.1) * 0.025
@@ -103,6 +58,12 @@ function FacilityHotspot({
 
   return (
     <group position={spec.position} {...interactionProps}>
+      {spec.displayName && <Html position={[0, 2.02, -0.35]} center>
+        <button className="office-domain-marker" aria-pressed={active} disabled={!interactive}
+          data-office-business-facility={spec.key}
+          data-office-courtyard-template="peer-court-v1" title={spec.displayName}
+          onClick={() => onSelect(spec.key)}>{spec.displayName}</button>
+      </Html>}
       <mesh position={[0, 0.024, 0]} receiveShadow>
         <boxGeometry args={[0.82, 0.012, 0.48]} />
         <meshStandardMaterial

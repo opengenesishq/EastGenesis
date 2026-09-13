@@ -1,14 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { isDeepStrictEqual } from 'node:util'
 import { writeDurableFile } from '../durable-file'
 
 export type MemoryLayer = 'working' | 'project' | 'user'
 
 export interface LayeredMemoryEntry {
   id: string
-  revision: number
   layer: MemoryLayer
   projectHash?: string
   title: string
@@ -23,7 +21,6 @@ export interface LayeredMemoryEntry {
 }
 
 export interface MemoryWriteInput {
-  id?: string
   layer: MemoryLayer
   projectRoot?: string
   title: string
@@ -33,7 +30,6 @@ export interface MemoryWriteInput {
 }
 
 export interface MemoryUpdateInput {
-  expectedRevision?: number
   title?: string
   body?: string
   tags?: string[]
@@ -54,31 +50,36 @@ export interface MemorySearchHit {
 }
 
 interface MemoryFile {
-  version: 2
-  revision: number
+  version: 1
   entries: LayeredMemoryEntry[]
 }
 
 const STORE_FILE = 'memory-index.json'
 const HASH_NAMESPACE = 'caogen-layered-memory-v1'
-const memoryStoreWriteQueues = new Map<string, Promise<void>>()
 
 export function memoryProjectHash(projectRoot: string): string {
   return createHash('sha256').update(`${HASH_NAMESPACE}\0${path.resolve(projectRoot)}`).digest('hex')
 }
 
 export async function addMemory(rootDir: string, input: MemoryWriteInput): Promise<LayeredMemoryEntry> {
-  return mutateStore(rootDir, (file) => {
-    const id = input.id === undefined ? randomUUID() : requireText(input.id, 'id')
-    const existing = file.entries.find((entry) => entry.id === id)
-    const entry = normalizeCreatedMemory(input, id, existing)
-    if (existing) {
-      if (isDeepStrictEqual(existing, entry)) return { result: existing, changed: false }
-      throw new Error(`Memory entry already exists with different content: ${id}`)
-    }
-    file.entries.push(entry)
-    return { result: entry, changed: true }
-  })
+  const file = await readStore(rootDir)
+  const now = new Date().toISOString()
+  const entry: LayeredMemoryEntry = {
+    id: randomUUID(),
+    layer: input.layer,
+    ...(input.projectRoot ? { projectHash: memoryProjectHash(input.projectRoot) } : {}),
+    title: requireText(input.title, 'title'),
+    body: requireText(input.body, 'body'),
+    source: requireText(input.source, 'source'),
+    tags: [...new Set((input.tags ?? []).map((tag) => tag.trim()).filter(Boolean))].slice(0, 20),
+    createdAt: now,
+    updatedAt: now,
+    lastUsedAt: now,
+    vector: vectorize(`${input.title}\n${input.body}\n${(input.tags ?? []).join(' ')}`)
+  }
+  file.entries.push(entry)
+  await writeStore(rootDir, file.entries)
+  return entry
 }
 
 export async function searchMemories(rootDir: string, input: MemorySearchInput): Promise<MemorySearchHit[]> {
@@ -104,14 +105,12 @@ export async function listMemories(rootDir: string): Promise<LayeredMemoryEntry[
   return (await readStore(rootDir)).entries
 }
 
-export async function deleteMemory(rootDir: string, entryId: string, expectedRevision?: number): Promise<boolean> {
-  return mutateStore(rootDir, (file) => {
-    const entry = file.entries.find((candidate) => candidate.id === entryId)
-    if (!entry) return { result: false, changed: false }
-    assertExpectedRevision(entry, expectedRevision)
-    file.entries = file.entries.filter((candidate) => candidate.id !== entryId)
-    return { result: true, changed: true }
-  })
+export async function deleteMemory(rootDir: string, entryId: string): Promise<boolean> {
+  const file = await readStore(rootDir)
+  const next = file.entries.filter((entry) => entry.id !== entryId)
+  if (next.length === file.entries.length) return false
+  await writeStore(rootDir, next)
+  return true
 }
 
 export async function updateMemory(
@@ -119,151 +118,15 @@ export async function updateMemory(
   entryId: string,
   patch: MemoryUpdateInput
 ): Promise<LayeredMemoryEntry | null> {
-  return mutateStore(rootDir, (file) => {
-    const index = file.entries.findIndex((entry) => entry.id === entryId)
-    if (index === -1) return { result: null, changed: false }
-    const current = file.entries[index]
-    assertExpectedRevision(current, patch.expectedRevision)
-    const next = updatedMemory(current, patch)
-    file.entries[index] = next
-    return { result: next, changed: true }
-  })
-}
-
-export async function archiveStaleMemories(rootDir: string, olderThanDays = 90, now = Date.now()): Promise<number> {
-  const cutoff = now - olderThanDays * 24 * 60 * 60 * 1000
-  return mutateStore(rootDir, (file) => {
-    let archived = 0
-    file.entries = file.entries.map((entry) => {
-      if (entry.archivedAt) return entry
-      const lastUsed = Date.parse(entry.lastUsedAt)
-      if (!Number.isFinite(lastUsed) || lastUsed >= cutoff) return entry
-      archived++
-      return { ...entry, revision: entry.revision + 1, archivedAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }
-    })
-    return { result: archived, changed: archived > 0 }
-  })
-}
-
-export async function exportMemories(rootDir: string): Promise<string> {
-  return JSON.stringify(await readStore(rootDir), null, 2)
-}
-
-async function touchMemories(rootDir: string, ids: string[]): Promise<void> {
-  const wanted = new Set(ids)
-  await mutateStore(rootDir, (file) => {
-    const now = new Date().toISOString()
-    let touched = 0
-    file.entries = file.entries.map((entry) => {
-      if (!wanted.has(entry.id)) return entry
-      touched++
-      return { ...entry, revision: entry.revision + 1, lastUsedAt: now }
-    })
-    return { result: undefined, changed: touched > 0 }
-  })
-}
-
-async function readStore(rootDir: string): Promise<MemoryFile> {
-  const filePath = storePath(rootDir)
-  try {
-    const raw = await readFile(filePath, 'utf8')
-    const parsed = JSON.parse(raw) as unknown
-    return normalizeStore(parsed)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 2, revision: 0, entries: [] }
-    throw new Error(`Memory store is unreadable: ${error instanceof Error ? error.message : String(error)}`)
-  }
-}
-
-async function writeStore(rootDir: string, file: MemoryFile): Promise<void> {
-  await writeDurableFile(storePath(rootDir), `${JSON.stringify(file, null, 2)}\n`)
-}
-
-function normalizeStore(value: unknown): MemoryFile {
-  if (!isRecord(value) || !Array.isArray(value.entries) || (value.version !== 1 && value.version !== 2)) {
-    throw new Error('Memory store schema is unsupported')
-  }
-  if (!value.entries.every(isMemoryEntry)) throw new Error('Memory store contains an invalid entry')
-  return {
-    version: 2,
-    revision: value.version === 2 ? normalizeStoreRevision(value.revision) : 0,
-    entries: value.entries.map((entry) => ({ ...entry, revision: normalizeEntryRevision(entry.revision) }))
-  }
-}
-
-function isMemoryEntry(value: unknown): value is Omit<LayeredMemoryEntry, 'revision'> & { revision?: number } {
-  if (!isRecord(value)) return false
-  return (
-    typeof value.id === 'string' &&
-    (value.layer === 'working' || value.layer === 'project' || value.layer === 'user') &&
-    typeof value.title === 'string' &&
-    typeof value.body === 'string' &&
-    typeof value.source === 'string' &&
-    (value.revision === undefined || isPositiveInteger(value.revision)) &&
-    Array.isArray(value.tags) &&
-    value.tags.every((tag) => typeof tag === 'string') &&
-    isRecord(value.vector)
-  )
-}
-
-async function mutateStore<T>(
-  rootDir: string,
-  operation: (file: MemoryFile) => { result: T; changed: boolean }
-): Promise<T> {
-  return withMemoryStoreWriteLock(rootDir, async () => {
-    const file = await readStore(rootDir)
-    const mutation = operation(file)
-    if (mutation.changed) {
-      file.revision += 1
-      await writeStore(rootDir, file)
-    }
-    return mutation.result
-  })
-}
-
-async function withMemoryStoreWriteLock<T>(rootDir: string, operation: () => Promise<T>): Promise<T> {
-  const key = storePath(rootDir)
-  const previous = memoryStoreWriteQueues.get(key) ?? Promise.resolve()
-  let value!: T
-  const operationPromise = previous.catch(() => undefined).then(async () => { value = await operation() })
-  const tail = operationPromise.then(() => undefined, () => undefined)
-  memoryStoreWriteQueues.set(key, tail)
-  try {
-    await operationPromise
-    return value
-  } finally {
-    if (memoryStoreWriteQueues.get(key) === tail) memoryStoreWriteQueues.delete(key)
-  }
-}
-
-function normalizeCreatedMemory(input: MemoryWriteInput, id: string, existing?: LayeredMemoryEntry): LayeredMemoryEntry {
-  const now = existing?.createdAt ?? new Date().toISOString()
-  const title = requireText(input.title, 'title')
-  const body = requireText(input.body, 'body')
-  const tags = normalizeTags(input.tags ?? [])
-  return {
-    id,
-    revision: 1,
-    layer: input.layer,
-    ...(input.projectRoot ? { projectHash: memoryProjectHash(input.projectRoot) } : {}),
-    title,
-    body,
-    source: requireText(input.source, 'source'),
-    tags,
-    createdAt: now,
-    updatedAt: now,
-    lastUsedAt: now,
-    vector: vectorize(`${title}\n${body}\n${tags.join(' ')}`)
-  }
-}
-
-function updatedMemory(current: LayeredMemoryEntry, patch: MemoryUpdateInput): LayeredMemoryEntry {
+  const file = await readStore(rootDir)
+  const index = file.entries.findIndex((entry) => entry.id === entryId)
+  if (index === -1) return null
+  const current = file.entries[index]
   const title = patch.title === undefined ? current.title : requireText(patch.title, 'title')
   const body = patch.body === undefined ? current.body : requireText(patch.body, 'body')
   const tags = patch.tags === undefined ? current.tags : normalizeTags(patch.tags)
   const next: LayeredMemoryEntry = {
     ...current,
-    revision: current.revision + 1,
     title,
     body,
     tags,
@@ -274,26 +137,76 @@ function updatedMemory(current: LayeredMemoryEntry, patch: MemoryUpdateInput): L
     if (patch.archivedAt === null || patch.archivedAt.trim() === '') delete next.archivedAt
     else next.archivedAt = patch.archivedAt
   }
+  file.entries[index] = next
+  await writeStore(rootDir, file.entries)
   return next
 }
 
-function assertExpectedRevision(entry: LayeredMemoryEntry, value: unknown): void {
-  if (value === undefined || value === null) return
-  if (!isPositiveInteger(value)) throw new Error('expectedRevision 必须是正整数')
-  if (value !== entry.revision) throw new Error(`Memory revision conflict: expected ${value}, got ${entry.revision}`)
+export async function archiveStaleMemories(rootDir: string, olderThanDays = 90, now = Date.now()): Promise<number> {
+  const cutoff = now - olderThanDays * 24 * 60 * 60 * 1000
+  const file = await readStore(rootDir)
+  let archived = 0
+  const next = file.entries.map((entry) => {
+    if (entry.archivedAt) return entry
+    const lastUsed = Date.parse(entry.lastUsedAt)
+    if (!Number.isFinite(lastUsed) || lastUsed >= cutoff) return entry
+    archived++
+    return { ...entry, archivedAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }
+  })
+  if (archived > 0) await writeStore(rootDir, next)
+  return archived
 }
 
-function normalizeEntryRevision(value: unknown): number {
-  return isPositiveInteger(value) ? value : 1
+export async function exportMemories(rootDir: string): Promise<string> {
+  const entries = await listMemories(rootDir)
+  return JSON.stringify({ version: 1, entries }, null, 2)
 }
 
-function normalizeStoreRevision(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new Error('Memory store revision is invalid')
-  return value
+async function touchMemories(rootDir: string, ids: string[]): Promise<void> {
+  const wanted = new Set(ids)
+  const file = await readStore(rootDir)
+  const now = new Date().toISOString()
+  const next = file.entries.map((entry) => (wanted.has(entry.id) ? { ...entry, lastUsedAt: now } : entry))
+  await writeStore(rootDir, next)
 }
 
-function isPositiveInteger(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
+async function readStore(rootDir: string): Promise<MemoryFile> {
+  const filePath = storePath(rootDir)
+  try {
+    const raw = await readFile(filePath, 'utf8')
+    const parsed = JSON.parse(raw) as unknown
+    return normalizeStore(parsed)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, entries: [] }
+    throw new Error(`Memory store is unreadable: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+async function writeStore(rootDir: string, entries: LayeredMemoryEntry[]): Promise<void> {
+  const filePath = storePath(rootDir)
+  await writeDurableFile(filePath, `${JSON.stringify({ version: 1, entries }, null, 2)}\n`)
+}
+
+function normalizeStore(value: unknown): MemoryFile {
+  if (!isRecord(value) || !Array.isArray(value.entries)) return { version: 1, entries: [] }
+  return {
+    version: 1,
+    entries: value.entries.filter(isMemoryEntry)
+  }
+}
+
+function isMemoryEntry(value: unknown): value is LayeredMemoryEntry {
+  if (!isRecord(value)) return false
+  return (
+    typeof value.id === 'string' &&
+    (value.layer === 'working' || value.layer === 'project' || value.layer === 'user') &&
+    typeof value.title === 'string' &&
+    typeof value.body === 'string' &&
+    typeof value.source === 'string' &&
+    Array.isArray(value.tags) &&
+    value.tags.every((tag) => typeof tag === 'string') &&
+    isRecord(value.vector)
+  )
 }
 
 export function vectorize(text: string): Record<string, number> {

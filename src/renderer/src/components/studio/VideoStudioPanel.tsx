@@ -7,7 +7,6 @@ import {
   Check,
   Clock3,
   CircleMinus,
-  Download,
   Film,
   HardDrive,
   ImagePlus,
@@ -29,7 +28,6 @@ import type {
   MediaFfmpegInfo,
   MediaMockScenario,
   MediaOperation,
-  MediaProviderProfile,
   MediaStudioSnapshot,
   ProviderView,
   VideoProduction,
@@ -37,20 +35,27 @@ import type {
 } from '../../../../shared/types'
 import { videoStudioText } from '../../i18n/studioTranslations'
 import { useStore } from '../../store'
+import VideoStoryboardPlanner from './VideoStoryboardPlanner'
+import VideoMediaRoutingControls, { operationCapability } from './VideoMediaRoutingControls'
+import { MEDIA_AUTO_PROVIDER_ID } from '../../../../shared/media-routing-types'
+import type { MediaRoutingPreference } from '../../../../shared/media-types'
 import VideoContinuitySection, { type BibleDraft, type LockDraft } from './VideoContinuitySection'
-import { hasRemoteVideoAdapter, VideoProviderQuickEnableButton, VERIFIED_OPENAI_VIDEO_MODELS } from './VideoProviderQuickEnable'
+import { businessLineVideoSnapshot } from './businessLineVideoSnapshot'
+import { getBusinessLines } from '../../../../shared/business-line-types'
 import './video-studio.css'
 
 const terminalStatuses = new Set(['succeeded', 'failed', 'cancelled', 'waiting_reconciliation'])
 
-export function VideoStudioPanel({ active, projectId, productionId }: { active: boolean; projectId?: string; productionId?: string }): React.JSX.Element | null {
+export function VideoStudioPanel({ active, projectId, productionId, businessLineId = 'video' }: { active: boolean; projectId?: string; productionId?: string; businessLineId?: string }): React.JSX.Element | null {
   const language = useStore((state) => state.settings.language)
+  const businessLines = useStore((state) => state.settings.businessLines)
   const text = videoStudioText(language)
   const [snapshot, setSnapshot] = useState<MediaStudioSnapshot | null>(null)
   const [ffmpeg, setFfmpeg] = useState<MediaFfmpegInfo | null>(null)
   const [selectedProductionId, setSelectedProductionId] = useState('')
   const [selectedShotId, setSelectedShotId] = useState('')
   const [selectedAssetId, setSelectedAssetId] = useState('')
+  const [previewSelections, setPreviewSelections] = useState<Record<string, string>>({})
   const [title, setTitle] = useState<string>(text.defaultProductionTitle)
   const [script, setScript] = useState('')
   const [revisionScript, setRevisionScript] = useState('')
@@ -59,11 +64,11 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
   const [bindingRole, setBindingRole] = useState<MediaAssetBindingRole>('keyframe')
   const [scenario, setScenario] = useState<MediaMockScenario>('success')
   const [appProviders, setAppProviders] = useState<ProviderView[]>([])
-  const [selectedMediaProviderId, setSelectedMediaProviderId] = useState('media-provider:mock-local')
+  const [selectedMediaProviderId, setSelectedMediaProviderId] = useState(MEDIA_AUTO_PROVIDER_ID)
   const [selectedMediaOperation, setSelectedMediaOperation] = useState<MediaOperation>('video.text-to-video')
   const [voiceDraft, setVoiceDraft] = useState('alloy')
   const [generationParameters, setGenerationParameters] = useState({ durationSeconds: 5, width: 1280, height: 720, quality: 'standard' as 'draft' | 'standard' | 'high', seed: '', negativePrompt: '', speechSpeed: 1 })
-  const [providerDraft, setProviderDraft] = useState({ displayName: 'OpenAI Video 兼容 Provider', providerId: '', model: 'grok-imagine-video', estimatedCostUsd: '', endpointClass: 'openai-video' as MediaProviderProfile['endpointClass'] })
+  const [routingPreference, setRoutingPreference] = useState<MediaRoutingPreference>('balanced')
   const [cueDraft, setCueDraft] = useState({ speaker: '', text: '', startMs: 0, endMs: 2_000, audioAssetId: '', subtitleEnabled: true })
   const [editingCueId, setEditingCueId] = useState('')
   const [backgroundVolumeDraft, setBackgroundVolumeDraft] = useState(0.2)
@@ -76,11 +81,15 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   useLocalizedProductionTitle(text.defaultProductionTitle, setTitle)
+  useEffect(() => {
+    const line = getBusinessLines({ businessLines }).find((item) => item.id === businessLineId)
+    setRoutingPreference(line?.routingPreference ?? 'balanced')
+  }, [businessLineId, businessLines])
   const refresh = useCallback(async (): Promise<void> => {
     if (!projectId) { setSnapshot(null); return }
     try {
       const [next, ffmpegInfo, providers] = await Promise.all([
-        window.agentDesk.getMediaStudio(projectId),
+        window.agentDesk.getMediaStudio(projectId).then((snapshot) => businessLineVideoSnapshot(snapshot, businessLineId)),
         window.agentDesk.getMediaFfmpegInfo(),
         window.agentDesk.listProviders()
       ])
@@ -88,9 +97,6 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
       setFfmpeg(ffmpegInfo)
       setAppProviders(providers)
       setSelectedMediaOperation((current) => next.providers.some((item) => item.enabled && item.operations.includes(current)) ? current : 'video.text-to-video')
-      setSelectedMediaProviderId((current) => next.providers.some((item) => item.id === current && item.enabled)
-        ? current
-        : next.providers.find((item) => item.enabled && item.defaultFor?.includes('video'))?.id ?? next.providers.find((item) => item.enabled)?.id ?? 'media-provider:mock-local')
       setSelectedProductionId((current) => productionId && next.productions.some((item) => item.id === productionId) ? productionId : next.productions.some((item) => item.id === current)
         ? current
         : next.productions[0]?.id ?? '')
@@ -98,7 +104,7 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
     } catch (cause) {
       setError(errorText(cause))
     }
-  }, [projectId, productionId])
+  }, [projectId, productionId, businessLineId])
   useEffect(() => { if (active) void refresh() }, [active, refresh])
   const production = snapshot?.productions.find((item) => item.id === selectedProductionId) ?? snapshot?.productions[0]
   const adoptedStructure = production?.structureRevisions.find((item) => item.id === production.adoptedStructureRevisionId)
@@ -107,21 +113,23 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
   const shots = visibleShotIds.map((id) => production?.shots.find((shot) => shot.id === id)).filter((shot): shot is VideoShot => Boolean(shot))
   const selectedShot = shots.find((item) => item.id === selectedShotId) ?? shots[0]
   const selectedAsset = production?.assets.find((item) => item.id === selectedAssetId) ?? production?.assets[0]
-  const previewAsset = finalAssetFor(production)
+  const compositionAssets = production?.assets
+    .filter((asset) => asset.kind === 'video' && asset.authorization?.source === 'local_composition')
+    .sort((left, right) => right.version - left.version || right.createdAt - left.createdAt) ?? []
+  const previewAsset = compositionAssets.find((asset) => asset.id === previewSelections[production?.id ?? '']) ?? compositionAssets[0]
   const audioAssets = production?.assets.filter((asset) => asset.contentStatus === 'available' &&
     (asset.kind === 'audio' || asset.kind === 'voice' || asset.mediaType?.startsWith('audio/'))) ?? []
   const finalAsset = production?.assets.find((asset) => asset.id === production.finalAssetId)
   const jobs = snapshot?.jobs.filter((job) => !production || job.productionId === production.id) ?? []
   const mediaProviders = snapshot?.providers ?? []
   const compatibleMediaProviders = mediaProviders.filter((item) => item.enabled && item.operations.includes(selectedMediaOperation))
-  const selectedMediaProvider = compatibleMediaProviders.find((item) => item.id === selectedMediaProviderId) ?? compatibleMediaProviders[0]
+  const selectedMediaProvider = compatibleMediaProviders.find((item) => item.id === selectedMediaProviderId)
+  const automaticMedia = selectedMediaProviderId === MEDIA_AUTO_PROVIDER_ID
   const selectedEgressGrant = selectedAsset?.egressGrants?.find((grant) => grant.mediaProviderId === selectedMediaProvider?.id && grant.operation === selectedMediaOperation && grant.assetVersion === selectedAsset.version)
   const selectedEgressActive = selectedEgressGrant?.status === 'granted' && (selectedEgressGrant.expiresAt === undefined || selectedEgressGrant.expiresAt > Date.now())
   const selectedVoiceAuthorization = selectedAsset?.voiceCloneAuthorizations?.find((item) => item.assetVersion === selectedAsset.version)
   const selectedVoiceAuthorizationActive = selectedVoiceAuthorization?.status === 'granted' && (selectedVoiceAuthorization.expiresAt === undefined || selectedVoiceAuthorization.expiresAt > Date.now())
   const speechProvider = mediaProviders.find((item) => item.id === selectedMediaProviderId && item.enabled && item.operations.includes('speech.synthesize'))
-    ?? mediaProviders.find((item) => item.enabled && item.defaultFor?.includes('tts') && item.operations.includes('speech.synthesize'))
-    ?? mediaProviders.find((item) => item.enabled && item.id === 'media-provider:mock-local')
   const storage = useMemo(() => mediaStorageSummary(snapshot, projectId), [snapshot?.snapshotDigest, projectId])
   const selectedAssetAvailable = selectedAsset?.contentStatus === 'available'
   useEffect(() => {
@@ -138,14 +146,15 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
   useEffect(() => { if (selectedAsset) setSelectedAssetId(selectedAsset.id) }, [selectedAsset?.id])
   useStorageQuotaDraft(storage?.quotaBytes, setStorageQuotaDraft)
   useAssetRetentionDraft(selectedAsset, setRetentionModeDraft, setRetentionUntilDraft)
-  const run = useStudioOperationRunner(busy, refresh, setBusy, setError)
+  const run = async (operation: () => Promise<unknown>): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try { await operation(); await refresh() } catch (cause) { setError(errorText(cause)) } finally { setBusy(false) }
+  }
   const createProduction = (): void => void run(async () => {
-    const productionScript = script.trim()
-    if (!projectId || !productionScript) throw new Error(text.productionInputRequired)
-    const productionTitle = title.trim() && !isDefaultProductionTitle(title, text.defaultProductionTitle)
-      ? title.trim()
-      : titleFromScript(productionScript, text.defaultProductionTitle)
-    const created = await window.agentDesk.createVideoProduction({ projectId, title: productionTitle, script: productionScript, autoStructure: true })
+    if (!projectId || !title.trim() || !script.trim()) throw new Error(text.productionInputRequired)
+    const created = await window.agentDesk.createVideoProduction({ projectId, title, script, autoStructure: true, businessLineId })
     setSelectedProductionId(created.id)
     setScript('')
   })
@@ -201,8 +210,9 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
       dialogueCueId: cue.id,
       capability: 'tts',
       operation: 'speech.synthesize',
-      idempotencyKey: `${production.id}:${production.revision}:${selectedShot.id}:${cue.id}:${cue.revision}:speech.synthesize:${speechProvider?.id ?? 'media-provider:mock-local'}:${speechProvider?.model ?? voiceDraft}`,
-      mediaProviderId: speechProvider?.id ?? 'media-provider:mock-local',
+      idempotencyKey: `${production.id}:${production.revision}:${selectedShot.id}:${cue.id}:${cue.revision}:speech.synthesize:${selectedMediaProviderId}:${speechProvider?.model ?? voiceDraft}`,
+      mediaProviderId: selectedMediaProviderId,
+      routingPreference,
       providerId: speechProvider?.providerId,
       model: speechProvider?.model,
       prompt: cue.text,
@@ -297,30 +307,6 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
     if (!projectId || !production || !selectedAsset) return
     await window.agentDesk.setMediaVoiceCloneAuthorization({ projectId, productionId: production.id, assetId: selectedAsset.id, approved: !selectedVoiceAuthorizationActive, basis: 'authorized' })
   })
-  const saveMediaProvider = (): void => void run(async () => {
-    const provider = appProviders.find((item) => item.id === providerDraft.providerId)
-    if (!provider || !providerDraft.displayName.trim() || !providerDraft.model.trim()) throw new Error('请选择已配置的 CaoGen Provider，并填写媒体模型')
-    const operations = operationsForEndpoint(providerDraft.endpointClass)
-    const capabilities = [...new Set(operations.map(operationCapability))]
-    const saved = await window.agentDesk.upsertMediaProvider({
-      displayName: providerDraft.displayName,
-      capabilities,
-      operations,
-      endpointClass: providerDraft.endpointClass,
-      providerId: provider.id,
-      model: providerDraft.model,
-      ...(providerDraft.estimatedCostUsd.trim() ? { estimatedCostUsd: Number(providerDraft.estimatedCostUsd) } : {}),
-      defaultFor: capabilities,
-      requestTimeoutMs: 120_000,
-      enabled: true
-    })
-    setSelectedMediaProviderId(saved.id)
-    setProviderDraft((value) => ({ ...value, displayName: '', model: '', estimatedCostUsd: '' }))
-  })
-  const deleteMediaProvider = (id: string): void => void run(async () => {
-    await window.agentDesk.deleteMediaProvider({ id })
-    setSelectedMediaProviderId('media-provider:mock-local')
-  })
   const moveShot = (direction: -1 | 1): void => void run(async () => {
     if (!production || !selectedShot) return
     const scene = visibleScenes.find((item) => item.id === selectedShot.sceneId)
@@ -360,8 +346,9 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
       shotId: shot.id,
       capability: operationCapability(selectedMediaOperation),
       operation: selectedMediaOperation,
-      idempotencyKey: `${production.id}:${production.revision}:${shot.id}:${shot.revision}:${selectedMediaOperation}:${selectedAsset?.id ?? 'no-input'}:${selectedMediaProvider?.id ?? 'media-provider:mock-local'}:${selectedMediaProvider?.model ?? scenario}`,
-      mediaProviderId: selectedMediaProvider?.id,
+      idempotencyKey: `${production.id}:${production.revision}:${shot.id}:${shot.revision}:${selectedMediaOperation}:${selectedAsset?.id ?? 'no-input'}:${selectedMediaProviderId}:${selectedMediaProvider?.model ?? scenario}`,
+      mediaProviderId: selectedMediaProviderId,
+      routingPreference,
       providerId: selectedMediaProvider?.providerId,
       model: selectedMediaProvider?.model,
       prompt: shot.prompt,
@@ -375,11 +362,6 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
       for (let attempt = 0; attempt < 4 && !terminalStatuses.has(current.status); attempt += 1) {
         current = await window.agentDesk.advanceMediaJob(current.id)
       }
-    } else {
-      // Submitting a remote job should enter the provider's queue immediately;
-      // later status transitions remain explicit so an asynchronous provider is
-      // never mistaken for a completed generation.
-      await window.agentDesk.advanceMediaJob(job.id)
     }
     return job
   }
@@ -391,10 +373,7 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
     if (!projectId || !production) return
     const result = await window.agentDesk.composeMediaProduction({ projectId, productionId: production.id, shotIds: shots.map((shot) => shot.id), subtitleMode: production.timeline.subtitleMode })
     setSelectedAssetId(result.asset.id)
-  })
-  const exportVideo = (): void => void run(async () => {
-    if (!projectId || !production || !previewAsset) return
-    await window.agentDesk.exportMediaProduction({ projectId, productionId: production.id, assetId: previewAsset.id })
+    setPreviewSelections((current) => ({ ...current, [production.id]: result.asset.id }))
   })
   const adoptPreview = (): void => void run(async () => {
     if (!production || !previewAsset) return
@@ -403,7 +382,8 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
   const advance = (id: string): void => void run(() => window.agentDesk.advanceMediaJob(id))
   const reconcile = (id: string): void => void run(() => window.agentDesk.reconcileMediaJob(id))
   const cancel = (id: string): void => void run(() => window.agentDesk.cancelMediaJob(id))
-  const activeJobCount = useMemo(() => jobs.filter((job) => !terminalStatuses.has(job.status)).length, [jobs]); const costSummary = useMemo(() => summarizeMediaCost(production, jobs), [production?.revision, jobs])
+  const activeJobCount = useMemo(() => jobs.filter((job) => !terminalStatuses.has(job.status)).length, [jobs])
+  const costSummary = useMemo(() => summarizeMediaCost(production, jobs), [production?.revision, jobs])
   if (!projectId) return null
   return <section className="video-studio-panel" aria-labelledby="video-studio-title">
     <header className="video-studio-header">
@@ -412,36 +392,37 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
         <span>{production ? text.productionSummary(visibleScenes.length, shots.length, production.assets.length) : text.noProduction}</span>
       </div>
       <div className="video-studio-header-actions">
-        {production && <select className="input" value={production.id} onChange={(event) => setSelectedProductionId(event.target.value)} aria-label={text.selectProduction}>
+        {production && <select className="input" value={production.id} onChange={(event) => setSelectedProductionId(event.target.value)} aria-label={text.selectProduction} data-video-production-select>
           {snapshot?.productions.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
         </select>}
         <span className={ffmpeg?.available ? 'video-studio-runtime is-ready' : 'video-studio-runtime'}>{ffmpeg?.available ? text.ffmpegReady : text.ffmpegUnavailable}</span>
-        <button type="button" className="btn btn-ghost btn-icon-sm" onClick={() => void refresh()} disabled={busy} aria-label={text.refreshStudio} title={text.refresh}><RefreshCw size={14} aria-hidden="true" /></button>
+        <button type="button" className="btn btn-ghost btn-icon-sm" onClick={() => void refresh()} disabled={busy} aria-label={text.refreshStudio} title={text.refresh} data-video-refresh><RefreshCw size={14} aria-hidden="true" /></button>
       </div>
     </header>
 
-    <VideoFlowRail hasProduction={Boolean(production)} hasPreview={Boolean(previewAsset)} />
-
     {error && <p className="video-studio-error" role="alert">{error}</p>}
     {!production ? <div className="video-studio-create">
-      <input className="input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder={text.productionTitlePlaceholder} aria-label={text.productionTitleLabel} data-video-title-optional />
+      <input className="input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder={text.productionTitlePlaceholder} aria-label={text.productionTitleLabel} />
       <textarea className="input" value={script} onChange={(event) => setScript(event.target.value)} placeholder={text.productionScriptPlaceholder} aria-label={text.productionScriptLabel} rows={5} />
-      <button type="button" className="btn btn-primary btn-sm" disabled={busy || !script.trim()} onClick={createProduction}><Sparkles size={14} aria-hidden="true" />{text.createStoryboard}</button>
+      <button type="button" className="btn btn-primary btn-sm" disabled={busy || !title.trim() || !script.trim()} onClick={createProduction}><Sparkles size={14} aria-hidden="true" />{text.createStoryboard}</button>
     </div> : <div className="video-studio-workspace">
       <VideoPreviewFlow
         busy={busy}
         onCompose={compose}
         onAdopt={adoptPreview}
-        onExport={exportVideo}
         previewAsset={previewAsset}
+        compositionAssets={compositionAssets}
+        finalAssetId={production.finalAssetId}
+        onPreviewChange={(assetId) => setPreviewSelections((current) => ({ ...current, [production.id]: assetId }))}
         shotCount={shots.length}
         ffmpegAvailable={Boolean(ffmpeg?.available)}
       />
-      <section className="video-studio-script" aria-label="剧本结构" data-video-flow-step="script">
+      <section className="video-studio-script" aria-label="剧本结构">
         <div className="video-studio-section-title"><strong>剧本与分镜</strong><span>结构修订 {production.structureRevisions.length}</span></div>
         <textarea className="input" value={revisionScript} onChange={(event) => setRevisionScript(event.target.value)} rows={5} aria-label="制作剧本" />
         <button type="button" className="btn btn-secondary btn-sm" disabled={busy || revisionScript.trim() === production.script} onClick={reviseProduction} data-video-revise><Sparkles size={14} aria-hidden="true" />生成新结构版本</button>
-        <div className="video-studio-storyboard" data-video-flow-step="shots">
+        <VideoStoryboardPlanner key={production.id} production={production} onApplied={refresh} />
+        <div className="video-studio-storyboard">
           {visibleScenes.map((scene) => <div className="video-studio-scene" key={scene.id}>
             <div className="video-studio-scene-title"><strong>{scene.title}</strong><span>{scene.shotIds.length} 镜头</span><button type="button" className="btn btn-ghost btn-icon-sm" onClick={() => createShot(scene.id)} disabled={busy} aria-label={`向 ${scene.title} 添加镜头`} title="添加镜头"><Plus size={13} /></button></div>
             <div className="video-studio-shot-grid">
@@ -464,7 +445,7 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
           <textarea className="input" value={shotDraft.prompt} onChange={(event) => setShotDraft((value) => ({ ...value, prompt: event.target.value }))} rows={5} aria-label="镜头提示词" />
           <label className="video-studio-duration"><span>时长</span><input className="input" type="number" min={500} max={120000} step={500} value={shotDraft.durationMs} onChange={(event) => setShotDraft((value) => ({ ...value, durationMs: Number(event.target.value) }))} /><span>ms</span></label>
           <div className="video-studio-inline-actions">
-            <button type="button" className="btn btn-primary btn-sm" onClick={saveShot} disabled={busy}><Save size={14} />保存</button>
+            <button type="button" className="btn btn-primary btn-sm" onClick={saveShot} disabled={busy} data-video-save-shot><Save size={14} />保存</button>
             <button type="button" className="btn btn-ghost btn-icon-sm" onClick={() => moveShot(-1)} disabled={busy} aria-label="镜头上移" title="上移"><ArrowUp size={14} /></button>
             <button type="button" className="btn btn-ghost btn-icon-sm" onClick={() => moveShot(1)} disabled={busy} aria-label="镜头下移" title="下移"><ArrowDown size={14} /></button>
           </div>
@@ -480,7 +461,7 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
               <div><strong>{cue.speaker}</strong><span>{cue.startMs}–{cue.endMs} ms</span></div>
               <p>{cue.text}</p>
               <small>{cue.audioAssetId || cue.voiceAssetId ? '已绑定音频' : '仅字幕'} · {cue.subtitleEnabled ? '字幕开启' : '字幕关闭'}{cueJob ? ` · 语音任务 ${cueJob.status}` : ''}</small>
-              <div className="video-studio-cue-actions"><button type="button" className="btn btn-secondary btn-sm" disabled={busy || !speechProvider || (cueJob !== undefined && !terminalStatuses.has(cueJob.status))} onClick={() => generateCueAudio(cue)} aria-label="生成对白语音" title="生成对白语音"><AudioLines size={13} />{cue.audioAssetId ? '重新生成' : '生成语音'}</button><button type="button" className="btn btn-ghost btn-icon-sm" disabled={busy} onClick={() => editCue(cue)} aria-label="编辑对白" title="编辑对白"><Pencil size={13} /></button><button type="button" className="btn btn-ghost btn-icon-sm" disabled={busy} onClick={() => deleteCue(cue.id)} aria-label="删除对白" title="删除对白"><CircleMinus size={13} /></button></div>
+              <div className="video-studio-cue-actions"><button type="button" className="btn btn-secondary btn-sm" disabled={busy || (!automaticMedia && !speechProvider) || (cueJob !== undefined && !terminalStatuses.has(cueJob.status))} onClick={() => generateCueAudio(cue)} aria-label="生成对白语音" title="生成对白语音"><AudioLines size={13} />{cue.audioAssetId ? '重新生成' : '生成语音'}</button><button type="button" className="btn btn-ghost btn-icon-sm" disabled={busy} onClick={() => editCue(cue)} aria-label="编辑对白" title="编辑对白"><Pencil size={13} /></button><button type="button" className="btn btn-ghost btn-icon-sm" disabled={busy} onClick={() => deleteCue(cue.id)} aria-label="删除对白" title="删除对白"><CircleMinus size={13} /></button></div>
                 </>
               })()}
             </div>)}
@@ -547,29 +528,13 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
         </>}
       </section>
       </details>
-      <details className="video-studio-advanced-section" data-video-advanced-section="generation" data-video-flow-step="generation">
+      <details className="video-studio-advanced-section" data-video-advanced-section="generation">
         <summary><strong>生成与合成</strong><span>{activeJobCount} 个任务运行中 · 按需展开</span></summary>
       <section className="video-studio-queue" aria-label="媒体任务队列">
         <div className="video-studio-section-title"><strong>生成与合成</strong><span>{activeJobCount} 运行中</span></div>
-        <div className="video-studio-provider-toolbar">
-          <label><span>生成能力</span><select className="input" value={selectedMediaOperation} onChange={(event) => { setSelectedMediaOperation(event.target.value as MediaOperation); setSelectedMediaProviderId('') }} aria-label="媒体生成能力">{mediaOperationOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-          <label><span>媒体 Provider</span><select className="input" value={selectedMediaProvider?.id ?? ''} onChange={(event) => setSelectedMediaProviderId(event.target.value)} aria-label="媒体 Provider">{compatibleMediaProviders.map((item) => <option key={item.id} value={item.id}>{item.displayName}{item.model ? ` · ${item.model}` : ''}</option>)}</select></label>
-          <span>{selectedMediaProvider?.endpointClass === 'mock' ? '本地模拟，不外发数据' : `使用 ${appProviders.find((item) => item.id === selectedMediaProvider?.providerId)?.name ?? '未绑定 Provider'} 的凭据`}</span>
-          {selectedMediaProvider && selectedMediaProvider.id !== 'media-provider:mock-local' && <button type="button" className="btn btn-ghost btn-icon-sm" onClick={() => deleteMediaProvider(selectedMediaProvider.id)} disabled={busy} aria-label="删除媒体 Provider" title="删除媒体 Provider"><CircleMinus size={13} /></button>}
-          <VideoProviderQuickEnableButton busy={busy} appProviders={appProviders} hasRemoteAdapter={hasRemoteVideoAdapter(mediaProviders)} onRun={run} onSaved={setSelectedMediaProviderId} />
-        </div>
-        <details className="video-studio-provider-editor">
-          <summary>添加媒体 Provider</summary>
-          <div>
-            <input className="input" value={providerDraft.displayName} onChange={(event) => setProviderDraft((value) => ({ ...value, displayName: event.target.value }))} placeholder="显示名称" aria-label="媒体 Provider 显示名称" />
-            <select className="input" value={providerDraft.providerId} onChange={(event) => setProviderDraft((value) => ({ ...value, providerId: event.target.value }))} aria-label="绑定 CaoGen Provider"><option value="">选择已配置 Provider</option>{appProviders.filter((item) => item.ready).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
-            <input className="input" list="caogen-video-model-presets" value={providerDraft.model} onChange={(event) => setProviderDraft((value) => ({ ...value, model: event.target.value }))} placeholder="媒体模型 ID" aria-label="媒体模型 ID" />
-            <datalist id="caogen-video-model-presets">{VERIFIED_OPENAI_VIDEO_MODELS.map((model) => <option key={model} value={model} />)}</datalist>
-            <input className="input" type="number" min={0} step={0.01} value={providerDraft.estimatedCostUsd} onChange={(event) => setProviderDraft((value) => ({ ...value, estimatedCostUsd: event.target.value }))} placeholder="每任务估价 USD" aria-label="媒体任务估价美元" />
-            <select className="input" value={providerDraft.endpointClass} onChange={(event) => setProviderDraft((value) => ({ ...value, endpointClass: event.target.value as MediaProviderProfile['endpointClass'] }))} aria-label="媒体协议"><option value="openai-video">OpenAI 视频</option><option value="openai-image">OpenAI 图片</option><option value="openai-speech">OpenAI TTS</option><option value="generic-async">通用异步媒体</option><option value="openai-compatible">旧版兼容异步</option></select>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={saveMediaProvider} disabled={busy || !providerDraft.providerId || !providerDraft.model.trim() || !providerDraft.displayName.trim()}><Plus size={13} />添加</button>
-          </div>
-        </details>
+        <VideoMediaRoutingControls operation={selectedMediaOperation} selectedId={selectedMediaProviderId} preference={routingPreference}
+          profiles={mediaProviders} providers={appProviders} busy={busy} onSelect={setSelectedMediaProviderId} onPreference={setRoutingPreference}
+          onOperation={(operation) => { setSelectedMediaOperation(operation); setSelectedMediaProviderId(MEDIA_AUTO_PROVIDER_ID) }} run={run} />
         <div className="video-studio-budget-toolbar">
           <span>已结算 {formatUsd(costSummary.settledUsd)}</span><span>估算 {formatUsd(costSummary.estimatedUsd)}</span><span>{costSummary.unavailableCount} 未定价</span>
           <label><span>预算 USD</span><input className="input" type="number" min={0} max={1000000} step={1} value={budgetLimitDraft} onChange={(event) => setBudgetLimitDraft(event.target.value)} placeholder="不限" aria-label="媒体预算美元" /></label>
@@ -585,8 +550,8 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
         <div className="video-studio-generation-toolbar">
           {selectedMediaProvider?.endpointClass === 'mock' && <select className="input" value={scenario} onChange={(event) => setScenario(event.target.value as MediaMockScenario)} aria-label="Mock 任务结果"><option value="success">成功</option><option value="failure">失败</option><option value="rate_limit">限流</option><option value="unknown_result">未知结果</option></select>}
           {selectedMediaOperation.startsWith('speech.') && <input className="input" value={voiceDraft} onChange={(event) => setVoiceDraft(event.target.value)} placeholder="声线 ID" aria-label="TTS 声线 ID" />}
-          <button type="button" className="btn btn-secondary btn-sm" disabled={busy || !selectedShot || !selectedMediaProvider || (operationNeedsAsset(selectedMediaOperation) && !selectedAssetAvailable)} onClick={submitSelected}><WandSparkles size={14} />当前镜头</button>
-          <button type="button" className="btn btn-secondary btn-sm" disabled={busy || shots.length === 0 || !selectedMediaProvider || operationNeedsAsset(selectedMediaOperation)} onClick={submitAll}><WandSparkles size={14} />批量入队</button>
+          <button type="button" className="btn btn-secondary btn-sm" disabled={busy || !selectedShot || (!automaticMedia && !selectedMediaProvider) || (operationNeedsAsset(selectedMediaOperation) && !selectedAssetAvailable)} onClick={submitSelected}><WandSparkles size={14} />当前镜头</button>
+          <button type="button" className="btn btn-secondary btn-sm" disabled={busy || shots.length === 0 || (!automaticMedia && !selectedMediaProvider) || operationNeedsAsset(selectedMediaOperation)} onClick={submitAll}><WandSparkles size={14} />批量入队</button>
           <button type="button" className="btn btn-primary btn-sm" disabled={busy || shots.length === 0 || !ffmpeg?.available} onClick={compose}><Film size={14} />合成 MP4</button>
         </div>
         <div className="video-studio-generation-toolbar">
@@ -600,7 +565,7 @@ export function VideoStudioPanel({ active, projectId, productionId }: { active: 
         </div>
         <div className="video-studio-job-list">
           {jobs.map((job) => <div className="video-studio-job" key={job.id}>
-            <span>{production.shots.find((shot) => shot.id === job.shotId)?.title ?? job.capability}</span><strong data-status={job.status}>{job.status}</strong><small>{job.downloadReceivedBytes !== undefined ? downloadProgress(job.downloadReceivedBytes, job.downloadTotalBytes) : job.cost.status === 'unavailable' ? '未定价' : formatUsd(job.cost.actualUsd ?? job.cost.estimatedUsd)}</small><code>{job.output?.digest.slice(7, 19) ?? job.id.slice(-12)}</code>
+            <span>{production.shots.find((shot) => shot.id === job.shotId)?.title ?? job.capability}</span><strong data-status={job.status}>{job.status}</strong>{job.executionBinding && <small title={job.executionBinding.decision.considerations.join("；")}>{job.executionBinding.profile.displayName} · {job.executionBinding.decision.reason}</small>}<small>{job.downloadReceivedBytes !== undefined ? downloadProgress(job.downloadReceivedBytes, job.downloadTotalBytes) : job.cost.status === 'unavailable' ? '未定价' : formatUsd(job.cost.actualUsd ?? job.cost.estimatedUsd)}</small><code>{job.output?.digest.slice(7, 19) ?? job.id.slice(-12)}</code>
             {job.status === 'waiting_reconciliation'
               ? <button type="button" className="btn btn-ghost btn-icon-sm" disabled={busy || job.providerMode !== 'remote'} onClick={() => reconcile(job.id)} aria-label="查询媒体 Provider 外部任务结果" title="对账"><RefreshCw size={13} /></button>
               : !terminalStatuses.has(job.status) && <><button type="button" className="btn btn-ghost btn-icon-sm" disabled={busy} onClick={() => advance(job.id)} aria-label="推进媒体任务" title="推进"><Play size={13} /></button><button type="button" className="btn btn-ghost btn-icon-sm" disabled={busy} onClick={() => cancel(job.id)} aria-label="取消媒体任务" title="取消"><Ban size={13} /></button></>}
@@ -658,93 +623,51 @@ function useAssetRetentionDraft(
   }, [assetId, asset, revision, setMode, setUntil])
 }
 
-function useStudioOperationRunner(
-  busy: boolean,
-  refresh: () => Promise<void>,
-  setBusy: Dispatch<SetStateAction<boolean>>,
-  setError: Dispatch<SetStateAction<string>>
-): (operation: () => Promise<unknown>) => Promise<void> {
-  return useCallback(async (operation) => {
-    if (busy) return
-    setBusy(true)
-    setError('')
-    try {
-      await operation()
-      await refresh()
-      window.dispatchEvent(new Event('caogen:video-updated'))
-    } catch (cause) {
-      setError(errorText(cause))
-    } finally {
-      setBusy(false)
-    }
-  }, [busy, refresh, setBusy, setError])
-}
-
-function VideoFlowRail({ hasProduction, hasPreview }: { hasProduction: boolean; hasPreview: boolean }): React.JSX.Element {
-  const steps = [
-    { id: 'script', label: '剧本', detail: '输入与修订' },
-    { id: 'shots', label: '分镜', detail: '镜头与素材' },
-    { id: 'generation', label: '生成', detail: '选择 Provider' },
-    { id: 'preview', label: '预览 / 导出', detail: hasPreview ? '可播放成片' : '先生成预览' }
-  ]
-  const goTo = (id: string): void => {
-    const target = document.querySelector<HTMLElement>(`[data-video-flow-step="${id}"]`)
-    if (target instanceof HTMLDetailsElement) target.open = true
-    target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-  return (
-    <nav className="video-flow-rail" aria-label="视频制作流程" data-video-flow-rail>
-      {steps.map((step, index) => (
-        <span className="video-flow-step-wrap" key={step.id}>
-          <button type="button" className="video-flow-step" onClick={() => goTo(step.id)} disabled={!hasProduction} data-video-flow-nav={step.id}>
-            <strong>{index + 1}. {step.label}</strong><small>{step.detail}</small>
-          </button>
-          {index < steps.length - 1 && <span className="video-flow-arrow" aria-hidden="true">→</span>}
-        </span>
-      ))}
-    </nav>
-  )
-}
-
 function VideoPreviewFlow({
   busy,
   ffmpegAvailable,
   onAdopt,
   onCompose,
-  onExport,
   previewAsset,
+  compositionAssets,
+  finalAssetId,
+  onPreviewChange,
   shotCount
 }: {
   busy: boolean
   ffmpegAvailable: boolean
   onAdopt: () => void
   onCompose: () => void
-  onExport: () => void
   previewAsset?: MediaAsset
+  compositionAssets: MediaAsset[]
+  finalAssetId?: string
+  onPreviewChange: (assetId: string) => void
   shotCount: number
 }): React.JSX.Element {
+  const previewAdopted = Boolean(previewAsset && previewAsset.id === finalAssetId)
+  const finalAsset = compositionAssets.find((asset) => asset.id === finalAssetId)
   return (
-    <section className="video-studio-preview-flow" aria-label="视频预览" data-video-preview-flow data-video-flow-step="preview">
+    <section className="video-studio-preview-flow" aria-label="视频预览" data-video-preview-flow data-video-preview-asset={previewAsset?.id ?? ''}>
       <div className="video-studio-preview-flow-heading">
         <div>
           <strong>预览</strong>
-          <span>{previewAsset ? '可播放本地草稿' : `${shotCount} 个镜头，尚未生成草稿`}</span>
+          <span>{previewAsset ? `本地草稿 v${previewAsset.version}${finalAsset ? ` · 已采用成片 v${finalAsset.version}` : ' · 尚未采用成片'}` : `${shotCount} 个镜头，尚未生成草稿`}</span>
         </div>
-        <div className="video-studio-inline-actions">
+        <div className="video-studio-inline-actions video-studio-header-actions">
+          {previewAsset && <select className="input" value={previewAsset.id} onChange={(event) => onPreviewChange(event.target.value)} disabled={busy} aria-label="预览合成版本" data-video-preview-version>
+            {compositionAssets.map((asset) => <option key={asset.id} value={asset.id}>本地草稿 v{asset.version}{asset.id === finalAssetId ? ' · 已采用成片' : ''}{asset.contentStatus !== 'available' ? ' · 文件不可用' : ''}</option>)}
+          </select>}
           <button type="button" className="btn btn-primary btn-sm" disabled={busy || !ffmpegAvailable || shotCount === 0} onClick={onCompose} data-video-compose-preview>
             <Film size={13} aria-hidden="true" />生成本地预览
           </button>
-          {previewAsset && <button type="button" className="btn btn-secondary btn-sm" disabled={busy || previewAsset.adopted} onClick={onAdopt} data-video-adopt-preview>
-            <Check size={13} aria-hidden="true" />{previewAsset.adopted ? '已采用为成片' : '采用为成片'}
-          </button>}
-          {previewAsset?.contentStatus === 'available' && previewAsset.artifactId && <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={onExport} data-video-export>
-            <Download size={13} aria-hidden="true" />导出文件
+          {previewAsset && <button type="button" className="btn btn-secondary btn-sm" disabled={busy || previewAdopted || previewAsset.contentStatus !== 'available'} onClick={onAdopt} data-video-adopt-preview>
+            <Check size={13} aria-hidden="true" />{previewAdopted ? '已采用为成片' : '采用为成片'}
           </button>}
         </div>
       </div>
       {previewAsset?.contentStatus === 'available' && previewAsset.previewUrl && previewAsset.mediaType
-        ? <MediaPreview mediaType={previewAsset.mediaType} previewUrl={previewAsset.previewUrl} title={previewAsset.title} />
-        : <p className="video-studio-preview-empty">先点击“生成本地预览”，即可检查当前分镜的可播放结果。</p>}
+        ? <MediaPreview key={previewAsset.id} mediaType={previewAsset.mediaType} previewUrl={previewAsset.previewUrl} title={previewAsset.title} />
+        : <p className="video-studio-preview-empty">{previewAsset ? '此版本的文件当前不可用，请选择其他版本或重新生成本地预览。' : '先点击“生成本地预览”，即可检查当前分镜的可播放结果。'}</p>}
     </section>
   )
 }
@@ -757,53 +680,15 @@ function MediaPreview({ mediaType, previewUrl, title }: { mediaType?: string; pr
   return null
 }
 
-function finalAssetFor(production: VideoProduction | undefined): MediaAsset | undefined {
-  if (!production) return undefined
-  const final = production.finalAssetId
-    ? production.assets.find((asset) => asset.id === production.finalAssetId)
-    : undefined
-  if (final) return final
-  return production.assets
-    .filter((asset) => asset.kind === 'video' && asset.authorization?.source === 'local_composition')
-    .sort((left, right) => right.version - left.version || right.createdAt - left.createdAt)[0]
-}
-
-function titleFromScript(script: string, fallback: string): string {
-  const firstLine = script.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? ''
-  return firstLine.slice(0, 80) || fallback
-}
-
-function isDefaultProductionTitle(value: string, localizedDefault: string): boolean {
-  const normalized = value.trim()
-  return normalized === localizedDefault || normalized === '新短片' || normalized === 'New video'
-}
-
 const assetKinds: Array<[MediaAssetKind, string]> = [['character', '角色'], ['scene', '场景'], ['prop', '道具'], ['voice', '声线'], ['image', '图片'], ['video', '视频'], ['audio', '音频'], ['subtitle', '字幕']]
 const bindingRoles: Array<[MediaAssetBindingRole, string]> = [['character', '角色'], ['costume', '服装'], ['scene', '场景'], ['prop', '道具'], ['keyframe', '关键帧'], ['voice', '声线'], ['subtitle', '字幕'], ['audio_track', '音轨']]
-const mediaOperationOptions: Array<[MediaOperation, string]> = [
-  ['image.generate', '文生图'], ['image.edit', '图片编辑'], ['video.text-to-video', '文生视频'],
-  ['video.image-to-video', '图生视频'], ['video.reference-to-video', '参考图视频'],
-  ['speech.synthesize', '文本转语音'], ['speech.voice-clone', '声音克隆']
-]
-function operationCapability(operation: MediaOperation): 'image' | 'video' | 'tts' | 'synthesis' {
-  if (operation.startsWith('image.')) return 'image'
-  if (operation.startsWith('video.')) return 'video'
-  if (operation.startsWith('speech.')) return 'tts'
-  return 'synthesis'
-}
 function operationNeedsAsset(operation: MediaOperation): boolean {
   return operation === 'image.edit' || operation === 'video.image-to-video' || operation === 'video.reference-to-video' || operation === 'speech.voice-clone'
-}
-function operationsForEndpoint(endpoint: MediaProviderProfile['endpointClass']): MediaOperation[] {
-  if (endpoint === 'openai-image') return ['image.generate', 'image.edit']
-  if (endpoint === 'openai-speech') return ['speech.synthesize']
-  if (endpoint === 'openai-video') return ['video.text-to-video', 'video.image-to-video', 'video.reference-to-video']
-  return mediaOperationOptions.map(([operation]) => operation)
 }
 const errorText = (cause: unknown): string => cause instanceof Error ? cause.message : String(cause)
 const ruleLines = (value: string): string[] => value.split('\n').map((line) => line.trim()).filter(Boolean)
 const formatBytes = (value?: number): string => value === undefined ? '-' : value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(2)} GB` : value >= 1024 ** 2 ? `${(value / 1024 ** 2).toFixed(1)} MB` : `${Math.ceil(value / 1024)} KB`
-const formatUsd = (value: number): string => `$${value.toFixed(4)}`
+const formatUsd = (value: number | undefined): string => value === undefined ? '未知' : `$${value.toFixed(4)}`
 function mediaStorageSummary(snapshot: MediaStudioSnapshot | null, projectId?: string): { quotaBytes: number; usedBytes: number; availableBytes: number } | undefined {
   if (!snapshot || !projectId) return undefined
   const quotaBytes = snapshot.projectStorage.find((item) => item.projectId === projectId)?.quotaBytes ?? 20 * 1024 ** 3
@@ -832,7 +717,7 @@ const downloadProgress = (received: number, total?: number): string => total && 
 function summarizeMediaCost(production: VideoProduction | undefined, jobs: MediaStudioSnapshot['jobs']) {
   const scoped = production ? jobs.filter((job) => job.productionId === production.id) : []
   const settledUsd = scoped.reduce((sum, job) => sum + (job.cost.status === 'settled' ? job.cost.actualUsd ?? 0 : 0), 0)
-  const estimatedUsd = scoped.reduce((sum, job) => sum + job.cost.estimatedUsd, 0)
+  const estimatedUsd = scoped.reduce((sum, job) => sum + (job.cost.estimatedUsd ?? 0), 0)
   const unavailableCount = scoped.filter((job) => job.cost.status === 'unavailable').length
   const limitUsd = production?.budget.limitUsd
   const status = unavailableCount > 0 ? 'unknown' : limitUsd === undefined || limitUsd === 0 ? 'unlimited' : settledUsd > limitUsd ? 'exceeded' : settledUsd >= limitUsd * production!.budget.warningThreshold ? 'warning' : 'within_budget'

@@ -7,6 +7,7 @@ import type {
   TaskPlanVersion
 } from '../../shared/types'
 import { requireExecuteTaskStrategy, requireTaskStrategy } from './task-strategy'
+import { assertBusinessLineTaskStrategy } from '../business-line-execution-policy'
 import { TaskPlanContractStore } from './task-plan-contract-store'
 import { TaskPlanCanonicalProjector } from './task-plan-canonical-projection'
 import { reconcileTaskPlanLedger, syncTaskPlanLedger } from './task-plan-ledger'
@@ -27,6 +28,7 @@ export class TaskPlanSessionCoordinator {
   async setStrategy(id: string, value: unknown): Promise<void> {
     const session = this.requireSession(id)
     const strategy = requireTaskStrategy(value)
+    assertBusinessLineTaskStrategy(session.meta, strategy)
     if (session.meta.taskStrategy === strategy) return
     this.assertIdle(session.meta, '切换任务策略')
     if (strategy === 'execute') {

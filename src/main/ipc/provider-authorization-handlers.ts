@@ -1,7 +1,8 @@
 import { ipcMain } from 'electron'
 import type {
   ProviderAuthorizationAccountPolicy,
-  ProviderAuthorizationMutation
+  ProviderAuthorizationMutation,
+  ProviderAuthorizationService
 } from '../../shared/provider-authorization-types'
 import type { ProviderView } from '../../shared/types'
 import {
@@ -144,8 +145,9 @@ function normalizeAuthorizationAccountPolicy(value: unknown): Partial<ProviderAu
   return policy
 }
 
-function normalizeAuthorizationService(value: unknown): 'codex-oauth' | 'github-copilot' | 'xai-oauth' {
-  return value === 'github-copilot' || value === 'xai-oauth' ? value : 'codex-oauth'
+function normalizeAuthorizationService(value: unknown): ProviderAuthorizationService {
+  if (value === undefined || value === 'xai-oauth') return 'xai-oauth'
+  throw new Error('Provider authorization service is not supported')
 }
 
 function stringValue(value: unknown): string {

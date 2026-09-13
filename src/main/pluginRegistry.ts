@@ -59,7 +59,6 @@ interface ScanLimits {
   maxFiles: number
   maxDepth: number
   maxReadBytes: number
-  includeSiblingProjectMcp: boolean
 }
 
 interface ScanContext {
@@ -75,7 +74,7 @@ const DEFAULT_MAX_FILES = 1000
 const DEFAULT_MAX_DEPTH = 6
 const DEFAULT_MAX_READ_BYTES = 256 * 1024
 const IGNORED_DIRS = new Set(['.git', 'node_modules'])
-const MCP_CONFIG_NAMES = new Set(['.mcp.json', 'mcp.json', 'settings.json', 'claude_desktop_config.json'])
+const MCP_CONFIG_NAMES = new Set(['mcp.json'])
 const SUMMARY_CHARS = 180
 
 export function scanPluginRegistry(
@@ -96,9 +95,6 @@ export function scanPluginRegistry(
   for (const sourceRoot of sourceRoots) {
     if (!isDirectory(sourceRoot)) {
       addDiagnostic(ctx, 'root_missing', sourceRoot, 'Plugin registry root does not exist or is not a directory.')
-      if (limits.includeSiblingProjectMcp && basename(sourceRoot) === '.claude') {
-        scanMcpConfigFile(sourceRoot, join(dirname(sourceRoot), '.mcp.json'), items, ctx, new Set())
-      }
       continue
     }
 
@@ -256,14 +252,10 @@ function applyPluginRegistryState(
 function sourceKindForRoot(sourceRoot: string): PluginRegistrySourceKind {
   const root = resolve(sourceRoot)
   const home = resolve(homedir())
-  const caogenRoot = resolve(join(home, '.caogen'))
-  const codexRoot = resolve(join(home, '.codex'))
-  const claudeRoot = resolve(join(home, '.claude'))
+  const userRoot = resolve(join(home, '.caogen'))
 
-  if (root === caogenRoot || isInsidePath(caogenRoot, root)) return 'user'
-  if (isInsidePath(codexRoot, root)) return 'codex'
-  if (root === claudeRoot || isInsidePath(claudeRoot, root)) return 'user'
-  if (root.split(/[\\/]+/).some((part) => part === '.caogen' || part === '.claude')) return 'project'
+  if (root === userRoot || isInsidePath(userRoot, root)) return 'user'
+  if (root.split(/[\\/]+/).includes('.caogen')) return 'project'
   return 'other'
 }
 
@@ -331,7 +323,7 @@ function scanStandaloneSkillRoot(sourceRoot: string, items: DiscoveredPluginRegi
 
 function scanPluginManifest(sourceRoot: string, items: DiscoveredPluginRegistryItem[], ctx: ScanContext): void {
   const manifest = readFirstExistingText(
-    [join(sourceRoot, '.caogen-plugin', 'plugin.json'), join(sourceRoot, '.codex-plugin', 'plugin.json'), join(sourceRoot, 'plugin.json')],
+    [join(sourceRoot, '.caogen-plugin', 'plugin.json'), join(sourceRoot, 'plugin.json')],
     ctx
   )
   if (!manifest) return
@@ -429,18 +421,18 @@ function scanAgents(sourceRoot: string, items: DiscoveredPluginRegistryItem[], c
   })
 }
 
-function scanManagedPluginPackages(sourceRoot: string, items: DiscoveredPluginRegistryItem[], ctx: ScanContext): void {
-  const pluginsRoot = basename(sourceRoot) === '.caogen'
-    ? join(sourceRoot, 'plugins')
-    : basename(sourceRoot) === 'plugins' && basename(dirname(sourceRoot)) === '.caogen'
-      ? sourceRoot
-      : undefined
-  if (!pluginsRoot || !isDirectory(pluginsRoot)) return
+function scanManagedPluginPackages(
+  sourceRoot: string,
+  items: DiscoveredPluginRegistryItem[],
+  ctx: ScanContext
+): void {
+  if (basename(sourceRoot) !== '.caogen') return
+  const pluginsRoot = join(sourceRoot, 'plugins')
+  if (!isDirectory(pluginsRoot)) return
   for (const entry of readDir(pluginsRoot, ctx)) {
-    if (!entry.isDirectory() || IGNORED_DIRS.has(entry.name) || entry.name.startsWith('.')) continue
+    if (!entry.isDirectory() || IGNORED_DIRS.has(entry.name)) continue
     const pluginRoot = join(pluginsRoot, entry.name)
     scanPluginManifest(pluginRoot, items, ctx)
-    scanStandaloneSkillRoot(pluginRoot, items, ctx)
     scanSkills(pluginRoot, items, ctx)
     scanAgents(pluginRoot, items, ctx)
   }
@@ -448,16 +440,16 @@ function scanManagedPluginPackages(sourceRoot: string, items: DiscoveredPluginRe
 
 function scanMcpConfigs(sourceRoot: string, items: DiscoveredPluginRegistryItem[], ctx: ScanContext): void {
   const seen = new Set<string>()
-
-  if (ctx.limits.includeSiblingProjectMcp && basename(sourceRoot) === '.claude') {
-    const siblingProjectMcp = join(dirname(sourceRoot), '.mcp.json')
-    scanMcpConfigFile(sourceRoot, siblingProjectMcp, items, ctx, seen)
+  const scanRoots = basename(sourceRoot) === '.caogen'
+    ? [join(sourceRoot, 'mcp'), join(sourceRoot, 'plugins')]
+    : [sourceRoot]
+  for (const root of scanRoots) {
+    if (!isDirectory(root)) continue
+    walkFiles(root, 0, ctx, (filePath, name) => {
+      if (!MCP_CONFIG_NAMES.has(name)) return
+      scanMcpConfigFile(sourceRoot, filePath, items, ctx, seen)
+    })
   }
-
-  walkFiles(sourceRoot, 0, ctx, (filePath, name) => {
-    if (!MCP_CONFIG_NAMES.has(name)) return
-    scanMcpConfigFile(sourceRoot, filePath, items, ctx, seen)
-  })
 }
 
 function scanMcpConfigFile(
@@ -733,8 +725,7 @@ function normalizeLimits(options: PluginRegistryScanOptions): ScanLimits {
   return {
     maxFiles: positiveInt(options.maxFiles, DEFAULT_MAX_FILES),
     maxDepth: positiveInt(options.maxDepth, DEFAULT_MAX_DEPTH),
-    maxReadBytes: positiveInt(options.maxReadBytes, DEFAULT_MAX_READ_BYTES),
-    includeSiblingProjectMcp: options.includeSiblingProjectMcp ?? true
+    maxReadBytes: positiveInt(options.maxReadBytes, DEFAULT_MAX_READ_BYTES)
   }
 }
 

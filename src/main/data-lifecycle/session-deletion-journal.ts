@@ -1,17 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import {
-  closeSync,
-  existsSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  unlinkSync,
-  writeFileSync
-} from 'node:fs'
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import type { DataPurgeTarget, DataRetentionSubject } from '../../shared/data-lifecycle-types'
 import { acquireFileLock, enqueueMutation, releaseFileLock } from '../digital-worker/persistence'
@@ -24,7 +12,6 @@ import { withDataLifecycleMutation } from './data-lifecycle-mutation-lock'
 
 export const SESSION_DELETION_COMPLETED_RECEIPT_LIMIT = 255
 export const SESSION_DELETION_COMPLETED_RECEIPT_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000
-const SESSION_DELETION_JOURNAL_FILE_NAME = 'session-deletion-journal.json'
 
 export const SESSION_DELETION_PHASES = [
   'prepared',
@@ -106,7 +93,6 @@ export class SessionDeletionJournal {
     inputOrSessionId: SessionDeletionJournalBeginInput | string,
     sdkSessionIdInput?: string
   ): Promise<SessionDeletionJournalEntry> {
-    const hasExplicitScope = typeof inputOrSessionId !== 'string'
     const input: SessionDeletionJournalBeginInput = typeof inputOrSessionId === 'string'
       ? {
           sessionId: inputOrSessionId,
@@ -127,7 +113,9 @@ export class SessionDeletionJournal {
       const pending = document.entries.find((candidate) =>
         candidate.sessionId === sessionId && candidate.phase !== 'completed')
       if (pending) {
-        assertReplayIdentity(pending, sdkSessionId, retentionTargets, legalHoldSubjects, hasExplicitScope)
+        if (pending.sdkSessionId !== sdkSessionId) {
+          throw new Error('session deletion journal identity conflicts with visible history')
+        }
         return pending
       }
       const now = Date.now()
@@ -155,21 +143,17 @@ export class SessionDeletionJournal {
     const operationId = requiredId(operationIdInput, 'operationId')
     const targetIndex = SESSION_DELETION_PHASES.indexOf(phase)
     if (targetIndex < 0) throw new Error('session deletion phase is invalid')
-    const normalizedPatch = normalizePatch(patch)
     return this.mutate((document) => {
       const entry = document.entries.find((candidate) => candidate.operationId === operationId)
       if (!entry) throw new Error('session deletion operation is missing')
       const currentIndex = SESSION_DELETION_PHASES.indexOf(entry.phase)
-      if (targetIndex <= currentIndex) {
-        assertPatchCompatible(entry, phase, normalizedPatch)
-        return entry
-      }
+      if (targetIndex < currentIndex) return entry
       if (targetIndex > currentIndex + 1) {
         throw new Error(`session deletion phase cannot skip ${entry.phase} -> ${phase}`)
       }
       entry.phase = phase
       entry.updatedAt = Date.now()
-      Object.assign(entry, normalizedPatch)
+      Object.assign(entry, normalizePatch(patch))
       if (phase === 'completed') entry.completedAt = entry.updatedAt
       return entry
     })
@@ -208,13 +192,10 @@ export class SessionDeletionJournal {
   private async mutate<T>(operation: (document: SessionDeletionJournalDocument) => T): Promise<T> {
     return withDataLifecycleMutation(this.userDataRoot, () => enqueueMutation(this.filePath, async () => {
       mkdirSync(dirname(this.filePath), { recursive: true, mode: 0o700 })
-      cleanupJournalTemps(this.filePath)
       const lock = acquireFileLock(this.lockPath)
       try {
         const document = readDocument(this.filePath)
-        const before = JSON.stringify(document)
         const result = operation(document)
-        if (JSON.stringify(document) === before) return clone(result)
         document.revision += 1
         writeDocument(this.filePath, document)
         return clone(result)
@@ -268,37 +249,7 @@ function subjectKey(subject: DataRetentionSubject): string {
   return subject.kind === 'application' ? 'application' : `${subject.kind}:${subject.id}`
 }
 
-function assertReplayIdentity(
-  entry: SessionDeletionJournalEntry,
-  sdkSessionId: string,
-  retentionTargets: DataPurgeTarget[],
-  legalHoldSubjects: DataRetentionSubject[],
-  hasExplicitScope: boolean
-): void {
-  const conflicts = [
-    entry.sdkSessionId !== sdkSessionId,
-    hasExplicitScope && JSON.stringify(entry.retentionTargets ?? []) !== JSON.stringify(retentionTargets),
-    hasExplicitScope && JSON.stringify(entry.legalHoldSubjects ?? []) !== JSON.stringify(legalHoldSubjects)
-  ]
-  if (conflicts.some(Boolean)) {
-    throw new Error('session deletion journal identity conflicts with its frozen deletion scope')
-  }
-}
-
-function assertPatchCompatible(
-  entry: SessionDeletionJournalEntry,
-  phase: SessionDeletionPhase,
-  patch: JournalPatch
-): void {
-  for (const [key, value] of Object.entries(patch) as Array<[keyof JournalPatch, JournalPatch[keyof JournalPatch]]>) {
-    const existing = entry[key]
-    if (JSON.stringify(existing) === JSON.stringify(value)) continue
-    throw new Error(`session deletion phase ${phase} already has a different receipt`)
-  }
-}
-
 function readDocument(filePath: string): SessionDeletionJournalDocument {
-  cleanupJournalTemps(filePath)
   if (!existsSync(filePath)) return { schemaVersion: 1, revision: 0, entries: [] }
   const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as unknown
   assertDocument(parsed)
@@ -308,7 +259,6 @@ function readDocument(filePath: string): SessionDeletionJournalDocument {
 function writeDocument(filePath: string, document: SessionDeletionJournalDocument): void {
   const directory = dirname(filePath)
   mkdirSync(directory, { recursive: true, mode: 0o700 })
-  cleanupJournalTemps(filePath)
   const temporary = `${filePath}.${process.pid}.${randomUUID()}.tmp`
   let descriptor: number | undefined
   try {
@@ -318,59 +268,15 @@ function writeDocument(filePath: string, document: SessionDeletionJournalDocumen
     closeSync(descriptor)
     descriptor = undefined
     renameSync(temporary, filePath)
-    syncDirectory(directory)
+    if (process.platform !== 'win32') {
+      const directoryDescriptor = openSync(directory, 'r')
+      try { fsyncSync(directoryDescriptor) } finally { closeSync(directoryDescriptor) }
+    }
   } catch (error) {
     if (descriptor !== undefined) closeSync(descriptor)
     rmSync(temporary, { force: true })
     throw error
   }
-}
-
-function cleanupJournalTemps(filePath: string): void {
-  const directory = dirname(filePath)
-  const prefix = `${SESSION_DELETION_JOURNAL_FILE_NAME}.`
-  let entries
-  try {
-    entries = readdirSync(directory, { withFileTypes: true })
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
-    throw error
-  }
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.startsWith(prefix) || !entry.name.endsWith('.tmp')) continue
-    const match = /^session-deletion-journal\.json\.(\d+)\.[0-9a-f-]+\.tmp$/.exec(entry.name)
-    if (!match || processIsAlive(Number.parseInt(match[1], 10))) continue
-    try { unlinkSync(join(directory, entry.name)) } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
-  }
-}
-
-function processIsAlive(pid: number): boolean {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
-  }
-}
-
-function syncDirectory(directory: string): void {
-  let descriptor: number | undefined
-  try {
-    descriptor = openSync(directory, 'r')
-    fsyncSync(descriptor)
-  } catch (error) {
-    if (process.platform !== 'win32' || !isWindowsDirectoryFsyncUnsupported(error)) throw error
-  } finally {
-    if (descriptor !== undefined) closeSync(descriptor)
-  }
-}
-
-function isWindowsDirectoryFsyncUnsupported(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException)?.code
-  return code === 'EPERM' || code === 'EACCES' || code === 'EINVAL' || code === 'ENOTSUP'
 }
 
 function assertDocument(value: unknown): asserts value is SessionDeletionJournalDocument {

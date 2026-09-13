@@ -1,15 +1,12 @@
 import type { ModelAttemptRecord } from '../../shared/model-attempt-types'
 import type {
-  ImportedProviderUsageRollup,
   ProviderUsageQuery,
-  ProviderUsageSummary,
-  ResolvedImportedProviderUsageRollup
+  ProviderUsageSummary
 } from '../../shared/provider-usage-types'
 import { listProviders } from '../providers'
 import { queryPersistedModelAttempts } from '../task/model-attempt-api'
 import { summarizeProviderUsage } from './providerUsageSummary'
 import { refreshProviderCredentialMetrics } from './providerCredentialMetrics'
-import { readImportedProviderUsage } from './providerImportedUsage'
 import { readProviderGatewayUsage } from './providerGatewayStore'
 
 const MAX_ATTEMPTS = 10_000
@@ -48,34 +45,14 @@ export async function queryProviderUsage(query: ProviderUsageQuery = {}): Promis
       recordDigest: 'sha256:provider-gateway-usage-record'
     }))
   const providers = listProviders()
-  const imported = resolveImportedUsage(readImportedProviderUsage(), providers)
-  const knownProviderIds = new Set(providers.map((provider) => provider.id))
-  const historicalProviders = imported
-    .filter((row) => !knownProviderIds.has(row.providerId))
-    .map((row) => ({ id: row.providerId, name: row.providerName }))
-  const uniqueHistorical = [...new Map(historicalProviders.map((provider) => [provider.id, provider])).values()]
   return summarizeProviderUsage(
     [...attemptResult.attempts, ...gatewayAttempts],
-    [...providers, ...uniqueHistorical],
+    providers,
     query,
     Date.now(),
-    imported,
+    [],
     attemptResult.truncated
   )
-}
-
-function resolveImportedUsage(
-  rows: ImportedProviderUsageRollup[],
-  providers: ReturnType<typeof listProviders>
-): ResolvedImportedProviderUsageRollup[] {
-  const mapped = new Map(providers.flatMap((provider) => {
-    const sourceId = provider.advancedConfig?.metadata?.sourceProviderId
-    return sourceId ? [[sourceId, provider.id] as const] : []
-  }))
-  return rows.map((row) => ({
-    ...row,
-    providerId: mapped.get(row.sourceProviderId) ?? `cc-switch:${row.sourceProviderId}`
-  }))
 }
 
 async function readAllAttempts(providerId: string | undefined): Promise<{

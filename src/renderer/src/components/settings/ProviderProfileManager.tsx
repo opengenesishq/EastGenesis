@@ -2,8 +2,6 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { FileScan, RotateCcw, Trash2, X } from 'lucide-react'
 import { useT } from '../../i18n'
 import { useStore } from '../../store'
-import CodexNativeConfigWorkspace from './CodexNativeConfigWorkspace'
-import CcSwitchImportPanel from './CcSwitchImportPanel'
 import type {
   ProviderProfileBackupView,
   ProviderProfileBackupPreview,
@@ -56,16 +54,6 @@ export default function ProviderProfileManager({ providers, onAdd, children }: P
       {profile.preview && <ProviderProfilePreviewPanel profile={profile} />}
       {profile.backupPreview && <ProviderProfileBackupPreviewPanel profile={profile} />}
       {children}
-      <section className="provider-compatibility-tools" aria-label={t('providerCompatibilityTitle')}>
-        <div className="provider-compatibility-tools-head">
-          <div>
-            <h4>{t('providerCompatibilityTitle')}</h4>
-            <p>{t('providerCompatibilityHint')}</p>
-          </div>
-        </div>
-        <CcSwitchImportPanel />
-        <CodexNativeConfigWorkspace />
-      </section>
       {profile.nativeBackups.length > 0 && <ProviderNativeBackups profile={profile} />}
       {profile.backups.length > 0 && <ProviderProfileBackups profile={profile} />}
     </>
@@ -280,7 +268,9 @@ function ProviderNativeCodexPreview({ profile }: { profile: ProfileController })
         <div>
           <h4>{t('providerNativeCodexPreviewTitle')}</h4>
           <p>{t('providerNativeCodexSource', {
-            source: preview.source === 'CODEX_HOME' ? 'CODEX_HOME' : t('providerNativeCodexUserProfile'),
+            source: preview.source === 'environment-override'
+              ? t('providerNativeEnvironmentOverride')
+              : t('providerNativeCodexUserProfile'),
             config: preview.configPresent ? 'config.toml' : '-',
             auth: preview.authPresent ? 'auth.json' : '-'
           })}</p>

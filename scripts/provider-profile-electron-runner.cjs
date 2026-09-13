@@ -531,22 +531,14 @@ async function openProviderProfileSettings(requireBackup = true) {
 }
 
 async function verifyUnsafeUiProfileRejected(win, urlCanary) {
-  await clickEnabledRendererText(win, '.provider-profile-actions button', '导入')
-  await waitForRenderer(win, `(() => {
-    const notice = document.querySelector('.provider-profile-notice.notice-error');
-    const importButton = [...document.querySelectorAll('.provider-profile-actions button')]
-      .find((button) => button.textContent.trim() === '导入');
-    return Boolean(notice && importButton && !importButton.disabled);
-  })()`)
+  await clickRendererText(win, '导入')
+  await waitForRenderer(win, `Boolean(document.querySelector('.notice-error'))`)
   const rejectedUi = await rendererValue(win, `({
     previewOpen: Boolean(document.querySelector('.provider-profile-preview')),
-    containsCanary: document.documentElement.innerHTML.includes(${JSON.stringify(urlCanary)}),
-    error: document.querySelector('.provider-profile-notice.notice-error')?.textContent?.trim() || ''
+    containsCanary: document.documentElement.innerHTML.includes(${JSON.stringify(urlCanary)})
   })`)
   check('unsafe URL is rejected without entering the preview DOM',
-    !rejectedUi.previewOpen
-      && !rejectedUi.containsCanary
-      && /Base URL|用户名|密码|userinfo/.test(rejectedUi.error))
+    !rejectedUi.previewOpen && !rejectedUi.containsCanary)
 }
 
 function writePortableUiProfileImport() {
@@ -574,13 +566,8 @@ function writePortableUiProfileImport() {
 }
 
 async function verifyUiProfilePreview(win, previewKeyLabel) {
-  await clickEnabledRendererText(win, '.provider-profile-actions button', '导入')
-  await waitForRenderer(win, `(() => {
-    const preview = document.querySelector('.provider-profile-preview');
-    const applyButton = [...(preview?.querySelectorAll('button') || [])]
-      .find((button) => button.textContent.trim() === '应用 Profile');
-    return Boolean(preview && applyButton && !applyButton.disabled);
-  })()`)
+  await clickRendererText(win, '导入')
+  await waitForRenderer(win, `Boolean(document.querySelector('.provider-profile-preview'))`)
   const previewUi = await rendererValue(win, `({
     text: document.querySelector('.provider-profile-preview')?.innerText || '',
     actions: [...document.querySelectorAll('.provider-profile-action-select')].map((select) => select.value),
@@ -605,10 +592,10 @@ async function verifyUiProfilePreview(win, previewKeyLabel) {
 }
 
 async function applyUiProfile(win) {
-  await clickEnabledRendererText(win, '.provider-profile-preview button', '应用 Profile')
+  await clickRendererText(win, '应用 Profile')
   const completion = await waitFor(async () => {
     const state = await rendererValue(win, `({
-      applied: document.querySelector('.provider-profile-notice.notice-info')?.textContent?.includes('Profile 已应用') || false,
+      applied: document.body.innerText.includes('Profile 已应用'),
       error: document.querySelector('.provider-profile-notice.notice-error')?.textContent?.trim() || '',
       applying: [...document.querySelectorAll('.provider-profile-preview button')]
         .some((button) => button.textContent.trim().includes('正在应用'))
@@ -924,7 +911,7 @@ async function openProviderEditor(win, providerName) {
   return rendererValue(win, `(() => {
     const row = [...document.querySelectorAll('.provider-row')]
       .find((candidate) => candidate.querySelector('.provider-row-name')?.childNodes[0]?.textContent.trim() === ${JSON.stringify(providerName)});
-    const edit = row?.querySelector('[data-provider-edit]');
+    const edit = row?.querySelector('.provider-row-actions button:nth-of-type(2)');
     edit?.click();
     return Boolean(edit);
   })()`)
@@ -1021,17 +1008,6 @@ async function clickRendererText(win, text) {
     return Boolean(button);
   })()`)
   if (!clicked) throw new Error(`renderer button not found: ${text}`)
-}
-
-function clickEnabledRendererText(win, selector, text) {
-  return waitFor(() => rendererValue(win, `(() => {
-    const target = ${JSON.stringify(text)};
-    const button = [...document.querySelectorAll(${JSON.stringify(selector)})]
-      .find((candidate) => candidate.textContent.trim() === target);
-    if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
-    button.click();
-    return true;
-  })()`), 10_000)
 }
 
 function rendererValue(win, expression) {

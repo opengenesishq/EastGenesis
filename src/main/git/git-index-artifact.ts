@@ -88,15 +88,10 @@ export function persistGitIndexArtifact(
   const artifactRoot = join(base, key)
   const artifactRef = `git-index/${key}`
   mkdirSync(base, { recursive: true, mode: 0o700 })
-  cleanupArtifactTemps(base, key)
   if (!existsSync(artifactRoot)) {
     createArtifactDirectory(base, artifactRoot, intent.expectedEntriesDigest, indexBytes, tempObjects)
   }
-  const view = validateArtifactDirectory(artifactRoot, artifactRef, intent.expectedEntriesDigest)
-  if (view.indexArtifactSha256 !== sha256(indexBytes) || view.indexArtifactBytes !== indexBytes.byteLength) {
-    throw new Error('Git index artifact identity conflict')
-  }
-  return view
+  return validateArtifactDirectory(artifactRoot, artifactRef, intent.expectedEntriesDigest)
 }
 
 export function readFrozenGitIndexArtifact(target: GitIndexUpdateTarget): FrozenGitIndexArtifact {
@@ -141,7 +136,7 @@ function createArtifactDirectory(
   indexBytes: Buffer,
   tempObjects: string
 ): void {
-  const tempArtifact = join(base, `.${basename(artifactRoot)}-${process.pid}-${randomUUID()}.tmp`)
+  const tempArtifact = join(base, `.${basename(artifactRoot)}-${randomUUID()}.tmp`)
   try {
     mkdirSync(tempArtifact, { recursive: false, mode: 0o700 })
     durableWriteFile(join(tempArtifact, 'index'), indexBytes)
@@ -154,22 +149,11 @@ function createArtifactDirectory(
       objects
     }
     durableWriteFile(join(tempArtifact, 'manifest.json'), Buffer.from(JSON.stringify(manifest), 'utf8'))
-    fsyncDirectory(tempArtifact)
     renameSync(tempArtifact, artifactRoot)
     fsyncDirectory(base)
   } catch (error) {
     rmSync(tempArtifact, { recursive: true, force: true })
-    if (!existsSync(artifactRoot) || !isArtifactPublicationConflict(error)) throw error
-  }
-}
-
-function cleanupArtifactTemps(base: string, key: string): void {
-  const pattern = new RegExp(`^\\.${key}-(\\d+)-[0-9a-f-]+\\.tmp$`)
-  for (const entry of readdirSync(base, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    const match = pattern.exec(entry.name)
-    if (!match || processIsAlive(Number.parseInt(match[1], 10))) continue
-    rmSync(join(base, entry.name), { recursive: true, force: true })
+    if (!existsSync(artifactRoot)) throw error
   }
 }
 
@@ -179,7 +163,6 @@ function copyObjectTree(sourceRoot: string, destinationRoot: string): GitIndexOb
   let totalBytes = 0
   for (const directory of readdirSync(sourceRoot, { withFileTypes: true })) {
     if (!directory.isDirectory() || !/^[0-9a-f]{2}$/.test(directory.name)) continue
-    const destinationDirectory = join(destinationRoot, directory.name)
     for (const file of readdirSync(join(sourceRoot, directory.name), { withFileTypes: true })) {
       if (!file.isFile() || !/^[0-9a-f]+$/.test(file.name)) continue
       const relativePath = `${directory.name}/${file.name}`
@@ -191,9 +174,7 @@ function copyObjectTree(sourceRoot: string, destinationRoot: string): GitIndexOb
       durableWriteFile(destination, bytes)
       entries.push({ path: relativePath, sha256: sha256(bytes), bytes: bytes.byteLength })
     }
-    if (existsSync(destinationDirectory)) fsyncDirectory(destinationDirectory)
   }
-  fsyncDirectory(destinationRoot)
   return entries.sort((left, right) => left.path.localeCompare(right.path))
 }
 
@@ -273,7 +254,6 @@ function promoteObject(
   const source = join(artifactRoot, 'objects', entry.path)
   const objectDirectory = ensureLooseObjectDirectory(target, entry.path.slice(0, 2))
   const destination = join(objectDirectory, entry.path.slice(3))
-  cleanupLooseObjectTemps(objectDirectory)
   if (existsSync(destination)) {
     validateLooseObjectFile(destination, objectId, target.objectFormat)
     return
@@ -298,25 +278,6 @@ function promoteObject(
       if (existsSync(destination)) chmodSync(destination, 0o444)
     }
     rmSync(temporary, { force: true })
-  }
-}
-
-function cleanupLooseObjectTemps(directory: string): void {
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (!entry.isFile()) continue
-    const match = /^\.caogen-(\d+)-[0-9a-f-]+\.tmp$/.exec(entry.name)
-    if (!match || processIsAlive(Number.parseInt(match[1], 10))) continue
-    rmSync(join(directory, entry.name), { force: true })
-  }
-}
-
-function processIsAlive(pid: number): boolean {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
   }
 }
 
@@ -475,23 +436,16 @@ function isWindowsFsyncPermissionError(error: unknown): boolean {
 }
 
 function fsyncDirectory(path: string): void {
-  let descriptor: number | undefined
   try {
-    descriptor = openSync(path, 'r')
-    fsyncSync(descriptor)
-  } catch (error) {
-    if (process.platform !== 'win32' || !isWindowsDirectoryFsyncUnsupported(error)) throw error
-  } finally {
-    if (descriptor !== undefined) safeClose(descriptor)
+    const descriptor = openSync(path, 'r')
+    try {
+      fsyncSync(descriptor)
+    } finally {
+      closeSync(descriptor)
+    }
+  } catch {
+    // Directory fsync is unavailable on some platforms; file fsync and atomic rename still apply.
   }
-}
-
-function isArtifactPublicationConflict(error: unknown): boolean {
-  return error instanceof Error && 'code' in error && ['EEXIST', 'ENOTEMPTY'].includes((error as NodeJS.ErrnoException).code ?? '')
-}
-
-function isWindowsDirectoryFsyncUnsupported(error: unknown): boolean {
-  return error instanceof Error && 'code' in error && ['EPERM', 'EACCES', 'EINVAL', 'ENOTSUP'].includes((error as NodeJS.ErrnoException).code ?? '')
 }
 
 function fileSystemIdentity(path: string): FileSystemIdentity {

@@ -1,5 +1,6 @@
 export type SettingsTab =
   | 'control'
+  | 'routing'
   | 'general'
   | 'permissions'
   | 'project'

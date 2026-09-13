@@ -16,6 +16,7 @@ import {
   normalizeOptionalId
 } from './workflow-ledger-codec'
 import { isTaskRunRecord } from './task-run'
+import { assertFrozenRoutingWrite } from './frozen-routing-policy'
 import { selectTaskEvidence, type TaskEvidenceRecord } from './task-evidence-store'
 import { assertWorkflowEvidenceLinkReferences } from './workflow-evidence-link-resolution'
 import type { WorkflowLedgerDatabase } from './workflow-ledger-db'
@@ -60,13 +61,14 @@ export function assertWorkItemCompatibility(
     existing.id !== incoming.id ||
     existing.projectId !== incoming.projectId ||
     existing.goalId !== incoming.goalId ||
-    existing.parentId !== incoming.parentId
+    existing.parentId !== incoming.parentId || existing.businessLineId !== incoming.businessLineId
   ) {
     throw new WorkflowLedgerCorruptionError(`work item ${incoming.id} immutable ownership changed`)
   }
 }
 
 export function assertRunCompatibility(existing: WorkflowRunRecord, incoming: WorkflowRunRecord): void {
+  assertFrozenRoutingWrite(existing.taskRun, incoming.taskRun)
   if (
     existing.id !== incoming.id ||
     existing.projectId !== incoming.projectId ||

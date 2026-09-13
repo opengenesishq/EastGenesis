@@ -40,11 +40,12 @@ const ACTION_MAP_SPECS = [
 ]
 
 const APP_FEATURE_ACTION_SPECS = [
+  { feature: 'office-revision', staticActions: ['inspect', 'plan'], readOnlyActions: ['inspect', 'plan'] },
   {
     feature: 'session-query',
     file: 'src/main/ipc/session-query-handlers.ts',
     typeAlias: 'SessionQueryAction',
-    readOnlyActions: ['query']
+    readOnlyActions: ['discover']
   },
   {
     feature: 'task-plan',
@@ -64,9 +65,8 @@ const APP_FEATURE_ACTION_SPECS = [
     typeAlias: 'ProviderProfileAction',
     readOnlyActions: [
       'preview', 'backups',
-      'cc-switch-preview', 'cc-switch-backups',
       'native-codex-preview', 'native-backups',
-      'native-config-preview', 'native-config-backups', 'backup-preview'
+      'backup-preview'
     ]
   },
   {
@@ -353,11 +353,40 @@ function discoverEffectTargetKinds(resolver) {
   const context = resolver.context(EFFECT_TYPES_FILE)
   const alias = findTypeAlias(context.sourceFile, 'EffectTarget')
   const kinds = new Set()
-  visit(alias.type, (node) => {
-    if (!ts.isPropertySignature(node) || propertyName(node.name) !== 'kind' || !node.type) return
-    collectLiteralTypeStrings(node.type, kinds)
-  })
+  collectEffectTargetKinds(alias.type, context, resolver, kinds, new Set())
   return kinds
+}
+
+function collectEffectTargetKinds(type, context, resolver, kinds, seen) {
+  if (ts.isUnionTypeNode(type)) {
+    for (const member of type.types) collectEffectTargetKinds(member, context, resolver, kinds, seen)
+    return
+  }
+  if (ts.isTypeReferenceNode(type) && ts.isIdentifier(type.typeName)) {
+    const binding = resolveEffectTargetType(type.typeName.text, context, resolver)
+    const key = `${binding.context.relativePath}:${binding.declaration.name.text}`
+    if (seen.has(key)) throw new Error(`cyclic EffectTarget type: ${key}`)
+    return collectEffectTargetKinds(binding.declaration.type ?? binding.declaration, binding.context,
+      resolver, kinds, new Set([...seen, key]))
+  }
+  if (!ts.isTypeLiteralNode(type) && !ts.isInterfaceDeclaration(type)) throw new Error('EffectTarget must have a static declared shape')
+  if (type.heritageClauses?.length) throw new Error('EffectTarget interface inheritance must be explicitly resolved')
+  const kind = type.members.find((member) => ts.isPropertySignature(member) && propertyName(member.name) === 'kind')
+  if (!kind?.type) throw new Error('EffectTarget member lacks a declared kind')
+  collectLiteralTypeStrings(kind.type, kinds)
+}
+
+function resolveEffectTargetType(name, context, resolver) {
+  const imported = context.imports.get(name)
+  if (imported) {
+    if (!imported.specifier.startsWith('.')) throw new Error('EffectTarget type must be a local source declaration')
+    context = resolver.context(resolveSourceModule(context.relativePath, imported.specifier, resolver.repoRoot))
+    name = imported.imported
+  }
+  const declaration = context.sourceFile.statements.find((item) =>
+    (ts.isTypeAliasDeclaration(item) || ts.isInterfaceDeclaration(item)) && item.name.text === name)
+  if (!declaration) throw new Error(`${context.relativePath}: EffectTarget type ${name} is missing`)
+  return { context, declaration }
 }
 
 function discoverReconciledTargetKinds(resolver) {
@@ -450,12 +479,7 @@ function createResolver(repoRoot) {
       const result = new Map()
       for (const groupExpression of initializer.arguments) {
         const group = unwrap(groupExpression)
-        if (!isNamedCall(group, 'policyGroup') || group.arguments.length < 2) {
-          throw new Error(`${relativePath}:${name} must contain only policyGroup(...) entries`)
-        }
-        const ids = resolver.stringArray(group.arguments[0], context)
-        const impact = resolver.objectStringProperty(group.arguments[1], context, 'impact')
-        const access = impact === 'read_only' ? 'read_only' : 'mutation'
+        const { ids, access } = staticPolicyGroup(group, resolver, context, relativePath, name)
         for (const id of ids) {
           if (result.has(id)) throw new Error(`${relativePath}:${name} declares ${id} more than once`)
           result.set(id, access)
@@ -705,4 +729,22 @@ function assertUnique(values, label) {
 
 function compareEntryId(left, right) {
   return left.id.localeCompare(right.id)
+}
+
+function staticPolicyGroup(group, resolver, context, relativePath, name) {
+  if (isNamedCall(group, 'delegatedPolicyGroup') && group.arguments.length === 1) {
+    const entries = unwrap(group.arguments[0])
+    if (!ts.isObjectLiteralExpression(entries)) throw new Error(`${relativePath}:${name} delegated entries must be a static evidence map`)
+    const ids = entries.properties.map((property) => {
+      if (!ts.isPropertyAssignment(property)) throw new Error(`${relativePath}:${name} delegated entry must be a property`)
+      const id = ts.isIdentifier(property.name) || ts.isStringLiteralLike(property.name) ? property.name.text : undefined
+      const evidence = resolver.string(property.initializer, context)
+      if (!id || !evidence?.trim()) throw new Error(`${relativePath}:${name} delegated entry requires static id and evidence`)
+      return id
+    })
+    return { ids, access: 'mutation' }
+  }
+  if (!isNamedCall(group, 'policyGroup') || group.arguments.length < 2) throw new Error(`${relativePath}:${name} must contain only policyGroup(...) or static delegatedPolicyGroup(...) entries`)
+  return { ids: resolver.stringArray(group.arguments[0], context),
+    access: resolver.objectStringProperty(group.arguments[1], context, 'impact') === 'read_only' ? 'read_only' : 'mutation' }
 }

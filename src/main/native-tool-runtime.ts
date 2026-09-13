@@ -1,3 +1,6 @@
+import { describeOfficeRevisionReplay } from './office-revision/replay'
+import { officeRevisionToolGate } from './office-revision/intent'
+import { finalizeOfficeRevisionToolResult } from './office-revision/producer'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
 import { settingsForCaoGenDrive } from './model/drive'
@@ -135,6 +138,7 @@ export class NativeToolRuntime {
     input: Record<string, unknown>
   ): Promise<{ targetDigest: string } | null> {
     if (!isSideEffectingToolCall(name, input)) return null
+    if (name === 'revise_office_artifact') return describeOfficeRevisionReplay(this.meta.id, input)
     if (isOfficeArtifactTool(name)) {
       const target = await describeOfficeArtifactReplayTarget(input, this.meta.cwd)
       return { targetDigest: effectReplayTargetDigest(target) }
@@ -293,7 +297,7 @@ export class NativeToolRuntime {
     toolUseId: string,
     effectTargetDigest?: string
   ): NativeToolPreflightDecision {
-    const workerPolicyError = digitalWorkerToolPolicyError(this.meta, name, input, app.getPath('userData'))
+    const workerPolicyError = officeRevisionToolGate(this.meta.id, name, input) ?? digitalWorkerToolPolicyError(this.meta, name, input, app.getPath('userData'))
     if (workerPolicyError) return { allow: false, message: workerPolicyError }
     const settings = settingsForCaoGenDrive(getSettings(), this.meta.driveMode)
     const policy = evaluateToolPermission(settings, { toolName: name, input, cwd: this.meta.cwd })
@@ -628,7 +632,7 @@ export class NativeToolRuntime {
       }
     }
     try {
-      const finalized = await this.persistProducedArtifacts(exec, effectInput)
+      const finalized = await this.persistProducedArtifacts(await finalizeOfficeRevisionToolResult(exec, effect, app.getPath('userData')), effectInput)
       return effect ? { ...finalized, effectStatus: effect.status } : finalized
     } catch (error) {
       const { producedArtifacts: _internal, ...publicExec } = exec

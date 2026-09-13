@@ -11,7 +11,6 @@ import type {
   ToolExecutionRecord
 } from '../../shared/types'
 import type { EffectDescriptor, EffectReconciliationResult } from './effect-reconciler'
-import { isEffectTargetCreatable } from './effect-target-validation'
 import { effectTargetsConflict } from './effect-target-conflict'
 import { normalizeToolName, stableValueDigest } from './tool-idempotency'
 
@@ -53,9 +52,6 @@ export function prepareEffect(
   run: TaskRunRecord,
   input: PrepareEffectInput
 ): PrepareEffectResult {
-  if (!isEffectTargetCreatable(input.descriptor.target)) {
-    throw new Error('历史通知 EffectTarget 仅供读取，禁止创建新的执行 lease')
-  }
   const now = input.now ?? Date.now()
   const toolName = normalizeToolName(input.toolName)
   const effectKey = buildEffectKey(input.cwd, toolName, input.descriptor)
@@ -255,34 +251,22 @@ export function applyEffectReconciliation(
   const effect = (run.effects ?? []).find((item) => item.id === effectId)
   if (!effect) throw new Error(`未找到 EffectRecord:${effectId}`)
   if (effect.status === 'confirmed' || effect.status === 'failed' || effect.status === 'compensated') return run
-  const sourceObservedAt = result.observedAt
-  const observedAt = sourceObservedAt ?? now
-  const outOfOrder = sourceObservedAt !== undefined && observedAt < effect.updatedAt
   const reconciliationEvidence = evidence(
     'reconciliation',
-    observedAt,
+    now,
     effect.generation,
     result.verifier,
-    {
-      result: result.kind,
-      evidenceDigest: result.evidenceDigest,
-      reason: result.reason,
-      ...(sourceObservedAt === undefined ? {} : { observedAt, outOfOrder })
-    }
+    { result: result.kind, evidenceDigest: result.evidenceDigest, reason: result.reason }
   )
   const previousReconciliation = [...effect.evidence]
     .reverse()
     .find((item) => item.kind === 'reconciliation')
-  if (previousReconciliation?.digest === reconciliationEvidence.digest) return run
-  if (outOfOrder) {
-    // A delayed adapter response is useful audit evidence, but it must not
-    // regress a newer status or timestamp already committed to the ledger.
-    const next: EffectRecord = {
-      ...effect,
-      revision: effect.revision + 1,
-      evidence: [...effect.evidence, reconciliationEvidence]
-    }
-    return projectEffectToToolExecution(replaceEffect(run, next, now), next)
+  if (
+    effect.status === 'waiting_reconciliation' &&
+    result.kind === 'unresolved' &&
+    previousReconciliation?.digest === reconciliationEvidence.digest
+  ) {
+    return run
   }
   let next: EffectRecord
   if (result.kind === 'confirmed') {
@@ -495,7 +479,29 @@ function buildResourceKey(
       markerToken: target.markerToken
     })}`
   }
-  if (target.kind === 'mcp_tool_call') return mcpResourceKey(target)
+  if (target.kind === 'mcp_tool_call') {
+    if (
+      !target.pluginRegistryItemKey || !target.pluginContentDigest ||
+      !target.pluginCapabilityDigest || !target.pluginServerId
+    ) {
+      return `resource-v1:${stableValueDigest({
+        scope: 'mcp-tool-call',
+        serverIdentityDigest: target.serverIdentityDigest,
+        toolName: target.toolName,
+        toolArgumentsDigest: target.toolArgumentsDigest
+      })}`
+    }
+    return `resource-v1:${stableValueDigest({
+      scope: 'mcp-tool-call-plugin-bound-v2',
+      serverIdentityDigest: target.serverIdentityDigest,
+      pluginRegistryItemKey: target.pluginRegistryItemKey,
+      pluginContentDigest: target.pluginContentDigest,
+      pluginCapabilityDigest: target.pluginCapabilityDigest,
+      pluginServerId: target.pluginServerId,
+      toolName: target.toolName,
+      toolArgumentsDigest: target.toolArgumentsDigest
+    })}`
+  }
   if (target.kind === 'webhook_message_send') {
     return `resource-v1:${stableValueDigest({
       scope: 'webhook-message',
@@ -514,26 +520,6 @@ function buildResourceKey(
     cwd: realpathSync(resolve(cwd)),
     toolName,
     effectKey
-  })}`
-}
-
-function mcpResourceKey(target: Extract<EffectTarget, { kind: 'mcp_tool_call' }>): string {
-  const pluginBound = target.pluginRegistryItemKey && target.pluginContentDigest &&
-    target.pluginCapabilityDigest && target.pluginServerId
-  return `resource-v1:${stableValueDigest(pluginBound ? {
-    scope: 'mcp-tool-call-plugin-bound-v2',
-    serverIdentityDigest: target.serverIdentityDigest,
-    pluginRegistryItemKey: target.pluginRegistryItemKey,
-    pluginContentDigest: target.pluginContentDigest,
-    pluginCapabilityDigest: target.pluginCapabilityDigest,
-    pluginServerId: target.pluginServerId,
-    toolName: target.toolName,
-    toolArgumentsDigest: target.toolArgumentsDigest
-  } : {
-    scope: 'mcp-tool-call',
-    serverIdentityDigest: target.serverIdentityDigest,
-    toolName: target.toolName,
-    toolArgumentsDigest: target.toolArgumentsDigest
   })}`
 }
 

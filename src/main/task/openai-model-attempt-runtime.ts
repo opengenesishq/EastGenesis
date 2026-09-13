@@ -1,4 +1,7 @@
 import type { ModelAttemptUsage } from '../../shared/model-attempt-types'
+import type { NativeRequestBudgetInput } from '../model/native-request-budget'
+import { isModelRouteError } from '../model/model-route-error'
+import { consumeWithNativeHttpRefusal } from '../model/native-http-refusal'
 import type { TaskRunRecord, UsageTotals } from '../../shared/types'
 import {
   classifyRuntimeModelFailure,
@@ -19,6 +22,7 @@ export interface OpenAIModelAttemptAuth {
 }
 
 export interface OpenAIModelAttemptFetch<T> {
+  budgetScope?: NativeRequestBudgetInput
   run?: TaskRunRecord
   providerId: string
   model: string
@@ -110,6 +114,7 @@ export class OpenAIModelAttemptTracker {
       const usageBefore = input.readUsage()
       try {
         return await executePersistedModelAttempt({
+          budgetScope: input.budgetScope,
           runId: input.run!.id,
           requestId: logical.requestId,
           stepId: logical.stepId,
@@ -127,7 +132,7 @@ export class OpenAIModelAttemptTracker {
             ? await input.executeFetch(logical.requestId)
             : await (input.fetch ?? fetch)(input.url, input.init)
           fetchResolved = true
-          return input.consume(response)
+          return consumeWithNativeHttpRefusal(response, input.consume, input.signal)
         }, {
           dependencies: this.dependencies,
           success: () => {
@@ -141,6 +146,7 @@ export class OpenAIModelAttemptTracker {
           }
         })
       } catch (error) {
+        if (isModelRouteError(error)) throw error
         if (isModelAttemptPersistenceError(error)) throw error
         if (isModelAttemptOperationError(error)) failoverFromAttemptId = error.attemptId
         if (requestWasAborted(error, input.signal)) throw error

@@ -84,7 +84,7 @@ const TEMPLATES: Record<ProjectWorkspaceKind, ProjectWorkspaceTemplateDefinition
     riskLevel: 'high',
     acceptance: ['研究、方案、交付和运营指标形成可追溯链']
   }, [
-    work('research', 'research', '市场与用户证据', '收集目标用户、竞品、需求和约束证据。', [], ['source', 'report'], ['关键判断有来源和信心度']),
+    work('research', 'research', '市场与用户证据', '收集目标用户、行业、需求和约束证据。', [], ['source', 'report'], ['关键判断有来源和信心度']),
     work('product', 'planning', '产品与交付方案', '确定范围、价值、预算、里程碑和验收。', ['research'], ['requirement', 'design'], ['范围与资源匹配']),
     work('build', 'coding', '制作核心交付物', '实现产品、内容或自动化的最小完整版本。', ['product'], ['code', 'document', 'presentation', 'custom'], ['交付物满足目标场景']),
     work('operate', 'operations', '运营与复盘', '经批准后执行运营动作并复盘指标。', ['build'], ['report'], ['外部动作有批准和结果回执'])

@@ -20,6 +20,7 @@ import {
   providerPricingForModel
 } from './provider/providerAdvancedConfig'
 import { getSettings } from './settings'
+import { runHasUnresolvedEffects } from './task/effect-runtime'
 import {
   recoverWorkflowTestFailureIngresses,
   WorkflowTestFailureRuntime
@@ -43,13 +44,25 @@ export interface SessionNotificationState {
 }
 
 export interface ManagedSessionCreationOptions {
+  /** Main-only ID reserved by a durable task submission; never forwarded from renderer options. */
+  reservedSessionId?: string
+  awaitStart?: boolean
   retainJournal?: boolean
   /** Durable owner binding that must commit before the engine can emit events. */
   beforeStart?: (meta: Readonly<SessionMeta>) => Promise<void>
 }
 
-export function sendableSession(session: Engine | undefined): Engine | null {
+const unresolvedEffectSendError = '当前任务存在尚未完成真实状态对账的外部副作用，已阻止继续发送；请先完成效果对账。'
+
+export function sendableSession(
+  session: Engine | undefined,
+  run?: TaskRunRecord
+): Engine | null {
   if (!session) return null
+  if (runHasUnresolvedEffects(run)) {
+    session.rejectSend(unresolvedEffectSendError)
+    return null
+  }
   if (session.meta.status !== 'running' && session.meta.status !== 'starting') return session
   session.rejectSend('上一轮仍在运行,请等待完成或中断后再发送。')
   return null
@@ -78,7 +91,7 @@ export function managedTaskRunSendGateError(
     return '当前会话已关联 Workspace，但未指定 WorkItem；已阻止创建脱离业务任务的 Run。'
   }
   if (hasUnresolvedEffects) {
-    return '当前任务存在尚未完成真实状态对账的外部副作用，已阻止继续发送；请先完成效果对账。'
+    return unresolvedEffectSendError
   }
   return budgetError ?? undefined
 }
@@ -340,13 +353,12 @@ export function effectiveBudgetUsd(meta: SessionMeta): number {
 export function canTrackCost(meta: SessionMeta): boolean {
   if (meta.engine === 'openai') return true
   const provider = meta.providerId ? getProvider(meta.providerId) : undefined
-  return Boolean(providerPricingForModel(provider?.advancedConfig, meta.model))
+  return Boolean(providerPricingForModel(provider?.advancedConfig, sessionWireModel(meta)))
 }
 
-/** Goal-level USD accounting requires provider-bound pricing, not a fallback catalog estimate. */
+/** Goal-level USD accounting requires provider-reported cost, not a fallback model estimate. */
 export function canEnforceGoalCostBudget(meta: SessionMeta): boolean {
-  const provider = meta.providerId ? getProvider(meta.providerId) : undefined
-  return Boolean(providerPricingForModel(provider?.advancedConfig, meta.model))
+  return canTrackCost(meta)
 }
 
 export async function withSessionCreationJournalBarrier<T>(
@@ -379,12 +391,17 @@ export function estimateTurnCostUsd(
   if (!event.usage) return undefined
   const provider = meta.providerId ? getProvider(meta.providerId) : undefined
   const configured = estimateProviderCostUsd(
-    providerPricingForModel(provider?.advancedConfig, meta.model),
+    providerPricingForModel(provider?.advancedConfig, sessionWireModel(meta)),
     event.usage
   )
   if (configured !== undefined) return configured
   if (meta.engine !== 'openai') return undefined
-  return estimateProviderCostUsd(builtinOpenAiPricingForModel(meta.model), event.usage)
+  return estimateProviderCostUsd(builtinOpenAiPricingForModel(sessionWireModel(meta)), event.usage)
+}
+
+function sessionWireModel(meta: SessionMeta): string {
+  return meta.model === 'auto' && meta.modelRoutingDecision?.providerId === meta.providerId
+    ? meta.modelRoutingDecision.model : meta.model
 }
 
 function buildTaskStepReplayPrompt(

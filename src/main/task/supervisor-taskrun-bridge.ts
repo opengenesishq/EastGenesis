@@ -6,8 +6,10 @@ import type {
   SupervisorMutationOptions,
   SupervisorRunAccountingBase,
   SupervisorRunCreateInput,
-  SupervisorRunInput
+  SupervisorRunInput,
+  SupervisorWorkItemLeaseBinding
 } from '../../shared/supervisor-types'
+import { createProjectWorkspaceCommandService } from '../project-workspace/command-service'
 import { openProjectWorkspaceStore } from '../project-workspace/store'
 import {
   SupervisorStateError,
@@ -54,7 +56,7 @@ interface SupervisorRunReservation {
 
 type SupervisorRunIdentity =
   Omit<Pick<SupervisorRunInput, 'id' | 'projectId' | 'goalId' | 'workItemId' | 'origin' | 'budget' | 'accountingBase'>, 'id'> &
-  { id: string }
+  { id: string; workItemLease?: SupervisorWorkItemLeaseBinding }
 
 export interface SupervisorRunBindingRecoveryResult {
   attached: string[]
@@ -90,17 +92,63 @@ export async function createCanonicalSupervisorRun(
   if (input.goalId !== undefined && item.goalId !== input.goalId) {
     throw new Error(`canonical WorkItem crosses Goal boundary:${input.workItemId}`)
   }
-  // Manual Supervisor rows are coordination state, not executable TaskRuns.
-  // WorkItem.runRefs is reserved for Workflow Ledger Runs with a durable
-  // session/task identity; attaching this row would create a dangling
-  // reference that invalidates the verified canonical ProjectWorkspace view.
-  return store.createRun({
+  const workItemLease = captureCanonicalWorkItemLease(item)
+  const created = await store.createRun({
     ...input,
     ...(item.goalId ? { goalId: item.goalId } : {}),
+    ...(workItemLease ? { workItemLease } : {}),
     ...(item.inheritedGoalContract?.budget
       ? { budget: structuredClone(item.inheritedGoalContract.budget) }
       : {})
   }, options)
+  try {
+    await attachManualSupervisorRun(workspace, rootDir, item, created.id)
+    return created
+  } catch (error) {
+    try {
+      await store.cancelRun(created.id, { actorId: 'supervisor-binding-rollback' })
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [error, rollbackError],
+        `Supervisor Run ${created.id} canonical binding and rollback both failed`
+      )
+    }
+    throw error
+  }
+}
+
+async function attachManualSupervisorRun(
+  initialStore: Awaited<ReturnType<typeof openProjectWorkspaceStore>>,
+  rootDir: string,
+  initialItem: WorkItem,
+  runId: string
+): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const workspace = attempt === 0 ? initialStore : await openProjectWorkspaceStore(rootDir)
+    const item = attempt === 0 ? initialItem : await workspace.getWorkItem(initialItem.id)
+    if (!item || item.projectId !== initialItem.projectId || item.goalId !== initialItem.goalId) {
+      throw new Error(`canonical WorkItem ownership changed:${initialItem.id}`)
+    }
+    if (item.runRefs.includes(runId)) return
+    const commands = createProjectWorkspaceCommandService(workspace, { rootDir })
+    await commands.reconcileShadowProjection()
+    try {
+      await commands.updateWorkItem(
+        item.id,
+        { runRefs: [...item.runRefs, runId] },
+        { expectedRevision: item.revision }
+      )
+      return
+    } catch (error) {
+      if (attempt < 2 && isStaleProjectWorkspaceRevision(error)) continue
+      throw error
+    }
+  }
+  throw new Error(`canonical Run binding retry exhausted:${runId}`)
+}
+
+function isStaleProjectWorkspaceRevision(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'stale_revision')
 }
 
 export type SupervisorRestartDisposition =
@@ -194,8 +242,9 @@ async function reserveSupervisorRun(
   if (existingBeforeBinding) assertClaimedSupervisorIdentity(existingBeforeBinding, meta)
   const resolved = await resolveWorkflowRunCanonicalWorkItem(meta, run, rootDir)
   if (resolved.disposition === 'unscoped') return undefined
+  const workItemLease = captureCanonicalWorkItemLease(resolved.workItem)
   assertCostBudgetEnforceable(resolved.workItem, options.costBudgetEnforceable)
-  const input = supervisorRunIdentity(run.id, resolved.workItem, options.accountingBase)
+  const input = supervisorRunIdentity(run.id, resolved.workItem, workItemLease, options.accountingBase)
   const reservation = await createOrLoadSupervisorRun(store, input, existingBeforeBinding)
   assertSupervisorRunIdentity(reservation.run, input)
   return { ...reservation, workItem: resolved.workItem }
@@ -238,6 +287,7 @@ async function getSupervisorRun(
 function supervisorRunIdentity(
   runId: string,
   workItem: WorkItem,
+  workItemLease: SupervisorWorkItemLeaseBinding | undefined,
   accountingBase: SupervisorRunAccountingBase | undefined
 ): SupervisorRunIdentity {
   return {
@@ -246,6 +296,7 @@ function supervisorRunIdentity(
     ...(workItem.goalId === undefined ? {} : { goalId: workItem.goalId }),
     workItemId: workItem.id,
     origin: 'task_run',
+    ...(workItemLease ? { workItemLease } : {}),
     ...(workItem.inheritedGoalContract?.budget
       ? { budget: structuredClone(workItem.inheritedGoalContract.budget) }
       : {}),
@@ -451,6 +502,37 @@ function assertSupervisorRunIdentity(
   ) {
     throw new Error(`Supervisor Run ${input.id} immutable canonical ownership changed`)
   }
+  if (!sameWorkItemLease(existing.workItemLease, input.workItemLease)) {
+    throw new Error(`Supervisor Run ${input.id} canonical WorkItem execution lease changed`)
+  }
+}
+
+/**
+ * A running canonical WorkItem is executable only while its source lease is
+ * active.  The lease identity is copied into the Supervisor row so a later
+ * release/takeover cannot accidentally continue an old Run under a new fence.
+ * Ready WorkItems remain unbound until their caller promotes them to running;
+ * this preserves the planning boundary for ordinary Session creation.
+ */
+function captureCanonicalWorkItemLease(item: WorkItem): SupervisorWorkItemLeaseBinding | undefined {
+  if (item.status !== 'running') return undefined
+  const lease = item.lease
+  if (!lease || lease.expiresAt <= Date.now()) {
+    throw new Error(`canonical WorkItem execution lease is missing or expired:${item.id}`)
+  }
+  return {
+    id: lease.id,
+    ownerId: lease.ownerId,
+    fencingToken: lease.fencingToken
+  }
+}
+
+function sameWorkItemLease(
+  left: SupervisorWorkItemLeaseBinding | undefined,
+  right: SupervisorWorkItemLeaseBinding | undefined
+): boolean {
+  return left?.id === right?.id && left?.ownerId === right?.ownerId &&
+    left?.fencingToken === right?.fencingToken
 }
 
 function assertClaimedSupervisorIdentity(

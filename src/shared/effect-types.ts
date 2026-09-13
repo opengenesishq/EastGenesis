@@ -1,3 +1,4 @@
+import type { OfficeRevisionEffectTarget } from './office-revision-types'
 export type EffectStatus =
   | 'prepared'
   | 'executing'
@@ -377,14 +378,14 @@ export type EffectTarget =
       kind: 'webhook_message_send'
       connectorId: string
       connectorRevision: number
-      /** `wecom` is retained only so historical Effect records remain readable. */
-      channel: 'feishu' | 'dingtalk' | 'wecom'
+      channel: 'feishu' | 'dingtalk'
       webhookDigest: string
       payloadDigest: string
       titleDigest: string
       textDigest: string
       linkUrlDigest?: string
     }
+  | OfficeRevisionEffectTarget
   | {
       kind: 'office_artifact'
       /** 对应 canonical Artifact 的 kind，非 artifact 自身 kind 字段。 */
@@ -524,7 +525,7 @@ export type EffectTarget =
     }
   | {
       kind: 'media_job_operation'
-      operation: 'submit' | 'poll' | 'download' | 'cancel' | 'asset_import' | 'compose' | 'export' | 'continuity_check'
+      operation: 'submit' | 'poll' | 'download' | 'cancel' | 'asset_import' | 'compose' | 'continuity_check'
       mediaJobId: string
       externalJobId: string
       idempotencyKeyDigest: string

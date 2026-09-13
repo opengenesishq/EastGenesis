@@ -1,5 +1,5 @@
 export type PluginRegistryKind = 'plugin' | 'skill' | 'agent' | 'mcp'
-export type PluginRegistrySourceKind = 'project' | 'user' | 'codex' | 'other'
+export type PluginRegistrySourceKind = 'project' | 'user' | 'other'
 export type PluginRegistryEnabledSource = 'manifest' | 'user'
 export type PluginRegistryTrustStatus = 'approved' | 'approval_required' | 'changed' | 'invalid'
 
@@ -28,7 +28,7 @@ export interface PluginRegistryTrustView {
 }
 
 export interface PluginRegistryProvenance {
-  origin: 'project_local' | 'user_local' | 'codex_local' | 'managed_local' | 'other_local'
+  origin: 'project_local' | 'user_local' | 'managed_local' | 'other_local'
   sourceKind: PluginRegistrySourceKind
   managed: boolean
 }
@@ -82,7 +82,6 @@ export interface PluginRegistryScanOptions {
   maxFiles?: number
   maxDepth?: number
   maxReadBytes?: number
-  includeSiblingProjectMcp?: boolean
   managedRoot?: string
 }
 

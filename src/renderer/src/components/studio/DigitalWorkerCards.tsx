@@ -14,6 +14,7 @@ import {
   permissionsFor,
   performanceProfileLabels,
   roleForWorker,
+  studioLocalized,
   watercolorRoleForWorker,
   workerInitials,
   workItemTitle
@@ -43,13 +44,13 @@ export function WorkerRoster(props: WorkerRosterProps): React.JSX.Element {
   if (workers.length === 0) {
     return (
       <div className="dws-empty" role="status">
-        <strong>当前筛选下没有数字员工</strong>
-        <button type="button" className="dws-button dws-button-primary" onClick={onHire}>招聘员工</button>
+        <strong>{studioLocalized('当前筛选下没有数字员工', 'No digital workers match the current filters')}</strong>
+        <button type="button" className="dws-button dws-button-primary" onClick={onHire}>{studioLocalized('招聘员工', 'Hire worker')}</button>
       </div>
     )
   }
   return (
-    <div className="dws-worker-grid" role="list" aria-label="数字员工列表">
+    <div className="dws-worker-grid" role="list" aria-label={studioLocalized('数字员工列表', 'Digital worker list')}>
       {workers.map((worker) => <WorkerCard key={worker.id} worker={worker} {...props} />)}
     </div>
   )
@@ -84,7 +85,7 @@ function WorkerCard(props: WorkerRosterProps & { worker: DigitalWorker }): React
         <div className="dws-avatar" aria-hidden="true">{workerInitials(worker.displayName)}</div>
         <div className="dws-worker-identity">
           <h3 id={`dws-worker-${worker.id}`}>{worker.displayName}</h3>
-          <span>{role?.name || '岗位模板不可用'} · v{worker.roleTemplateVersion} · {WATERCOLOR_ROLE_LABELS[watercolorRole.role]}</span>
+          <span>{role?.name || studioLocalized('岗位模板不可用', 'Role template unavailable')} · v{worker.roleTemplateVersion} · {WATERCOLOR_ROLE_LABELS[watercolorRole.role]}</span>
         </div>
         <span className={`dws-status dws-status-${worker.status}`}>
           <span className="dws-status-dot" aria-hidden="true" />
@@ -92,53 +93,53 @@ function WorkerCard(props: WorkerRosterProps & { worker: DigitalWorker }): React
         </span>
       </header>
 
-      {showProject && <div className="dws-project-line"><span>项目</span><code>{compactId(worker.projectId)}</code></div>}
+      {showProject && <div className="dws-project-line"><span>{studioLocalized('项目', 'Project')}</span><code>{compactId(worker.projectId)}</code></div>}
 
-      <div className="dws-worker-metrics" aria-label="员工运行配置">
-        <div><span>预算</span><strong>{budgetLabel(worker.budgetPolicy)}</strong></div>
-        <div><span>并发</span><strong>{worker.concurrencyLimit}</strong></div>
-        <div><span>任务</span><strong>{activeAssignments.length}</strong></div>
+      <div className="dws-worker-metrics" aria-label={studioLocalized('员工运行配置', 'Worker runtime configuration')}>
+        <div><span>{studioLocalized('预算', 'Budget')}</span><strong>{budgetLabel(worker.budgetPolicy)}</strong></div>
+        <div><span>{studioLocalized('并发', 'Concurrency')}</span><strong>{worker.concurrencyLimit}</strong></div>
+        <div><span>{studioLocalized('任务', 'Tasks')}</span><strong>{activeAssignments.length}</strong></div>
       </div>
 
-      <section className="dws-worker-section" aria-label="职责">
-        <h4>职责</h4>
+      <section className="dws-worker-section" aria-label={studioLocalized('职责', 'Responsibilities')}>
+        <h4>{studioLocalized('职责', 'Responsibilities')}</h4>
         {worker.responsibilityScope.length > 0 ? (
           <ul>{worker.responsibilityScope.map((item) => <li key={item}>{item}</li>)}</ul>
-        ) : <span className="dws-muted">沿用岗位职责</span>}
+        ) : <span className="dws-muted">{studioLocalized('沿用岗位职责', 'Uses role responsibilities')}</span>}
       </section>
 
-      <section className="dws-worker-section" aria-label="工具权限">
-        <h4>工具权限</h4>
+      <section className="dws-worker-section" aria-label={studioLocalized('工具权限', 'Tool permissions')}>
+        <h4>{studioLocalized('工具权限', 'Tool permissions')}</h4>
         <div className="dws-chip-row">
-          {(permissions.length > 0 ? permissions : ['未授予工具权限']).map((permission) => (
+          {(permissions.length > 0 ? permissions : [studioLocalized('未授予工具权限', 'No tool permissions granted')]).map((permission) => (
             <span key={permission} className="dws-chip">{permission}</span>
           ))}
         </div>
       </section>
 
-      <section className="dws-worker-section" aria-label="数据范围">
-        <h4>数据范围</h4>
+      <section className="dws-worker-section" aria-label={studioLocalized('数据范围', 'Data scope')}>
+        <h4>{studioLocalized('数据范围', 'Data scope')}</h4>
         <div className="dws-chip-row">
           {dataScopeLabels(worker).map((label) => <span key={label} className="dws-chip">{label}</span>)}
         </div>
       </section>
 
-      <section className="dws-worker-section" aria-label="验收与升级策略">
-        <h4>验收与升级</h4>
+      <section className="dws-worker-section" aria-label={studioLocalized('验收与升级策略', 'Acceptance and escalation policy')}>
+        <h4>{studioLocalized('验收与升级', 'Acceptance and escalation')}</h4>
         <div className="dws-chip-row">
           {acceptancePolicyLabels(worker).map((label) => <span key={`acceptance:${label}`} className="dws-chip">{label}</span>)}
           {escalationPolicyLabels(worker).map((label) => <span key={`escalation:${label}`} className="dws-chip">{label}</span>)}
         </div>
       </section>
 
-      <section className="dws-worker-section" aria-label="绩效">
-        <h4>绩效</h4>
+      <section className="dws-worker-section" aria-label={studioLocalized('绩效', 'Performance')}>
+        <h4>{studioLocalized('绩效', 'Performance')}</h4>
         <div className="dws-chip-row">
           {performanceProfileLabels(worker).map((label) => <span key={label} className="dws-chip">{label}</span>)}
         </div>
       </section>
 
-      <section className="dws-worker-section" aria-label="已分配 WorkItem">
+      <section className="dws-worker-section" aria-label={studioLocalized('已分配 WorkItem', 'Assigned work items')}>
         <h4>WorkItem</h4>
         {activeAssignments.length > 0 ? (
           <ul className="dws-assignment-list">
@@ -150,8 +151,8 @@ function WorkerCard(props: WorkerRosterProps & { worker: DigitalWorker }): React
                   className="dws-button dws-button-quiet dws-icon-button"
                   disabled={busy}
                   onClick={() => props.onReleaseAssignment(assignment)}
-                  aria-label={`解除 ${workItemTitle(assignment.workItemId, workItems)} 分配`}
-                  title="解除分配"
+                  aria-label={studioLocalized(`解除 ${workItemTitle(assignment.workItemId, workItems)} 分配`, `Release assignment for ${workItemTitle(assignment.workItemId, workItems)}`)}
+                  title={studioLocalized('解除分配', 'Release assignment')}
                   data-dws-action="release-assignment"
                   data-assignment-id={assignment.id}
                 >
@@ -160,7 +161,7 @@ function WorkerCard(props: WorkerRosterProps & { worker: DigitalWorker }): React
               </li>
             ))}
           </ul>
-        ) : <span className="dws-muted">暂无分配</span>}
+        ) : <span className="dws-muted">{studioLocalized('暂无分配', 'No assignments')}</span>}
       </section>
 
       <WorkerCardActions {...props} worker={worker} busy={busy} />
@@ -183,41 +184,41 @@ function WorkerCardActions(props: WorkerCardActionsProps): React.JSX.Element {
   if (confirmRetire && worker.status !== 'retired') {
     return (
       <div className="dws-retire-confirm" role="alert">
-        <span>退休后不可重新启用；请先解除所有在办任务。</span>
+        <span>{studioLocalized('退休后不可重新启用；请先解除所有在办任务。', 'Retired workers cannot be reactivated. Release all active assignments first.')}</span>
         <div>
-          <button type="button" className="dws-button dws-button-danger" disabled={busy} onClick={() => onRetire(worker)} data-dws-action="confirm-retire">确认退休</button>
-          <button type="button" className="dws-button dws-button-quiet" disabled={busy} onClick={() => setConfirmRetire(false)}>取消</button>
+          <button type="button" className="dws-button dws-button-danger" disabled={busy} onClick={() => onRetire(worker)} data-dws-action="confirm-retire">{studioLocalized('确认退休', 'Confirm retirement')}</button>
+          <button type="button" className="dws-button dws-button-quiet" disabled={busy} onClick={() => setConfirmRetire(false)}>{studioLocalized('取消', 'Cancel')}</button>
         </div>
       </div>
     )
   }
   return (
     <footer className="dws-worker-actions">
-      <button type="button" className="dws-button" disabled={busy} onClick={() => onMemory(worker)} aria-label={`查看 ${worker.displayName} 的记忆`} data-dws-action="worker-memory">
-        <Brain aria-hidden="true" />记忆
+      <button type="button" className="dws-button" disabled={busy} onClick={() => onMemory(worker)} aria-label={studioLocalized(`查看 ${worker.displayName} 的记忆`, `View memory for ${worker.displayName}`)} data-dws-action="worker-memory">
+        <Brain aria-hidden="true" />{studioLocalized('记忆', 'Memory')}
       </button>
-      <button type="button" className="dws-button" disabled={busy} onClick={() => onHistory(worker)} aria-label={`查看 ${worker.displayName} 的交付历史`} data-dws-action="worker-history">
-        <History aria-hidden="true" />历史
+      <button type="button" className="dws-button" disabled={busy} onClick={() => onHistory(worker)} aria-label={studioLocalized(`查看 ${worker.displayName} 的交付历史`, `View delivery history for ${worker.displayName}`)} data-dws-action="worker-history">
+        <History aria-hidden="true" />{studioLocalized('历史', 'History')}
       </button>
       {worker.status !== 'retired' && (
-        <button type="button" className="dws-button" disabled={busy} onClick={() => onRefreshPerformance(worker)} aria-label={`刷新 ${worker.displayName} 的绩效`} data-dws-action="refresh-performance">
-          <Gauge aria-hidden="true" />刷新绩效
+        <button type="button" className="dws-button" disabled={busy} onClick={() => onRefreshPerformance(worker)} aria-label={studioLocalized(`刷新 ${worker.displayName} 的绩效`, `Refresh performance for ${worker.displayName}`)} data-dws-action="refresh-performance">
+          <Gauge aria-hidden="true" />{studioLocalized('刷新绩效', 'Refresh performance')}
         </button>
       )}
       {worker.status === 'proposed' && (
-        <button type="button" className="dws-button dws-button-primary" disabled={busy} onClick={() => onActivate(worker)} aria-label={`启用 ${worker.displayName}`} data-dws-action="activate">启用</button>
+        <button type="button" className="dws-button dws-button-primary" disabled={busy} onClick={() => onActivate(worker)} aria-label={studioLocalized(`启用 ${worker.displayName}`, `Activate ${worker.displayName}`)} data-dws-action="activate">{studioLocalized('启用', 'Activate')}</button>
       )}
       {worker.status === 'active' && (
         <>
-          <button type="button" className="dws-button dws-button-primary" disabled={busy} onClick={() => onAssign(worker.id)} aria-label={`给 ${worker.displayName} 分配 WorkItem`} data-dws-action="assign">分配任务</button>
-          <button type="button" className="dws-button" disabled={busy} onClick={() => onPause(worker)} aria-label={`暂停 ${worker.displayName}`} data-dws-action="pause">暂停</button>
+          <button type="button" className="dws-button dws-button-primary" disabled={busy} onClick={() => onAssign(worker.id)} aria-label={studioLocalized(`给 ${worker.displayName} 分配 WorkItem`, `Assign a work item to ${worker.displayName}`)} data-dws-action="assign">{studioLocalized('分配任务', 'Assign task')}</button>
+          <button type="button" className="dws-button" disabled={busy} onClick={() => onPause(worker)} aria-label={studioLocalized(`暂停 ${worker.displayName}`, `Pause ${worker.displayName}`)} data-dws-action="pause">{studioLocalized('暂停', 'Pause')}</button>
         </>
       )}
       {worker.status === 'paused' && (
-        <button type="button" className="dws-button dws-button-primary" disabled={busy} onClick={() => onResume(worker)} aria-label={`恢复 ${worker.displayName}`} data-dws-action="resume">恢复</button>
+        <button type="button" className="dws-button dws-button-primary" disabled={busy} onClick={() => onResume(worker)} aria-label={studioLocalized(`恢复 ${worker.displayName}`, `Resume ${worker.displayName}`)} data-dws-action="resume">{studioLocalized('恢复', 'Resume')}</button>
       )}
       {worker.status !== 'retired' && (
-        <button type="button" className="dws-button dws-button-quiet" disabled={busy} onClick={() => setConfirmRetire(true)} aria-label={`退休 ${worker.displayName}`} data-dws-action="retire">退休</button>
+        <button type="button" className="dws-button dws-button-quiet" disabled={busy} onClick={() => setConfirmRetire(true)} aria-label={studioLocalized(`退休 ${worker.displayName}`, `Retire ${worker.displayName}`)} data-dws-action="retire">{studioLocalized('退休', 'Retire')}</button>
       )}
     </footer>
   )
@@ -234,25 +235,25 @@ export function RoleLibrary({ roles, canHire, onCreate, onHire }: RoleLibraryPro
   if (roles.length === 0) {
     return (
       <div className="dws-empty" role="status">
-        <strong>岗位库为空</strong>
-        <button type="button" className="dws-button dws-button-primary" onClick={onCreate}>新建岗位</button>
+        <strong>{studioLocalized('岗位库为空', 'The role library is empty')}</strong>
+        <button type="button" className="dws-button dws-button-primary" onClick={onCreate}>{studioLocalized('新建岗位', 'New role')}</button>
       </div>
     )
   }
   return (
-    <div className="dws-role-grid" role="list" aria-label="岗位模板列表">
+    <div className="dws-role-grid" role="list" aria-label={studioLocalized('岗位模板列表', 'Role template list')}>
       {roles.map((role) => (
         <article key={role.id} className="dws-role-card" role="listitem" data-role-template-id={role.id}>
           <header>
             <div>
               <h3>{role.name}</h3>
-              <span>版本 {role.version}</span>
+              <span>{studioLocalized('版本', 'Version')} {role.version}</span>
             </div>
-            <span className="dws-role-source">{role.source === 'builtin' ? '内置' : '自定义'}</span>
+            <span className="dws-role-source">{role.source === 'builtin' ? studioLocalized('内置', 'Built in') : studioLocalized('自定义', 'Custom')}</span>
           </header>
           <p>{role.purpose}</p>
           {(role.capabilityRefs.length > 0 || role.skillRefs.length > 0) && (
-            <div className="dws-chip-row" aria-label="岗位能力与技能">
+            <div className="dws-chip-row" aria-label={studioLocalized('岗位能力与技能', 'Role capabilities and skills')}>
               {[...new Set([...role.capabilityRefs, ...role.skillRefs])].map((item) => <span key={item} className="dws-chip">{item}</span>)}
             </div>
           )}
@@ -262,10 +263,10 @@ export function RoleLibrary({ roles, canHire, onCreate, onHire }: RoleLibraryPro
               className="dws-button dws-button-primary"
               onClick={() => onHire(role.id)}
               disabled={!canHire}
-              title={canHire ? undefined : '请先选择项目'}
+              title={canHire ? undefined : studioLocalized('请先选择项目', 'Select a project first')}
               data-dws-action="hire-from-role"
             >
-              按此岗位招聘
+              {studioLocalized('按此岗位招聘', 'Hire for this role')}
             </button>
           </footer>
         </article>

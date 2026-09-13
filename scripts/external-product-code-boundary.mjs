@@ -132,6 +132,10 @@ for (const directory of standaloneInstallRoots) {
   if (!packageBoundaries.includes(directory)) inspectInstalledDependencies(directory)
 }
 
+if (existsSync(path.join(repoRoot, 'ui-hifi', 'competitors.html'))) {
+  failures.push('ui-hifi/competitors.html must remain deleted; comparative material belongs in docs or the CaoGen website')
+}
+
 // Keep the scan focused on code and shipped/demo surfaces. Product research is
 // intentionally kept in docs (and the CaoGen website); it is not part of this
 // source boundary. Compatibility adapters and protocol names can be retained
@@ -140,6 +144,7 @@ const guardedRoots = [
   '.caogen',
   'src',
   'scripts',
+  'ui-hifi',
   'caogen-promo',
   'plugins/vscode',
   'tools/website-demo-video'
@@ -159,30 +164,27 @@ const forbiddenCopy = [
     name: 'retired-wecom-notification-surface',
     regex: /\b(?:wecom|wechat\s*work|wechatwork)\b|企业微信|(?:qyapi|work)\.weixin\.qq\.com/gi
   },
+  { name: 'competitor-copy-zh', regex: /竞品/g },
+  { name: 'competitor-copy-en', regex: /\bcompetitors?\b/gi },
   { name: 'copied-product-name', regex: /\bWorkBuddy\b/g },
   { name: 'unsupported-market-rank', regex: /国内日活第一/g },
   { name: 'comparative-design-copy', regex: /反打.{0,24}企业蓝|借鉴.{0,16}别学/g }
 ]
+const forbiddenRuntimePathPatterns = [
+  { name: 'external-runtime-claude-root', regex: /["'`]\.claude(?:[\\/]|["'`])/i },
+  { name: 'external-runtime-claude-desktop-config', regex: /claude_desktop_config\.json/i },
+  { name: 'external-runtime-codex-plugin-cache', regex: /\.codex[\\/]plugins[\\/]cache/i },
+  { name: 'external-runtime-codex-home', regex: /\bCODEX_HOME\b/ },
+  { name: 'external-runtime-codex-plugin-manifest', regex: /\.codex-plugin[\\/]plugin\.json/i },
+  { name: 'external-runtime-claude-mcp-tool', regex: /\bmcp_import_claude_desktop\b/ },
+  { name: 'external-runtime-claude-rules', regex: /\bCLAUDE\.md\b/ }
+]
 const allForbiddenCopyRuleNames = new Set(forbiddenCopy.map((pattern) => pattern.name))
 const guardRuleExemptions = new Map([
-  ['src/main/notification/notification-connector-store.ts', new Set([
-    'retired-wecom-notification-surface'
-  ])],
-  ['src/main/notification/notification-effect.ts', new Set([
-    'retired-wecom-notification-surface'
-  ])],
-  ['src/main/task/effect-target-validation.ts', new Set([
-    'retired-wecom-notification-surface'
-  ])],
-  ['src/main/task/notification-artifact-producer.ts', new Set([
-    'retired-wecom-notification-surface'
-  ])],
-  ['src/shared/effect-types.ts', new Set([
-    'retired-wecom-notification-surface'
-  ])],
-  ['scripts/notification-effect-required.mjs', new Set([
-    'retired-wecom-notification-surface'
-  ])],
+  ['scripts/product-positioning-audit.mjs', new Set(['competitor-copy-zh', 'competitor-copy-en'])],
+  ['scripts/release-notes-audit.mjs', new Set(['competitor-copy-en'])],
+  ['scripts/sprint-01-gate-audit.mjs', new Set(['competitor-copy-en'])],
+  ['scripts/ide-plugin-retirement-smoke.mjs', new Set(['competitor-copy-en'])],
   ['scripts/external-product-code-boundary-smoke.mjs', new Set([
     'external-product-package-reference',
     'external-product-sdk-reference',
@@ -212,6 +214,7 @@ for (const root of guardedRoots) {
     const text = readFileSync(absolutePath, 'utf8')
     scannedFiles.push(relativePath)
     inspectRuntimeModuleSpecifiers(text, relativePath)
+    inspectExternalRuntimePaths(text, relativePath)
     const exemptRules = guardRuleExemptions.get(relativePath) ?? new Set()
     for (const pattern of forbiddenCopy) {
       if (exemptRules.has(pattern.name)) continue
@@ -252,6 +255,20 @@ function readJson(relativePath) {
 
 function requireEqual(actual, expected, message) {
   if (actual !== expected) failures.push(`${message}; expected ${JSON.stringify(expected)}, found ${JSON.stringify(actual)}`)
+}
+
+function inspectExternalRuntimePaths(text, relativePath) {
+  if (!relativePath.startsWith('src/') || isExplicitLegacyMigrationAdapter(relativePath)) return
+  for (const pattern of forbiddenRuntimePathPatterns) {
+    pattern.regex.lastIndex = 0
+    if (pattern.regex.test(text)) failures.push(`${relativePath}: forbidden ${pattern.name}`)
+  }
+}
+
+function isExplicitLegacyMigrationAdapter(relativePath) {
+  return relativePath === 'src/main/migration.ts' ||
+    relativePath.startsWith('src/main/migration-') ||
+    relativePath === 'src/main/provider/providerNativeConfigImport.ts'
 }
 
 function inspectBoundaryIdentity(manifestPath, lockPath) {

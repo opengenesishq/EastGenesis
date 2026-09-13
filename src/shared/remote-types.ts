@@ -188,7 +188,7 @@ export interface RemoteContinuationSnapshot {
   approvals: RemoteApprovalRecord[]
   leases: RemoteRunnerLease[]
   audit: RemoteAuditEntry[]
-  webhook?: { host: string; port: number; running: boolean }
+  webhook?: { host: string; port: number; running: boolean; protocol?: 'http' | 'https' }
   snapshotDigest: string
 }
 

@@ -15,6 +15,7 @@ export interface ProjectTestsController {
   loading: boolean
   error: string
   result: ProjectTestRunResult | null
+  stale: boolean
   runningCommandId: string | null
   cancelPending: boolean
   stream: ProjectTestOutputStream
@@ -23,6 +24,7 @@ export interface ProjectTestsController {
   run(command: ProjectTestCommand): Promise<void>
   cancel(): Promise<void>
   setStream(stream: ProjectTestOutputStream): void
+  invalidate(): void
 }
 
 export function useProjectTests(): ProjectTestsController {
@@ -31,6 +33,7 @@ export function useProjectTests(): ProjectTestsController {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState<ProjectTestRunResult | null>(null)
+  const [stale, setStale] = useState(false)
   const [runningCommandId, setRunningCommandId] = useState<string | null>(null)
   const [cancelPending, setCancelPending] = useState(false)
   const [stream, setStream] = useState<ProjectTestOutputStream>('stdout')
@@ -56,7 +59,7 @@ export function useProjectTests(): ProjectTestsController {
 
   useEffect(() => {
     discoverySequence.current += 1
-    setCommands([]); setError(''); setResult(null)
+    setCommands([]); setError(''); setResult(null); setStale(false)
     setRunningCommandId(activeRun.current?.sessionId === activeId ? activeRun.current.commandId : null)
     if (activeId) void refreshSession(activeId)
   }, [activeId])
@@ -69,7 +72,7 @@ export function useProjectTests(): ProjectTestsController {
     try {
       const next = await window.agentDesk.runProjectTest(sessionId, command.id)
       if (activeSessionId.current === sessionId) {
-        setResult(next)
+        setResult(next); setStale(false)
         setStream(next.stderr && !next.stdout ? 'stderr' : 'stdout')
       }
     } catch (caught) {
@@ -93,10 +96,10 @@ export function useProjectTests(): ProjectTestsController {
   }
 
   return {
-    activeId, commands, loading, error, result, runningCommandId, cancelPending, stream,
+    activeId, commands, loading, error, result, stale, runningCommandId, cancelPending, stream,
     runningHere: activeRun.current?.sessionId === activeId,
     refresh: () => activeId ? refreshSession(activeId) : Promise.resolve(),
-    run, cancel, setStream
+    run, cancel, setStream, invalidate: () => setStale(true)
   }
 }
 

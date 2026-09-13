@@ -60,7 +60,8 @@ export function WorkItemsView({
   onTransfer,
   onViewChange,
   projectId,
-  view
+  view,
+  requestedWorkItemId
 }: {
   goals: Goal[]
   items: WorkItem[]
@@ -72,6 +73,7 @@ export function WorkItemsView({
   onViewChange: (view: StudioView) => void
   projectId: string
   view: StudioView
+  requestedWorkItemId?: string
 }): React.JSX.Element {
   const titleId = useId()
   const [filters, setFilters] = useState<WorkItemFilters>(() => readStoredWorkItemFilters(projectId))
@@ -86,6 +88,26 @@ export function WorkItemsView({
       // Preference persistence is best effort; canonical WorkItem data remains durable in the main process.
     }
   }, [filters, projectId])
+  useEffect(() => {
+    if (!requestedWorkItemId || !items.some((item) => item.id === requestedWorkItemId)) return
+    // An explicit Control Room handoff must win over a remembered local
+    // filter, otherwise a canonical waiting/blocked WorkItem can remain
+    // present yet impossible to locate in the 2D board.
+    setFilters(DEFAULT_WORK_ITEM_FILTERS)
+  }, [items, requestedWorkItemId])
+  useLayoutEffect(() => {
+    if (!requestedWorkItemId) return
+    const target = document.querySelector<HTMLElement>(`[data-work-item-id="${CSS.escape(requestedWorkItemId)}"]`)
+    if (!target) return
+    target.dataset.workItemNavigationTarget = 'true'
+    target.tabIndex = -1
+    target.focus({ preventScroll: true })
+    target.scrollIntoView({ block: 'center', inline: 'nearest' })
+    const timer = window.setTimeout(() => {
+      if (target.isConnected) delete target.dataset.workItemNavigationTarget
+    }, 2_000)
+    return () => window.clearTimeout(timer)
+  }, [requestedWorkItemId, visibleItems, view])
   return (
     <section className="pws-section pws-work-items" aria-labelledby={titleId}>
       <div className="pws-section-header">
@@ -111,8 +133,8 @@ export function WorkItemsView({
         visibleItems.length === 0
           ? <div className="pws-filter-empty" data-work-item-filter-empty>{TEXT.noMatchingWorkItems}</div>
           : view === 'list'
-            ? <WorkItemList items={visibleItems} goalNames={goalNames} onAcceptance={onAcceptance} onControl={onControl} onReorder={onReorder} onTransferRequest={onTransfer ? setTransferItemId : undefined} />
-            : <WorkItemBoard items={visibleItems} allItems={items} goalNames={goalNames} onAcceptance={onAcceptance} onControl={onControl} onReorder={onReorder} onTransferRequest={onTransfer ? setTransferItemId : undefined} />
+            ? <WorkItemList items={visibleItems} goalNames={goalNames} targetItemId={requestedWorkItemId} onAcceptance={onAcceptance} onControl={onControl} onReorder={onReorder} onTransferRequest={onTransfer ? setTransferItemId : undefined} />
+            : <WorkItemBoard items={visibleItems} allItems={items} goalNames={goalNames} targetItemId={requestedWorkItemId} onAcceptance={onAcceptance} onControl={onControl} onReorder={onReorder} onTransferRequest={onTransfer ? setTransferItemId : undefined} />
       )}
     </section>
   )
@@ -303,6 +325,7 @@ function GoalRow({
 function WorkItemList({
   items,
   goalNames,
+  targetItemId,
   onControl,
   onAcceptance,
   onReorder,
@@ -310,50 +333,55 @@ function WorkItemList({
 }: {
   items: WorkItem[]
   goalNames: Map<string, string>
+  targetItemId?: string
   onControl?: (item: WorkItem, action: WorkItemControlAction) => Promise<void>
   onAcceptance?: (item: WorkItem, result: AcceptanceResult) => Promise<void>
   onReorder?: (item: WorkItem, targetId: string, placement: 'before' | 'after') => Promise<void>
   onTransferRequest?: (workItemId: string) => void
 }): React.JSX.Element {
   return (
-    <div className="pws-table" role="table" aria-rowcount={items.length + 1} data-work-item-list>
-      <div className="pws-table-row pws-table-head" role="row">
-        <span role="columnheader">{TEXT.workItemTitle}</span><span role="columnheader">{TEXT.goal}</span><span role="columnheader">{TEXT.type}</span><span role="columnheader">{TEXT.owner}</span><span role="columnheader">{TEXT.due}</span><span role="columnheader">{TEXT.status}</span><span role="columnheader">{TEXT.acceptance}</span><span role="columnheader">{TEXT.workItemControls}</span>
+    <div className="pws-table" role="table" aria-label={TEXT.workItems} aria-rowcount={items.length + 1} tabIndex={0} data-work-item-list data-horizontal-scroll-region>
+      <div className="pws-table-content">
+        <div className="pws-table-row pws-table-head" role="row">
+          <span role="columnheader">{TEXT.workItemTitle}</span><span role="columnheader">{TEXT.goal}</span><span role="columnheader">{TEXT.type}</span><span role="columnheader">{TEXT.owner}</span><span role="columnheader">{TEXT.due}</span><span role="columnheader">{TEXT.status}</span><span role="columnheader">{TEXT.acceptance}</span><span role="columnheader">{TEXT.workItemControls}</span>
+        </div>
+        <VirtualWorkItemStack
+          items={items}
+          rowHeight={WORK_ITEM_LIST_ROW_HEIGHT}
+          className="pws-table-scroll"
+          dataSurface="list"
+          targetItemId={targetItemId}
+          renderItem={(item, index) => {
+            const acceptance = acceptancePresentation(item.acceptanceSpec.length, item.acceptance)
+            return (
+              <div
+                className="pws-table-row pws-table-body-row"
+                role="row"
+                data-work-item-id={item.id}
+                data-work-item-navigation-target={targetItemId === item.id ? 'true' : undefined}
+                data-status={item.status}
+                data-work-item-revision={item.revision}
+                data-board-order={item.boardOrder ?? ''}
+                data-goal-id={item.goalId ?? ''}
+                data-owner-id={item.owner?.id ?? ''}
+                data-priority={item.priority}
+              >
+                <span role="cell"><strong>{item.title}</strong>{item.description && <span className="pws-table-note">{item.description}</span>}</span>
+                <span role="cell">{item.goalId ? goalNames.get(item.goalId) ?? TEXT.noLinkedGoal : TEXT.noLinkedGoal}</span>
+                <span role="cell">{workItemTypeLabel(item.type)}</span>
+                <span role="cell">{item.owner?.displayName ?? item.owner?.id ?? TEXT.untitledOwner}</span>
+                <span role="cell">{formatDate(item.dueAt)}</span>
+                <span role="cell"><StatusBadge status={item.status} label={WORK_ITEM_STATUS_LABELS[item.status]} /></span>
+                <span role="cell"><AcceptanceBadge status={acceptance.status} label={acceptance.label} /></span>
+                <span role="cell" className="pws-table-actions">
+                  {onReorder && <WorkItemOrderControls item={item} previous={items[index - 1]} next={items[index + 1]} onReorder={onReorder} />}
+                  {onControl && <WorkItemControls item={item} onAction={onControl} onTransfer={onTransferRequest ? () => onTransferRequest(item.id) : undefined} onAcceptance={onAcceptance} />}
+                </span>
+              </div>
+            )
+          }}
+        />
       </div>
-      <VirtualWorkItemStack
-        items={items}
-        rowHeight={WORK_ITEM_LIST_ROW_HEIGHT}
-        className="pws-table-scroll"
-        dataSurface="list"
-        renderItem={(item, index) => {
-          const acceptance = acceptancePresentation(item.acceptanceSpec.length, item.acceptance)
-          return (
-            <div
-              className="pws-table-row pws-table-body-row"
-              role="row"
-              data-work-item-id={item.id}
-              data-status={item.status}
-              data-work-item-revision={item.revision}
-              data-board-order={item.boardOrder ?? ''}
-              data-goal-id={item.goalId ?? ''}
-              data-owner-id={item.owner?.id ?? ''}
-              data-priority={item.priority}
-            >
-              <span role="cell"><strong>{item.title}</strong>{item.description && <span className="pws-table-note">{item.description}</span>}</span>
-              <span role="cell">{item.goalId ? goalNames.get(item.goalId) ?? TEXT.noLinkedGoal : TEXT.noLinkedGoal}</span>
-              <span role="cell">{workItemTypeLabel(item.type)}</span>
-              <span role="cell">{item.owner?.displayName ?? item.owner?.id ?? TEXT.untitledOwner}</span>
-              <span role="cell">{formatDate(item.dueAt)}</span>
-              <span role="cell"><StatusBadge status={item.status} label={WORK_ITEM_STATUS_LABELS[item.status]} /></span>
-              <span role="cell"><AcceptanceBadge status={acceptance.status} label={acceptance.label} /></span>
-              <span role="cell" className="pws-table-actions">
-                {onReorder && <WorkItemOrderControls item={item} previous={items[index - 1]} next={items[index + 1]} onReorder={onReorder} />}
-                {onControl && <WorkItemControls item={item} onAction={onControl} onTransfer={onTransferRequest ? () => onTransferRequest(item.id) : undefined} onAcceptance={onAcceptance} />}
-              </span>
-            </div>
-          )
-        }}
-      />
     </div>
   )
 }
@@ -362,6 +390,7 @@ function WorkItemBoard({
   allItems,
   items,
   goalNames,
+  targetItemId,
   onControl,
   onAcceptance,
   onReorder,
@@ -370,6 +399,7 @@ function WorkItemBoard({
   allItems: WorkItem[]
   items: WorkItem[]
   goalNames: Map<string, string>
+  targetItemId?: string
   onControl?: (item: WorkItem, action: WorkItemControlAction) => Promise<void>
   onAcceptance?: (item: WorkItem, result: AcceptanceResult) => Promise<void>
   onReorder?: (item: WorkItem, targetId: string, placement: 'before' | 'after') => Promise<void>
@@ -422,9 +452,11 @@ function WorkItemBoard({
                 rowHeight={WORK_ITEM_BOARD_CARD_HEIGHT}
                 className="pws-board-items"
                 dataSurface={`board-${status}`}
+                targetItemId={targetItemId}
                 renderItem={(item, index) => (
                   <WorkItemBoardCard
                     item={item}
+                    targetItemId={targetItemId}
                     dependencyItems={item.dependencyIds.map((id) => itemById.get(id)).filter((candidate): candidate is WorkItem => Boolean(candidate))}
                     goalName={item.goalId ? goalNames.get(item.goalId) : undefined}
                     onControl={onControl}
@@ -456,6 +488,7 @@ function WorkItemBoardCard({
   dependencyItems,
   draggable,
   item,
+  targetItemId,
   goalName,
   next,
   onControl,
@@ -467,6 +500,7 @@ function WorkItemBoardCard({
   onDragEnd
 }: {
   item: WorkItem
+  targetItemId?: string
   dependencyItems: WorkItem[]
   draggable: boolean
   goalName?: string
@@ -487,6 +521,7 @@ function WorkItemBoardCard({
       className="pws-board-item"
       role="listitem"
       data-work-item-id={item.id}
+      data-work-item-navigation-target={targetItemId === item.id ? 'true' : undefined}
       data-status={item.status}
       data-work-item-revision={item.revision}
       data-board-order={item.boardOrder ?? ''}
@@ -505,9 +540,9 @@ function WorkItemBoardCard({
         <span>{formatDate(item.dueAt)}</span>
       </div>
       {item.dependencyIds.length > 0 && (
-        <div className={`pws-board-dependencies${incompleteDependencies.length > 0 ? ' pws-board-dependencies-blocked' : ''}`} title={missingDependencies.length > 0 ? '部分依赖不存在' : undefined}>
-          {incompleteDependencies.length === 0 ? '依赖已满足' : `依赖未完成 ${incompleteDependencies.length}/${item.dependencyIds.length}`}
-          {missingDependencies.length > 0 ? ` · 缺失 ${missingDependencies.length}` : ''}
+        <div className={`pws-board-dependencies${incompleteDependencies.length > 0 ? ' pws-board-dependencies-blocked' : ''}`} title={missingDependencies.length > 0 ? TEXT.dependencyMissingTitle : undefined}>
+          {incompleteDependencies.length === 0 ? TEXT.dependenciesSatisfied : TEXT.dependenciesIncomplete(incompleteDependencies.length, item.dependencyIds.length)}
+          {missingDependencies.length > 0 ? ` · ${TEXT.dependenciesMissing(missingDependencies.length)}` : ''}
         </div>
       )}
       <div className="pws-row-badges">
@@ -579,13 +614,15 @@ function VirtualWorkItemStack<T extends { id: string }>({
   dataSurface,
   items,
   renderItem,
-  rowHeight
+  rowHeight,
+  targetItemId
 }: {
   className: string
   dataSurface: string
   items: T[]
   renderItem: (item: T, index: number) => React.JSX.Element
   rowHeight: number
+  targetItemId?: string
 }): React.JSX.Element {
   const [scrollTop, setScrollTop] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -599,9 +636,11 @@ function VirtualWorkItemStack<T extends { id: string }>({
     setScrollTop(event.currentTarget.scrollTop)
   }, [])
   useLayoutEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = 0
-    setScrollTop(0)
-  }, [dataSurface, itemOrderKey])
+    const targetIndex = targetItemId ? items.findIndex((item) => item.id === targetItemId) : -1
+    const nextScrollTop = targetIndex >= 0 ? targetIndex * rowHeight : 0
+    if (scrollRef.current) scrollRef.current.scrollTop = nextScrollTop
+    setScrollTop(nextScrollTop)
+  }, [dataSurface, itemOrderKey, items, rowHeight, targetItemId])
   return (
     <div
       ref={scrollRef}
@@ -667,11 +706,11 @@ function WorkItemControls({
     if (!onAcceptance) return
     const refs = [...new Set(evidenceRefs.split(/[\n,]/).map((value) => value.trim()).filter(Boolean))]
     if (status === 'passed' && refs.length === 0) {
-      setError('通过验收需要至少一条 Evidence 引用')
+      setError(TEXT.acceptanceEvidenceRequired)
       return
     }
     if (status === 'waived' && !waiverReason.trim()) {
-      setError('豁免验收需要填写原因')
+      setError(TEXT.acceptanceWaiverRequired)
       return
     }
     setBusy(true)
@@ -729,13 +768,13 @@ function WorkItemControls({
       {onAcceptance && item.acceptanceSpec.length > 0 && (
         <details className="pws-acceptance-editor" data-work-item-acceptance={item.id}>
           <summary>{TEXT.acceptance} · {acceptancePresentation(item.acceptanceSpec.length, item.acceptance).label}</summary>
-          <label>Evidence 引用<textarea className="input" rows={2} value={evidenceRefs} onChange={(event) => setEvidenceRefs(event.target.value)} placeholder="每行一个 Artifact/Evidence ID" disabled={busy} /></label>
-          <label>豁免原因<input className="input" value={waiverReason} onChange={(event) => setWaiverReason(event.target.value)} placeholder="仅豁免时需要" disabled={busy} /></label>
+          <label>{TEXT.evidenceReferences}<textarea className="input" rows={2} value={evidenceRefs} onChange={(event) => setEvidenceRefs(event.target.value)} placeholder={TEXT.evidenceReferencesPlaceholder} disabled={busy} /></label>
+          <label>{TEXT.waiverReason}<input className="input" value={waiverReason} onChange={(event) => setWaiverReason(event.target.value)} placeholder={TEXT.waiverReasonPlaceholder} disabled={busy} /></label>
           <div className="pws-acceptance-editor-actions">
-            <button type="button" className="btn btn-ghost btn-xs" disabled={busy} onClick={() => void saveAcceptance('pending')}>标记待验收</button>
-            <button type="button" className="btn btn-primary btn-xs" disabled={busy} onClick={() => void saveAcceptance('passed')}>通过</button>
-            <button type="button" className="btn btn-ghost btn-xs" disabled={busy} onClick={() => void saveAcceptance('failed')}>未通过</button>
-            <button type="button" className="btn btn-ghost btn-xs" disabled={busy} onClick={() => void saveAcceptance('waived')}>豁免</button>
+            <button type="button" className="btn btn-ghost btn-xs" disabled={busy} onClick={() => void saveAcceptance('pending')}>{TEXT.markAcceptancePending}</button>
+            <button type="button" className="btn btn-primary btn-xs" disabled={busy} onClick={() => void saveAcceptance('passed')}>{TEXT.passAcceptance}</button>
+            <button type="button" className="btn btn-ghost btn-xs" disabled={busy} onClick={() => void saveAcceptance('failed')}>{TEXT.failAcceptance}</button>
+            <button type="button" className="btn btn-ghost btn-xs" disabled={busy} onClick={() => void saveAcceptance('waived')}>{TEXT.waiveAcceptance}</button>
           </div>
         </details>
       )}
@@ -793,7 +832,6 @@ function AcceptanceBadge({ status, label }: { status: string; label: string }): 
 function ContractBlock({ label, value }: { label: string; value: string }): React.JSX.Element {
   return <div className="pws-contract-field"><h4>{label}</h4><p>{value}</p></div>
 }
-
 function ContractList({ label, values }: { label: string; values: string[] }): React.JSX.Element | null {
   if (values.length === 0) return null
   return <div className="pws-contract-field"><h4>{label}</h4><ul>{values.map((value, index) => <li key={`${value}-${index}`}>{value}</li>)}</ul></div>
@@ -807,8 +845,8 @@ function budgetLabel(budget: Goal['budget']): string {
   if (!budget) return TEXT.noDueDate
   const parts: string[] = []
   if (budget.amount !== undefined) parts.push(`${budget.currency ?? ''} ${budget.amount}`.trim())
-  if (budget.maxRuns !== undefined) parts.push(`${budget.maxRuns} 次`)
-  if (budget.maxConcurrentRuns !== undefined) parts.push(`${budget.maxConcurrentRuns} 并发`)
+  if (budget.maxRuns !== undefined) parts.push(TEXT.runCount(budget.maxRuns))
+  if (budget.maxConcurrentRuns !== undefined) parts.push(TEXT.concurrentRunCount(budget.maxConcurrentRuns))
   if (budget.maxTokens !== undefined) parts.push(`${budget.maxTokens} tokens`)
   return parts.join(' · ') || TEXT.noDueDate
 }
@@ -816,7 +854,6 @@ function budgetLabel(budget: Goal['budget']): string {
 function workItemFilterStorageKey(projectId: string): string {
   return `caogen.project-workspace.work-items.filters.v1:${projectId}`
 }
-
 function readStoredWorkItemFilters(projectId: string): WorkItemFilters {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(workItemFilterStorageKey(projectId)) ?? 'null') as Partial<WorkItemFilters> | null

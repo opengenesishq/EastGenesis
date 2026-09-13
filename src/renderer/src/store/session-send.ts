@@ -12,7 +12,7 @@ export async function sendActiveSessionMessage(
   if (!id) return
   const payload: SendMessagePayload = typeof input === 'string'
     ? { text: input.trim() }
-    : { text: input.text.trim(), images: input.images, documents: input.documents }
+    : { text: input.text.trim(), images: input.images, documents: input.documents, officeRevisionIntent: input.officeRevisionIntent }
   const displayText = payload.text ||
     (payload.images?.length ? `图片输入 (${payload.images.length} 张)` : '') ||
     (payload.documents?.length ? `文档输入 (${payload.documents.length} 个)` : '')

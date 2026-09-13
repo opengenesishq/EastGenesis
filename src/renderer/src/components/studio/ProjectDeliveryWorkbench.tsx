@@ -15,6 +15,11 @@ import { DisclosureChevron } from '../DisclosureChevron'
 import { WorkflowAcceptanceRow } from '../WorkflowAcceptanceRow'
 import { EVIDENCE_KINDS, errorMessage, newWorkflowId } from '../workflow-ledger-ui'
 import { useStore } from '../../store'
+import {
+  deliveryTrustPolicyLabel,
+  packageVerificationSignals,
+  useDeliveryIdentityTrust
+} from './projectDeliveryVerification'
 interface ProjectDeliveryWorkbenchProps {
   active: boolean
   projectId: string
@@ -26,6 +31,7 @@ export function ProjectDeliveryWorkbench({
   projectId,
   refreshToken = ''
 }: ProjectDeliveryWorkbenchProps): React.JSX.Element {
+  useStore((state) => state.settings.language)
   const openFile = useStore((state) => state.openFile)
   const openPreviewPanel = useStore((state) => state.openPreviewPanel)
   const openBrowserPanel = useStore((state) => state.openBrowserPanel)
@@ -37,7 +43,7 @@ export function ProjectDeliveryWorkbench({
   const [exporting, setExporting] = useState(false)
   const [deliveryAudit, setDeliveryAudit] = useState<WorkflowProjectDeliveryIntegrityReport>()
   const [packageVerification, setPackageVerification] = useState<Exclude<WorkflowProjectDeliveryPackageVerificationResult, { canceled: true }>>()
-  const [identityTrust, setIdentityTrust] = useState<WorkflowDeliveryIdentityTrustSnapshot>()
+  const [identityTrust, setIdentityTrust] = useDeliveryIdentityTrust(active, setError)
   const [auditing, setAuditing] = useState<'verify' | 'manifest' | 'package' | 'verify-package' | ''>('')
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -56,18 +62,6 @@ export function ProjectDeliveryWorkbench({
   useEffect(() => {
     if (active) void refresh()
   }, [active, refresh, refreshToken])
-
-  const refreshIdentityTrust = useCallback(async (): Promise<void> => {
-    try {
-      setIdentityTrust(await window.agentDesk.listWorkflowDeliveryTrustedIdentities())
-    } catch (cause) {
-      setError(errorMessage(cause))
-    }
-  }, [])
-
-  useEffect(() => {
-    if (active) void refreshIdentityTrust()
-  }, [active, refreshIdentityTrust])
 
   const evidenceById = useMemo(
     () => new Map((projection?.evidence ?? []).map((record) => [record.evidenceId, record])),
@@ -88,7 +82,7 @@ export function ProjectDeliveryWorkbench({
     try {
       const result = await window.agentDesk.startWorkflowAcceptanceRepair(acceptance.id)
       setRepairByAcceptanceId((current) => ({ ...current, [acceptance.id]: result.workItemId }))
-      setMessage(`返工任务 ${result.workItemId} 已${result.disposition === 'blocked' ? '阻塞' : '启动'}`)
+      setMessage(localized(`返工任务 ${result.workItemId} 已${result.disposition === 'blocked' ? '阻塞' : '启动'}`, `Repair task ${result.workItemId} ${result.disposition === 'blocked' ? 'is blocked' : 'started'}`))
       await refresh()
     } catch (cause) {
       setError(errorMessage(cause))
@@ -101,7 +95,7 @@ export function ProjectDeliveryWorkbench({
     try {
       const exported = await window.agentDesk.exportProjectWorkspaceData(projectId)
       downloadDeliveryExport(projectId, exported.json)
-      setMessage(`交付包已导出 · ${exported.exportDigest.slice(0, 16)}`)
+      setMessage(localized(`交付包已导出 · ${exported.exportDigest.slice(0, 16)}`, `Delivery package exported · ${exported.exportDigest.slice(0, 16)}`))
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
@@ -128,7 +122,7 @@ export function ProjectDeliveryWorkbench({
     try {
       const result = await window.agentDesk.exportWorkflowProjectDeliveryManifest({ projectId })
       if (!result.canceled) {
-        setMessage(`${result.fileName} · ${result.readyArtifactCount} 可交付 / ${result.blockedArtifactCount} 阻塞 · ${shortDigest(result.manifestDigest)}`)
+        setMessage(localized(`${result.fileName} · ${result.readyArtifactCount} 可交付 / ${result.blockedArtifactCount} 阻塞 · ${shortDigest(result.manifestDigest)}`, `${result.fileName} · ${result.readyArtifactCount} ready / ${result.blockedArtifactCount} blocked · ${shortDigest(result.manifestDigest)}`))
         setDeliveryAudit(await window.agentDesk.verifyWorkflowProjectDelivery({ projectId }))
       }
     } catch (cause) {
@@ -144,7 +138,7 @@ export function ProjectDeliveryWorkbench({
     try {
       const result = await window.agentDesk.exportWorkflowProjectDeliveryPackage({ projectId })
       if (!result.canceled) {
-        setMessage(`${result.fileName} · Ed25519 已签名 · ${result.includedArtifactCount} 个已验收文件 · ${result.blockedArtifactCount} 个阻塞 · ${shortDigest(result.packageDigest)}`)
+        setMessage(localized(`${result.fileName} · Ed25519 已签名 · ${result.includedArtifactCount} 个已验收文件 · ${result.blockedArtifactCount} 个阻塞 · ${shortDigest(result.packageDigest)}`, `${result.fileName} · Ed25519 signed · ${result.includedArtifactCount} accepted files · ${result.blockedArtifactCount} blocked · ${shortDigest(result.packageDigest)}`))
         setDeliveryAudit(await window.agentDesk.verifyWorkflowProjectDelivery({ projectId }))
       }
     } catch (cause) {
@@ -172,31 +166,31 @@ export function ProjectDeliveryWorkbench({
     <section className="pws-section pws-delivery-workbench" aria-labelledby={`delivery-${projectId}`} data-project-delivery-workbench>
       <div className="pws-section-header">
         <div className="pws-section-title">
-          <h2 id={`delivery-${projectId}`}>交付与验收</h2>
+          <h2 id={`delivery-${projectId}`}>{localized('交付与验收', 'Delivery and acceptance')}</h2>
           {projection && <span>{projection.summary.currentArtifactCount}/{projection.summary.artifactCount}</span>}
         </div>
         <div className="pws-section-actions">
-          <span className="pws-delivery-state">{loading ? '同步中...' : projection ? '已同步' : '尚无交付数据'}</span>
+          <span className="pws-delivery-state">{loading ? localized('同步中...', 'Syncing...') : projection ? localized('已同步', 'Synced') : localized('尚无交付数据', 'No delivery data')}</span>
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => void verifyDeliveryPackage()} disabled={Boolean(auditing)}>
             <FileCheck2 size={13} aria-hidden="true" />
-            {auditing === 'verify-package' ? '验证中...' : '验证交付包'}
+            {auditing === 'verify-package' ? localized('验证中...', 'Verifying...') : localized('验证交付包', 'Verify package')}
           </button>
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => void verifyProjectDelivery()} disabled={loading || Boolean(auditing)}>
             <ShieldCheck size={13} aria-hidden="true" />
-            {auditing === 'verify' ? '审计中...' : '全项目审计'}
+            {auditing === 'verify' ? localized('审计中...', 'Auditing...') : localized('全项目审计', 'Audit project')}
           </button>
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => void exportProjectManifest()} disabled={loading || Boolean(auditing)}>
             <FileJson size={13} aria-hidden="true" />
-            {auditing === 'manifest' ? '导出中...' : '项目清单'}
+            {auditing === 'manifest' ? localized('导出中...', 'Exporting...') : localized('项目清单', 'Project manifest')}
           </button>
           <button type="button" className="btn btn-primary btn-sm" onClick={() => void exportVerifiedPackage()} disabled={loading || Boolean(auditing)}>
             <Download size={13} aria-hidden="true" />
-            {auditing === 'package' ? '打包中...' : '可验证交付包'}
+            {auditing === 'package' ? localized('打包中...', 'Packaging...') : localized('可验证交付包', 'Verifiable package')}
           </button>
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => void exportDelivery()} disabled={loading || exporting}>
-            {exporting ? '导出中...' : '导出项目数据'}
+            {exporting ? localized('导出中...', 'Exporting...') : localized('导出项目数据', 'Export project data')}
           </button>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => void refresh()} disabled={loading}>刷新</button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => void refresh()} disabled={loading}>{localized('刷新', 'Refresh')}</button>
         </div>
       </div>
       {error && <div className="pws-error" role="alert">{error}</div>}
@@ -237,8 +231,8 @@ export function ProjectDeliveryWorkbench({
             />
             <div className="pws-delivery-column">
               <section className="pws-delivery-subsection" aria-labelledby={`acceptance-${projectId}`}>
-                <h3 id={`acceptance-${projectId}`}>验收清单</h3>
-                {projection.acceptances.length === 0 ? <p className="pws-delivery-empty">暂无 Acceptance</p> : projection.acceptances.map((acceptance) => (
+                <h3 id={`acceptance-${projectId}`}>{localized('验收清单', 'Acceptance checklist')}</h3>
+                {projection.acceptances.length === 0 ? <p className="pws-delivery-empty">{localized('暂无 Acceptance', 'No Acceptance records')}</p> : projection.acceptances.map((acceptance) => (
                   <div className="pws-delivery-acceptance" key={acceptance.id}>
                     <WorkflowAcceptanceRow
                       acceptance={acceptance}
@@ -250,7 +244,7 @@ export function ProjectDeliveryWorkbench({
                     />
                     {acceptance.status === 'failed' && (
                       <button type="button" className="btn btn-ghost btn-xs" onClick={() => void startRepair(acceptance)}>
-                        启动返工
+                        {localized('启动返工', 'Start repair')}
                       </button>
                     )}
                   </div>
@@ -258,10 +252,10 @@ export function ProjectDeliveryWorkbench({
               </section>
               <section className="pws-delivery-subsection" aria-labelledby={`evidence-${projectId}`}>
                 <h3 id={`evidence-${projectId}`}>Evidence ({projection.evidence.length})</h3>
-                {projection.evidence.length === 0 ? <p className="pws-delivery-empty">暂无 Evidence</p> : projection.evidence.slice(0, 12).map((record) => (
+                {projection.evidence.length === 0 ? <p className="pws-delivery-empty">{localized('暂无 Evidence', 'No Evidence')}</p> : projection.evidence.slice(0, 12).map((record) => (
                   <div className="pws-delivery-evidence" key={record.evidenceId}>
                     <strong>{record.title}</strong>
-                    <span>{record.kind} · {record.source}{record.artifactId ? ` · ${record.artifactId}` : ' · 未绑定产物'}</span>
+                    <span>{record.kind} · {record.source}{record.artifactId ? ` · ${record.artifactId}` : localized(' · 未绑定产物', ' · No bound artifact')}</span>
                     {record.summary && <p>{record.summary}</p>}
                   </div>
                 ))}
@@ -329,33 +323,24 @@ function DeliveryPackageVerification({
     <div className={`pws-package-verification is-${report.verdict}`} role="status" aria-live="polite">
       <div className="pws-package-verification-head">
         <div>
-          <strong>{report.verdict === 'verified' ? '交付包验证通过' : '交付包验证未通过'}</strong>
+          <strong>{report.verdict === 'verified' ? localized('交付包验证通过', 'Delivery package verified') : localized('交付包验证未通过', 'Delivery package verification failed')}</strong>
           <span>{report.fileName}{report.projectId ? ` · ${report.projectId}` : ''}</span>
         </div>
         <span>
-          {report.verifiedArtifactCount ?? 0}/{report.declaredArtifactCount ?? 0} 文件 · {formatBytes(report.verifiedArtifactBytes ?? 0)}
-          {report.manifestVerdict ? ` · 清单 ${report.manifestVerdict}` : ''}
+          {localized(`${report.verifiedArtifactCount ?? 0}/${report.declaredArtifactCount ?? 0} 文件`, `${report.verifiedArtifactCount ?? 0}/${report.declaredArtifactCount ?? 0} files`)} · {formatBytes(report.verifiedArtifactBytes ?? 0)}
+          {report.manifestVerdict ? ` · ${localized('清单', 'Manifest')} ${report.manifestVerdict}` : ''}
         </span>
       </div>
-      <div className="pws-package-verification-signals" aria-label="交付包验证状态">
-        <span data-state={report.byteIntegrity === 'verified' ? 'ok' : 'blocked'}>
-          字节 {report.byteIntegrity === 'verified' ? '完整' : '异常'}
-        </span>
-        <span data-state={report.signatureStatus === 'valid' ? 'ok' : report.signatureStatus === 'unsigned' ? 'neutral' : 'blocked'}>
-          签名 {report.signatureStatus === 'valid' ? '有效' : report.signatureStatus === 'unsigned' ? '未签名' : '无效'}
-        </span>
-        <span data-state={report.identityTrust === 'local_identity' || report.identityTrust === 'trusted_identity' ? 'ok' : report.identityTrust === 'revoked_identity' ? 'blocked' : 'neutral'}>
-          身份 {deliveryIdentityTrustLabel(report)}
-        </span>
-        <span data-state={report.trustPolicyVerdict === 'passed' ? 'ok' : 'blocked'}>
-          策略 {report.trustPolicyVerdict === 'passed' ? '通过' : '阻断'} · {deliveryTrustPolicyLabel(report.trustPolicyMode)}
-        </span>
+      <div className="pws-package-verification-signals" aria-label={localized('交付包验证状态', 'Delivery package verification status')}>
+        {packageVerificationSignals(report).map((signal) => (
+          <span key={signal.key} data-state={signal.state}>{signal.label}</span>
+        ))}
       </div>
       {report.packageDigest && (
         <div className="pws-package-verification-digests">
           <code>{shortDigest(report.packageDigest)}</code>
           {report.manifestDigest && <code>{shortDigest(report.manifestDigest)}</code>}
-          {report.signingIdentityFingerprint && <code title="Ed25519 公钥 SHA-256 指纹">{shortDigest(report.signingIdentityFingerprint)}</code>}
+          {report.signingIdentityFingerprint && <code title={localized('Ed25519 公钥 SHA-256 指纹', 'Ed25519 public key SHA-256 fingerprint')}>{shortDigest(report.signingIdentityFingerprint)}</code>}
         </div>
       )}
       {(report.identityTrust === 'unknown_identity' || report.identityTrust === 'revoked_identity') && report.signatureStatus === 'valid' && trustSnapshot && (
@@ -364,8 +349,8 @@ function DeliveryPackageVerification({
             value={identityLabel}
             onChange={(event) => setIdentityLabel(event.target.value)}
             maxLength={100}
-            placeholder={report.identityTrust === 'revoked_identity' ? report.signingIdentityLabel || '重新信任名称' : '合作方身份名称'}
-            aria-label="合作方身份名称"
+            placeholder={report.identityTrust === 'revoked_identity' ? report.signingIdentityLabel || localized('重新信任名称', 'Name for restored trust') : localized('合作方身份名称', 'Partner identity name')}
+            aria-label={localized('合作方身份名称', 'Partner identity name')}
           />
           <button
             type="button"
@@ -374,7 +359,7 @@ function DeliveryPackageVerification({
             disabled={trusting || !identityLabel.trim()}
           >
             <UserCheck size={12} aria-hidden="true" />
-            {trusting ? '保存中...' : report.identityTrust === 'revoked_identity' ? '重新信任' : '信任此身份'}
+            {trusting ? localized('保存中...', 'Saving...') : report.identityTrust === 'revoked_identity' ? localized('重新信任', 'Trust again') : localized('信任此身份', 'Trust this identity')}
           </button>
         </div>
       )}
@@ -390,7 +375,7 @@ function DeliveryPackageVerification({
       <div className="pws-package-verification-actions">
         <button type="button" className="btn btn-ghost btn-xs" onClick={() => void saveReceipt()} disabled={saving}>
           <Save size={12} aria-hidden="true" />
-          {saving ? '保存中...' : '保存验证凭证'}
+          {saving ? localized('保存中...', 'Saving...') : localized('保存验证凭证', 'Save verification receipt')}
         </button>
       </div>
     </div>
@@ -428,7 +413,7 @@ function DeliveryIdentityTrustList({
       })
       onChange(result.snapshot)
       onPolicyChange()
-      onMessage(`交付信任策略已切换为 ${deliveryTrustPolicyLabel(mode)}，请重新验证交付包`)
+      onMessage(localized(`交付信任策略已切换为 ${deliveryTrustPolicyLabel(mode)}，请重新验证交付包`, `Delivery trust policy changed to ${deliveryTrustPolicyLabel(mode)}. Verify the package again.`))
     } catch (cause) {
       onError(errorMessage(cause))
     } finally {
@@ -455,7 +440,7 @@ function DeliveryIdentityTrustList({
     onError('')
     try {
       const result = await window.agentDesk.exportWorkflowDeliveryIdentityTrustBundle()
-      if (!result.canceled) onMessage(`${result.fileName} · ${result.identityCount ?? 0} 个身份`)
+      if (!result.canceled) onMessage(localized(`${result.fileName} · ${result.identityCount ?? 0} 个身份`, `${result.fileName} · ${result.identityCount ?? 0} identities`))
     } catch (cause) {
       onError(errorMessage(cause))
     } finally {
@@ -469,7 +454,7 @@ function DeliveryIdentityTrustList({
       const result = await window.agentDesk.importWorkflowDeliveryIdentityTrustBundle(snapshot.revision)
       if (!result.canceled) {
         onChange(result.snapshot)
-        onMessage(`信任包已合并 · 新增 ${result.importedCount} · 更新 ${result.updatedCount} · 未变 ${result.unchangedCount}`)
+        onMessage(localized(`信任包已合并 · 新增 ${result.importedCount} · 更新 ${result.updatedCount} · 未变 ${result.unchangedCount}`, `Trust bundle merged · ${result.importedCount} added · ${result.updatedCount} updated · ${result.unchangedCount} unchanged`))
       }
     } catch (cause) {
       onError(errorMessage(cause))
@@ -501,7 +486,7 @@ function DeliveryIdentityTrustList({
       const result = await window.agentDesk.restoreWorkflowDeliveryIdentityBackup({ passphrase })
       if (!result.canceled) {
         onChange(result.snapshot)
-        onMessage(result.disposition === 'reinstalled' ? '交付身份已重新安装' : '交付身份已恢复，原身份已撤销')
+        onMessage(result.disposition === 'reinstalled' ? localized('交付身份已重新安装', 'Delivery identity reinstalled') : localized('交付身份已恢复，原身份已撤销', 'Delivery identity restored; the previous identity was revoked'))
         setPassphrase('')
       }
     } catch (cause) {
@@ -518,7 +503,7 @@ function DeliveryIdentityTrustList({
         ...(snapshot.localIdentity ? { expectedFingerprint: snapshot.localIdentity.fingerprint } : {})
       })
       onChange(result.snapshot)
-      onMessage('新的交付签名身份已启用，原身份已撤销')
+      onMessage(localized('新的交付签名身份已启用，原身份已撤销', 'A new delivery signing identity is active; the previous identity was revoked'))
       setConfirmingRotation(false)
     } catch (cause) {
       onError(errorMessage(cause))
@@ -530,19 +515,19 @@ function DeliveryIdentityTrustList({
     <section className="pws-delivery-identities" aria-labelledby="delivery-trusted-identities">
       <div className="pws-delivery-identities-head">
         <div>
-          <strong id="delivery-trusted-identities">交付身份</strong>
-          <span>{snapshot.identities.filter((item) => item.status === 'trusted').length} 个可信 · rev {snapshot.revision}</span>
+          <strong id="delivery-trusted-identities">{localized('交付身份', 'Delivery identities')}</strong>
+          <span>{localized(`${snapshot.identities.filter((item) => item.status === 'trusted').length} 个可信`, `${snapshot.identities.filter((item) => item.status === 'trusted').length} trusted`)} · rev {snapshot.revision}</span>
         </div>
         <div className="pws-delivery-identity-toolbar">
-          <button type="button" className="btn btn-ghost btn-xs" onClick={() => void importTrustBundle()} disabled={Boolean(busy)} title="导入交付身份信任包">
-            <Upload size={12} aria-hidden="true" />{busy === 'trust-import' ? '导入中...' : '导入信任'}
+          <button type="button" className="btn btn-ghost btn-xs" onClick={() => void importTrustBundle()} disabled={Boolean(busy)} title={localized('导入交付身份信任包', 'Import delivery identity trust bundle')}>
+            <Upload size={12} aria-hidden="true" />{busy === 'trust-import' ? localized('导入中...', 'Importing...') : localized('导入信任', 'Import trust')}
           </button>
-          <button type="button" className="btn btn-ghost btn-xs" onClick={() => void exportTrustBundle()} disabled={Boolean(busy) || !localIdentityAvailable} title="导出交付身份信任包">
-            <Download size={12} aria-hidden="true" />{busy === 'trust-export' ? '导出中...' : '导出信任'}
+          <button type="button" className="btn btn-ghost btn-xs" onClick={() => void exportTrustBundle()} disabled={Boolean(busy) || !localIdentityAvailable} title={localized('导出交付身份信任包', 'Export delivery identity trust bundle')}>
+            <Download size={12} aria-hidden="true" />{busy === 'trust-export' ? localized('导出中...', 'Exporting...') : localized('导出信任', 'Export trust')}
           </button>
         </div>
       </div>
-      <div className="pws-delivery-trust-policy" role="group" aria-label="组织交付信任策略">
+      <div className="pws-delivery-trust-policy" role="group" aria-label={localized('组织交付信任策略', 'Organization delivery trust policy')}>
         {(['audit_only', 'require_valid_signature', 'require_trusted_identity'] as const).map((mode) => (
           <button
             type="button"
@@ -558,20 +543,20 @@ function DeliveryIdentityTrustList({
       <div className="pws-delivery-local-identity" data-local-identity-status={snapshot.localIdentityStatus}>
         <div>
           <KeyRound size={13} aria-hidden="true" />
-          <strong>本机签名身份</strong>
+          <strong>{localized('本机签名身份', 'Local signing identity')}</strong>
           {snapshot.localIdentity ? (
             <>
             <code>{shortDigest(snapshot.localIdentity.fingerprint)}</code>
-            <span>{snapshot.localIdentity.retiredIdentities.length} 个历史身份</span>
+            <span>{localized(`${snapshot.localIdentity.retiredIdentities.length} 个历史身份`, `${snapshot.localIdentity.retiredIdentities.length} historical identities`)}</span>
             </>
-          ) : <span>系统凭据加密不可用</span>}
+          ) : <span>{localized('系统凭据加密不可用', 'System credential encryption unavailable')}</span>}
         </div>
         {snapshot.localIdentity && (!confirmingRotation ? (
-          <button type="button" className="btn btn-ghost btn-xs" onClick={() => setConfirmingRotation(true)} disabled={Boolean(busy)} title="轮换本机交付签名身份"><RotateCw size={12} aria-hidden="true" />轮换</button>
+          <button type="button" className="btn btn-ghost btn-xs" onClick={() => setConfirmingRotation(true)} disabled={Boolean(busy)} title={localized('轮换本机交付签名身份', 'Rotate local delivery signing identity')}><RotateCw size={12} aria-hidden="true" />{localized('轮换', 'Rotate')}</button>
         ) : (
           <div className="pws-delivery-rotation-confirm">
-            <button type="button" className="btn btn-danger btn-xs" onClick={() => void rotateIdentity()} disabled={Boolean(busy)}><RotateCw size={12} aria-hidden="true" />{busy === 'rotate' ? '轮换中...' : '确认轮换'}</button>
-            <button type="button" className="btn btn-ghost btn-xs" onClick={() => setConfirmingRotation(false)} disabled={Boolean(busy)} title="取消轮换"><X size={12} aria-hidden="true" />取消</button>
+            <button type="button" className="btn btn-danger btn-xs" onClick={() => void rotateIdentity()} disabled={Boolean(busy)}><RotateCw size={12} aria-hidden="true" />{busy === 'rotate' ? localized('轮换中...', 'Rotating...') : localized('确认轮换', 'Confirm rotation')}</button>
+            <button type="button" className="btn btn-ghost btn-xs" onClick={() => setConfirmingRotation(false)} disabled={Boolean(busy)} title={localized('取消轮换', 'Cancel rotation')}><X size={12} aria-hidden="true" />{localized('取消', 'Cancel')}</button>
           </div>
         ))}
       </div>
@@ -582,26 +567,26 @@ function DeliveryIdentityTrustList({
           minLength={12}
           maxLength={1024}
           onChange={(event) => setPassphrase(event.target.value)}
-          placeholder="身份备份密码（至少 12 位）"
-          aria-label="交付身份备份密码"
+          placeholder={localized('身份备份密码（至少 12 位）', 'Identity backup passphrase (at least 12 characters)')}
+          aria-label={localized('交付身份备份密码', 'Delivery identity backup passphrase')}
           autoComplete="new-password"
           disabled={!localIdentityAvailable}
         />
         <button type="button" className="btn btn-ghost btn-xs" onClick={() => void backupIdentity()} disabled={Boolean(busy) || !localIdentityAvailable || passphrase.length < 12}>
-          <Save size={12} aria-hidden="true" />{busy === 'backup' ? '备份中...' : '备份身份'}
+          <Save size={12} aria-hidden="true" />{busy === 'backup' ? localized('备份中...', 'Backing up...') : localized('备份身份', 'Back up identity')}
         </button>
         <button type="button" className="btn btn-ghost btn-xs" onClick={() => void restoreIdentity()} disabled={Boolean(busy) || !localIdentityAvailable || passphrase.length < 12}>
-          <Upload size={12} aria-hidden="true" />{busy === 'restore' ? '恢复中...' : '恢复身份'}
+          <Upload size={12} aria-hidden="true" />{busy === 'restore' ? localized('恢复中...', 'Restoring...') : localized('恢复身份', 'Restore identity')}
         </button>
       </div>
       <div className="pws-delivery-identities-list">
-        {snapshot.identities.length === 0 && <span className="pws-delivery-empty">暂无合作方身份</span>}
+        {snapshot.identities.length === 0 && <span className="pws-delivery-empty">{localized('暂无合作方身份', 'No partner identities')}</span>}
         {snapshot.identities.map((identity) => (
           <div className="pws-delivery-identity" data-status={identity.status} key={identity.fingerprint}>
             <div>
               <strong>{identity.label}</strong>
               <code>{shortDigest(identity.fingerprint)}</code>
-              <span>{identity.status === 'trusted' ? '可信' : '已撤销'}{identity.lastProjectId ? ` · ${identity.lastProjectId}` : ''}</span>
+              <span>{identity.status === 'trusted' ? localized('可信', 'Trusted') : localized('已撤销', 'Revoked')}{identity.lastProjectId ? ` · ${identity.lastProjectId}` : ''}</span>
             </div>
             {identity.status === 'trusted' && (
               <button
@@ -609,10 +594,10 @@ function DeliveryIdentityTrustList({
                 className="btn btn-ghost btn-xs"
                 onClick={() => void revoke(identity.fingerprint)}
                 disabled={Boolean(revoking)}
-                title="撤销交付身份信任"
+                title={localized('撤销交付身份信任', 'Revoke delivery identity trust')}
               >
                 <ShieldOff size={12} aria-hidden="true" />
-                {revoking === identity.fingerprint ? '撤销中...' : '撤销'}
+                {revoking === identity.fingerprint ? localized('撤销中...', 'Revoking...') : localized('撤销', 'Revoke')}
               </button>
             )}
           </div>
@@ -622,30 +607,12 @@ function DeliveryIdentityTrustList({
   )
 }
 
-function deliveryIdentityTrustLabel(
-  report: Exclude<WorkflowProjectDeliveryPackageVerificationResult, { canceled: true }>
-): string {
-  if (report.identityTrust === 'local_identity') return '本机 CaoGen'
-  if (report.identityTrust === 'trusted_identity') return report.signingIdentityLabel || '已信任'
-  if (report.identityTrust === 'revoked_identity') return `${report.signingIdentityLabel || '已知身份'}（已撤销）`
-  if (report.identityTrust === 'unknown_identity') return '未知公钥'
-  return '未提供'
-}
-
-function deliveryTrustPolicyLabel(
-  mode: WorkflowDeliveryIdentityTrustSnapshot['policy']['mode']
-): string {
-  if (mode === 'require_valid_signature') return '必须签名'
-  if (mode === 'require_trusted_identity') return '必须信任身份'
-  return '仅审计'
-}
-
 function ProjectDeliveryAudit({ report }: { report: WorkflowProjectDeliveryIntegrityReport }): React.JSX.Element {
   return (
     <div className={`pws-project-delivery-audit is-${report.verdict}`} role="status">
       <div>
-        <strong>{report.verdict === 'ready' ? 'Project 当前产物全部可交付' : `${report.summary.blockedArtifactCount} 个当前产物有阻塞`}</strong>
-        <span>{report.summary.readyArtifactCount}/{report.summary.currentArtifactCount} 可交付 · 已核对 {formatBytes(report.summary.verifiedBytes)}</span>
+        <strong>{report.verdict === 'ready' ? localized('Project 当前产物全部可交付', 'All current project artifacts are deliverable') : localized(`${report.summary.blockedArtifactCount} 个当前产物有阻塞`, `${report.summary.blockedArtifactCount} current artifacts are blocked`)}</strong>
+        <span>{report.summary.readyArtifactCount}/{report.summary.currentArtifactCount} {localized('可交付', 'deliverable')} · {localized('已核对', 'verified')} {formatBytes(report.summary.verifiedBytes)}</span>
       </div>
       {report.summary.blockerCounts.length > 0 && (
         <div className="pws-project-delivery-blockers">
@@ -658,12 +625,12 @@ function ProjectDeliveryAudit({ report }: { report: WorkflowProjectDeliveryInteg
 
 function projectBlockerLabel(code: WorkflowProjectDeliveryIntegrityReport['summary']['blockerCounts'][number]['code']): string {
   const labels: Record<typeof code, string> = {
-    HISTORICAL_VERSION: '历史版本',
-    LOCAL_LOCATION_UNVERIFIED: '文件未校验',
-    EVIDENCE_MISSING: '缺 Evidence',
-    ACCEPTANCE_MISSING: '缺 Acceptance',
-    ACCEPTANCE_PENDING: '等待验收',
-    ACCEPTANCE_FAILED: '验收失败'
+    HISTORICAL_VERSION: localized('历史版本', 'Historical version'),
+    LOCAL_LOCATION_UNVERIFIED: localized('文件未校验', 'File not verified'),
+    EVIDENCE_MISSING: localized('缺 Evidence', 'Evidence missing'),
+    ACCEPTANCE_MISSING: localized('缺 Acceptance', 'Acceptance missing'),
+    ACCEPTANCE_PENDING: localized('等待验收', 'Acceptance pending'),
+    ACCEPTANCE_FAILED: localized('验收失败', 'Acceptance failed')
   }
   return labels[code]
 }
@@ -672,12 +639,12 @@ function DeliverySummary({ projection }: { projection: WorkflowProjectDeliveryWo
   const { summary } = projection
   return (
     <div className="pws-delivery-summary" data-delivery-summary>
-      <span><strong>{summary.availableArtifactCount}</strong> 可用产物</span>
+      <span><strong>{summary.availableArtifactCount}</strong> {localized('可用产物', 'available artifacts')}</span>
       <span><strong>{summary.evidenceCount}</strong> Evidence</span>
-      <span><strong>{summary.passedAcceptanceCount}</strong> 通过</span>
-      <span><strong>{summary.pendingAcceptanceCount}</strong> 待验收</span>
-      <span><strong>{summary.failedAcceptanceCount}</strong> 失败</span>
-      <span><strong>{summary.unlinkedEvidenceCount}</strong> 未绑定 Evidence</span>
+      <span><strong>{summary.passedAcceptanceCount}</strong> {localized('通过', 'passed')}</span>
+      <span><strong>{summary.pendingAcceptanceCount}</strong> {localized('待验收', 'pending')}</span>
+      <span><strong>{summary.failedAcceptanceCount}</strong> {localized('失败', 'failed')}</span>
+      <span><strong>{summary.unlinkedEvidenceCount}</strong> {localized('未绑定 Evidence', 'unlinked Evidence')}</span>
     </div>
   )
 }
@@ -704,15 +671,15 @@ function ArtifactDeliveryList({
   const artifactById = new Map(artifacts.map((item) => [item.artifact.id, item]))
   return (
     <section className="pws-delivery-subsection" aria-labelledby="delivery-artifacts">
-      <h3 id="delivery-artifacts">交付物 ({artifacts.length})</h3>
-      {artifacts.length === 0 ? <p className="pws-delivery-empty">暂无 Artifact</p> : artifacts.map((item) => (
+      <h3 id="delivery-artifacts">{localized('交付物', 'Deliverables')} ({artifacts.length})</h3>
+      {artifacts.length === 0 ? <p className="pws-delivery-empty">{localized('暂无 Artifact', 'No Artifacts')}</p> : artifacts.map((item) => (
         <article className={`pws-delivery-artifact ${item.isCurrent ? '' : 'is-superseded'}`} key={item.artifact.id}>
           <div className="pws-delivery-artifact-head">
             <strong>{item.artifact.title}</strong>
             <span>v{item.artifact.version} · {item.artifact.kind}</span>
           </div>
           <div className="pws-delivery-artifact-meta">
-            <span>{item.available ? '可用位置' : '缺少可用位置'} · {item.locations.length} 个位置</span>
+            <span>{item.available ? localized('可用位置', 'Available location') : localized('缺少可用位置', 'No available location')} · {localized(`${item.locations.length} 个位置`, `${item.locations.length} locations`)}</span>
             <span>{item.evidenceIds.length} Evidence · {item.acceptanceIds.length} Acceptance</span>
           </div>
           <ArtifactLineage artifact={item} artifactById={artifactById} />
@@ -727,12 +694,12 @@ function ArtifactDeliveryList({
               <code>{location.path || location.uri || location.kind} · {location.availability}</code>
               {location.path && location.availability === 'available' && (
                 <>
-                  <button type="button" className="btn btn-ghost btn-xs" onClick={() => void onOpenFile(location.path!)}>打开文件</button>
-                  <button type="button" className="btn btn-ghost btn-xs" onClick={() => void onOpenPreview(location.path)}>预览</button>
+                  <button type="button" className="btn btn-ghost btn-xs" onClick={() => void onOpenFile(location.path!)}>{localized('打开文件', 'Open file')}</button>
+                  <button type="button" className="btn btn-ghost btn-xs" onClick={() => void onOpenPreview(location.path)}>{localized('预览', 'Preview')}</button>
                 </>
               )}
               {location.uri && /^https?:\/\//i.test(location.uri) && (
-                <button type="button" className="btn btn-ghost btn-xs" onClick={() => void onOpenBrowser(location.uri)}>打开链接</button>
+                <button type="button" className="btn btn-ghost btn-xs" onClick={() => void onOpenBrowser(location.uri)}>{localized('打开链接', 'Open link')}</button>
               )}
             </div>
           ))}</div>}
@@ -768,17 +735,17 @@ function ArtifactLineage({
     <div className="pws-artifact-lineage">
       <div className="pws-artifact-lineage-summary">
         <code title={artifact.artifact.digest}>{shortDigest(artifact.artifact.digest)}</code>
-        <span>{artifact.isCurrent ? '当前版本' : '历史版本'}</span>
-        {artifact.predecessorArtifactId && <span>替代 v{artifactById.get(artifact.predecessorArtifactId)?.artifact.version ?? '?'}</span>}
-        {artifact.successorArtifactIds.length > 0 && <span>{artifact.successorArtifactIds.length} 个后继</span>}
+        <span>{artifact.isCurrent ? localized('当前版本', 'Current version') : localized('历史版本', 'Historical version')}</span>
+        {artifact.predecessorArtifactId && <span>{localized('替代', 'Supersedes')} v{artifactById.get(artifact.predecessorArtifactId)?.artifact.version ?? '?'}</span>}
+        {artifact.successorArtifactIds.length > 0 && <span>{localized(`${artifact.successorArtifactIds.length} 个后继`, `${artifact.successorArtifactIds.length} successors`)}</span>}
         {hasHistory && (
           <button
             type="button"
             className="btn btn-ghost btn-icon-sm"
             onClick={() => setExpanded((value) => !value)}
             aria-expanded={expanded}
-            aria-label={expanded ? '收起版本历史' : '展开版本历史'}
-            title={expanded ? '收起版本历史' : '展开版本历史'}
+            aria-label={expanded ? localized('收起版本历史', 'Collapse version history') : localized('展开版本历史', 'Expand version history')}
+            title={expanded ? localized('收起版本历史', 'Collapse version history') : localized('展开版本历史', 'Expand version history')}
           >
             <DisclosureChevron expanded={expanded} size={13} />
           </button>
@@ -786,7 +753,7 @@ function ArtifactLineage({
       </div>
       {!artifact.isCurrent && currentVersions.length > 0 && (
         <div className="pws-artifact-current-leaves">
-          当前可交付：{currentVersions.map((item) => `v${item.artifact.version} ${shortDigest(item.artifact.digest)}`).join(' · ')}
+          {localized('当前可交付：', 'Current deliverables: ')}{currentVersions.map((item) => `v${item.artifact.version} ${shortDigest(item.artifact.digest)}`).join(' · ')}
         </div>
       )}
       {expanded && (
@@ -796,7 +763,7 @@ function ArtifactLineage({
               <span>v{item.artifact.version}</span>
               <strong>{item.artifact.title}</strong>
               <code title={item.artifact.digest}>{shortDigest(item.artifact.digest)}</code>
-              <span>{item.isCurrent ? '当前' : '历史'}</span>
+              <span>{item.isCurrent ? localized('当前', 'Current') : localized('历史', 'Historical')}</span>
             </li>
           ))}
         </ol>
@@ -841,7 +808,7 @@ function ArtifactComparer({
     <div className="pws-artifact-compare">
       <button type="button" className="btn btn-ghost btn-xs" onClick={() => void compare()} disabled={busy}>
         <GitCompareArrows size={12} aria-hidden="true" />
-        {busy ? '比较中...' : artifact.predecessorArtifactId ? '对比前一版' : '对比后一版'}
+        {busy ? localized('比较中...', 'Comparing...') : artifact.predecessorArtifactId ? localized('对比前一版', 'Compare previous version') : localized('对比后一版', 'Compare next version')}
       </button>
       {result && <ArtifactCompareResult result={result} />}
       {error && <span className="pws-delivery-inline-error" role="alert">{error}</span>}
@@ -854,9 +821,9 @@ function ArtifactCompareResult({ result }: { result: WorkflowArtifactCompareResu
     <div className="pws-artifact-compare-result" role="status">
       <div className="pws-artifact-compare-summary">
         <strong>v{result.base.version} → v{result.target.version}</strong>
-        <span>{result.comparison === 'identical' ? '内容相同' : result.comparison === 'binary' ? '二进制差异' : `+${result.addedLines} / -${result.removedLines} 行`}</span>
+        <span>{result.comparison === 'identical' ? localized('内容相同', 'Identical content') : result.comparison === 'binary' ? localized('二进制差异', 'Binary difference') : localized(`+${result.addedLines} / -${result.removedLines} 行`, `+${result.addedLines} / -${result.removedLines} lines`)}</span>
         <span>{signedBytes(result.sizeDeltaBytes)}</span>
-        {result.truncated && <span>结果已截断</span>}
+        {result.truncated && <span>{localized('结果已截断', 'Result truncated')}</span>}
       </div>
       <div className="pws-artifact-compare-digests">
         <code title={result.base.digest}>{shortDigest(result.base.digest)}</code>
@@ -864,7 +831,7 @@ function ArtifactCompareResult({ result }: { result: WorkflowArtifactCompareResu
         <code title={result.target.digest}>{shortDigest(result.target.digest)}</code>
       </div>
       {result.changes.length > 0 && (
-        <pre className="pws-artifact-compare-lines" aria-label="Artifact 文本版本差异">
+        <pre className="pws-artifact-compare-lines" aria-label={localized('Artifact 文本版本差异', 'Artifact text version diff')}>
           {result.changes.map((change, index) => (
             <span className={`is-${change.kind}`} key={`${index}:${change.kind}`}>
               {change.kind === 'added' ? '+' : change.kind === 'removed' ? '-' : ' '}{change.text}{'\n'}
@@ -877,7 +844,7 @@ function ArtifactCompareResult({ result }: { result: WorkflowArtifactCompareResu
 }
 
 function signedBytes(value: number): string {
-  if (value === 0) return '大小不变'
+  if (value === 0) return localized('大小不变', 'No size change')
   return `${value > 0 ? '+' : '-'}${formatBytes(Math.abs(value))}`
 }
 
@@ -910,10 +877,10 @@ function ArtifactExporter({ artifact }: { artifact: WorkflowProjectDeliveryArtif
         className="btn btn-ghost btn-xs"
         onClick={() => void exportArtifact()}
         disabled={busy || !hasLocalLocation}
-        title={hasLocalLocation ? '导出并校验交付物' : '没有可导出的本地文件'}
+        title={hasLocalLocation ? localized('导出并校验交付物', 'Export and verify deliverable') : localized('没有可导出的本地文件', 'No exportable local file')}
       >
         <Download size={12} aria-hidden="true" />
-        {busy ? '导出中...' : '导出'}
+        {busy ? localized('导出中...', 'Exporting...') : localized('导出', 'Export')}
       </button>
       {message && <span className="pws-delivery-inline-success" role="status">{message}</span>}
       {error && <span className="pws-delivery-inline-error" role="alert">{error}</span>}
@@ -946,7 +913,7 @@ function ArtifactIntegrity({ artifact }: { artifact: WorkflowProjectDeliveryArti
     try {
       const result = await window.agentDesk.exportWorkflowArtifactManifest({ artifactId: artifact.artifact.id })
       if (!result.canceled) {
-        setMessage(`${result.fileName} · ${result.verdict === 'ready' ? '可交付' : '含阻塞项'} · ${shortDigest(result.manifestDigest)}`)
+        setMessage(`${result.fileName} · ${result.verdict === 'ready' ? localized('可交付', 'Ready') : localized('含阻塞项', 'Contains blockers')} · ${shortDigest(result.manifestDigest)}`)
         setReport(await window.agentDesk.verifyWorkflowArtifactIntegrity({ artifactId: artifact.artifact.id }))
       }
     } catch (cause) {
@@ -960,11 +927,11 @@ function ArtifactIntegrity({ artifact }: { artifact: WorkflowProjectDeliveryArti
       <div className="pws-artifact-integrity-actions">
         <button type="button" className="btn btn-ghost btn-xs" onClick={() => void verify()} disabled={Boolean(busy)}>
           <ShieldCheck size={12} aria-hidden="true" />
-          {busy === 'verify' ? '校验中...' : '完整性校验'}
+          {busy === 'verify' ? localized('校验中...', 'Verifying...') : localized('完整性校验', 'Verify integrity')}
         </button>
         <button type="button" className="btn btn-ghost btn-xs" onClick={() => void exportManifest()} disabled={Boolean(busy)}>
           <FileJson size={12} aria-hidden="true" />
-          {busy === 'manifest' ? '导出中...' : '交付清单'}
+          {busy === 'manifest' ? localized('导出中...', 'Exporting...') : localized('交付清单', 'Delivery manifest')}
         </button>
       </div>
       {report && <ArtifactIntegrityResult report={report} />}
@@ -978,13 +945,13 @@ function ArtifactIntegrityResult({ report }: { report: WorkflowArtifactIntegrity
   return (
     <div className={`pws-artifact-integrity-result is-${report.verdict}`} role="status">
       <div className="pws-artifact-integrity-verdict">
-        <strong>{report.verdict === 'ready' ? '可交付' : `${report.blockers.length} 个阻塞项`}</strong>
-        <span>{report.locations.byteVerified ? '字节已校验' : '字节未校验'} · {report.evidence.length} Evidence · {report.acceptances.length} Acceptance</span>
+        <strong>{report.verdict === 'ready' ? localized('可交付', 'Ready') : localized(`${report.blockers.length} 个阻塞项`, `${report.blockers.length} blockers`)}</strong>
+        <span>{report.locations.byteVerified ? localized('字节已校验', 'Bytes verified') : localized('字节未校验', 'Bytes not verified')} · {report.evidence.length} Evidence · {report.acceptances.length} Acceptance</span>
       </div>
       <div className="pws-artifact-integrity-checks">
         {report.checks.map((check) => (
           <span className={`is-${check.status}`} key={check.kind} title={check.message}>
-            {check.status === 'passed' ? '通过' : '阻塞'} · {integrityCheckLabel(check.kind)}
+            {check.status === 'passed' ? localized('通过', 'Passed') : localized('阻塞', 'Blocked')} · {integrityCheckLabel(check.kind)}
           </span>
         ))}
       </div>
@@ -999,11 +966,11 @@ function ArtifactIntegrityResult({ report }: { report: WorkflowArtifactIntegrity
 
 function integrityCheckLabel(kind: WorkflowArtifactIntegrityReport['checks'][number]['kind']): string {
   const labels: Record<typeof kind, string> = {
-    canonical_ownership: 'Project 归属',
+    canonical_ownership: localized('Project 归属', 'Project ownership'),
     artifact_graph: 'Artifact Graph',
-    current_version: '当前版本',
-    local_location: '本地位置',
-    content_identity: '文件身份',
+    current_version: localized('当前版本', 'Current version'),
+    local_location: localized('本地位置', 'Local location'),
+    content_identity: localized('文件身份', 'Content identity'),
     evidence_binding: 'Evidence',
     acceptance_status: 'Acceptance'
   }
@@ -1045,7 +1012,7 @@ function ArtifactAcceptanceCreator({
         onClick={() => void createAcceptance()}
         disabled={busy}
       >
-        {busy ? '创建中...' : '创建验收'}
+        {busy ? localized('创建中...', 'Creating...') : localized('创建验收', 'Create acceptance')}
       </button>
       {error && <p className="pws-delivery-inline-error" role="alert">{error}</p>}
     </div>
@@ -1093,7 +1060,7 @@ function ArtifactEvidenceBinder({
     event.preventDefault()
     const trimmedTitle = title.trim()
     if (!trimmedTitle) {
-      setError('Evidence 标题不能为空')
+      setError(localized('Evidence 标题不能为空', 'Evidence title is required'))
       return
     }
     setBusy(true)
@@ -1129,19 +1096,19 @@ function ArtifactEvidenceBinder({
   return (
     <div className="pws-delivery-evidence-binder">
       <div className="pws-delivery-binder-row">
-        <select className="select" value={selectedEvidenceId} onChange={(event) => setSelectedEvidenceId(event.target.value)} disabled={busy} aria-label="选择已有 Evidence">
-          <option value="">选择已有 Evidence</option>
+        <select className="select" value={selectedEvidenceId} onChange={(event) => setSelectedEvidenceId(event.target.value)} disabled={busy} aria-label={localized('选择已有 Evidence', 'Select existing Evidence')}>
+          <option value="">{localized('选择已有 Evidence', 'Select existing Evidence')}</option>
           {availableEvidence.map((record) => <option key={record.evidenceId} value={record.evidenceId}>{record.title}</option>)}
         </select>
-        <button type="button" className="btn btn-ghost btn-xs" onClick={() => void attachExisting()} disabled={busy || !selectedEvidenceId}>绑定 Evidence</button>
+        <button type="button" className="btn btn-ghost btn-xs" onClick={() => void attachExisting()} disabled={busy || !selectedEvidenceId}>{localized('绑定 Evidence', 'Bind Evidence')}</button>
       </div>
       <form className="pws-delivery-new-evidence" onSubmit={(event) => void createAndAttach(event)}>
-        <input className="input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="新 Evidence 标题" disabled={busy} />
-        <select className="select" value={kind} onChange={(event) => setKind(event.target.value as WorkflowEvidenceKind)} disabled={busy} aria-label="Evidence 类型">
+        <input className="input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder={localized('新 Evidence 标题', 'New Evidence title')} disabled={busy} />
+        <select className="select" value={kind} onChange={(event) => setKind(event.target.value as WorkflowEvidenceKind)} disabled={busy} aria-label={localized('Evidence 类型', 'Evidence type')}>
           {EVIDENCE_KINDS.map((option) => <option key={option} value={option}>{option}</option>)}
         </select>
-        <input className="input" value={summary} onChange={(event) => setSummary(event.target.value)} placeholder="摘要（可选）" disabled={busy} />
-        <button type="submit" className="btn btn-ghost btn-xs" disabled={busy || !title.trim()}>新建并绑定</button>
+        <input className="input" value={summary} onChange={(event) => setSummary(event.target.value)} placeholder={localized('摘要（可选）', 'Summary (optional)')} disabled={busy} />
+        <button type="submit" className="btn btn-ghost btn-xs" disabled={busy || !title.trim()}>{localized('新建并绑定', 'Create and bind')}</button>
       </form>
       {error && <p className="pws-delivery-inline-error" role="alert">{error}</p>}
     </div>
@@ -1162,4 +1129,8 @@ function downloadDeliveryExport(projectId: string, json: string): void {
   link.download = `${projectId.replace(/[^a-z0-9_-]+/gi, '-') || 'project'}-delivery-export.json`
   link.click()
   URL.revokeObjectURL(url)
+}
+
+function localized(chinese: string, english: string): string {
+  return useStore.getState().settings.language === 'en' ? english : chinese
 }

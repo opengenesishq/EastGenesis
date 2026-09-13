@@ -6,7 +6,7 @@ interface FileOverlapOptions {
   canonicalizeRoots?: boolean
 }
 
-type OutputFileTarget = Extract<EffectTarget, { kind: 'file_content' | 'office_artifact' }>
+type OutputFileTarget = Extract<EffectTarget, { kind: 'file_content' | 'office_artifact' | 'office_artifact_revision' }>
 
 export function effectTargetsShareFile(
   left: EffectTarget,
@@ -75,7 +75,7 @@ function fileTargetPath(
 }
 
 function isOutputFileTarget(target: EffectTarget): target is OutputFileTarget {
-  return target.kind === 'file_content' || target.kind === 'office_artifact'
+  return target.kind === 'file_content' || (target.kind === 'office_artifact' || target.kind === 'office_artifact_revision')
 }
 
 function rootPath(value: string, options: FileOverlapOptions): string {

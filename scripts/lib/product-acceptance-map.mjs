@@ -1,13 +1,11 @@
-export const PRODUCT_1_0_EXPECTED_COUNTS = Object.freeze({ P0: 64, P1: 38 })
-export const PRODUCT_1_0_CRITICAL_RECOVERY_REQUIREMENT_IDS = Object.freeze([
+const REQUIREMENT_ID = /^[A-Z][A-Z0-9-]+-\d+$/
+const PRIORITY = /^P[01]$/
+const CRITICAL_RECOVERY_REQUIREMENTS = new Set([
   'RUN-004', 'RUN-005',
   'TRUST-002', 'TRUST-003', 'TRUST-004',
   'ART-002',
   'NFR-REC-001', 'NFR-REC-002', 'NFR-REC-003', 'NFR-REC-004', 'NFR-REC-005'
 ])
-
-const REQUIREMENT_ID = /^[A-Z][A-Z0-9-]+-\d+$/
-const PRIORITY = /^P[01]$/
 const RESILIENCE_PATTERNS = {
   kill: /strong[- ]?kill|crash|restart|power loss|enospc/i,
   network: /network|remote|provider|connector/i,
@@ -15,20 +13,11 @@ const RESILIENCE_PATTERNS = {
   outOfOrder: /out[- ]of[- ]order|reorder|stale|fencing|\bcas\b/i
 }
 
-export function buildAcceptanceMap({
-  prdMarkdown,
-  matrixMarkdown,
-  packageScripts,
-  expectedCounts,
-  criticalRecoveryRequirementIds = PRODUCT_1_0_CRITICAL_RECOVERY_REQUIREMENT_IDS
-}) {
+export function buildAcceptanceMap({ prdMarkdown, matrixMarkdown, packageScripts, expectedCounts }) {
   const requirements = parseRequirements(prdMarkdown)
   const matrixRows = parseMatrixRows(matrixMarkdown)
   const rowsById = groupById(matrixRows)
-  const criticalRecoveryRequirements = new Set(criticalRecoveryRequirementIds)
-  const entries = requirements.map((requirement) =>
-    buildEntry(requirement, rowsById, packageScripts, criticalRecoveryRequirements)
-  )
+  const entries = requirements.map((requirement) => buildEntry(requirement, rowsById, packageScripts))
   const requirementIds = new Set(requirements.map((item) => item.id))
   const unexpectedMatrixIds = [...rowsById.keys()].filter((id) => !requirementIds.has(id)).sort()
   const structuralFailures = [
@@ -98,7 +87,7 @@ export function parseMatrixRows(markdown) {
   return rows
 }
 
-function buildEntry(requirement, rowsById, packageScripts, criticalRecoveryRequirements) {
+function buildEntry(requirement, rowsById, packageScripts) {
   const rows = rowsById.get(requirement.id) ?? []
   const matrix = rows[0]
   const declaredCommands = matrix ? extractCommands(matrix.gate) : []
@@ -117,7 +106,7 @@ function buildEntry(requirement, rowsById, packageScripts, criticalRecoveryRequi
     mapped,
     statusMatches,
     releaseBoundEvidence: matrix ? isReleaseBoundEvidence(matrix) : false,
-    resilience: resilienceCoverage(requirement.id, matrix, criticalRecoveryRequirements),
+    resilience: resilienceCoverage(requirement.id, matrix),
     waiver
   }
 }
@@ -162,8 +151,8 @@ function parseWaiver(matrix) {
   return { declared, approved }
 }
 
-function resilienceCoverage(id, matrix, criticalRecoveryRequirements) {
-  const required = criticalRecoveryRequirements.has(id)
+function resilienceCoverage(id, matrix) {
+  const required = CRITICAL_RECOVERY_REQUIREMENTS.has(id)
   const text = matrix ? `${matrix.evidence} ${matrix.gate} ${matrix.dependencies}` : ''
   const cases = Object.fromEntries(
     Object.entries(RESILIENCE_PATTERNS).map(([name, pattern]) => [name, pattern.test(text)])

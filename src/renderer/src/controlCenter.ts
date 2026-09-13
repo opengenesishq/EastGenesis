@@ -1,8 +1,10 @@
 import {
   AUTO_MODEL,
   caogenDrivePolicyView,
+  type AppLanguage,
   type AppSettings,
   type CaoGenDrivePolicyView,
+  type CaoGenDriveValidationDepth,
   type EngineInfo,
   type HistoryEntry,
   type McpProbeResult,
@@ -13,6 +15,11 @@ import {
   type SessionMeta
 } from '../../shared/types'
 import { calculateBudgetReport, type BudgetReportSnapshot } from '../../shared/budget'
+import {
+  translateControlCenter,
+  translateControlCenterFailureLabel,
+  type ControlCenterTranslationKey
+} from './i18n/controlCenterTranslations'
 
 export type ControlCenterStatus = 'available' | 'needs-config' | 'external-required' | 'disabled' | 'unknown'
 
@@ -77,8 +84,13 @@ export interface ControlCenterModelRole {
   detail: string
 }
 
+export type ControlCenterDrivePolicyView = Omit<CaoGenDrivePolicyView, 'zhLabel'> & {
+  displayLabel: string
+  validationDepthLabel: string
+}
+
 export interface ControlCenterView {
-  policy: CaoGenDrivePolicyView
+  policy: ControlCenterDrivePolicyView
   route: {
     driveLabel: string
     routeLabel: string
@@ -124,11 +136,12 @@ export interface BuildControlCenterViewInput {
 }
 
 export function buildControlCenterView(input: BuildControlCenterViewInput): ControlCenterView {
-  const policy = caogenDrivePolicyView(input.settings.driveMode)
+  const language = input.settings.language
+  const policy = localizeDrivePolicy(caogenDrivePolicyView(input.settings.driveMode), language)
   const healthByProvider = new Map(input.health.map((item) => [item.providerId, item]))
   const selectedProviderId = input.settings.defaultProviderId
   const providerRows = input.providers.map((provider) =>
-    buildProviderStatus(provider, healthByProvider.get(provider.id), selectedProviderId)
+    buildProviderStatus(provider, healthByProvider.get(provider.id), selectedProviderId, language)
   )
   const selectedProvider = providerRows.find((provider) => provider.id === selectedProviderId)
   const selectedProviderMissing = Boolean(selectedProviderId) && !selectedProvider
@@ -139,14 +152,15 @@ export function buildControlCenterView(input: BuildControlCenterViewInput): Cont
       ? (selectedProvider?.status ?? 'external-required')
       : 'needs-config'
   const defaultProviderName = selectedProviderMissing
-    ? `${input.settings.defaultProviderId} (missing)`
-    : (selectedProvider?.name ?? '未设置 Provider 偏好')
-  const mcp = buildMcpStatus(input.pluginRegistry, input.mcpProbeResults ?? {})
+    ? `${input.settings.defaultProviderId} ${translateControlCenter(language, 'controlCenterMissingSuffix')}`
+    : (selectedProvider?.name ?? translateControlCenter(language, 'controlCenterNoProviderPreference'))
+  const mcp = buildMcpStatus(input.pluginRegistry, input.mcpProbeResults ?? {}, language)
   const engines = input.engines.map((engine) => {
     const optional = engine.optional === true
     const configured = engine.configured !== false
     return {
       ...engine,
+      label: engineDisplayLabel(engine, language),
       optional,
       configured,
       status: !engine.available
@@ -157,12 +171,12 @@ export function buildControlCenterView(input: BuildControlCenterViewInput): Cont
             : 'needs-config'
           : 'available',
       statusLabel: !engine.available
-        ? '运行时不可用'
+        ? translateControlCenter(language, 'controlCenterEngineRuntimeUnavailable')
         : optional
           ? configured
-            ? '有凭据，兼容性未验证'
-            : '未保存凭据，可选'
-          : '可用'
+            ? translateControlCenter(language, 'controlCenterEngineCompatibilityUnknown')
+            : translateControlCenter(language, 'controlCenterEngineOptionalNoCredential')
+          : translateControlCenter(language, 'controlCenterEngineAvailable')
     } satisfies ControlCenterEngineStatus
   })
   const budgetReport = calculateBudgetReport({
@@ -177,20 +191,30 @@ export function buildControlCenterView(input: BuildControlCenterViewInput): Cont
   return {
     policy,
     route: {
-      driveLabel: `${policy.label} / ${policy.zhLabel}`,
-      routeLabel: input.settings.smartModelRoutingEnabled ? 'Auto routing enabled' : 'Auto routing disabled',
+      driveLabel: policy.displayLabel,
+      routeLabel: input.settings.smartModelRoutingEnabled
+        ? translateControlCenter(language, 'controlCenterRouteEnabled')
+        : translateControlCenter(language, 'controlCenterRouteDisabled'),
       providerLabel: defaultProviderName,
       providerStatus,
-      modelLabel: modelLabel(input.settings.defaultModel),
-      strategyLabel: strategyLabel(input.settings.schedulerStrategy),
-      crossValidationLabel: input.settings.modelCrossValidationAutoRunEnabled ? 'Auto review enabled' : 'Auto review disabled',
-      failoverLabel: input.settings.failoverEnabled ? 'Failover enabled' : 'Failover disabled',
-      customRulesLabel: customRulesLabel(input.settings.modelRoutingRules)
+      modelLabel: modelLabel(input.settings.defaultModel, language),
+      strategyLabel: strategyLabel(input.settings.schedulerStrategy, language),
+      crossValidationLabel: input.settings.modelCrossValidationAutoRunEnabled
+        ? translateControlCenter(language, 'controlCenterReviewEnabled')
+        : translateControlCenter(language, 'controlCenterReviewDisabled'),
+      failoverLabel: input.settings.failoverEnabled
+        ? translateControlCenter(language, 'controlCenterFailoverEnabled')
+        : translateControlCenter(language, 'controlCenterFailoverDisabled'),
+      customRulesLabel: customRulesLabel(input.settings.modelRoutingRules, language)
     },
     budget: {
       driveSessionLabel: moneyLabel(policy.sessionBudgetUsd),
-      sessionLabel: input.settings.budgetUsdPerSession > 0 ? moneyLabel(input.settings.budgetUsdPerSession) : 'unlimited',
-      monthlyLabel: input.settings.budgetUsdPerMonth > 0 ? moneyLabel(input.settings.budgetUsdPerMonth) : 'unlimited',
+      sessionLabel: input.settings.budgetUsdPerSession > 0
+        ? moneyLabel(input.settings.budgetUsdPerSession)
+        : translateControlCenter(language, 'controlCenterUnlimited'),
+      monthlyLabel: input.settings.budgetUsdPerMonth > 0
+        ? moneyLabel(input.settings.budgetUsdPerMonth)
+        : translateControlCenter(language, 'controlCenterUnlimited'),
       status: budgetExceeded
         ? 'needs-config'
         : input.settings.budgetUsdPerSession > 0 || input.settings.budgetUsdPerMonth > 0
@@ -206,7 +230,7 @@ export function buildControlCenterView(input: BuildControlCenterViewInput): Cont
       healthy: providerRows.filter((provider) => provider.status === 'available').length,
       missingKeys: input.providers.filter((provider) => !provider.ready).length
     },
-    modelRoles: buildModelRoles(input.settings, input.providers),
+    modelRoles: buildModelRoles(input.settings, input.providers, language),
     mcp,
     engines,
     capabilities: buildCapabilities({
@@ -215,12 +239,24 @@ export function buildControlCenterView(input: BuildControlCenterViewInput): Cont
       selectedProviderMissing,
       selectedProviderName: defaultProviderName,
       mcp,
-      engines
+      engines,
+      language,
+      policy
     })
   }
 }
 
-function customRulesLabel(rules: AppSettings['modelRoutingRules'] | undefined): string {
+function engineDisplayLabel(engine: EngineInfo, language: AppLanguage): string {
+  if (engine.kind === 'openai') {
+    return translateControlCenter(language, 'controlCenterOpenAiEngine')
+  }
+  return engine.label
+}
+
+function customRulesLabel(
+  rules: AppSettings['modelRoutingRules'] | undefined,
+  language: AppLanguage
+): string {
   const normalized = rules ?? []
   const total = normalized.length
   const enabled = normalized.filter((rule) =>
@@ -231,25 +267,30 @@ function customRulesLabel(rules: AppSettings['modelRoutingRules'] | undefined): 
       rule.whenStrategy
     )
   ).length
-  if (total === 0) return 'Custom rules disabled'
-  return `${enabled}/${total} custom rules enabled`
+  if (total === 0) return translateControlCenter(language, 'controlCenterCustomRulesDisabled')
+  return translateControlCenter(language, 'controlCenterCustomRulesEnabled', { enabled, total })
 }
 
-function buildModelRoles(settings: AppSettings, providers: ProviderView[]): ControlCenterModelRole[] {
+function buildModelRoles(
+  settings: AppSettings,
+  providers: ProviderView[],
+  language: AppLanguage
+): ControlCenterModelRole[] {
   return [
-    buildModelRole('lowCost', '低成本', settings.lowCostProviderId, settings.lowCostModel, providers),
-    buildModelRole('strongReasoning', '强推理', settings.strongReasoningProviderId, settings.strongReasoningModel, providers),
-    buildModelRole('review', '审查', settings.reviewProviderId, settings.reviewModel, providers),
-    buildModelRole('fallback', '备用', settings.fallbackProviderId, settings.fallbackModel, providers)
+    buildModelRole('lowCost', 'controlCenterRoleLowCost', settings.lowCostProviderId, settings.lowCostModel, providers, language),
+    buildModelRole('strongReasoning', 'controlCenterRoleStrongReasoning', settings.strongReasoningProviderId, settings.strongReasoningModel, providers, language),
+    buildModelRole('review', 'controlCenterRoleReview', settings.reviewProviderId, settings.reviewModel, providers, language),
+    buildModelRole('fallback', 'controlCenterRoleFallback', settings.fallbackProviderId, settings.fallbackModel, providers, language)
   ]
 }
 
 function buildModelRole(
   key: string,
-  label: string,
+  labelKey: ControlCenterTranslationKey,
   providerId: string,
   model: string,
-  providers: ProviderView[]
+  providers: ProviderView[],
+  language: AppLanguage
 ): ControlCenterModelRole {
   const provider = providerId ? providers.find((item) => item.id === providerId) : undefined
   const hasProvider = Boolean(providerId)
@@ -263,36 +304,38 @@ function buildModelRole(
         : provider && hasModel && provider.models.length > 0 && !provider.models.includes(model)
           ? 'needs-config'
           : 'available'
-  const providerLabel = hasProvider ? (provider?.name ?? `${providerId} (missing)`) : '不指定 Provider'
-  const modelLabel = hasModel ? model : '不指定模型'
+  const providerLabel = hasProvider
+    ? (provider?.name ?? `${providerId} ${translateControlCenter(language, 'controlCenterMissingSuffix')}`)
+    : translateControlCenter(language, 'controlCenterNoSpecificProvider')
+  const modelLabel = hasModel ? model : translateControlCenter(language, 'controlCenterNoSpecificModel')
   const detail = !hasProvider && !hasModel
-    ? '交给自动调度'
+    ? translateControlCenter(language, 'controlCenterRoleAutomatic')
     : status === 'needs-config'
-      ? '配置与 Provider/模型列表不匹配'
+      ? translateControlCenter(language, 'controlCenterRoleMismatch')
       : status === 'external-required'
-        ? 'Provider 需要 API Key'
-        : '将作为自动调度角色偏好'
-  return { key, label, providerLabel, modelLabel, status, detail }
+        ? translateControlCenter(language, 'controlCenterRoleKeyRequired')
+        : translateControlCenter(language, 'controlCenterRolePreference')
+  return {
+    key,
+    label: translateControlCenter(language, labelKey),
+    providerLabel,
+    modelLabel,
+    status,
+    detail
+  }
 }
 
 function buildProviderStatus(
   provider: ProviderView,
   health: ProviderHealthView | undefined,
-  selectedProviderId: string
+  selectedProviderId: string,
+  language: AppLanguage
 ): ControlCenterProviderStatus {
   const totalCalls = (health?.successes ?? 0) + (health?.failures ?? 0)
   const successRate = totalCalls > 0 ? Math.round(((health?.successes ?? 0) / totalCalls) * 100) : undefined
   const latency = health?.latencyEmaMs ?? health?.lastLatencyMs
   const latestFailure = health?.recentFailures?.[0]
-  const healthLabel = health
-    ? health.circuitState === 'open'
-      ? `circuit open${latestFailure ? ` · ${latestFailure.label}` : ''}`
-      : health.circuitState === 'half_open'
-        ? `half-open recovery · ${health.halfOpenSuccesses} probe successes`
-        : health.healthy
-          ? `healthy · ${successRate ?? '-'}%${latency ? ` · ${Math.round(latency)}ms EMA` : ''}`
-          : `failing · ${health.consecutiveFailures} consecutive${latestFailure ? ` · ${latestFailure.label}` : ''}`
-    : 'not probed'
+  const healthLabel = providerHealthLabel(health, successRate, latency, language)
   const missingModels = provider.models.length === 0
   const status: ControlCenterStatus = !provider.ready
     ? 'external-required'
@@ -302,40 +345,79 @@ function buildProviderStatus(
         ? 'needs-config'
         : 'available'
   const detail = !provider.ready
-    ? 'API key required outside this view'
+    ? translateControlCenter(language, 'controlCenterProviderKeyRequired')
     : health && !health.healthy
-      ? latestFailure?.message ?? health.lastError ?? 'provider health check is failing'
+      ? latestFailure?.message ?? health.lastError ?? translateControlCenter(language, 'controlCenterProviderHealthFailing')
       : missingModels
-        ? 'model list is empty'
+        ? translateControlCenter(language, 'controlCenterModelListEmpty')
         : provider.openaiProtocol === 'chat'
-          ? 'OpenAI chat protocol'
-          : 'ready for routing'
+          ? translateControlCenter(language, 'controlCenterOpenAiChatProtocol')
+          : translateControlCenter(language, 'controlCenterReadyForRouting')
 
   return {
     id: provider.id,
     name: provider.name,
-    endpoint: provider.baseUrl || 'local login endpoint',
+    endpoint: provider.baseUrl || translateControlCenter(language, 'controlCenterLocalLoginEndpoint'),
     modelCount: provider.models.length,
     keyCount: providerKeyCount(provider),
     activeKeyLabel: provider.activeKeyLabel,
-    budgetLabel: provider.budgetUsd > 0 ? moneyLabel(provider.budgetUsd) : 'inherits global budget',
+    budgetLabel: provider.budgetUsd > 0
+      ? moneyLabel(provider.budgetUsd)
+      : translateControlCenter(language, 'controlCenterInheritsGlobalBudget'),
     hasToken: provider.hasToken,
-    tokenLabel: providerTokenLabel(provider),
+    tokenLabel: providerTokenLabel(provider, language),
     healthLabel,
-    successRateLabel: successRate === undefined ? 'no samples' : `${successRate}% success`,
-    latencyLabel: latency ? `${Math.round(latency)}ms EMA` : 'no latency sample',
-    recentFailures: health?.recentFailures ?? [],
+    successRateLabel: successRate === undefined
+      ? translateControlCenter(language, 'controlCenterNoSamples')
+      : translateControlCenter(language, 'controlCenterSuccessRate', { rate: successRate }),
+    latencyLabel: latency
+      ? `${Math.round(latency)}ms EMA`
+      : translateControlCenter(language, 'controlCenterNoLatencySample'),
+    recentFailures: (health?.recentFailures ?? []).map((failure) => ({
+      ...failure,
+      label: translateControlCenterFailureLabel(language, failure.label)
+    })),
     status,
     detail,
     selected: provider.id === selectedProviderId
   }
 }
 
-function providerTokenLabel(provider: ProviderView): string {
-  if (provider.authMode === 'none') return 'local service · no key required'
-  if (!provider.hasToken) return 'missing'
+function providerHealthLabel(
+  health: ProviderHealthView | undefined,
+  successRate: number | undefined,
+  latency: number | undefined,
+  language: AppLanguage
+): string {
+  if (!health) return translateControlCenter(language, 'controlCenterNotProbed')
+  const failure = health.recentFailures?.[0]
+  const failureSuffix = failure
+    ? ` · ${translateControlCenterFailureLabel(language, failure.label)}`
+    : ''
+  if (health.circuitState === 'open') {
+    return `${translateControlCenter(language, 'controlCenterCircuitOpen')}${failureSuffix}`
+  }
+  if (health.circuitState === 'half_open') {
+    return `${translateControlCenter(language, 'controlCenterHalfOpenRecovery')} · ${translateControlCenter(language, 'controlCenterProbeSuccesses', { count: health.halfOpenSuccesses })}`
+  }
+  if (health.healthy) {
+    return `${translateControlCenter(language, 'controlCenterHealthy')} · ${successRate ?? '-'}%${latency ? ` · ${Math.round(latency)}ms EMA` : ''}`
+  }
+  return `${translateControlCenter(language, 'controlCenterFailing')} · ${translateControlCenter(language, 'controlCenterConsecutiveFailures', { count: health.consecutiveFailures })}${failureSuffix}`
+}
+
+function providerTokenLabel(provider: ProviderView, language: AppLanguage): string {
+  if (provider.authMode === 'none') {
+    return translateControlCenter(language, 'controlCenterLocalNoKeyRequired')
+  }
+  if (!provider.hasToken) return translateControlCenter(language, 'controlCenterKeyMissing')
   const count = providerKeyCount(provider)
-  return `${count} key${count === 1 ? '' : 's'}${provider.activeKeyLabel ? ` · ${provider.activeKeyLabel}` : ''}`
+  const countLabel = translateControlCenter(
+    language,
+    count === 1 ? 'controlCenterOneKey' : 'controlCenterManyKeys',
+    { count }
+  )
+  return `${countLabel}${provider.activeKeyLabel ? ` · ${provider.activeKeyLabel}` : ''}`
 }
 
 function providerKeyCount(provider: ProviderView): number {
@@ -344,7 +426,8 @@ function providerKeyCount(provider: ProviderView): number {
 
 function buildMcpStatus(
   pluginRegistry: PluginRegistryView | undefined,
-  mcpProbeResults: Record<string, McpProbeResult>
+  mcpProbeResults: Record<string, McpProbeResult>,
+  language: AppLanguage
 ): ControlCenterMcpStatus {
   if (!pluginRegistry) {
     return {
@@ -354,7 +437,7 @@ function buildMcpStatus(
       ok: 0,
       failed: 0,
       status: 'unknown',
-      label: 'not scanned',
+      label: translateControlCenter(language, 'controlCenterMcpNotScanned'),
       items: []
     }
   }
@@ -383,27 +466,53 @@ function buildMcpStatus(
     status,
     label:
       mcpItems.length === 0
-        ? 'no MCP declarations'
+        ? translateControlCenter(language, 'controlCenterNoMcp')
         : probed.length === 0
-          ? `${enabledItems.length}/${mcpItems.length} enabled · not probed`
-          : `${ok.length}/${probed.length} reachable`,
-    items: mcpItems.slice(0, 8).map((item) => buildMcpItemStatus(item, mcpProbeResults[item.id]))
+          ? translateControlCenter(language, 'controlCenterMcpEnabledNotProbed', {
+              enabled: enabledItems.length,
+              total: mcpItems.length
+            })
+          : translateControlCenter(language, 'controlCenterMcpReachable', {
+              ok: ok.length,
+              probed: probed.length
+            }),
+    items: mcpItems
+      .slice(0, 8)
+      .map((item) => buildMcpItemStatus(item, mcpProbeResults[item.id], language))
   }
 }
 
-function buildMcpItemStatus(item: PluginRegistryItem, probe: McpProbeResult | undefined): ControlCenterMcpStatus['items'][number] {
+function buildMcpItemStatus(
+  item: PluginRegistryItem,
+  probe: McpProbeResult | undefined,
+  language: AppLanguage
+): ControlCenterMcpStatus['items'][number] {
   if (!item.enabled) {
-    return { id: item.id, name: item.name, enabled: false, status: 'disabled', label: 'disabled' }
+    return {
+      id: item.id,
+      name: item.name,
+      enabled: false,
+      status: 'disabled',
+      label: translateControlCenter(language, 'controlCenterMcpDisabled')
+    }
   }
   if (!probe) {
-    return { id: item.id, name: item.name, enabled: true, status: 'unknown', label: 'not probed' }
+    return {
+      id: item.id,
+      name: item.name,
+      enabled: true,
+      status: 'unknown',
+      label: translateControlCenter(language, 'controlCenterNotProbed')
+    }
   }
   return {
     id: item.id,
     name: item.name,
     enabled: true,
     status: probe.ok ? 'available' : 'needs-config',
-    label: probe.ok ? `${probe.transport} · ${probe.latencyMs ?? '?'}ms` : probe.error ?? 'probe failed'
+    label: probe.ok
+      ? `${probe.transport} · ${probe.latencyMs ?? '?'}ms`
+      : probe.error ?? translateControlCenter(language, 'controlCenterMcpProbeFailed')
   }
 }
 
@@ -414,50 +523,128 @@ function buildCapabilities(input: {
   selectedProviderName: string
   mcp: ControlCenterMcpStatus
   engines: ControlCenterEngineStatus[]
+  language: AppLanguage
+  policy: ControlCenterDrivePolicyView
 }): ControlCenterCapability[] {
   const availableEngines = input.engines.filter((engine) => engine.status === 'available')
   return [
     {
-      title: 'Drive policy',
+      title: translateControlCenter(input.language, 'controlCenterCapabilityDrivePolicy'),
       status: 'available',
-      detail: `${caogenDrivePolicyView(input.settings.driveMode).summary} · validation=${caogenDrivePolicyView(input.settings.driveMode).validationDepth}`
+      detail: `${input.policy.summary} · ${translateControlCenter(input.language, 'controlCenterValidation')}=${input.policy.validationDepthLabel}`
     },
     {
-      title: 'Model routing',
+      title: translateControlCenter(input.language, 'controlCenterCapabilityModelRouting'),
       status: input.settings.smartModelRoutingEnabled ? input.providerStatus : 'disabled',
       detail: input.settings.smartModelRoutingEnabled
-        ? `${input.selectedProviderName} · ${strategyLabel(input.settings.schedulerStrategy)}`
-        : 'auto routing is off; fixed/default model path is active'
+        ? `${input.selectedProviderName} · ${strategyLabel(input.settings.schedulerStrategy, input.language)}`
+        : translateControlCenter(input.language, 'controlCenterRoutingOffDetail')
     },
     {
-      title: 'Provider credential',
+      title: translateControlCenter(input.language, 'controlCenterCapabilityProviderCredential'),
       status: input.selectedProviderMissing ? 'needs-config' : input.providerStatus,
-      detail: input.selectedProviderMissing ? 'default provider id is not in the provider list' : `${input.selectedProviderName} credential state`
+      detail: input.selectedProviderMissing
+        ? translateControlCenter(input.language, 'controlCenterProviderIdMissing')
+        : translateControlCenter(input.language, 'controlCenterCredentialState', {
+            provider: input.selectedProviderName
+          })
     },
     {
-      title: 'MCP tools',
+      title: translateControlCenter(input.language, 'controlCenterCapabilityMcpTools'),
       status: input.mcp.status,
       detail: input.mcp.label
     },
     {
-      title: 'Agent engines',
+      title: translateControlCenter(input.language, 'controlCenterCapabilityAgentEngines'),
       status: availableEngines.length > 0 ? 'available' : 'external-required',
-      detail: availableEngines.length > 0 ? availableEngines.map((engine) => engine.label).join(', ') : 'no configured Agent engine is currently available'
+      detail: availableEngines.length > 0
+        ? availableEngines.map((engine) => engine.label).join(', ')
+        : translateControlCenter(input.language, 'controlCenterNoAgentEngineAvailable')
     }
   ]
 }
 
-function modelLabel(model: string): string {
-  if (model === AUTO_MODEL) return 'auto route'
-  if (!model) return 'no model preference'
+function modelLabel(model: string, language: AppLanguage): string {
+  if (model === AUTO_MODEL) return translateControlCenter(language, 'controlCenterAutoRoute')
+  if (!model) return translateControlCenter(language, 'controlCenterNoModelPreferenceValue')
   return model
 }
 
-function strategyLabel(strategy: AppSettings['schedulerStrategy']): string {
-  if (strategy === 'quality') return 'quality'
-  if (strategy === 'cost') return 'cost'
-  if (strategy === 'speed') return 'speed'
-  return 'balanced'
+function strategyLabel(
+  strategy: AppSettings['schedulerStrategy'],
+  language: AppLanguage
+): string {
+  if (strategy === 'quality') {
+    return translateControlCenter(language, 'controlCenterStrategyQuality')
+  }
+  if (strategy === 'cost') return translateControlCenter(language, 'controlCenterStrategyCost')
+  if (strategy === 'speed') return translateControlCenter(language, 'controlCenterStrategySpeed')
+  return translateControlCenter(language, 'controlCenterStrategyBalanced')
+}
+
+const DRIVE_COPY_KEYS: Record<
+  CaoGenDrivePolicyView['mode'],
+  {
+    display: ControlCenterTranslationKey
+    summary: ControlCenterTranslationKey
+    tools: ControlCenterTranslationKey
+  }
+> = {
+  spark: {
+    display: 'controlCenterDriveSpark',
+    summary: 'controlCenterDriveSummarySpark',
+    tools: 'controlCenterDriveToolsSpark'
+  },
+  core: {
+    display: 'controlCenterDriveCore',
+    summary: 'controlCenterDriveSummaryCore',
+    tools: 'controlCenterDriveToolsCore'
+  },
+  forge: {
+    display: 'controlCenterDriveForge',
+    summary: 'controlCenterDriveSummaryForge',
+    tools: 'controlCenterDriveToolsForge'
+  },
+  command: {
+    display: 'controlCenterDriveCommand',
+    summary: 'controlCenterDriveSummaryCommand',
+    tools: 'controlCenterDriveToolsCommand'
+  },
+  genesis: {
+    display: 'controlCenterDriveGenesis',
+    summary: 'controlCenterDriveSummaryGenesis',
+    tools: 'controlCenterDriveToolsGenesis'
+  }
+}
+
+const VALIDATION_COPY_KEYS: Record<CaoGenDriveValidationDepth, ControlCenterTranslationKey> = {
+  light: 'controlCenterValidationLight',
+  basic: 'controlCenterValidationBasic',
+  local: 'controlCenterValidationLocal',
+  guarded: 'controlCenterValidationGuarded',
+  closedLoop: 'controlCenterValidationClosedLoop'
+}
+
+function localizeDrivePolicy(
+  policy: CaoGenDrivePolicyView,
+  language: AppLanguage
+): ControlCenterDrivePolicyView {
+  const copyKeys = DRIVE_COPY_KEYS[policy.mode]
+  return {
+    mode: policy.mode,
+    label: policy.label,
+    displayLabel: translateControlCenter(language, copyKeys.display),
+    summary: translateControlCenter(language, copyKeys.summary),
+    schedulerStrategy: policy.schedulerStrategy,
+    defaultModel: policy.defaultModel,
+    defaultPermissionMode: policy.defaultPermissionMode,
+    sessionBudgetUsd: policy.sessionBudgetUsd,
+    validationDepth: policy.validationDepth,
+    validationDepthLabel: translateControlCenter(language, VALIDATION_COPY_KEYS[policy.validationDepth]),
+    smartModelRoutingEnabled: policy.smartModelRoutingEnabled,
+    modelCrossValidationAutoRunEnabled: policy.modelCrossValidationAutoRunEnabled,
+    toolPolicySummary: translateControlCenter(language, copyKeys.tools)
+  }
 }
 
 function moneyLabel(value: number): string {

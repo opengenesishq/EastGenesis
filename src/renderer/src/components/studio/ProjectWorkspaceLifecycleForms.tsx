@@ -14,6 +14,7 @@ import type {
   ProjectWorkspacePatch
 } from '../../../../shared/types'
 import { PROJECT_CONNECTOR_CATALOG } from '../../../../shared/types'
+import { useStore } from '../../store'
 import {
   PROJECT_KIND_OPTIONS,
   PROJECT_RESOURCE_OPTIONS,
@@ -213,7 +214,7 @@ function ProjectConnectorFields({
     draft.connectorCredentialRef === `oauth:${providerId}/${account.id}`)
   return (
     <>
-      <LifecycleField id={`${baseId}-connector-catalog`} label="连接器目录">
+      <LifecycleField id={`${baseId}-connector-catalog`} label={localized('连接器目录', 'Connector catalog')}>
         <select
           id={`${baseId}-connector-catalog`}
           name="connectorCatalog"
@@ -227,7 +228,7 @@ function ProjectConnectorFields({
           {PROJECT_CONNECTOR_CATALOG.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
         </select>
       </LifecycleField>
-      <LifecycleField id={`${baseId}-connector-usage`} label="用途">
+      <LifecycleField id={`${baseId}-connector-usage`} label={localized('用途', 'Usage')}>
         <select
           id={`${baseId}-connector-usage`}
           className="select select-block"
@@ -235,27 +236,27 @@ function ProjectConnectorFields({
           onChange={(event) => update('connectorUsage', [event.target.value as ProjectResourceDraft['connectorUsage'][number]])}
         >
           <option value="resource">Project Resource</option>
-          <option value="knowledge_source">知识源</option>
+          <option value="knowledge_source">{localized('知识源', 'Knowledge source')}</option>
           <option value="tool">Tool</option>
         </select>
       </LifecycleField>
-      <LifecycleField id={`${baseId}-connector-direction`} label="数据方向">
+      <LifecycleField id={`${baseId}-connector-direction`} label={localized('数据方向', 'Data direction')}>
         <select id={`${baseId}-connector-direction`} className="select select-block" value={draft.connectorDataDirection} onChange={(event) => update('connectorDataDirection', event.target.value as ProjectResourceDraft['connectorDataDirection'])}>
-          <option value="read">只读</option>
-          <option value="write">只写</option>
-          <option value="bidirectional">双向</option>
+          <option value="read">{localized('只读', 'Read only')}</option>
+          <option value="write">{localized('只写', 'Write only')}</option>
+          <option value="bidirectional">{localized('双向', 'Bidirectional')}</option>
         </select>
       </LifecycleField>
-      <LifecycleField id={`${baseId}-connector-capabilities`} label="能力清单（逗号分隔）">
+      <LifecycleField id={`${baseId}-connector-capabilities`} label={localized('能力清单（逗号分隔）', 'Capabilities (comma-separated)')}>
         <input id={`${baseId}-connector-capabilities`} className="input" value={draft.connectorCapabilities} onChange={(event) => update('connectorCapabilities', event.target.value)} required />
       </LifecycleField>
-      <LifecycleField id={`${baseId}-connector-subject`} label="授权主体">
+      <LifecycleField id={`${baseId}-connector-subject`} label={localized('授权主体', 'Authorization subject')}>
         <select id={`${baseId}-connector-subject`} className="select select-block" value={draft.connectorAuthorizationSubject} onChange={(event) => update('connectorAuthorizationSubject', event.target.value as ProjectResourceDraft['connectorAuthorizationSubject'])}>
-          <option value="personal">个人授权</option>
-          <option value="shared">共享授权</option>
+          <option value="personal">{localized('个人授权', 'Personal authorization')}</option>
+          <option value="shared">{localized('共享授权', 'Shared authorization')}</option>
         </select>
       </LifecycleField>
-      <LifecycleField id={`${baseId}-connector-account`} label="已授权账户">
+      <LifecycleField id={`${baseId}-connector-account`} label={localized('已授权账户', 'Authorized account')}>
         <select
           id={`${baseId}-connector-account`}
           className="select select-block"
@@ -268,30 +269,30 @@ function ProjectConnectorFields({
             update('connectorCredentialRef', `oauth:${selected.providerId}/${selected.account.id}`)
           }}
         >
-          <option value="">手动填写账户或普通 Provider 凭据</option>
+          <option value="">{localized('手动填写账户或普通 Provider 凭据', 'Enter an account or standard Provider credential manually')}</option>
           {authorizationAccounts.map(({ providerId, account }) => (
             <option key={`${providerId}/${account.id}`} value={`${providerId}/${account.id}`} disabled={account.requiresReauth}>
-              {account.label} · {providerId}{account.requiresReauth ? ' · 需要重新授权' : ''}
+              {account.label} · {providerId}{account.requiresReauth ? localized(' · 需要重新授权', ' · Reauthorization required') : ''}
             </option>
           ))}
         </select>
       </LifecycleField>
-      <LifecycleField id={`${baseId}-connector-principal`} label="授权账户/组织 ID">
+      <LifecycleField id={`${baseId}-connector-principal`} label={localized('授权账户/组织 ID', 'Authorized account or organization ID')}>
         <input id={`${baseId}-connector-principal`} className="input" value={draft.connectorPrincipalId} onChange={(event) => update('connectorPrincipalId', event.target.value)} required />
       </LifecycleField>
-      <LifecycleField id={`${baseId}-connector-credential`} label="凭据引用（不填入令牌）">
+      <LifecycleField id={`${baseId}-connector-credential`} label={localized('凭据引用（不填入令牌）', 'Credential reference (do not enter tokens)')}>
         <input id={`${baseId}-connector-credential`} className="input" value={draft.connectorCredentialRef} onChange={(event) => update('connectorCredentialRef', event.target.value)} placeholder="credential://..." />
       </LifecycleField>
-      <LifecycleField id={`${baseId}-connector-scopes`} label="授权作用域（逗号分隔）">
+      <LifecycleField id={`${baseId}-connector-scopes`} label={localized('授权作用域（逗号分隔）', 'Authorization scopes (comma-separated)')}>
         <input id={`${baseId}-connector-scopes`} className="input" value={draft.connectorScopes} onChange={(event) => update('connectorScopes', event.target.value)} required />
       </LifecycleField>
-      <LifecycleField id={`${baseId}-connector-version`} label="连接器版本">
+      <LifecycleField id={`${baseId}-connector-version`} label={localized('连接器版本', 'Connector version')}>
         <input id={`${baseId}-connector-version`} className="input" value={draft.connectorVersion} onChange={(event) => update('connectorVersion', event.target.value)} required />
       </LifecycleField>
-      <LifecycleField id={`${baseId}-connector-reconciliation`} label="写操作对账">
+      <LifecycleField id={`${baseId}-connector-reconciliation`} label={localized('写操作对账', 'Write reconciliation')}>
         <select id={`${baseId}-connector-reconciliation`} className="select select-block" value={draft.connectorReconciliation} onChange={(event) => update('connectorReconciliation', event.target.value as ProjectResourceDraft['connectorReconciliation'])}>
-          <option value="queryable">可查询对账</option>
-          <option value="manual_only">不透明/仅手动确认</option>
+          <option value="queryable">{localized('可查询对账', 'Queryable reconciliation')}</option>
+          <option value="manual_only">{localized('不透明/仅手动确认', 'Opaque / manual confirmation only')}</option>
         </select>
       </LifecycleField>
     </>
@@ -432,6 +433,10 @@ function closeOnEscape(event: KeyboardEvent<HTMLFormElement>, onCancel: () => vo
   if (event.key !== 'Escape') return
   event.preventDefault()
   onCancel()
+}
+
+function localized(chinese: string, english: string): string {
+  return useStore.getState().settings.language === 'en' ? english : chinese
 }
 
 function downloadManifest(projectName: string, json: string): void {

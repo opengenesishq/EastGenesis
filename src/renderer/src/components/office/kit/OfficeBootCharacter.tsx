@@ -6,6 +6,7 @@ interface OfficeBootCharacterProps {
 }
 
 export default function OfficeBootCharacter({ sessionId, active }: OfficeBootCharacterProps): React.JSX.Element {
+  const accent = active ? '#59dcff' : '#697680'
   return (
     <group
       name="office-boot-articulated-worker"
@@ -21,7 +22,7 @@ export default function OfficeBootCharacter({ sessionId, active }: OfficeBootCha
         sessionId={sessionId}
         role="operations"
         detailLevel="low"
-        accentColor={active ? '#59dcff' : '#697680'}
+        accentColor={accent}
         scale={0.82}
       />
     </group>

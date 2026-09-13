@@ -46,7 +46,8 @@ export default function MigrationManager({ defaultDirectory }: { defaultDirector
       })
       setMessage(result.message)
       setBackupId(result.backupId ?? '')
-      if (result.ok && result.status === 'applied') refreshAfterMutation(scan.cwd)
+      // Keep the scan snapshot stable while the rollback affordance is visible;
+      // a concurrent rescan can race the operation's durable backup state.
     } catch (error) {
       setMessage(errorText(error))
     } finally {
@@ -62,7 +63,7 @@ export default function MigrationManager({ defaultDirectory }: { defaultDirector
       setMessage(result.message)
       if (result.ok) {
         setBackupId('')
-        refreshAfterMutation(scan?.cwd)
+        void refreshAfterMutation(scan?.cwd)
       }
     } catch (error) {
       setMessage(errorText(error))
@@ -77,8 +78,12 @@ export default function MigrationManager({ defaultDirectory }: { defaultDirector
     setPicked(recommendedIds(refreshed))
   }
 
-  const refreshAfterMutation = (cwd?: string): void => {
-    void refreshScan(cwd).catch((error) => setMessage(errorText(error)))
+  const refreshAfterMutation = async (cwd?: string): Promise<void> => {
+    try {
+      await refreshScan(cwd)
+    } catch (error) {
+      setMessage(errorText(error))
+    }
   }
 
   const toggle = (assetId: string): void => {
@@ -138,9 +143,6 @@ function MigrationScanResults({
   const t = useT()
   return (
     <>
-      {scan.claudeNative && (
-        <p className="settings-hint">{t('migrateClaudeNative')} ({scan.nativeAssetCount})</p>
-      )}
       <div className="migrate-scan-meta" data-migration-mode={scan.mode}>
         <span>{scan.mode === 'project' ? t('migrateScopeProject') : t('migrateScopeConversation')}</span>
         <span>{t('migrateFound', { n: scan.assets.length })}</span>

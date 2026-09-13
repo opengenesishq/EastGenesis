@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { useT } from '../../i18n'
 
 export type PluginRegistryKind = 'plugin' | 'skill' | 'agent' | 'mcp'
-export type PluginRegistrySourceKind = 'project' | 'user' | 'codex' | 'other'
+export type PluginRegistrySourceKind = 'project' | 'user' | 'other'
 export type PluginRegistryEnabledSource = 'manifest' | 'user'
 export type PluginRegistryTrustStatus = 'approved' | 'approval_required' | 'changed' | 'invalid'
 
@@ -23,7 +23,7 @@ export interface PluginRegistryPanelItem {
   managed?: boolean
   contentDigest?: string
   provenance: {
-    origin: 'project_local' | 'user_local' | 'codex_local' | 'managed_local' | 'other_local'
+    origin: 'project_local' | 'user_local' | 'managed_local' | 'other_local'
     sourceKind: PluginRegistrySourceKind
     managed: boolean
   }
@@ -64,7 +64,6 @@ export interface PluginRegistryPanelLabels {
   allSources?: string
   projectSource?: string
   userSource?: string
-  codexSource?: string
   otherSource?: string
   enabled?: string
   disabled?: string
@@ -141,7 +140,7 @@ type StatusFilter = 'all' | 'enabled' | 'disabled'
 type SourceFilter = PluginRegistrySourceKind | 'all'
 
 const KIND_ORDER: PluginRegistryKind[] = ['plugin', 'skill', 'agent', 'mcp']
-const SOURCE_ORDER: PluginRegistrySourceKind[] = ['codex', 'project', 'user', 'other']
+const SOURCE_ORDER: PluginRegistrySourceKind[] = ['project', 'user', 'other']
 
 function translatedLabels(t: ReturnType<typeof useT>): Required<PluginRegistryPanelLabels> {
   return {
@@ -160,7 +159,6 @@ function translatedLabels(t: ReturnType<typeof useT>): Required<PluginRegistryPa
   allSources: t('pluginRegistryAllSources'),
   projectSource: t('pluginRegistryProjectSource'),
   userSource: t('pluginRegistryUserSource'),
-  codexSource: t('pluginRegistryCodexSource'),
   otherSource: t('pluginRegistryOtherSource'),
   enabled: t('pluginRegistryEnabled'),
   disabled: t('pluginRegistryDisabled'),
@@ -216,7 +214,6 @@ function itemKindLabel(kind: PluginRegistryKind, labels: Required<PluginRegistry
 }
 
 function sourceLabel(source: SourceFilter | undefined, labels: Required<PluginRegistryPanelLabels>): string {
-  if (source === 'codex') return labels.codexSource
   if (source === 'project') return labels.projectSource
   if (source === 'user') return labels.userSource
   if (source === 'other') return labels.otherSource
@@ -332,7 +329,7 @@ export default function PluginRegistryPanel({
 
   const stats = useMemo(() => {
     const byKind: Record<PluginRegistryKind, number> = { plugin: 0, skill: 0, agent: 0, mcp: 0 }
-    const bySource: Record<PluginRegistrySourceKind, number> = { codex: 0, project: 0, user: 0, other: 0 }
+    const bySource: Record<PluginRegistrySourceKind, number> = { project: 0, user: 0, other: 0 }
     let enabled = 0
 
     for (const item of items) {

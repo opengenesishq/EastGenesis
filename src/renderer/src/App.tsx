@@ -2,15 +2,15 @@ import * as React from 'react'
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
 import { useStore } from './store'
 import { useThemeEffect } from './theme'
-import type { AppSettings, MenuCommand } from '../../shared/types'
+import type { MenuCommand } from '../../shared/types'
 import CommandPalette from './components/CommandPalette'
 import TaskRecoveryModal from './components/TaskRecoveryModal'
 import Quickbar from './components/Quickbar'
 import AppListView from './components/AppListView'
 import { APP_ICON_URL, APP_NAME } from './brand'
-import { loadOfficeView } from './components/office/loadOffice'
+import { loadOfficeView, scheduleOfficeIdlePrewarm } from './components/office/loadOffice'
 import type { ExperienceMode } from './store/experience-mode'
-import { sessionExperienceMode } from './store/session-experience'
+import { resolveBusinessLineId, resolveSelectedBusinessLine } from '../../shared/business-line-types'
 
 const OfficeView = lazy(loadOfficeView)
 const SettingsPage = lazy(() => import('./components/SettingsModal'))
@@ -46,45 +46,29 @@ function startPrimaryCreation(
 }
 
 function sessionOrderForMode(
-  mode: ExperienceMode,
+  businessLineId: string,
   order: string[],
   sessions: ReturnType<typeof useStore.getState>['sessions']
 ): string[] {
-  if (mode === 'video') return []
+  if (businessLineId === 'video') return []
   return order.filter((id) => {
     const meta = sessions[id]?.meta
     if (!meta) return false
-    return mode === sessionExperienceMode(meta)
+    return resolveBusinessLineId(meta) === businessLineId
   })
-}
-
-function officeBootProps(
-  order: string[],
-  sessions: ReturnType<typeof useStore.getState>['sessions'],
-  activeId: string | null,
-  settings: AppSettings,
-  selectSession: ReturnType<typeof useStore.getState>['selectSession']
-): React.ComponentProps<typeof OfficeView>['boot'] {
-  const systemLight = settings.theme === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches
-  return {
-    sessionIds: order.filter((id) => Boolean(sessions[id])),
-    activeId,
-    quality: settings.office?.qualityMode ?? 'auto',
-    lightMode: settings.theme === 'light' || systemLight,
-    language: settings.language,
-    selectSession
-  }
 }
 
 export default function App(): React.JSX.Element {
   const init = useStore((s) => s.init)
   const activeId = useStore((s) => s.activeId)
+  const hydrated = useStore((s) => s.hydrated)
   const hasActive = useStore((s) => (activeId ? Boolean(s.sessions[activeId]) : false))
   const order = useStore((s) => s.order)
   const sessions = useStore((s) => s.sessions)
   const view = useStore((s) => s.view)
   const experienceMode = useStore((s) => s.experienceMode)
-  const settings = useStore((s) => s.settings)
+  const selectedBusinessLineId = useStore((s) => resolveSelectedBusinessLine(s.settings).id)
+  const language = useStore((s) => s.settings.language)
   const showNewSession = useStore((s) => s.showNewSession)
   const showSettings = useStore((s) => s.showSettings)
   const showCommandPalette = useStore((s) => s.showCommandPalette)
@@ -106,16 +90,11 @@ export default function App(): React.JSX.Element {
       input.select()
     })
   }, [setView])
-
   const handleMenuCommand = useCallback(
     (command: MenuCommand): void => {
       if (command.type === 'new-session') {
         setShowSettings(false)
-        startPrimaryCreation(experienceMode, {
-          newProject: openNewProjectWorkspace,
-          newSession: () => setShowNewSession(true),
-          selectMode: setExperienceMode
-        })
+        startPrimaryCreation(experienceMode, { newProject: openNewProjectWorkspace, newSession: () => setShowNewSession(true), selectMode: setExperienceMode })
         return
       }
       if (command.type === 'settings') {
@@ -133,19 +112,22 @@ export default function App(): React.JSX.Element {
         focusSidebarSearch()
         return
       }
-      const id = sessionOrderForMode(experienceMode, order, sessions)[command.index]
+      const id = sessionOrderForMode(selectedBusinessLineId, order, sessions)[command.index]
       if (id) {
         setShowSettings(false)
         selectSession(id)
       }
     },
-    [experienceMode, focusSidebarSearch, openNewProjectWorkspace, order, selectSession, sessions, setExperienceMode, setShowCommandPalette, setShowNewSession, setShowSettings]
+    [experienceMode, selectedBusinessLineId, focusSidebarSearch, openNewProjectWorkspace, order, selectSession, sessions, setExperienceMode, setShowCommandPalette, setShowNewSession, setShowSettings]
   )
-
   useEffect(() => {
     if (typeof window.agentDesk === 'undefined') return
     void init()
   }, [init])
+  useEffect(() => {
+    if (!hydrated || view === 'office' || showSettings) return
+    return scheduleOfficeIdlePrewarm()
+  }, [hydrated, order.length, showSettings, view])
 
   useEffect(() => {
     if (typeof window.agentDesk === 'undefined') return
@@ -204,14 +186,12 @@ export default function App(): React.JSX.Element {
         </Suspense>
       ) : view === 'office' ? (
         <Suspense fallback={<div className="office-loading">加载办公区…</div>}>
-          <OfficeView boot={officeBootProps(order, sessions, activeId, settings, selectSession)} />
+          <HydratedOfficeEntry />
         </Suspense>
       ) : (
         <AppListView
-          activeId={activeId}
-          experienceMode={experienceMode}
-          hasActive={hasActive}
-          language={settings.language}
+          activeId={activeId} experienceMode={experienceMode}
+          hasActive={hasActive} language={language}
           showNewSession={showNewSession}
           studioVisited={studioVisited}
           videoVisited={videoVisited}
@@ -223,4 +203,10 @@ export default function App(): React.JSX.Element {
       {!showSettings && <Quickbar />}
     </div>
   )
+}
+
+/** Navigation must validate saved custom business lines against loaded settings. */
+function HydratedOfficeEntry(): React.JSX.Element {
+  const hydrated = useStore((state) => state.hydrated)
+  return hydrated ? <OfficeView /> : <div className="office-loading">加载办公区…</div>
 }

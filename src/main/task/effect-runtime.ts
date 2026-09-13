@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { EffectRecord, TaskRunRecord, TaskSnapshotRecord } from '../../shared/types'
 import { projectConfirmedManagedWorktreeTarget } from '../managed-worktree-lifecycle'
+import { isObservedMediaCancellationNotApplied } from '../media/media-cancel-reconciliation'
 import {
   abandonPreparedEffect,
   applyEffectReconciliation,
@@ -14,6 +15,10 @@ import {
 } from './effect-ledger'
 import { effectRecordIntegrityMatches } from './effect-record-integrity'
 import { buildEffectDescriptor, reconcileEffect } from './effect-reconciler'
+import {
+  effectEntryReplayPolicyForTool,
+  type EffectEntryReplayPolicy
+} from './effect-entry-inventory'
 import {
   officeArtifactEffectHasOutputBinding,
   registerConfirmedRunArtifactLifecycles
@@ -39,6 +44,12 @@ export interface PrepareEffectExecutionInput {
 export interface CompleteEffectExecutionInput {
   ok: boolean
   output: string
+  /**
+   * Some application-owned operations have an atomic local failure boundary.
+   * They may explicitly classify a callback failure as terminal; all other
+   * queryable effects remain waiting_reconciliation by default.
+   */
+  failureDisposition?: 'failed' | 'waiting_reconciliation'
 }
 
 export class ConfirmedEffectArtifactProjectionError extends Error {
@@ -69,12 +80,22 @@ export async function prepareEffectExecution(
       toolInput: input.toolInput,
       cwd: input.cwd
     })
+    // The inventory is the policy authority for native tool entrypoints. An
+    // opaque/delegated/direct-user entry must stay opaque even when its target
+    // happens to have a generic reconciler; otherwise a restart could turn a
+    // static manual barrier into an automatic retry.
+    const replayPolicy = effectEntryReplayPolicyForTool(input.toolName)
+    // Keep a dedicated read-only reconciler (for example an MCP state query)
+    // available even when the entry's replay policy is manual. The gate below
+    // removes only automatic retry authorization from a `not_applied` probe;
+    // an observed confirmed state remains safe to accept.
+    const gatedDescriptor = descriptor
     const prepared = prepareEffect(run, {
       sessionId: input.sessionId,
       cwd: input.cwd,
       toolUseId: input.toolUseId,
       toolName: input.toolName,
-      descriptor,
+      descriptor: gatedDescriptor,
       ownerId: PROCESS_OWNER_ID
     })
     if (!prepared.created) return { ...prepared.handle, rootDir: input.rootDir }
@@ -128,8 +149,53 @@ export async function completeEffectExecution(
   if (!handle) return null
   return withSessionQueueByHandle(handle, async (run) => {
     const effect = requireEffect(run, handle.effectId)
+    const replayPolicy = effectEntryReplayPolicyForTool(effect.toolName)
     let next: TaskRunRecord
-    if (effect.reconcilability === 'queryable') {
+    if (requiresManualReplay(replayPolicy) && effect.reconcilability === 'queryable') {
+      const observed = completeEffect(
+        run,
+        handle,
+        'waiting_reconciliation',
+        stableValueDigest({ ok: result.ok, output: result.output }),
+        result.ok
+          ? '入口策略禁止自动重试，正在执行只读目标对账'
+          : '入口策略禁止自动重试，正在执行只读目标对账'
+      )
+      const probed = await reconcileEffect(requireEffect(observed, effect.id), {}, handle.rootDir)
+      next = applyEffectReconciliation(
+        observed,
+        effect.id,
+        gateReplayResult(effect, replayPolicy, probed)
+      )
+    } else if (requiresManualReplay(replayPolicy)) {
+      if (result.ok) {
+        next = completeEffect(
+          run,
+          handle,
+          'confirmed',
+          stableValueDigest({ ok: true, output: result.output }),
+          '工具返回成功；入口策略要求重启后人工对账，已跳过自动查询'
+        )
+      } else {
+        const waiting = completeEffect(
+          run,
+          handle,
+          'waiting_reconciliation',
+          stableValueDigest({ ok: false, output: result.output }),
+          '入口策略要求人工对账，已跳过自动查询'
+        )
+        next = applyEffectReconciliation(waiting, effect.id, manualReplayBarrier(effect, replayPolicy))
+      }
+    } else if (effect.reconcilability === 'queryable' &&
+        !result.ok && result.failureDisposition === 'failed') {
+      next = completeEffect(
+        run,
+        handle,
+        'failed',
+        stableValueDigest({ ok: false, output: result.output }),
+        '应用操作报告了可确定的失败，未进入外部副作用对账'
+      )
+    } else if (effect.reconcilability === 'queryable') {
       const observed = completeEffect(
         run,
         handle,
@@ -213,8 +279,18 @@ async function reconcileStoppedTaskRunEffects(
       )
       continue
     }
+    const replayPolicy = effectEntryReplayPolicyForTool(current.toolName)
+    if (requiresManualReplay(replayPolicy)) {
+      if (current.reconcilability === 'queryable') {
+        const probed = await reconcileEffect(current, {}, rootDir)
+        next = applyEffectReconciliation(next, current.id, gateReplayResult(current, replayPolicy, probed))
+      } else {
+        next = applyEffectReconciliation(next, current.id, manualReplayBarrier(current, replayPolicy))
+      }
+      continue
+    }
     const probed = await reconcileEffect(current, {}, rootDir)
-    const result = probed.kind === 'not_applied' && current.lease?.ownerId === PROCESS_OWNER_ID
+    const result = probed.kind === 'not_applied' && current.lease?.ownerId === PROCESS_OWNER_ID && !isObservedMediaCancellationNotApplied(probed, current.target)
       ? {
           kind: 'unresolved' as const,
           evidenceDigest: stableValueDigest({
@@ -230,6 +306,51 @@ async function reconcileStoppedTaskRunEffects(
     next = applyEffectReconciliation(next, current.id, result)
   }
   return next
+}
+
+function requiresManualReplay(policy: EffectEntryReplayPolicy | undefined): boolean {
+  return policy === 'manual_reconciliation' || policy === 'never' || policy === 'downstream_barrier'
+}
+
+function manualReplayBarrier(
+  effect: EffectRecord,
+  policy: EffectEntryReplayPolicy | undefined
+): {
+  kind: 'unresolved'
+  evidenceDigest: string
+  verifier: string
+  reason: string
+} {
+  const label = policy ?? 'unclassified'
+  return {
+    kind: 'unresolved',
+    evidenceDigest: stableValueDigest({
+      effectId: effect.id,
+      effectKey: effect.effectKey,
+      generation: effect.generation,
+      replayPolicy: label
+    }),
+    verifier: 'effect-entry-replay-gate-v1',
+    reason: `入口策略 ${label} 禁止自动重放；需要人工对账或下游屏障`
+  }
+}
+
+function gateReplayResult(
+  effect: EffectRecord,
+  policy: EffectEntryReplayPolicy | undefined,
+  result: Awaited<ReturnType<typeof reconcileEffect>>
+): Awaited<ReturnType<typeof reconcileEffect>> {
+  if (result.kind !== 'not_applied') return result
+  const barrier = manualReplayBarrier(effect, policy)
+  return {
+    ...barrier,
+    evidenceDigest: stableValueDigest({
+      effectId: effect.id,
+      replayPolicy: policy ?? 'unclassified',
+      probeEvidenceDigest: result.evidenceDigest
+    }),
+    reason: `${barrier.reason}；只读对账结果为 not_applied，未授予 retry_authorized`
+  }
 }
 
 function usesPreExecutionNativeToolGate(engine: TaskSnapshotRecord['engine']): boolean {

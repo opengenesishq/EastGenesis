@@ -1,4 +1,7 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { createServer as createHttpsServer } from 'node:https'
+import { readFileSync } from 'node:fs'
+import { isIP } from 'node:net'
 import { randomBytes } from 'node:crypto'
 import { getRemoteContinuationStore } from './store'
 import { executeRemoteCommand } from './executor'
@@ -15,22 +18,33 @@ export interface RemoteWebhookServerOptions {
   rootDir: string
   host?: string
   port?: number
+  tls?: { cert: string | Buffer; key: string | Buffer }
+  tlsCertPath?: string
+  tlsKeyPath?: string
   onListening?: (address: { host: string; port: number }) => void
 }
 
 let activeServer: Server | undefined
+let activeProtocol: 'http' | 'https' = 'http'
 const pairingSessions = new Map<string, { expiresAt: number; projectId?: string; capabilities: RemoteDeviceCapability[] }>()
 const consoleSessions = new Map<string, { expiresAt: number; deviceId: string; projectId?: string }>()
 
-/** A narrow local HTTP ingress; the signed event remains the authorization boundary. */
+/** A narrow local HTTP or explicitly configured TLS ingress; signed events remain the authorization boundary. */
 export async function startRemoteWebhookServer(options: RemoteWebhookServerOptions): Promise<{ host: string; port: number }> {
   await stopRemoteWebhookServer()
   const host = normalizeHost(options.host ?? process.env.CAOGEN_REMOTE_WEBHOOK_HOST ?? DEFAULT_HOST)
   const port = normalizePort(options.port ?? parseEnvPort(process.env.CAOGEN_REMOTE_WEBHOOK_PORT) ?? DEFAULT_PORT)
-  const server = createServer((request, response) => {
+  const tls = resolveTlsOptions(options)
+  if (!isLoopbackHost(host) && !tls) {
+    throw new Error('Remote webhook non-loopback listeners require explicit TLS certificate and key configuration')
+  }
+  const protocol = tls ? 'https' : 'http'
+  const handler = (request: IncomingMessage, response: ServerResponse) => {
     void handleRequest(options.rootDir, request, response)
-  })
+  }
+  const server = tls ? createHttpsServer(tls, handler) : createHttpServer(handler)
   activeServer = server
+  activeProtocol = protocol
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => { server.off('listening', onListening); reject(error) }
     const onListening = () => { server.off('error', onError); resolve() }
@@ -41,7 +55,7 @@ export async function startRemoteWebhookServer(options: RemoteWebhookServerOptio
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('Remote webhook server did not expose a TCP address')
   const result = { host, port: address.port }
-  setRemoteWebhookStatus({ ...result, running: true })
+  setRemoteWebhookStatus({ ...result, protocol, running: true })
   options.onListening?.(result)
   return result
 }
@@ -50,7 +64,8 @@ export async function stopRemoteWebhookServer(): Promise<void> {
   const server = activeServer
   activeServer = undefined
   if (!server) return
-  setRemoteWebhookStatus({ host: DEFAULT_HOST, port: 0, running: false })
+  activeProtocol = 'http'
+  setRemoteWebhookStatus({ host: DEFAULT_HOST, port: 0, protocol: 'http', running: false })
   await new Promise<void>((resolve) => server.close(() => resolve()))
 }
 
@@ -119,7 +134,7 @@ export async function createRemotePairingSession(input: { ttlMs?: number; projec
   for (const [key, value] of pairingSessions) if (value.expiresAt <= Date.now()) pairingSessions.delete(key)
   const host = (process.env.CAOGEN_REMOTE_WEBHOOK_ADVERTISE_HOST?.trim() || (status.host === '0.0.0.0' ? '127.0.0.1' : status.host)).replace(/[\0\r\n]/g, '')
   if (!host) throw new Error('Remote pairing advertise host is invalid')
-  return { token, expiresAt, host, port: status.port, ...(input.projectId ? { projectId: input.projectId } : {}), url: `http://${host}:${status.port}/remote/pair/${encodeURIComponent(token)}` }
+  return { token, expiresAt, host, port: status.port, ...(input.projectId ? { projectId: input.projectId } : {}), url: `${activeProtocol}://${host}:${status.port}/remote/pair/${encodeURIComponent(token)}` }
 }
 
 async function handlePairingPage(token: string, response: ServerResponse): Promise<void> {
@@ -141,7 +156,7 @@ async function handlePairingRegistration(rootDir: string, request: IncomingMessa
     pairingSessions.delete(token)
     const status = getRemoteWebhookStatus()
     const host = (process.env.CAOGEN_REMOTE_WEBHOOK_ADVERTISE_HOST?.trim() || (status?.host === '0.0.0.0' ? '127.0.0.1' : status?.host ?? '127.0.0.1')).replace(/[\0\r\n]/g, '')
-    writeJson(response, 201, { deviceId: device.id, fingerprint: device.publicKeyFingerprint, expiresAt: session.expiresAt, consoleUrl: `http://${host}:${status?.port ?? 0}/remote/console/${encodeURIComponent(consoleToken)}` })
+    writeJson(response, 201, { deviceId: device.id, fingerprint: device.publicKeyFingerprint, expiresAt: session.expiresAt, consoleUrl: `${activeProtocol}://${host}:${status?.port ?? 0}/remote/console/${encodeURIComponent(consoleToken)}` })
   } catch (error) { writeJson(response, 400, { error: error instanceof Error ? error.message.slice(0, 300) : String(error) }) }
 }
 
@@ -255,6 +270,26 @@ function normalizeHost(value: string): string {
   const host = value.trim()
   if (!host || /[\0\r\n]/.test(host)) throw new Error('Remote webhook host is invalid')
   return host
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.toLowerCase().replace(/^\[|\]$/g, '')
+  if (normalized === 'localhost') return true
+  if (isIP(normalized) === 4) return normalized.startsWith('127.')
+  if (isIP(normalized) === 6) return normalized === '::1'
+  return false
+}
+
+function resolveTlsOptions(options: RemoteWebhookServerOptions): { cert: string | Buffer; key: string | Buffer } | undefined {
+  if (options.tls) {
+    if (!options.tls.cert || !options.tls.key) throw new Error('Remote webhook TLS requires both certificate and key')
+    return options.tls
+  }
+  const certPath = options.tlsCertPath ?? process.env.CAOGEN_REMOTE_WEBHOOK_TLS_CERT
+  const keyPath = options.tlsKeyPath ?? process.env.CAOGEN_REMOTE_WEBHOOK_TLS_KEY
+  if (!certPath && !keyPath) return undefined
+  if (!certPath || !keyPath) throw new Error('Remote webhook TLS requires both certificate and key paths')
+  return { cert: readFileSync(certPath), key: readFileSync(keyPath) }
 }
 
 function parseEnvPort(value: string | undefined): number | undefined {

@@ -241,7 +241,7 @@ async function tryFetchModelsFrom(
     return { models: null, attempt: { endpointPath, result: 'invalid_response', status: response.status } }
   }
   const json = await parseModelResponse(response)
-  const models = modelIds(json)
+  const models = modelIds(json, engine)
   return models
     ? { models, attempt: { endpointPath, result: 'success', status: response.status } }
     : { models: null, attempt: { endpointPath, result: 'invalid_response', status: response.status } }
@@ -255,20 +255,43 @@ async function parseModelResponse(response: Response): Promise<unknown> {
   }
 }
 
-function modelIds(json: unknown): string[] | null {
+function modelIds(json: unknown, engine?: EngineKind): string[] | null {
   const envelope = json as Record<string, unknown> | null
   const records = Array.isArray(json) ? json
     : Array.isArray(envelope?.data) ? envelope.data as unknown[]
       : Array.isArray(envelope?.models) ? envelope.models as unknown[] : []
-  const ids = records.map(modelId).filter(Boolean)
-  return ids.length > 0 ? [...new Set(ids)] : null
+  const ids = records.map((record) => modelId(record, engine)).filter(Boolean)
+  return ids.length > 0 ? uniqueCanonicalModelIds(ids, engine) : null
 }
 
-function modelId(model: unknown): string {
-  if (typeof model === 'string') return model
+function modelId(model: unknown, engine?: EngineKind): string {
+  if (typeof model === 'string') return canonicalModelId(model, engine)
   const record = model as Record<string, unknown> | null
-  if (typeof record?.id === 'string') return record.id
-  return typeof record?.name === 'string' ? record.name.replace(/^models\//, '') : ''
+  if (typeof record?.id === 'string') return canonicalModelId(record.id, engine)
+  return typeof record?.name === 'string' ? canonicalModelId(record.name, engine) : ''
+}
+
+/**
+ * Model catalogs are inconsistent across providers: Gemini commonly returns
+ * `models/foo`, while OpenAI-compatible gateways may return whitespace and
+ * duplicate records. Keep the first spelling for a stable user-visible list,
+ * but remove transport-only prefixes and exact duplicates before saving it.
+ */
+function canonicalModelId(value: string, engine?: EngineKind): string {
+  const trimmed = value.trim()
+  return engine === 'gemini' ? trimmed.replace(/^models\//i, '') : trimmed
+}
+
+function uniqueCanonicalModelIds(ids: string[], engine?: EngineKind): string[] {
+  const seen = new Set<string>()
+  const unique: string[] = []
+  for (const id of ids) {
+    const canonical = canonicalModelId(id, engine)
+    if (!canonical || seen.has(canonical)) continue
+    seen.add(canonical)
+    unique.push(canonical)
+  }
+  return unique
 }
 
 function successfulModelFetchResult(

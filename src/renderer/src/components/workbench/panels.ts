@@ -1,6 +1,9 @@
 import { createElement, lazy } from 'react'
 import type * as React from 'react'
 import type { HeaderIconName } from '../ChatHeaderIcons'
+import type { PanelId, PanelOpenContext } from './panel-types'
+
+export type { PanelId, PanelOpenContext } from './panel-types'
 
 /**
  * 工作台面板标识符。
@@ -8,19 +11,6 @@ import type { HeaderIconName } from '../ChatHeaderIcons'
  * 11 个面板 = 原 10 个独立面板 + StudioResultPanel（归一为 'result'）。
  * 新增面板只需在此联合类型添加一个字面量 + 在 PANEL_REGISTRY 注册。
  */
-export type PanelId =
-  | 'result'
-  | 'diff'
-  | 'terminal'
-  | 'browser'
-  | 'files'
-  | 'preview'
-  | 'worktree'
-  | 'pluginRegistry'
-  | 'subagent'
-  | 'routine'
-  | 'memory'
-
 /**
  * 面板注册表条目。
  *
@@ -56,13 +46,6 @@ function lazyPanel(loader: () => Promise<{ default: unknown }>): PanelComponent 
  *
  * 其他面板忽略此参数。
  */
-export interface PanelOpenContext {
-  url?: string
-  path?: string
-  /** DeveloperPanel 的直接目标视图。 */
-  developerView?: 'files' | 'tests' | 'debug' | 'refactor'
-}
-
 /**
  * 面板注册表：11 个面板全部注册，keepAlive 全部 true。
  *

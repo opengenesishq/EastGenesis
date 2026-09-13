@@ -9,10 +9,8 @@ import {
   executeInteractiveOperationEffect,
   type InteractiveOperationEffectOutcome
 } from './task/operation-effect-gateway'
-import {
-  prepareCanonicalSystemOperation,
-  settleCanonicalSystemOperation
-} from './task/system-operation-context'
+import type { CanonicalSystemOperationContext } from './task/system-operation-context'
+import { TaskKernel } from './task/task-kernel'
 import { stableValueDigest } from './task/tool-idempotency'
 import type { ProjectAggregateExportBundle } from '../shared/project-aggregate-types'
 import type { ProjectPortableImportEffectTarget } from './project-import-effect-target'
@@ -27,13 +25,15 @@ export async function executeProjectPortableImportEffect(
   const prepared = await prepareProjectAggregateImport(rawBundle, rootDir)
   const bundle = prepared.bundle
   const operationId = randomUUID()
-  const context = await prepareCanonicalSystemOperation({
+  const kernel = new TaskKernel(rootDir)
+  const context = await kernel.plan(await kernel.create({
     rootDir,
     requestId: `project-import-${operationId}`,
-    objective: '导入完整、脱敏、可验证且可恢复的 Project 可移植包'
-  })
+    objective: '导入完整、脱敏、可验证且可恢复的 Project 可移植包',
+    deferExecution: true
+  }))
   const target = importTarget(context, operationId, bundle)
-  const outcome = await runOperation({
+  const outcome = await kernel.execute(context, () => runOperation({
     rootDir,
     operationId,
     kind: 'project_import',
@@ -58,9 +58,9 @@ export async function executeProjectPortableImportEffect(
       sourceAggregateDigest: result.sourceAggregateDigest,
       operationId: result.operationId
     })
-  })
+  }))
   const result = requireCompletedImport(outcome)
-  await settleCanonicalSystemOperation(context, {
+  await kernel.deliver(context, {
     status: 'passed',
     evidenceRefs: [target.evidenceId],
     verifiedBy: 'project-portable-import'
@@ -141,7 +141,7 @@ async function registerProjectPortableImportReport(
 }
 
 function importTarget(
-  context: Awaited<ReturnType<typeof prepareCanonicalSystemOperation>>,
+  context: CanonicalSystemOperationContext,
   operationId: string,
   bundle: ProjectAggregateExportBundle
 ): ProjectPortableImportEffectTarget {

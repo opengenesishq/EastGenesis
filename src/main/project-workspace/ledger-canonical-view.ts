@@ -19,12 +19,12 @@ import type {
 } from '../../shared/workflow-types'
 import { digest } from '../task/workflow-ledger-codec'
 import type { WorkflowLedgerDatabase } from '../task/workflow-ledger-db'
-import { readAndVerifyEvents, readGoals, readWorkItems } from '../task/workflow-ledger-query'
 import {
-  findWorkflowGoal,
-  findWorkflowRun,
-  findWorkflowWorkItem
-} from '../task/workflow-ledger-store'
+  readAndVerifyEventAppendState,
+  readAndVerifyEvents,
+  type WorkflowEventReferenceIndex
+} from '../task/workflow-ledger-query'
+import { WorkflowLedgerCorruptionError } from '../task/workflow-ledger-errors'
 import {
   clone,
   normalizeAcceptanceResult,
@@ -35,6 +35,7 @@ import {
 import {
   PROJECT_WORKSPACE_MIGRATION_EVENT_KIND,
   latestProjectWorkspaceMigration,
+  parseProjectWorkspaceMigrationPayload,
   type ProjectWorkspaceMigrationPayload
 } from './ledger-migration-continuity'
 import type {
@@ -118,16 +119,27 @@ export function readVerifiedCanonicalProjectWorkspaceViewFromDatabase(
   workspaceId: string
 ): VerifiedCanonicalProjectWorkspaceView {
   const id = requiredWorkspaceId(workspaceId)
-  const migration = readMigration(db, id)
+  let verified: ReturnType<typeof readAndVerifyEventAppendState>
+  try {
+    verified = readAndVerifyEventAppendState(db)
+  } catch (error) {
+    // Keep the low-level ledger verifier strict, but expose a stable error
+    // contract at the canonical ProjectWorkspace read boundary.
+    if (isWorkflowLedgerCorruption(error)) {
+      fail('MIGRATION_EVENT_INVALID', `Workspace ${id} canonical Ledger verification failed`, error)
+    }
+    throw error
+  }
+  const migration = readMigration(verified.events, id)
   verifyWorkspace(migration, id)
   const goalDescriptors = uniqueDescriptors(migration.goals, 'Goal')
   const workItemDescriptors = uniqueDescriptors(migration.workItems, 'WorkItem')
-  verifyExplicitEntityClosure(db, id, goalDescriptors, workItemDescriptors)
+  verifyExplicitEntityClosure(verified.references, id, goalDescriptors, workItemDescriptors)
   const goals = goalDescriptors.map((descriptor) =>
-    verifyGoal(db, descriptor, id)
+    verifyGoal(verified.references, descriptor, id)
   )
   const workItems = workItemDescriptors.map((descriptor) =>
-    verifyWorkItem(db, descriptor, id)
+    verifyWorkItem(verified.references, descriptor, id)
   )
   verifyRichRelations(goals, workItems, id)
   verifyProjectionDigest(migration, goals, workItems)
@@ -145,6 +157,18 @@ export function readVerifiedCanonicalProjectWorkspaceViewFromDatabase(
   })
 }
 
+/**
+ * Keep the canonical read contract stable even when the Ledger verifier is
+ * loaded through a separate compiled/module boundary. The verifier remains
+ * fail-closed; this guard only normalizes its public error code.
+ */
+function isWorkflowLedgerCorruption(error: unknown): error is WorkflowLedgerCorruptionError {
+  return error instanceof WorkflowLedgerCorruptionError || (
+    typeof error === 'object' && error !== null &&
+    'code' in error && error.code === 'WORKFLOW_LEDGER_CORRUPTION'
+  )
+}
+
 function requiredWorkspaceId(value: string): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     fail('INVALID_WORKSPACE_ID', 'verified canonical view requires a Workspace id')
@@ -152,11 +176,19 @@ function requiredWorkspaceId(value: string): string {
   return value.trim()
 }
 
-function readMigration(db: WorkflowLedgerDatabase, workspaceId: string): ProjectWorkspaceMigrationPayload {
+function readMigration(
+  events: ReturnType<typeof readAndVerifyEvents>,
+  workspaceId: string
+): ProjectWorkspaceMigrationPayload {
   try {
-    const migration = latestProjectWorkspaceMigration(db, workspaceId)
-    if (!migration) fail('MIGRATION_EVENT_MISSING', `Workspace ${workspaceId} has no verified migration event`)
-    return migration
+    const event = events.filter((candidate) =>
+      candidate.kind === PROJECT_WORKSPACE_MIGRATION_EVENT_KIND &&
+      candidate.entityType === 'system' &&
+      candidate.entityId === workspaceId &&
+      candidate.projectId === workspaceId
+    ).at(-1)
+    if (!event) fail('MIGRATION_EVENT_MISSING', `Workspace ${workspaceId} has no verified migration event`)
+    return parseProjectWorkspaceMigrationPayload(event.payload)
   } catch (error) {
     if (error instanceof VerifiedCanonicalProjectWorkspaceViewError) throw error
     fail('MIGRATION_EVENT_INVALID', `Workspace ${workspaceId} migration event verification failed`, error)
@@ -177,7 +209,7 @@ function verifyWorkspace(migration: ProjectWorkspaceMigrationPayload, workspaceI
 }
 
 function verifyGoal(
-  db: WorkflowLedgerDatabase,
+  references: WorkflowEventReferenceIndex,
   descriptor: GoalMigrationDescriptor,
   workspaceId: string
 ): Goal {
@@ -192,14 +224,14 @@ function verifyGoal(
   if (source.revision !== descriptor.sourceRevision) {
     fail('REVISION_MISMATCH', `Goal ${descriptor.id} rich source revision differs`)
   }
-  const ledger = requireGoal(db, descriptor.id)
+  const ledger = requireGoal(references, descriptor.id)
   verifyLedgerDigest(ledger, descriptor.ledgerDigest, 'Goal', descriptor.id)
   verifyGoalMapping(source, ledger)
   return clone(source)
 }
 
 function verifyWorkItem(
-  db: WorkflowLedgerDatabase,
+  references: WorkflowEventReferenceIndex,
   descriptor: WorkItemMigrationDescriptor,
   workspaceId: string
 ): WorkItem {
@@ -218,21 +250,21 @@ function verifyWorkItem(
   if (!sameIds(source.runRefs, descriptor.runRefs)) {
     fail('RUN_MAPPING_MISMATCH', `WorkItem ${descriptor.id} migration Run references differ from its rich source`)
   }
-  verifyRunReferences(db, source)
-  const ledger = requireWorkItem(db, descriptor.id)
+  verifyRunReferences(references, source)
+  const ledger = requireWorkItem(references, descriptor.id)
   verifyLedgerDigest(ledger, descriptor.ledgerDigest, 'WorkItem', descriptor.id)
   verifyWorkItemMapping(source, ledger)
   return clone(source)
 }
 
-function requireGoal(db: WorkflowLedgerDatabase, id: string): WorkflowGoalRecord {
-  const goal = findWorkflowGoal(db, id)
+function requireGoal(references: WorkflowEventReferenceIndex, id: string): WorkflowGoalRecord {
+  const goal = references.goals.get(id)
   if (!goal) fail('LEDGER_ENTITY_MISSING', `Goal ${id} is missing from the Workflow Ledger`)
   return goal
 }
 
-function requireWorkItem(db: WorkflowLedgerDatabase, id: string): WorkflowWorkItemRecord {
-  const item = findWorkflowWorkItem(db, id)
+function requireWorkItem(references: WorkflowEventReferenceIndex, id: string): WorkflowWorkItemRecord {
+  const item = references.workItems.get(id)
   if (!item) fail('LEDGER_ENTITY_MISSING', `WorkItem ${id} is missing from the Workflow Ledger`)
   return item
 }
@@ -244,15 +276,15 @@ function verifyLedgerDigest(record: object, expected: string, label: string, id:
 }
 
 function verifyExplicitEntityClosure(
-  db: WorkflowLedgerDatabase,
+  references: WorkflowEventReferenceIndex,
   workspaceId: string,
   goals: readonly GoalMigrationDescriptor[],
   workItems: readonly WorkItemMigrationDescriptor[]
 ): void {
-  const explicitGoalIds = readGoals(db).filter((goal) =>
+  const explicitGoalIds = [...references.goals.values()].filter((goal) =>
     goal.projectId === workspaceId && goal.source === 'explicit'
   ).map((goal) => goal.id).sort()
-  const explicitWorkItemIds = readWorkItems(db).filter((item) =>
+  const explicitWorkItemIds = [...references.workItems.values()].filter((item) =>
     item.projectId === workspaceId && item.source === 'explicit'
   ).map((item) => item.id).sort()
   assertEntitySet(goals.map((goal) => goal.id).sort(), explicitGoalIds, 'Goal', workspaceId)
@@ -273,9 +305,9 @@ function assertEntitySet(
   }
 }
 
-function verifyRunReferences(db: WorkflowLedgerDatabase, item: WorkItem): void {
+function verifyRunReferences(references: WorkflowEventReferenceIndex, item: WorkItem): void {
   for (const runId of item.runRefs) {
-    const run = findWorkflowRun(db, runId)
+    const run = references.runs.get(runId)
     if (!run) fail('RUN_REFERENCE_INVALID', `WorkItem ${item.id} references missing Run ${runId}`)
     if (run.projectId !== item.projectId || run.goalId !== item.goalId || run.workItemId !== item.id) {
       fail('RUN_REFERENCE_INVALID', `Run ${runId} crosses WorkItem ${item.id} ownership`)
@@ -332,6 +364,7 @@ function verifyWorkItemMapping(source: WorkItem, ledger: WorkflowWorkItemRecord)
     projectId: source.projectId,
     goalId: source.goalId,
     parentId: source.parentId,
+    businessLineId: source.businessLineId,
     type: source.type,
     title: source.title,
     description: source.description,

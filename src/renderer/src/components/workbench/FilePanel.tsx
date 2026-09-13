@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Braces, CircleAlert, FolderTree, Info, Search, X } from 'lucide-react'
 import { useT } from '../../i18n'
 import { useStore } from '../../store'
@@ -17,6 +17,9 @@ import {
   moveFileBrowserModeFocus,
   type FileBrowserMode
 } from './file-panel-tree'
+import type { MonacoFileEditorHandle } from './MonacoFileEditor'
+
+const MonacoFileEditor = lazy(() => import('./MonacoFileEditor'))
 
 interface LanguageSymbolResult extends ProjectSymbolLocation {
   insertText?: string
@@ -240,7 +243,7 @@ export default function FilePanel(): React.JSX.Element {
   const symbolRequestRef = useRef(0)
   const hoverRequestRef = useRef(0)
   const diagnosticsRequestRef = useRef(0)
-  const editorRef = useRef<HTMLTextAreaElement>(null)
+  const editorRef = useRef<MonacoFileEditorHandle>(null)
 
   useEffect(() => {
     setMode('tree')
@@ -254,7 +257,6 @@ export default function FilePanel(): React.JSX.Element {
     clearProjectFileSearch()
     if (activeId) void refresh()
   }, [activeId, clearProjectFileSearch, refresh])
-
   const dirty = currentFileContent !== savedFileContent
   const problemDiagnostics = useMemo(
     () => mergedDiagnostics(fileDiagnostics, semanticDiagnostics),
@@ -272,7 +274,6 @@ export default function FilePanel(): React.JSX.Element {
     }
     closeFileTab(path)
   }, [closeFileTab, sessionTabs, t])
-
   useEffect(() => {
     if (activePanelId !== 'files') return
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -332,25 +333,23 @@ export default function FilePanel(): React.JSX.Element {
     const editor = editorRef.current
     if (!editor || !pendingLocation || currentFilePath !== pendingLocation.path || fileLoading) return
     const position = editorOffsetForLocation(currentFileContent, pendingLocation.line, pendingLocation.column)
-    editor.focus()
-    editor.setSelectionRange(position, position)
-    const lineHeight = Number.parseFloat(getComputedStyle(editor).lineHeight) || 18
-    editor.scrollTop = Math.max(0, (pendingLocation.line - 2) * lineHeight)
+    editor.setSelectionOffset(position)
+    editor.revealLine(pendingLocation.line)
     setPendingLocation(null)
   }, [currentFileContent, currentFilePath, fileLoading, pendingLocation])
 
   useEffect(() => {
     const editor = editorRef.current
     if (!editor || pendingCaret === null) return
-    editor.focus()
-    editor.setSelectionRange(pendingCaret, pendingCaret)
+    editor.setSelectionOffset(pendingCaret)
     setPendingCaret(null)
   }, [currentFileContent, pendingCaret])
 
   const languageInput = useCallback(() => {
     const editor = editorRef.current
     if (!editor || !currentFilePath) return null
-    const location = editorLocationForOffset(currentFileContent, editor.selectionStart)
+    const selection = editor.getSelectionOffsets()
+    const location = editorLocationForOffset(currentFileContent, selection.start)
     return { path: currentFilePath, content: currentFileContent, ...location }
   }, [currentFileContent, currentFilePath])
 
@@ -419,7 +418,7 @@ export default function FilePanel(): React.JSX.Element {
   const requestSymbols = useCallback(async (modeValue: 'completion' | 'definition'): Promise<void> => {
     const editor = editorRef.current
     if (!editor || !activeId || !currentFilePath) return
-    const range = editorWordRange(currentFileContent, editor.selectionStart)
+    const range = editorWordRange(currentFileContent, editor.getSelectionOffsets().start)
     const requestId = ++symbolRequestRef.current
     setHoverOpen(false)
     setSymbolLoading(true)
@@ -508,9 +507,10 @@ export default function FilePanel(): React.JSX.Element {
     }
     const editor = editorRef.current
     if (!editor) return
-    const range = editorWordRange(currentFileContent, editor.selectionStart) ?? {
-      start: editor.selectionStart,
-      end: editor.selectionEnd,
+    const selection = editor.getSelectionOffsets()
+    const range = editorWordRange(currentFileContent, selection.start) ?? {
+      start: selection.start,
+      end: selection.end,
       word: ''
     }
     const replacement = replaceEditorWord(currentFileContent, range, symbol.insertText ?? symbol.name)
@@ -769,27 +769,22 @@ export default function FilePanel(): React.JSX.Element {
           {fileLoading ? (
             <div className="workspace-diff-empty">{t('fileLoading')}</div>
           ) : currentFilePath ? (
-            <textarea
-              ref={editorRef}
-              className="file-editor-textarea"
-              data-file-editor-path={currentFilePath}
-              value={currentFileContent}
-              spellCheck={false}
-              onChange={(e) => updateDraft(e.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'F12') {
-                  event.preventDefault()
-                  void requestSymbols('definition')
-                } else if ((event.ctrlKey || event.metaKey) && (event.code === 'Space' || event.key === ' ')) {
-                  event.preventDefault()
-                  void requestSymbols('completion')
-                } else if (event.key === 'Escape' && (symbolMode || hoverOpen)) {
-                  event.preventDefault()
-                  setSymbolMode(null)
-                  setHoverOpen(false)
-                }
-              }}
-            />
+            <Suspense fallback={<div className="workspace-diff-empty">{t('fileLoading')}</div>}>
+              <MonacoFileEditor
+                ref={editorRef}
+                path={currentFilePath}
+                value={currentFileContent}
+                onChange={updateDraft}
+                onDefinition={() => void requestSymbols('definition')}
+                onCompletion={() => void requestSymbols('completion')}
+                onEscape={() => {
+                  if (symbolMode || hoverOpen) {
+                    setSymbolMode(null)
+                    setHoverOpen(false)
+                  }
+                }}
+              />
+            </Suspense>
           ) : (
             <div className="workspace-diff-empty">{t('filePickHint')}</div>
           )}

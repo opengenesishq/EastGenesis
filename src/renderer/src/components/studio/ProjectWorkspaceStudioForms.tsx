@@ -63,35 +63,31 @@ export function ProjectCreateForm({
             </select>
           </FormField>
         </div>
-        <p className="pws-create-next-step">创建后立即输入一句话目标，CaoGen 会从目标开始拆解任务。</p>
-        <details className="pws-template-details" data-project-template-details>
-          <summary>查看 {template.name} 模板（{template.workItems.length} 个任务）</summary>
-          <section className="pws-template-preview" aria-live="polite" data-project-template={template.id}>
-            <header>
-              <div>
-                <span className="pws-eyebrow">PROJECT TEMPLATE</span>
-                <h4>{template.name}</h4>
-              </div>
-              <span>{template.workItems.length} 个任务</span>
-            </header>
-            <p>{template.summary}</p>
-            <div className="pws-template-columns">
-              <div>
-                <strong>任务骨架</strong>
-                <ol>{template.workItems.map((item) => <li key={item.key}>{item.title}</li>)}</ol>
-              </div>
-              <div>
-                <strong>预期产物</strong>
-                <div className="pws-template-tags">{artifacts.map((artifact) => <span key={artifact}>{artifact}</span>)}</div>
-              </div>
-              <div>
-                <strong>Resource 建议</strong>
-                <ul>{template.resourceSuggestions.map((resource) => <li key={`${resource.kind}:${resource.label}`}>{resource.label}</li>)}</ul>
-              </div>
+        <section className="pws-template-preview" aria-live="polite" data-project-template={template.id}>
+          <header>
+            <div>
+              <span className="pws-eyebrow">PROJECT TEMPLATE</span>
+              <h4>{template.name}</h4>
             </div>
-            <p className="pws-template-policy">Resource 仅作为建议，不会自动读取目录、连接服务或授予权限。</p>
-          </section>
-        </details>
+            <span>{TEXT.templateTaskCount(template.workItems.length)}</span>
+          </header>
+          <p>{template.summary}</p>
+          <div className="pws-template-columns">
+            <div>
+              <strong>{TEXT.templateTaskSkeleton}</strong>
+              <ol>{template.workItems.map((item) => <li key={item.key}>{item.title}</li>)}</ol>
+            </div>
+            <div>
+              <strong>{TEXT.templateExpectedArtifacts}</strong>
+              <div className="pws-template-tags">{artifacts.map((artifact) => <span key={artifact}>{artifact}</span>)}</div>
+            </div>
+            <div>
+              <strong>{TEXT.templateResourceSuggestions}</strong>
+              <ul>{template.resourceSuggestions.map((resource) => <li key={`${resource.kind}:${resource.label}`}>{resource.label}</li>)}</ul>
+            </div>
+          </div>
+          <p className="pws-template-policy">{TEXT.templateResourcePolicy}</p>
+        </section>
         <FormActions busy={busy === 'project'} submitLabel={TEXT.createProjectSubmit} onCancel={onCancel} />
       </fieldset>
     </form>

@@ -1,3 +1,4 @@
+import { isOfficeRevisionTarget } from '../office-revision/target-validation'
 import type { EffectTarget, FileSystemIdentity } from '../../shared/types'
 import { isManagedPluginEffectTarget } from '../plugin/plugin-effect-target-validation'
 import { isAbsolute } from 'node:path'
@@ -21,7 +22,8 @@ export function isEffectTarget(value: unknown): value is EffectTarget {
   if (value.kind === 'issue_create') return isIssueTarget(value)
   if (value.kind === 'mcp_tool_call') return isMcpToolCallTarget(value)
   if (value.kind === 'webhook_message_send') return isWebhookMessageTarget(value)
-  if (value.kind === 'office_artifact') return isOfficeArtifactTarget(value)
+  const office = OFFICE_TARGET_VALIDATORS[String(value.kind)]
+  if (office) return office(value)
   if (value.kind === 'migration_operation') return isMigrationOperationTarget(value)
   if (value.kind === 'project_portable_export') return isProjectPortableExportTarget(value)
   if (value.kind === 'project_portable_import') return isProjectPortableImportTarget(value)
@@ -31,13 +33,8 @@ export function isEffectTarget(value: unknown): value is EffectTarget {
   return value.kind === 'unsupported' && isString(value.toolName)
 }
 
-export function isEffectTargetCreatable(value: EffectTarget): boolean {
-  return value.kind !== 'webhook_message_send' ||
-    value.channel === 'feishu' || value.channel === 'dingtalk'
-}
-
 function isMediaJobOperationTarget(record: Record<string, unknown>): boolean {
-  const operations = ['submit', 'poll', 'download', 'cancel', 'asset_import', 'compose', 'export']
+  const operations = ['submit', 'poll', 'download', 'cancel', 'asset_import', 'compose']
   const statuses = ['submitting', 'running', 'downloading', 'succeeded', 'failed', 'cancelled', 'waiting_reconciliation']
   const identifiers = [
     'mediaJobId', 'externalJobId', 'projectId', 'goalId', 'workItemId', 'runId'
@@ -47,7 +44,7 @@ function isMediaJobOperationTarget(record: Record<string, unknown>): boolean {
   const noArtifactFields = artifactFields.every((key) => record[key] === undefined)
   return operations.includes(String(record.operation)) && statuses.includes(String(record.expectedStatus)) &&
     identifiers.every((key) => isString(record[key])) && isSha256(record.idempotencyKeyDigest) &&
-    (['download', 'asset_import', 'compose', 'export'].includes(String(record.operation)) ? hasArtifactFields : hasArtifactFields || noArtifactFields)
+    (['download', 'asset_import', 'compose'].includes(String(record.operation)) ? hasArtifactFields : hasArtifactFields || noArtifactFields)
 }
 
 function isProviderProfileOperationTarget(record: Record<string, unknown>): boolean {
@@ -475,7 +472,7 @@ function isWebhookMessageTarget(record: Record<string, unknown>): boolean {
   return [
     isString(record.connectorId),
     isNonNegativeInteger(record.connectorRevision),
-    record.channel === 'feishu' || record.channel === 'dingtalk' || record.channel === 'wecom',
+    record.channel === 'feishu' || record.channel === 'dingtalk',
     isString(record.webhookDigest),
     isString(record.payloadDigest),
     isString(record.titleDigest),
@@ -519,4 +516,8 @@ function isOptionalNullableString(value: unknown): boolean {
 
 function isString(value: unknown): value is string {
   return typeof value === 'string'
+}
+
+const OFFICE_TARGET_VALIDATORS: Record<string, ((value: Record<string, unknown>) => boolean) | undefined> = {
+  office_artifact: isOfficeArtifactTarget, office_artifact_revision: isOfficeRevisionTarget
 }

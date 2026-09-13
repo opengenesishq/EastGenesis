@@ -347,6 +347,9 @@ export function permissionEffectScope(target: EffectTarget, targetDigest: string
     case 'office_artifact':
       summary = `Office ${target.artifactKind} · ${target.relativePath}`
       break
+    case 'office_artifact_revision':
+      summary = `Office ${target.title} · v${target.baseVersion} → v${target.baseVersion + 1} · ${target.operations.length}处选区：${target.operations.slice(0, 8).map((op) => op.kind === 'replaceParagraphText' ? op.paragraphId : `${op.sheetId}!${op.address}`).join(', ')} · 原稿 ${target.baseDigest.slice(0, 19)}`
+      break
     default:
       summary = `效果 ${target.kind}`
   }

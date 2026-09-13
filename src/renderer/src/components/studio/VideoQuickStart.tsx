@@ -25,12 +25,12 @@ export default function VideoQuickStart(props: Props): React.JSX.Element {
     }}>
       <input className="input" name="videoTitle" value={props.name}
         onChange={(event) => props.onNameChange(event.target.value)} placeholder={text.titlePlaceholder}
-        aria-label={text.titleLabel} maxLength={120} autoFocus data-video-title-optional />
+        aria-label={text.titleLabel} maxLength={120} autoFocus />
       <textarea className="input" name="videoScript" value={props.script}
         onChange={(event) => props.onScriptChange(event.target.value)} placeholder={text.scriptPlaceholder}
         aria-label={text.scriptLabel} rows={4} maxLength={20_000} />
       <button type="submit" className="btn btn-primary btn-sm"
-        disabled={props.creating || !props.script.trim()}>
+        disabled={props.creating || !props.name.trim() || !props.script.trim()}>
         {props.creating ? <LoaderCircle className="video-studio-shell-spinner" size={14} /> : <Plus size={14} />}
         {props.creating ? text.creating : text.start}
       </button>

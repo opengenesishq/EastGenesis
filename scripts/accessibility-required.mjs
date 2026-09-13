@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import net from 'node:net'
 import { createRequire } from 'node:module'
+import { openControlRoom } from './lib/open-control-room.mjs'
 
 const repoRoot = process.cwd()
 const require = createRequire(path.join(repoRoot, 'package.json'))
@@ -61,7 +62,7 @@ try {
   await page.waitForSelector('[data-studio-surface="digital-workers"]', { visible: true, timeout: 15_000 })
   await auditSurface('studio-team', '[data-studio-surface="digital-workers"]')
 
-  await click(page, '[data-sidebar-action="control-room"]')
+  await openControlRoom(page)
   await page.waitForSelector('.office', { visible: true, timeout: 15_000 })
   await auditSurface('office', '.office')
 
@@ -108,11 +109,13 @@ async function inspectSurfaceDom(selector) {
   return page.evaluate((rootSelector) => {
     const root = document.querySelector(rootSelector)
     if (!root) throw new Error(`surface root is missing: ${rootSelector}`)
-    const all = [...root.querySelectorAll('button,input,select,textarea,a[href],summary,[role="button"],[tabindex]')]
+    const all = [...root.querySelectorAll('button,input,select,textarea,summary,a[href],[role="button"],[tabindex]')]
     const visible = all.filter((element) => {
       const style = window.getComputedStyle(element)
       const rect = element.getBoundingClientRect()
-      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+      const closedDetails = element.closest('details:not([open])')
+      const summary = closedDetails?.querySelector(':scope > summary')
+      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0 && (!closedDetails || Boolean(summary?.contains(element)))
     })
     const records = visible.map((element) => ({
       tag: element.tagName.toLowerCase(),
@@ -160,12 +163,14 @@ async function waitForFocusableInventoryStable(selector) {
     const current = await page.evaluate((rootSelector) => {
       const root = document.querySelector(rootSelector)
       if (!root) return -1
-      return [...root.querySelectorAll('button,input,select,textarea,a[href],summary,[role="button"],[tabindex]')]
+      return [...root.querySelectorAll('button,input,select,textarea,summary,a[href],[role="button"],[tabindex]')]
         .filter((element) => {
           const style = window.getComputedStyle(element)
           const rect = element.getBoundingClientRect()
           const disabled = 'disabled' in element && element.disabled === true
-          return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0 &&
+          const closedDetails = element.closest('details:not([open])')
+          const summary = closedDetails?.querySelector(':scope > summary')
+          return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0 && (!closedDetails || Boolean(summary?.contains(element))) &&
             element.tabIndex >= 0 && !disabled && element.getAttribute('aria-hidden') !== 'true'
         }).length
     }, selector)
@@ -178,8 +183,8 @@ async function waitForFocusableInventoryStable(selector) {
 }
 
 async function auditAccessibilityTree(selector) {
-  const focusableRoles = new Set(['button', 'checkbox', 'combobox', 'DisclosureTriangle', 'link', 'menuitem', 'radio', 'switch', 'tab', 'textbox'])
-  const handles = await page.$$(`${selector} :is(button,input,select,textarea,a[href],summary,[role="button"],[role="tab"])`)
+  const focusableRoles = new Set(['button', 'checkbox', 'combobox', 'link', 'menuitem', 'radio', 'switch', 'tab', 'textbox'])
+  const handles = await page.$$(`${selector} :is(button,input,select,textarea,summary,a[href],[role="button"],[role="tab"])`)
   const nodes = []
   const unnamedFocusable = []
   for (const handle of handles) {
@@ -222,12 +227,14 @@ async function auditKeyboardTraversal(selector) {
     sentinel.style.opacity = '0'
     root.before(sentinel)
     sentinel.focus()
-    return [...root.querySelectorAll('button,input,select,textarea,a[href],summary,[role="button"],[tabindex]')]
+    return [...root.querySelectorAll('button,input,select,textarea,summary,a[href],[role="button"],[tabindex]')]
       .filter((element) => {
         const style = window.getComputedStyle(element)
         const rect = element.getBoundingClientRect()
         const disabled = 'disabled' in element && element.disabled === true
-        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0 &&
+        const closedDetails = element.closest('details:not([open])')
+        const summary = closedDetails?.querySelector(':scope > summary')
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0 && (!closedDetails || Boolean(summary?.contains(element))) &&
           element.tabIndex >= 0 && !disabled && element.getAttribute('aria-hidden') !== 'true'
       }).length
   }, selector)
@@ -235,16 +242,25 @@ async function auditKeyboardTraversal(selector) {
   for (let index = 0; index < Math.max(1, expected + 1); index += 1) {
     await page.keyboard.press('Tab')
     const visit = await page.evaluate((rootSelector) => {
-      const element = document.activeElement
-      const root = document.querySelector(rootSelector)
-      if (!(element instanceof HTMLElement) || !root?.contains(element)) return null
+    const element = document.activeElement
+    const root = document.querySelector(rootSelector)
+    if (!(element instanceof HTMLElement) || !root?.contains(element)) return null
       const style = window.getComputedStyle(element)
       const rect = element.getBoundingClientRect()
       const named = element.getAttribute('aria-label') || element.textContent?.trim() ||
         element.getAttribute('title') || element.getAttribute('placeholder') || ''
       const focusVisible = style.outlineStyle !== 'none' || style.boxShadow !== 'none' ||
         style.borderColor !== 'rgba(0, 0, 0, 0)'
-      return { tag: element.tagName.toLowerCase(), name: named, width: rect.width, height: rect.height, focusVisible }
+      const focusables = [...root.querySelectorAll('button,input,select,textarea,summary,a[href],[role="button"],[tabindex]')]
+        .filter((candidate) => {
+          const candidateStyle = window.getComputedStyle(candidate)
+          const candidateRect = candidate.getBoundingClientRect()
+          const disabled = 'disabled' in candidate && candidate.disabled === true
+          const closedDetails = candidate.closest('details:not([open])')
+          const summary = closedDetails?.querySelector(':scope > summary')
+          return candidateStyle.display !== 'none' && candidateStyle.visibility !== 'hidden' && candidateRect.width > 0 && candidateRect.height > 0 && (!closedDetails || Boolean(summary?.contains(candidate))) && candidate.tabIndex >= 0 && !disabled && candidate.getAttribute('aria-hidden') !== 'true'
+        })
+      return { tag: element.tagName.toLowerCase(), name: named, width: rect.width, height: rect.height, focusVisible, focusIndex: focusables.indexOf(element) }
     }, selector)
     if (visit) visits.push(visit)
     else if (visits.length > 0 || expected === 0) break
@@ -252,12 +268,14 @@ async function auditKeyboardTraversal(selector) {
   const expectedAfterTraversal = await page.evaluate((rootSelector) => {
     const root = document.querySelector(rootSelector)
     if (!root) throw new Error(`surface root is missing: ${rootSelector}`)
-    return [...root.querySelectorAll('button,input,select,textarea,a[href],summary,[role="button"],[tabindex]')]
+    return [...root.querySelectorAll('button,input,select,textarea,summary,a[href],[role="button"],[tabindex]')]
       .filter((element) => {
         const style = window.getComputedStyle(element)
         const rect = element.getBoundingClientRect()
         const disabled = 'disabled' in element && element.disabled === true
-        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0 &&
+        const closedDetails = element.closest('details:not([open])')
+        const summary = closedDetails?.querySelector(':scope > summary')
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0 && (!closedDetails || Boolean(summary?.contains(element))) &&
           element.tabIndex >= 0 && !disabled && element.getAttribute('aria-hidden') !== 'true'
       }).length
   }, selector)
@@ -265,9 +283,9 @@ async function auditKeyboardTraversal(selector) {
   return {
     expected,
     expectedAfterTraversal,
-    visited: visits.length,
+    visited: new Set(visits.map((visit) => visit.focusIndex)).size,
     uniqueNames: new Set(visits.map((visit) => visit.name)).size,
-    targets: visits.map(({ tag, name }) => ({ tag, name })),
+    targets: visits.map(({ tag, name, focusIndex }) => ({ tag, name, focusIndex })),
     unnamedOrInvisible: visits.filter((visit) => !visit.name || visit.width <= 0 || visit.height <= 0),
     missingFocusVisible: visits.filter((visit) => !visit.focusVisible)
   }

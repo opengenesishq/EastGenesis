@@ -1,15 +1,6 @@
 .video-studio-panel { padding: 14px 18px 18px; background: color-mix(in srgb, var(--bg-raised) 82%, transparent); }
 .video-studio-header, .video-studio-heading, .video-studio-header-actions, .video-studio-section-title, .video-studio-inline-actions, .video-studio-asset-toolbar, .video-studio-asset-actions, .video-studio-storage-toolbar, .video-studio-retention-toolbar, .video-studio-generation-toolbar, .video-studio-provider-toolbar, .video-studio-timeline-toolbar, .video-studio-subheading, .video-studio-scene-title, .video-studio-job { display: flex; align-items: center; gap: 8px; }
 .video-studio-header { justify-content: space-between; min-height: 30px; }
-.video-flow-rail { display: flex; align-items: stretch; gap: 4px; margin: 8px 0 2px; padding: 6px; border: 1px solid var(--border-soft); border-radius: 7px; background: var(--bg-primary); }
-.video-flow-step-wrap { display: flex; min-width: 0; flex: 1 1 0; align-items: center; gap: 4px; }
-.video-flow-step { display: grid; min-width: 0; flex: 1; gap: 2px; padding: 6px 8px; border: 0; border-radius: 5px; color: var(--text); background: transparent; text-align: left; cursor: pointer; }
-.video-flow-step:hover:not(:disabled), .video-flow-step:focus-visible:not(:disabled) { background: var(--bg-hover); }
-.video-flow-step:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
-.video-flow-step:disabled { color: var(--text-dim); cursor: not-allowed; opacity: .62; }
-.video-flow-step strong { font-size: 10.5px; font-weight: 650; white-space: nowrap; }
-.video-flow-step small { min-width: 0; overflow: hidden; color: var(--text-dim); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.video-flow-arrow { color: var(--text-dim); font-size: 12px; }
 .video-studio-heading h2 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 14px; }
 .video-studio-heading > span, .video-studio-section-title span, .video-studio-scene-title span { color: var(--text-dim); font-size: 10px; }
 .video-studio-header-actions { flex-wrap: wrap; justify-content: flex-end; }
@@ -125,4 +116,3 @@
 .video-studio-error { margin: 8px 0 0; color: var(--red); font-size: 11px; overflow-wrap: anywhere; }
 @container video-studio (max-width: 900px) { .video-studio-workspace { grid-template-columns: minmax(280px, 1fr) minmax(230px, .8fr); } .video-studio-assets, .video-studio-queue { grid-column: 1 / -1; } }
 @container video-studio (max-width: 680px) { .video-studio-panel { padding-inline: 12px; } .video-studio-header { align-items: stretch; flex-direction: column; } .video-studio-heading, .video-studio-header-actions { flex-wrap: wrap; } .video-studio-header-actions { width: 100%; justify-content: flex-start; } .video-studio-header-actions .input { flex: 1 1 180px; width: auto; min-width: 0; } .video-studio-create, .video-studio-workspace, .video-studio-continuity-grid, .video-studio-provider-editor > div { grid-template-columns: minmax(0, 1fr); } .video-studio-create button, .video-studio-script, .video-studio-inspector, .video-studio-assets, .video-studio-queue, .video-studio-continuity { grid-column: 1; grid-row: auto; } .video-studio-cue-form { grid-template-columns: minmax(0, 1fr); } .video-studio-cue-form > * { grid-column: 1 / -1; } .video-studio-final { width: 100%; margin-left: 0; } }
-@container video-studio (max-width: 680px) { .video-flow-rail { overflow-x: auto; } .video-flow-step-wrap { min-width: 118px; } }

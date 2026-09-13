@@ -1,4 +1,5 @@
-import type { EngineKind, ModelRoutingTaskKind, SchedulerStrategy } from '../../shared/types'
+import type { EngineKind, ModelRoutingTaskKind, ProviderModelProfile, SchedulerStrategy } from '../../shared/types'
+import { applyConfiguredModelProfile, findConfiguredModelProfile } from './configured-model-profile'
 
 export type ModelTaskKind = ModelRoutingTaskKind
 
@@ -35,7 +36,11 @@ export interface ModelProfile {
   contextWindowTokens: number
   supportsTools: boolean
   supportsVision: boolean
+  /** False for models explicitly declared to produce only media. */
+  supportsText?: boolean
   tags: string[]
+  /** Persisted generation evidence; failed probes are hard-excluded from automatic routing. */
+  verification?: 'passed' | 'failed'
 }
 
 export interface TaskProfileInput {
@@ -98,8 +103,8 @@ export function createFallbackProfile(providerId: string, model: string, provide
         : { inputUsdPerMTok: 1, outputUsdPerMTok: 5, tier: 'medium' },
     latency: isBudget ? 'fast' : isReasoning ? 'slow' : 'balanced',
     contextWindowTokens: hasAny(lower, ['gemini', 'claude', 'qwen-long']) ? 200_000 : DEFAULT_CONTEXT_WINDOW,
-    supportsTools: true,
-    supportsVision: isVision,
+    supportsTools: false,
+    supportsVision: false,
     tags: ['fallback']
   }
 }
@@ -109,10 +114,13 @@ export function buildModelProfiles(input: {
   providerName?: string
   models: string[]
   engine?: EngineKind
+  modelProfiles?: ProviderModelProfile[]
 }): ModelProfile[] {
   return input.models.map((model) => {
-    const known = knownProfile(input.providerId, model, input.providerName)
-    return { ...(known ?? createFallbackProfile(input.providerId, model, input.providerName)), engine: input.engine }
+    const configured = findConfiguredModelProfile(model, input.modelProfiles)
+    const known = knownProfile(input.providerId, configured?.model ?? model, input.providerName)
+    const profile = { ...(known ?? createFallbackProfile(input.providerId, model, input.providerName)), model, engine: input.engine }
+    return applyConfiguredModelProfile(profile, configured)
   })
 }
 
@@ -186,7 +194,7 @@ export function estimateCostUsd(profile: ModelProfile, inputTokens: number, outp
 
 function knownProfile(providerId: string, model: string, providerName?: string): ModelProfile | undefined {
   const lower = model.toLowerCase()
-  if (lower.includes('deepseek-chat')) {
+  if (/^deepseek-chat(?:[.-]|$)/.test(lower)) {
     return {
       providerId,
       providerName,
@@ -200,7 +208,7 @@ function knownProfile(providerId: string, model: string, providerName?: string):
       tags: ['chat', 'budget']
     }
   }
-  if (lower.includes('deepseek-reasoner') || lower.includes('r1')) {
+  if (/^deepseek-(?:reasoner|r1)(?:[.-]|$)/.test(lower)) {
     return {
       providerId,
       providerName,
@@ -214,7 +222,7 @@ function knownProfile(providerId: string, model: string, providerName?: string):
       tags: ['reasoning']
     }
   }
-  if (lower.includes('haiku')) {
+  if (/^claude[-.].*haiku/.test(lower)) {
     return {
       providerId,
       providerName,
@@ -234,7 +242,7 @@ function knownProfile(providerId: string, model: string, providerName?: string):
       tags: ['anthropic', 'fast', 'budget']
     }
   }
-  if (lower.includes('gemini') && lower.includes('flash')) {
+  if (/^gemini[-.].*flash/.test(lower)) {
     return {
       providerId,
       providerName,
@@ -253,7 +261,7 @@ function knownProfile(providerId: string, model: string, providerName?: string):
       tags: ['google', 'fast', 'budget', 'vision', 'long-context']
     }
   }
-  if (/gpt-5(?:[.\-]|$)/.test(lower)) {
+  if (/^gpt-5(?:[.\-]|$)/.test(lower)) {
     return {
       providerId,
       providerName,
@@ -274,7 +282,7 @@ function knownProfile(providerId: string, model: string, providerName?: string):
       tags: ['openai', 'quality', 'coding', 'reasoning']
     }
   }
-  if (lower.includes('kimi') || lower.includes('moonshot')) {
+  if (/^(?:kimi|moonshot)(?:[-.]|$)/.test(lower)) {
     return {
       providerId,
       providerName,
@@ -293,7 +301,7 @@ function knownProfile(providerId: string, model: string, providerName?: string):
       tags: ['moonshot', 'long-context', 'documentation']
     }
   }
-  if (lower.includes('opus')) {
+  if (/^claude[-.].*opus/.test(lower)) {
     return {
       providerId,
       providerName,
@@ -314,7 +322,7 @@ function knownProfile(providerId: string, model: string, providerName?: string):
       tags: ['anthropic', 'quality', 'reasoning']
     }
   }
-  if (lower.includes('sonnet')) {
+  if (/^claude[-.].*sonnet/.test(lower)) {
     return {
       providerId,
       providerName,
@@ -335,7 +343,7 @@ function knownProfile(providerId: string, model: string, providerName?: string):
       tags: ['anthropic', 'balanced', 'coding']
     }
   }
-  if (lower.includes('gpt-4o-mini') || lower.includes('mini')) {
+  if (/^gpt-4o-mini(?:[-.]|$)/.test(lower)) {
     return {
       providerId,
       providerName,
@@ -349,7 +357,7 @@ function knownProfile(providerId: string, model: string, providerName?: string):
       tags: ['budget', 'vision']
     }
   }
-  if (lower.includes('gpt-4o')) {
+  if (/^gpt-4o(?:[-.]|$)/.test(lower)) {
     return {
       providerId,
       providerName,

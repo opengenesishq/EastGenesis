@@ -33,7 +33,7 @@ const ROLE_DEFINITIONS: readonly RoleDefinition[] = [
     role: 'researcher',
     name: '研究分析师',
     purpose: '建立可追溯的事实、需求和方案依据',
-    signals: ['研究', '调研', '分析', '检索', '竞品', '市场', '资料', 'research', 'analysis', 'benchmark'],
+    signals: ['研究', '调研', '分析', '检索', '行业', '市场', '资料', 'research', 'analysis', 'benchmark'],
     methods: ['先定义问题与证据标准', '交叉核验来源并标注不确定性', '将结论绑定到可复查证据'],
     responsibilities: ['收集并筛选一手资料', '输出证据化洞察与风险', '为后续岗位提供可引用输入'],
     capabilityRefs: ['research', 'source-verification', 'evidence-synthesis'],

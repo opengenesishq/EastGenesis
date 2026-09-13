@@ -9,6 +9,7 @@ import type {
   MutationOptions
 } from '../../shared/project-workspace-types'
 import { connectorAuthorizationDigest, connectorResourceAvailability, projectConnectorResource } from './connector-resource'
+import { assertProjectConnectorReadEgressAllowed } from './resource-context'
 import { openProjectWorkspaceStore } from './store'
 import { readProjectConnector } from './project-connector-read-adapter'
 import { createWorkflowEvidence } from '../task/workflow-ledger-api'
@@ -76,6 +77,7 @@ async function executeRequestedProjectConnectorRefresh(
   let cacheWritten = false
   try {
     const runningResource = projectConnectorResource(running, resourceId)
+    assertProjectConnectorReadEgressAllowed(runningResource)
     const operationId = `connector-refresh:${running.id}:${resourceId}:${running.revision}:${runningResource.connector?.lifecycle?.refresh.requestedAt ?? 'unknown'}`
     const read = await readProjectConnector(running, resourceId, { operationId })
     const cached = await writeProjectConnectorCache(rootDir, running.id, resourceId, read, {

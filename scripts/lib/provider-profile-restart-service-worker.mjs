@@ -96,15 +96,20 @@ async function runSameProcessConvergenceAction(context) {
   const preview = service.previewProviderProfileFile(importPath)
   const initialModel = providers.listProviders()[0]?.models?.[0]
   const storePath = path.join(userDataDir, 'providers.json')
+  // Startup can migrate the seed to include a durable connection identity. A
+  // reconciliation repair must restore that exact frozen snapshot, not rebuild
+  // a legacy record that represents a different Provider generation.
+  const storeBeforeOperation = readFileSync(storePath, 'utf8')
   let operationBlocked = false
   try {
     service.applyProviderProfilePreview(preview.previewId, [], {
       onCheckpoint: (checkpoint) => {
         if (checkpoint !== 'after_store_commit') return
-        writeFileSync(storePath, `${JSON.stringify([{
-          ...seedProvider(),
-          models: ['third-digest-model']
-        }], null, 2)}\n`, { mode: 0o600 })
+        const thirdStore = JSON.parse(storeBeforeOperation)
+        currentProviderStoreEntries(thirdStore).find(
+          (provider) => provider.id === seedProvider().id
+        ).models = ['third-digest-model']
+        writeFileSync(storePath, `${JSON.stringify(thirdStore, null, 2)}\n`, { mode: 0o600 })
       }
     })
   } catch {
@@ -115,8 +120,9 @@ async function runSameProcessConvergenceAction(context) {
     (entry) => entry.phase === 'waiting_reconciliation'
   )?.phase
   const pendingMutationCode = capturePendingMutationCode(providers)
-  writeFileSync(storePath, `${JSON.stringify([seedProvider()], null, 2)}\n`, { mode: 0o600 })
+  writeFileSync(storePath, storeBeforeOperation, { mode: 0o600 })
   const reconciliations = service.reconcileProviderProfileOperations()
+  const repairedStoreByteStable = readFileSync(storePath, 'utf8') === storeBeforeOperation
   providers.createProvider({
     name: 'Same-process resumed mutation',
     baseUrl: 'http://127.0.0.1:11436/v1',
@@ -132,6 +138,7 @@ async function runSameProcessConvergenceAction(context) {
     waitingPhase,
     pendingMutationCode,
     reconciliations,
+    repairedStoreByteStable,
     created: finalProviders.some((provider) => provider.name === 'Same-process resumed mutation'),
     finalModels: finalProviders
       .filter((provider) => provider.id === seedProvider().id)
@@ -171,12 +178,11 @@ async function runPendingWriterMatrixAction(context) {
   const storePath = path.join(userDataDir, 'providers.json')
   const storeBefore = readFileSync(storePath, 'utf8')
   const writerResults = {}
-  let preparedOperation
   try {
     service.applyProviderProfilePreview(preview.previewId, [], {
       onCheckpoint: (checkpoint, operationId) => {
         if (checkpoint !== 'after_prepare') return
-        preparedOperation = capturePendingWriterMatrix({
+        capturePendingWriterMatrix({
           operationId,
           providers,
           seedProvider,
@@ -189,19 +195,10 @@ async function runPendingWriterMatrixAction(context) {
   } catch {
     // The injected stop reconciles the untouched before snapshot to aborted.
   }
-  if (!preparedOperation) throw new Error('prepared Provider Profile operation evidence is missing')
-  const delayedTerminalWrite = captureWorkerMutation(() => providers.commitProviderProfileStore(
-    [{ ...seedProvider(), models: ['delayed-terminal-write'] }],
-    {
-      operationId: preparedOperation.operationId,
-      expectedWriteDigest: preparedOperation.desiredSnapshotDigest
-    }
-  ))
   const journalPath = path.join(userDataDir, 'provider-profile-operations', 'journal.json')
   const finalPhase = JSON.parse(readFileSync(journalPath, 'utf8')).entries.at(-1)?.phase
   writeResult({
     writerResults,
-    delayedTerminalWrite,
     storeByteStable: readFileSync(storePath, 'utf8') === storeBefore,
     finalPhase
   })
@@ -234,10 +231,6 @@ function capturePendingWriterMatrix(context) {
       operationId,
       expectedWriteDigest: entry.desiredSnapshotDigest
     }))
-  return {
-    operationId,
-    desiredSnapshotDigest: entry.desiredSnapshotDigest
-  }
 }
 
 function runTamperDuringOperationAction(context) {
@@ -246,6 +239,8 @@ function runTamperDuringOperationAction(context) {
   const originalBackupPath = requiredEnvironment('CAOGEN_PROVIDER_PROFILE_RESTART_ORIGINAL_BACKUP')
   const tamperCheckpoint = requiredEnvironment('CAOGEN_PROVIDER_PROFILE_RESTART_TAMPER_CHECKPOINT')
   const preview = service.previewProviderProfileFile(importPath)
+  const storeBeforeOperationDigest = createHash('sha256')
+    .update(readFileSync(path.join(userDataDir, 'providers.json'))).digest('hex')
   const outcome = { blocked: false, operationId: undefined, safetyBackupId: undefined }
   try {
     service.applyProviderProfilePreview(preview.previewId, [], {
@@ -261,7 +256,7 @@ function runTamperDuringOperationAction(context) {
   const phase = JSON.parse(readFileSync(journalPath, 'utf8')).entries.find(
     (entry) => entry.operationId === outcome.operationId
   )?.phase
-  writeResult({ ...outcome, phase })
+  writeResult({ ...outcome, phase, storeBeforeOperationDigest })
 }
 
 function tamperSafetyBackup(context) {

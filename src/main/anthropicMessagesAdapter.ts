@@ -1,4 +1,5 @@
 import { buildAnthropicMessagesWireBody } from './anthropicMessagesRequest'
+import { NativeProviderHttpError } from './model/native-http-refusal'
 import {
   ProviderRequestDeadline,
   type ProviderRequestTimeouts
@@ -131,11 +132,11 @@ export interface AnthropicMessagesStreamInput {
 
 export { buildAnthropicMessagesWireBody } from './anthropicMessagesRequest'
 
-export class AnthropicMessagesHttpError extends Error {
+export class AnthropicMessagesHttpError extends NativeProviderHttpError {
   readonly name = 'AnthropicMessagesHttpError'
 
   constructor(readonly status: number, message: string) {
-    super(`Anthropic Messages 返回 ${status}: ${message}`)
+    super(status, `Anthropic Messages 返回 ${status}: ${message}`)
   }
 }
 

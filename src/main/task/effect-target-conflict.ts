@@ -1,9 +1,10 @@
+import { domainEffectTargetsConflict } from './effect-domain-conflict'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import type { EffectTarget, FileSystemIdentity } from '../../shared/types'
 import { effectTargetsShareFile } from './effect-target-overlap'
 
 type FileContentTarget = Extract<EffectTarget, { kind: 'file_content' }>
-type OfficeArtifactTarget = Extract<EffectTarget, { kind: 'office_artifact' }>
+type OfficeArtifactTarget = Extract<EffectTarget, { kind: 'office_artifact' | 'office_artifact_revision' }>
 type OutputFileTarget = FileContentTarget | OfficeArtifactTarget
 type GitCommitTarget = Extract<EffectTarget, { kind: 'git_commit' }>
 type GitIndexTarget = Extract<EffectTarget, { kind: 'git_index_update' }>
@@ -16,17 +17,7 @@ type WorktreeLifecycleTarget = Extract<
 >
 
 export function effectTargetsConflict(left: EffectTarget, right: EffectTarget): boolean {
-  if (left.kind === 'migration_operation' && right.kind === 'migration_operation') {
-    if (left.backupRef && right.backupRef) return left.backupRef === right.backupRef
-    return Boolean(left.backupRoot && right.backupRoot && resolve(left.backupRoot) === resolve(right.backupRoot))
-  }
-  if (left.kind === 'project_portable_export' && right.kind === 'project_portable_export') {
-    return left.projectId === right.projectId
-  }
-  if (left.kind === 'provider_profile_operation' && right.kind === 'provider_profile_operation') return true
-  if (left.kind === 'media_job_operation' && right.kind === 'media_job_operation') {
-    return left.mediaJobId === right.mediaJobId
-  }
+  if (domainEffectTargetsConflict(left, right)) return true
   if (targetsShareFile(left, right)) return true
   if (opaqueFileTargetsConflict(left, right)) return true
   if (left.kind === 'git_index_update') return gitIndexTargetConflicts(left, right)
@@ -54,7 +45,7 @@ function opaqueFileTargetsConflict(left: EffectTarget, right: EffectTarget): boo
 }
 
 function isFileEdit(target: EffectTarget): boolean {
-  return target.kind === 'file_content' || target.kind === 'office_artifact' || isOpaqueFileEdit(target)
+  return target.kind === 'file_content' || (target.kind === 'office_artifact' || target.kind === 'office_artifact_revision') || isOpaqueFileEdit(target)
 }
 
 function isOpaqueFileEdit(target: EffectTarget): boolean {
@@ -69,7 +60,7 @@ function gitIndexTargetConflicts(index: GitIndexTarget, other: EffectTarget): bo
   if (other.kind === 'git_index_update') return sameIndexWorktree(index, other)
   if (other.kind === 'git_commit') return sameCommitWorktree(index, other)
   if (other.kind === 'git_merge') return sameMergeWorktree(index, other)
-  if (other.kind === 'file_content' || other.kind === 'office_artifact') return indexReadsFile(index, other)
+  if (isOutputFileTarget(other)) return indexReadsFile(index, other)
   if (other.kind === 'worktree_patch_apply') return indexReadsPatchPaths(index, other)
   if (isWorktreeLifecycleTarget(other)) return worktreeLifecycleConflicts(other, index)
   return false
@@ -84,7 +75,7 @@ function worktreeLifecycleConflicts(lifecycle: WorktreeLifecycleTarget, other: E
   if (other.kind === 'git_commit' || other.kind === 'git_merge') {
     return paths.includes(resolve(other.repoRoot))
   }
-  if (other.kind === 'file_content' || other.kind === 'office_artifact') {
+  if (isOutputFileTarget(other)) {
     return pathIsInside(lifecycle.worktreePath, resolve(other.rootPath, other.relativePath))
   }
   if (other.kind === 'git_push' || other.kind === 'pull_request_create' || other.kind === 'issue_create') {
@@ -231,4 +222,8 @@ function relativeGitPath(root: string, fullPath: string): string | undefined {
   const value = relative(resolve(root), resolve(fullPath))
   if (!value || value === '..' || value.startsWith(`..${sep}`) || isAbsolute(value)) return undefined
   return value.split(sep).join('/')
+}
+
+function isOutputFileTarget(target: EffectTarget): target is OutputFileTarget {
+  return target.kind === 'file_content' || target.kind === 'office_artifact' || target.kind === 'office_artifact_revision'
 }

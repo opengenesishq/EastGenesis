@@ -60,7 +60,7 @@ export function latestProjectWorkspaceMigration(
     candidate.entityId === workspaceId &&
     candidate.projectId === workspaceId
   ).at(-1)
-  return event ? parseMigrationPayload(event.payload) : undefined
+  return event ? parseProjectWorkspaceMigrationPayload(event.payload) : undefined
 }
 
 export function assertProjectWorkspaceSourceContinuity(
@@ -202,7 +202,7 @@ function assertEntityContinuity<T extends GoalMigrationDescriptor | WorkItemMigr
   }
 }
 
-function parseMigrationPayload(value: unknown): ProjectWorkspaceMigrationPayload {
+export function parseProjectWorkspaceMigrationPayload(value: unknown): ProjectWorkspaceMigrationPayload {
   if (!isRecord(value) || !hasPayloadEnvelope(value) || !hasPayloadCollections(value)) {
     throw migrationError('MIGRATION_EVENT_INVALID', 'ProjectWorkspace migration event payload is invalid')
   }

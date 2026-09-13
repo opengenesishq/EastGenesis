@@ -8,6 +8,9 @@ import type {
   WorkflowEvidenceRecord
 } from '../../../shared/types'
 import { EVIDENCE_KINDS, errorMessage, newWorkflowId } from './workflow-ledger-ui'
+import { useT } from '../i18n'
+
+type Translate = ReturnType<typeof useT>
 
 interface ReviewState {
   addingEvidence: boolean
@@ -70,20 +73,26 @@ export function WorkflowAcceptanceRow({
   /** ART-005 (T06) additive:review 成功且有 repair 时上报父层,用于回填 repairByAcceptanceId */
   onRepairReported?: (repair: NonNullable<WorkflowAcceptanceReviewResult['repair']>) => void
 }): React.JSX.Element {
+  const t = useT()
   const state = useReviewState(acceptance)
   const reviewable = acceptance.status === 'pending' || acceptance.status === 'verifying'
   const onAddEvidence = (event: React.FormEvent<HTMLFormElement>): void => {
-    void addEvidence(event, acceptance, state, onRefresh, artifact)
+    void addEvidence(event, acceptance, state, onRefresh, t, artifact)
   }
   const onReview = (decision: WorkflowAcceptanceReviewDecision): void => {
-    void reviewAcceptance(decision, acceptance, state, onRefresh, onRepairReported)
+    void reviewAcceptance(decision, acceptance, state, onRefresh, t, onRepairReported)
   }
 
   return (
     <div className="workflow-acceptance-row" data-acceptance-review={acceptance.id}>
       <div className="workflow-ledger-row-main">
         <strong>{acceptance.status} · {acceptance.id}</strong>
-        <span className="workflow-ledger-meta">{acceptance.criteria.length} criteria · revision {acceptance.revision}</span>
+        <span className="workflow-ledger-meta">
+          {t('workflowLedgerCriteriaRevision', {
+            count: acceptance.criteria.length,
+            revision: acceptance.revision
+          })}
+        </span>
       </div>
       <AcceptancePolicyList acceptance={acceptance} />
       {reviewable && (
@@ -105,10 +114,10 @@ export function WorkflowAcceptanceRow({
             type="button"
             className="btn btn-ghost btn-xs"
             data-acceptance-repair
-            onClick={() => void openRepair(repairWorkItemId, state, onOpenRepair)}
+            onClick={() => void openRepair(repairWorkItemId, state, onOpenRepair, t)}
             disabled={state.busy}
           >
-            {state.busy ? '启动中...' : '开始返工'}
+            {state.busy ? t('workflowLedgerRepairStarting') : t('workflowLedgerStartRepair')}
           </button>
         </div>
       )}
@@ -119,14 +128,15 @@ export function WorkflowAcceptanceRow({
 async function openRepair(
   workItemId: string,
   state: ReviewState,
-  onOpenRepair: (workItemId: string) => Promise<void> | void
+  onOpenRepair: (workItemId: string) => Promise<void> | void,
+  t: Translate
 ): Promise<void> {
   state.setError('')
   state.setSuccess('')
   state.setBusy(true)
   try {
     await onOpenRepair(workItemId)
-    state.setSuccess('返工任务已启动')
+    state.setSuccess(t('workflowLedgerRepairStarted'))
   } catch (cause) {
     state.setError(errorMessage(cause))
   } finally {
@@ -135,13 +145,14 @@ async function openRepair(
 }
 
 function AcceptancePolicyList({ acceptance }: { acceptance: WorkflowAcceptanceRecord }): React.JSX.Element {
+  const t = useT()
   return (
     <div className="workflow-acceptance-policy-list">
       {acceptance.criterionPolicies?.map((policy) => (
         <span className="workflow-acceptance-policy" key={`${acceptance.id}:${policy.criterionId}`}>
           {policy.criterionIndex + 1}: {policy.evidenceKind} / {policy.allowedSources.join(', ')}
         </span>
-      )) ?? <span className="workflow-ledger-meta">legacy policy</span>}
+      )) ?? <span className="workflow-ledger-meta">{t('workflowLedgerLegacyPolicy')}</span>}
     </div>
   )
 }
@@ -161,10 +172,11 @@ function AcceptanceReviewPanel({
   onAddEvidence: (event: React.FormEvent<HTMLFormElement>) => void
   onReview: (decision: WorkflowAcceptanceReviewDecision) => void
 }): React.JSX.Element {
+  const t = useT()
   return (
     <div className="workflow-acceptance-review">
       <div className="workflow-acceptance-review-head">
-        <strong>Review / Evidence</strong>
+        <strong>{t('workflowLedgerReviewEvidence')}</strong>
         <button
           type="button"
           className="btn btn-ghost btn-xs"
@@ -172,19 +184,19 @@ function AcceptanceReviewPanel({
           onClick={() => toggleEvidenceAuthoring(state)}
           disabled={state.busy}
         >
-          {state.addingEvidence ? '取消 Evidence' : '添加 Evidence'}
+          {state.addingEvidence ? t('workflowLedgerCancelEvidence') : t('workflowLedgerAddEvidence')}
         </button>
       </div>
       {state.addingEvidence && <EvidenceAuthoringForm state={state} onSubmit={onAddEvidence} />}
       <CriterionReviewList acceptance={acceptance} evidence={evidence} artifactId={artifactId} state={state} />
       <label className="field-label workflow-waiver-field">
-        Waiver reason
+        {t('workflowLedgerWaiverReason')}
         <input
           className="input"
           value={state.waiverReason}
           onChange={(event) => state.setWaiverReason(event.target.value)}
           disabled={state.busy}
-          placeholder="仅在豁免时填写"
+          placeholder={t('workflowLedgerWaiverPlaceholder')}
           data-acceptance-waiver-reason
         />
       </label>
@@ -202,10 +214,11 @@ function EvidenceAuthoringForm({
   state: ReviewState
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
 }): React.JSX.Element {
+  const t = useT()
   return (
     <form className="workflow-evidence-authoring" onSubmit={onSubmit}>
       <label className="field-label">
-        Evidence kind
+        {t('workflowLedgerEvidenceKind')}
         <select
           className="select select-block"
           value={state.evidenceKind}
@@ -217,7 +230,7 @@ function EvidenceAuthoringForm({
         </select>
       </label>
       <label className="field-label">
-        标题
+        {t('workflowLedgerEvidenceTitle')}
         <input
           className="input"
           value={state.evidenceTitle}
@@ -228,7 +241,7 @@ function EvidenceAuthoringForm({
         />
       </label>
       <label className="field-label">
-        摘要
+        {t('workflowLedgerEvidenceSummary')}
         <textarea
           className="input workflow-evidence-summary-input"
           value={state.evidenceSummary}
@@ -239,7 +252,7 @@ function EvidenceAuthoringForm({
         />
       </label>
       <button type="submit" className="btn btn-primary btn-xs" disabled={state.busy} data-acceptance-save-evidence>
-        {state.busy ? '保存中...' : '保存 Evidence'}
+        {state.busy ? t('workflowLedgerSaving') : t('workflowLedgerSaveEvidence')}
       </button>
     </form>
   )
@@ -288,6 +301,7 @@ function CriterionReview({
   artifactId?: string
   state: ReviewState
 }): React.JSX.Element {
+  const t = useT()
   const policy = policyFor(acceptance, criterionIndex)
   const candidates = eligibleEvidence(evidence, policy, artifactId)
   const selected = state.selectedEvidence[criterionIndex] ?? []
@@ -295,7 +309,12 @@ function CriterionReview({
     <fieldset className="workflow-criterion-review">
       <legend>Criterion {criterionIndex + 1}: {criterion}</legend>
       {candidates.length === 0 ? (
-        <span className="workflow-ledger-meta">暂无匹配 Evidence（要求 {policy?.evidenceKind ?? '任意 kind'} / {policy?.allowedSources.join(', ') ?? '任意 source'}）</span>
+        <span className="workflow-ledger-meta">
+          {t('workflowLedgerNoMatchingEvidence', {
+            kind: policy?.evidenceKind ?? t('workflowLedgerAnyKind'),
+            source: policy?.allowedSources.join(', ') ?? t('workflowLedgerAnySource')
+          })}
+        </span>
       ) : candidates.map((record) => (
         <label className="workflow-evidence-option" key={record.evidenceId}>
           <input
@@ -319,11 +338,12 @@ function ReviewActions({
   busy: boolean
   onReview: (decision: WorkflowAcceptanceReviewDecision) => void
 }): React.JSX.Element {
+  const t = useT()
   return (
     <div className="workflow-acceptance-review-actions">
-      <button type="button" className="btn btn-primary btn-xs" onClick={() => onReview('passed')} disabled={busy} data-acceptance-decision="passed">通过</button>
-      <button type="button" className="btn btn-ghost btn-xs" onClick={() => onReview('failed')} disabled={busy} data-acceptance-decision="failed">标记失败</button>
-      <button type="button" className="btn btn-ghost btn-xs" onClick={() => onReview('waived')} disabled={busy} data-acceptance-decision="waived">豁免</button>
+      <button type="button" className="btn btn-primary btn-xs" onClick={() => onReview('passed')} disabled={busy} data-acceptance-decision="passed">{t('workflowLedgerPass')}</button>
+      <button type="button" className="btn btn-ghost btn-xs" onClick={() => onReview('failed')} disabled={busy} data-acceptance-decision="failed">{t('workflowLedgerMarkFailed')}</button>
+      <button type="button" className="btn btn-ghost btn-xs" onClick={() => onReview('waived')} disabled={busy} data-acceptance-decision="waived">{t('workflowLedgerWaive')}</button>
     </div>
   )
 }
@@ -335,9 +355,10 @@ function FailedAcceptanceReview({
   state: ReviewState
   onReview: (decision: WorkflowAcceptanceReviewDecision) => void
 }): React.JSX.Element {
+  const t = useT()
   return (
     <div className="workflow-acceptance-review workflow-acceptance-retest">
-      <button type="button" className="btn btn-ghost btn-xs" onClick={() => onReview('retest')} disabled={state.busy} data-acceptance-decision="retest">开始重测</button>
+      <button type="button" className="btn btn-ghost btn-xs" onClick={() => onReview('retest')} disabled={state.busy} data-acceptance-decision="retest">{t('workflowLedgerStartRetest')}</button>
       {state.error && <div className="notice notice-error">{state.error}</div>}
       {state.success && <div className="notice notice-success">{state.success}</div>}
     </div>
@@ -380,6 +401,7 @@ async function addEvidence(
   acceptance: WorkflowAcceptanceRecord,
   state: ReviewState,
   onRefresh: () => Promise<void>,
+  t: Translate,
   artifact?: WorkflowArtifactRecord
 ): Promise<void> {
   event.preventDefault()
@@ -388,7 +410,7 @@ async function addEvidence(
   const title = state.evidenceTitle.trim()
   const summary = state.evidenceSummary.trim()
   if (!title || !acceptance.projectId) {
-    state.setError('Evidence title 和 Project 归属不能为空')
+    state.setError(t('workflowLedgerEvidenceTitleProjectRequired'))
     return
   }
   state.setBusy(true)
@@ -410,7 +432,7 @@ async function addEvidence(
     state.setEvidenceTitle('')
     state.setEvidenceSummary('')
     state.setAddingEvidence(false)
-    state.setSuccess('Evidence 已记录；请选择它覆盖对应 criterion')
+    state.setSuccess(t('workflowLedgerEvidenceRecorded'))
     await onRefresh()
   } catch (cause) {
     state.setError(errorMessage(cause))
@@ -424,12 +446,13 @@ async function reviewAcceptance(
   acceptance: WorkflowAcceptanceRecord,
   state: ReviewState,
   onRefresh: () => Promise<void>,
+  t: Translate,
   onRepairReported?: (repair: NonNullable<WorkflowAcceptanceReviewResult['repair']>) => void
 ): Promise<void> {
   state.setError('')
   state.setSuccess('')
   if (decision === 'waived' && !state.waiverReason.trim()) {
-    state.setError('豁免必须填写理由')
+    state.setError(t('workflowLedgerWaiverReasonRequired'))
     return
   }
   const criterionEvidence = acceptance.criteria.map((_, criterionIndex) => ({
@@ -437,7 +460,7 @@ async function reviewAcceptance(
     evidenceRefs: [...new Set(state.selectedEvidence[criterionIndex] ?? [])]
   }))
   if (requiresEvidence(decision) && criterionEvidence.some((item) => item.evidenceRefs.length === 0)) {
-    state.setError('通过或失败前必须为每个 criterion 选择 Evidence')
+    state.setError(t('workflowLedgerCriterionEvidenceRequired'))
     return
   }
   state.setBusy(true)
@@ -448,7 +471,7 @@ async function reviewAcceptance(
       decision,
       ...(decision === 'waived' ? { waiverReason: state.waiverReason.trim() } : {})
     })
-    state.setSuccess(`Acceptance 已${reviewDecisionLabel(decision)}`)
+    state.setSuccess(t('workflowLedgerAcceptanceReviewed', { decision: reviewDecisionLabel(decision, t) }))
     state.setSelectedEvidence({})
     state.setWaiverReason('')
     await onRefresh()
@@ -465,11 +488,11 @@ function requiresEvidence(decision: WorkflowAcceptanceReviewDecision): boolean {
   return decision === 'passed' || decision === 'failed'
 }
 
-function reviewDecisionLabel(decision: WorkflowAcceptanceReviewDecision): string {
-  if (decision === 'passed') return '通过'
-  if (decision === 'failed') return '标记失败'
-  if (decision === 'retest') return '进入重测'
-  return '豁免'
+function reviewDecisionLabel(decision: WorkflowAcceptanceReviewDecision, t: Translate): string {
+  if (decision === 'passed') return t('workflowLedgerDecisionPassed')
+  if (decision === 'failed') return t('workflowLedgerDecisionFailed')
+  if (decision === 'retest') return t('workflowLedgerDecisionRetest')
+  return t('workflowLedgerDecisionWaived')
 }
 
 async function sha256(value: string): Promise<string> {

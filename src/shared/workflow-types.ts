@@ -1,4 +1,5 @@
 import type { TaskRunRecord, TaskRunStatus } from './types'
+import type { BusinessLineBinding } from './business-line-types'
 export type WorkflowGoalStatus =
   | 'draft'
   | 'planned'
@@ -342,7 +343,7 @@ export interface WorkflowGoalRecord {
   archivedAt?: number
 }
 
-export interface WorkflowWorkItemRecord {
+export interface WorkflowWorkItemRecord extends BusinessLineBinding {
   schemaVersion: 1
   id: string
   projectId?: string
@@ -361,7 +362,6 @@ export interface WorkflowWorkItemRecord {
   updatedAt: number
   dueAt?: number
 }
-
 export interface WorkflowRunRecord {
   schemaVersion: 1
   id: string
@@ -944,7 +944,7 @@ export interface WorkflowEvidenceLinkInput {
   createdAt?: number
 }
 
-export interface WorkflowWorkItemProjectionInput {
+export interface WorkflowWorkItemProjectionInput extends BusinessLineBinding {
   id: string
   projectId?: string
   goalId?: string

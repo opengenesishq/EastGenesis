@@ -33,7 +33,6 @@ const KIND_LABEL: Record<PluginRegistryKind, string> = {
 }
 
 const SOURCE_LABEL: Record<PluginRegistrySourceKind, string> = {
-  codex: 'Codex',
   project: 'Project',
   user: 'User',
   other: 'Other'

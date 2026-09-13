@@ -23,6 +23,7 @@ import {
   ProjectResourceForm
 } from './ProjectWorkspaceLifecycleForms'
 import { useProjectWorkspaceLifecycle } from './useProjectWorkspaceLifecycle'
+import { useStore } from '../../store'
 import './project-workspace-lifecycle.css'
 
 interface Props {
@@ -36,6 +37,7 @@ export default function ProjectWorkspaceLifecycle({
   refreshContents,
   refreshProjects
 }: Props): React.JSX.Element {
+  useStore((state) => state.settings.language)
   const titleId = useId()
   const [panel, setPanel] = useState<ProjectLifecyclePanel>(null)
   const [deleteMode, setDeleteMode] = useState<'soft' | 'permanent' | null>(null)
@@ -204,38 +206,38 @@ function ProjectKnowledgePanel({
   return (
     <div className="pws-knowledge" aria-labelledby={titleId} aria-busy={loading}>
       <div className="pws-resources-header">
-        <div className="pws-section-title"><h3 id={titleId}>项目知识</h3><span>{knowledge ? knowledge.sources.length + knowledge.connectors.length : 0}</span></div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onRefresh} disabled={loading} data-project-action="refresh-knowledge">{loading ? '读取中...' : '刷新预览'}</button>
+        <div className="pws-section-title"><h3 id={titleId}>{localized('项目知识', 'Project knowledge')}</h3><span>{knowledge ? knowledge.sources.length + knowledge.connectors.length : 0}</span></div>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onRefresh} disabled={loading} data-project-action="refresh-knowledge">{loading ? localized('读取中...', 'Loading...') : localized('刷新预览', 'Refresh preview')}</button>
       </div>
       {error && <p className="pws-lifecycle-feedback notice notice-error" role="alert">{error}</p>}
-      {!error && !knowledge && !loading && <p className="pws-muted pws-resource-empty">暂无可读知识源</p>}
+      {!error && !knowledge && !loading && <p className="pws-muted pws-resource-empty">{localized('暂无可读知识源', 'No readable knowledge sources')}</p>}
       {knowledge && (
         <>
-          <p className="pws-knowledge-meta">策略 {knowledge.policyDigest.slice(0, 19)} · revision {knowledge.projectRevision}</p>
-          <form className="pws-knowledge-search" onSubmit={submitSearch} aria-label="搜索项目知识">
+          <p className="pws-knowledge-meta">{localized('策略', 'Policy')} {knowledge.policyDigest.slice(0, 19)} · revision {knowledge.projectRevision}</p>
+          <form className="pws-knowledge-search" onSubmit={submitSearch} aria-label={localized('搜索项目知识', 'Search project knowledge')}>
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索项目知识文件"
-              aria-label="搜索项目知识文件"
+              placeholder={localized('搜索项目知识文件', 'Search project knowledge files')}
+              aria-label={localized('搜索项目知识文件', 'Search project knowledge files')}
               maxLength={512}
             />
             <button type="submit" className="btn btn-primary btn-sm" disabled={searchLoading || !query.trim()} data-project-action="search-knowledge">
-              {searchLoading ? '搜索中...' : '搜索'}
+              {searchLoading ? localized('搜索中...', 'Searching...') : localized('搜索', 'Search')}
             </button>
           </form>
           {searchError && <p className="pws-lifecycle-feedback notice notice-error" role="alert">{searchError}</p>}
           {search && (
-            <div className="pws-knowledge-search-results" role="region" aria-label="知识搜索结果">
-              <p className="pws-knowledge-meta">“{search.query}” · {search.results.length} 个命中 · {new Date(search.searchedAt).toLocaleTimeString('zh-CN')}</p>
+            <div className="pws-knowledge-search-results" role="region" aria-label={localized('知识搜索结果', 'Knowledge search results')}>
+              <p className="pws-knowledge-meta">“{search.query}” · {localized(`${search.results.length} 个命中`, `${search.results.length} matches`)} · {new Date(search.searchedAt).toLocaleTimeString(locale())}</p>
               {search.connectorErrors.length > 0 && (
-                <p className="pws-knowledge-meta" role="status">{search.connectorErrors.length} 个连接器未参与搜索：{search.connectorErrors.map((item) => `${item.resourceId}（${item.reason}）`).join('、')}</p>
+                <p className="pws-knowledge-meta" role="status">{localized(`${search.connectorErrors.length} 个连接器未参与搜索：`, `${search.connectorErrors.length} connectors were excluded from search: `)}{search.connectorErrors.map((item) => `${item.resourceId} (${item.reason})`).join(', ')}</p>
               )}
-              {search.results.length === 0 ? <p className="pws-muted pws-resource-empty">没有匹配的本地知识文件</p> : (
+              {search.results.length === 0 ? <p className="pws-muted pws-resource-empty">{localized('没有匹配的本地知识文件', 'No local knowledge files matched')}</p> : (
                 <div className="pws-knowledge-list" role="list">
                   {search.results.map((result) => (
                     <div className="pws-knowledge-row" key={result.evidenceId} role="listitem" data-knowledge-evidence-id={result.evidenceId}>
-                      <span className="pws-knowledge-kind">引用</span>
+                      <span className="pws-knowledge-kind">{localized('引用', 'Citation')}</span>
                       <span className="pws-resource-copy">
                         <strong>{basenameForDisplay(result.path)}</strong>
                         <small>{result.snippet}</small>
@@ -248,28 +250,28 @@ function ProjectKnowledgePanel({
             </div>
           )}
           {knowledge.sources.length > 0 && (
-            <div className="pws-knowledge-list" role="list" aria-label="本地知识文件">
+            <div className="pws-knowledge-list" role="list" aria-label={localized('本地知识文件', 'Local knowledge files')}>
               {knowledge.sources.map((source) => (
                 <div className="pws-knowledge-row" key={`${source.resourceId}:${source.path}`} role="listitem" data-knowledge-resource-id={source.resourceId}>
-                  <span className="pws-knowledge-kind">本地</span>
+                  <span className="pws-knowledge-kind">{localized('本地', 'Local')}</span>
                   <span className="pws-resource-copy">
                     <strong>{basenameForDisplay(source.path)}</strong>
-                    <small>{source.bytes} bytes · sha256:{source.digest.slice(0, 12)} · {new Date(source.modifiedAt).toLocaleDateString('zh-CN')}{source.truncated ? ' · 已截断' : ''}</small>
+                    <small>{source.bytes} bytes · sha256:{source.digest.slice(0, 12)} · {new Date(source.modifiedAt).toLocaleDateString(locale())}{source.truncated ? localized(' · 已截断', ' · Truncated') : ''}</small>
                   </span>
                 </div>
               ))}
             </div>
           )}
           {knowledge.connectors.length > 0 && (
-            <div className="pws-knowledge-list" role="list" aria-label="项目连接器知识源">
+            <div className="pws-knowledge-list" role="list" aria-label={localized('项目连接器知识源', 'Project connector knowledge sources')}>
               {knowledge.connectors.map((connector) => (
                 <div className="pws-knowledge-row" key={connector.resourceId} role="listitem" data-knowledge-connector-id={connector.resourceId}>
-                  <span className="pws-knowledge-kind">连接器</span>
+                  <span className="pws-knowledge-kind">{localized('连接器', 'Connector')}</span>
                   <span className="pws-resource-copy">
                     <strong>{connector.label}</strong>
                     <small>
-                      {connector.connectorId ?? 'generic'} · {connector.available ? '可用' : connector.reason ?? '不可用'} · refresh:{connector.refresh.status}
-                      {connector.autoRefresh?.intervalMs ? ` · 自动:${autoRefreshLabel(connector.autoRefresh.intervalMs)}${connector.autoRefresh.nextAt ? `/${new Date(connector.autoRefresh.nextAt).toLocaleString('zh-CN')}` : ''}` : ''}
+                      {connector.connectorId ?? 'generic'} · {connector.available ? localized('可用', 'Available') : connector.reason ?? localized('不可用', 'Unavailable')} · refresh:{connector.refresh.status}
+                      {connector.autoRefresh?.intervalMs ? ` · ${localized('自动', 'Auto')}:${autoRefreshLabel(connector.autoRefresh.intervalMs)}${connector.autoRefresh.nextAt ? `/${new Date(connector.autoRefresh.nextAt).toLocaleString(locale())}` : ''}` : ''}
                       {' · '}cache:{connector.cache.status}{connector.cache.bytes !== undefined ? `/${connector.cache.bytes} bytes` : ''}
                       {connector.revocation ? ` · revocation:${connector.revocation.status}/${connector.revocation.pausedRunIds.length} runs` : ''}
                       {connector.refresh.latestCitation ? ` · ${connector.refresh.latestCitation.version}` : ''}
@@ -426,10 +428,10 @@ function ProjectResourceRow({
           <small>
             {resource.connector.connectorId ?? 'generic'} · v{resource.connector.version} · {resource.connector.dataDirection} · {resource.connector.authorization.subject}
             {' · '}{resource.connector.authorization.status} · {lifecycle.enabled ? 'enabled' : 'disabled'} · refresh:{lifecycle.refresh.status}
-            {lifecycle.autoRefresh?.intervalMs ? ` · 自动:${autoRefreshLabel(lifecycle.autoRefresh.intervalMs)}${lifecycle.autoRefresh.nextAt ? `/${new Date(lifecycle.autoRefresh.nextAt).toLocaleString('zh-CN')}` : ''}` : ' · 自动:关闭'}
+            {lifecycle.autoRefresh?.intervalMs ? ` · ${localized('自动', 'Auto')}:${autoRefreshLabel(lifecycle.autoRefresh.intervalMs)}${lifecycle.autoRefresh.nextAt ? `/${new Date(lifecycle.autoRefresh.nextAt).toLocaleString(locale())}` : ''}` : ` · ${localized('自动:关闭', 'Auto:off')}`}
             {' · '}cache:{lifecycle.cache?.status ?? 'empty'}{lifecycle.cache?.bytes !== undefined ? `/${lifecycle.cache.bytes} bytes` : ''}
             {lifecycle.revocation ? ` · revocation:${lifecycle.revocation.status}/${lifecycle.revocation.pausedRunIds.length} runs` : ''}
-            {lifecycle.refresh.latestCitation && ` · ${lifecycle.refresh.latestCitation.version} · ${new Date(lifecycle.refresh.latestCitation.retrievedAt).toLocaleDateString('zh-CN')}`}
+            {lifecycle.refresh.latestCitation && ` · ${lifecycle.refresh.latestCitation.version} · ${new Date(lifecycle.refresh.latestCitation.retrievedAt).toLocaleDateString(locale())}`}
           </small>
         )}
       </span>
@@ -437,52 +439,60 @@ function ProjectResourceRow({
         {resourceDataClass(resource)} · {resourceEgressLabel(resource)}
       </span>
       {editable && connector && (
-        <span className="pws-resource-controls" aria-label={`${label} 连接器控制`}>
-          {supportsRead && connectorAvailable && <button type="button" className="btn btn-ghost btn-sm" onClick={() => onConnectorMutation(resource.id, { kind: 'request_refresh' })} disabled={busy || lifecycle.refresh.status === 'requested' || lifecycle.refresh.status === 'running'} data-resource-action="refresh">刷新</button>}
+        <span className="pws-resource-controls" aria-label={localized(`${label} 连接器控制`, `Connector controls for ${label}`)}>
+          {supportsRead && connectorAvailable && <button type="button" className="btn btn-ghost btn-sm" onClick={() => onConnectorMutation(resource.id, { kind: 'request_refresh' })} disabled={busy || lifecycle.refresh.status === 'requested' || lifecycle.refresh.status === 'running'} data-resource-action="refresh">{localized('刷新', 'Refresh')}</button>}
           {supportsRead && (
             <select
               className="select"
               value={lifecycle.autoRefresh?.intervalMs ?? 0}
               onChange={(event) => onConnectorMutation(resource.id, { kind: 'set_auto_refresh', intervalMs: Number(event.target.value) as 0 | 900_000 | 3_600_000 | 21_600_000 | 86_400_000 })}
               disabled={busy}
-              aria-label={`${label} 自动刷新周期`}
+              aria-label={localized(`${label} 自动刷新周期`, `Auto-refresh interval for ${label}`)}
               data-resource-action="auto-refresh"
             >
-              <option value={0}>自动刷新:关闭</option>
-              <option value={900_000}>每 15 分钟</option>
-              <option value={3_600_000}>每 1 小时</option>
-              <option value={21_600_000}>每 6 小时</option>
-              <option value={86_400_000}>每 24 小时</option>
+              <option value={0}>{localized('自动刷新:关闭', 'Auto-refresh: off')}</option>
+              <option value={900_000}>{localized('每 15 分钟', 'Every 15 minutes')}</option>
+              <option value={3_600_000}>{localized('每 1 小时', 'Every hour')}</option>
+              <option value={21_600_000}>{localized('每 6 小时', 'Every 6 hours')}</option>
+              <option value={86_400_000}>{localized('每 24 小时', 'Every 24 hours')}</option>
             </select>
           )}
-          {(lifecycle.cache?.status === 'ready' || lifecycle.cache?.status === 'purge_failed') && <button type="button" className="btn btn-ghost btn-sm" onClick={() => onConnectorMutation(resource.id, { kind: 'purge_cache' })} disabled={busy} data-resource-action="purge-cache">清缓存</button>}
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => onConnectorMutation(resource.id, { kind: 'set_enabled', enabled: !lifecycle.enabled })} disabled={busy || (lifecycle.enabled === false && connector.authorization.status !== 'active')} data-resource-action="toggle-enabled">{lifecycle.enabled ? '停用' : '启用'}</button>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => onConnectorMutation(resource.id, { kind: 'set_authorization', status: connector.authorization.status === 'active' ? 'revoked' : 'active' })} disabled={busy} data-resource-action="toggle-authorization">{connector.authorization.status === 'active' ? '撤销授权' : '恢复授权'}</button>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setBindingOpen((value) => !value)} disabled={busy} data-resource-action="bind-authorization">更换账户</button>
+          {(lifecycle.cache?.status === 'ready' || lifecycle.cache?.status === 'purge_failed') && <button type="button" className="btn btn-ghost btn-sm" onClick={() => onConnectorMutation(resource.id, { kind: 'purge_cache' })} disabled={busy} data-resource-action="purge-cache">{localized('清缓存', 'Clear cache')}</button>}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => onConnectorMutation(resource.id, { kind: 'set_enabled', enabled: !lifecycle.enabled })} disabled={busy || (lifecycle.enabled === false && connector.authorization.status !== 'active')} data-resource-action="toggle-enabled">{lifecycle.enabled ? localized('停用', 'Disable') : localized('启用', 'Enable')}</button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => onConnectorMutation(resource.id, { kind: 'set_authorization', status: connector.authorization.status === 'active' ? 'revoked' : 'active' })} disabled={busy} data-resource-action="toggle-authorization">{connector.authorization.status === 'active' ? localized('撤销授权', 'Revoke authorization') : localized('恢复授权', 'Restore authorization')}</button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setBindingOpen((value) => !value)} disabled={busy} data-resource-action="bind-authorization">{localized('更换账户', 'Change account')}</button>
         </span>
       )}
       {editable && connector && bindingOpen && (
         <span className="pws-resource-binding" data-resource-action="bind-authorization-form">
-          <select className="select" value={selectedBinding} onChange={(event) => setSelectedBinding(event.target.value)} aria-label={`${label} 授权账户`}>
-            <option value="">选择已授权账户</option>
+          <select className="select" value={selectedBinding} onChange={(event) => setSelectedBinding(event.target.value)} aria-label={localized(`${label} 授权账户`, `Authorized account for ${label}`)}>
+            <option value="">{localized('选择已授权账户', 'Select an authorized account')}</option>
             {accounts.map(({ providerId, account }) => (
               <option key={`${providerId}/${account.id}`} value={`${providerId}/${account.id}`} disabled={account.requiresReauth}>
-                {account.label} · {providerId}{account.requiresReauth ? ' · 需要重新授权' : ''}
+                {account.label} · {providerId}{account.requiresReauth ? localized(' · 需要重新授权', ' · Reauthorization required') : ''}
               </option>
             ))}
           </select>
-          <button type="button" className="btn btn-primary btn-sm" onClick={submitBinding} disabled={busy || !selectedBinding}>绑定</button>
+          <button type="button" className="btn btn-primary btn-sm" onClick={submitBinding} disabled={busy || !selectedBinding}>{localized('绑定', 'Bind')}</button>
         </span>
       )}
-      {editable && <button type="button" className="btn btn-ghost btn-sm" onClick={() => onRemove(resource.id)} disabled={busy} aria-label={TEXT.removeResource(label)} data-resource-action="remove">移除</button>}
+      {editable && <button type="button" className="btn btn-ghost btn-sm" onClick={() => onRemove(resource.id)} disabled={busy} aria-label={TEXT.removeResource(label)} data-resource-action="remove">{localized('移除', 'Remove')}</button>}
     </div>
   )
 }
 
 function autoRefreshLabel(intervalMs: number): string {
-  if (intervalMs === 900_000) return '15 分钟'
-  if (intervalMs === 3_600_000) return '1 小时'
-  if (intervalMs === 21_600_000) return '6 小时'
-  if (intervalMs === 86_400_000) return '24 小时'
-  return '关闭'
+  if (intervalMs === 900_000) return localized('15 分钟', '15 minutes')
+  if (intervalMs === 3_600_000) return localized('1 小时', '1 hour')
+  if (intervalMs === 21_600_000) return localized('6 小时', '6 hours')
+  if (intervalMs === 86_400_000) return localized('24 小时', '24 hours')
+  return localized('关闭', 'Off')
+}
+
+function locale(): string {
+  return useStore.getState().settings.language === 'zh' ? 'zh-CN' : 'en-US'
+}
+
+function localized(chinese: string, english: string): string {
+  return useStore.getState().settings.language === 'en' ? english : chinese
 }

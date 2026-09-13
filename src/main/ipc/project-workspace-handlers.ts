@@ -3,8 +3,7 @@ import { isAbsolute, relative, resolve } from 'node:path'
 import {
   openProjectWorkspaceStore,
   type DeleteOptions,
-  type LeaseOptions,
-  type ListOptions
+  type LeaseOptions
 } from '../project-workspace/store'
 import { openProjectWorkspaceCommandService } from '../project-workspace/command-service'
 import {
@@ -36,7 +35,6 @@ import {
   type ProjectWorkspaceDeleteOptions,
   type ProjectWorkspaceInput,
   type ProjectWorkspaceLeaseOptions,
-  type ProjectWorkspaceListOptions,
   type ProjectWorkspacePatch,
   type ProjectWorkspaceTemplateApplyInput,
   type ProjectConnectorMutation,
@@ -57,7 +55,8 @@ import { LOCAL_USER_ACTOR } from '../project-workspace/work-item-authorization'
 import { assertTrustedWorkflowLedgerSender } from './workflow-ledger-handlers'
 import {
   startAssignmentOwnerReadiness,
-  withAssignmentOwnerReadiness
+  withAssignmentOwnerReadAccess,
+  withAssignmentOwnerWriteAccess
 } from '../assignment-owner-coordinator'
 import { DigitalWorkerStore } from '../digital-worker/domain-store'
 import { normalizeOwner, normalizeResources } from '../project-workspace/codec'
@@ -66,9 +65,9 @@ import {
   verifyProductionProjectMutation
 } from '../project-aggregate/project-mutation-ingress'
 import { executeProjectPermanentDeletionEffect } from '../project-deletion-effect'
-import {
-  recoverPendingProjectImports
-} from '../data-lifecycle/project-import-coordinator'
+import { projectImportReadiness } from './project-import-readiness'
+import { prewarmFirstActiveProject } from './project-workspace-readiness'
+import { normalizeContentsOptions, normalizeListOptions } from './project-workspace-read-options'
 import { sessionManager } from '../sessionManager'
 import { invalidateHistoryCache } from '../history'
 import { applyProjectWorkspaceTemplate, createProjectWorkspaceWithTemplate } from '../project-workspace/template-service'
@@ -102,7 +101,7 @@ const GOAL_PATCH_KEYS = new Set([
   'acceptanceResult', 'contract', 'createdBy'
 ])
 const WORK_ITEM_KEYS = new Set([
-  'id', 'projectId', 'goalId', 'parentId', 'type', 'title', 'description',
+  'id', 'projectId', 'goalId', 'parentId', 'businessLineId', 'type', 'title', 'description',
   'dependencyIds', 'priority', 'owner', 'status', 'dueAt', 'acceptanceSpec',
   'artifactRefs', 'runRefs', 'createdAt', 'updatedAt'
 ])
@@ -110,7 +109,7 @@ const WORK_ITEM_PATCH_KEYS = new Set([
   'title', 'description', 'type', 'parentId', 'dependencyIds', 'priority',
   'owner', 'dueAt', 'acceptanceSpec', 'artifactRefs', 'runRefs'
 ])
-const GOAL_TASK_KEYS = new Set(['requestId', 'projectId', 'objective'])
+const GOAL_TASK_KEYS = new Set(['requestId', 'projectId', 'objective', 'businessLineId'])
 const PROJECT_TEMPLATE_APPLY_KEYS = new Set(['requestId', 'projectId', 'templateId'])
 const PROJECT_KNOWLEDGE_SEARCH_KEYS = new Set(['projectId', 'query', 'limit'])
 const PROJECT_DEPENDENCY_KEYS = new Set(['id', 'fromProjectId', 'toProjectId', 'fromWorkItemId', 'toWorkItemId', 'label'])
@@ -148,13 +147,20 @@ const PROJECT_WORKSPACE_MUTATIONS = new Set([
   'collaborationInbox:mark',
   'goalTask:create', 'connectors:mutate', 'knowledge:search'
 ])
-
+const WORKSPACE_ID_MUTATIONS = new Set(['update', 'archive', 'restore', 'delete', 'purge'])
+const PROJECT_INPUT_MUTATIONS = new Set([
+  'goals:create', 'workItems:create', 'squads:create', 'members:create',
+  'invitations:create', 'comments:create', 'sharedApprovals:create'
+])
 type ProjectWorkspaceHandler = (...args: unknown[]) => unknown
 
 const PROJECT_WORKSPACE_HANDLERS: Record<string, ProjectWorkspaceHandler> = {
-  list: (rawOptions) => withStore(async (store) => (
-    await store.listWorkspaces(normalizeListOptions(rawOptions))
-  ).filter((workspace) => workspace.id !== MANAGED_PERSONAL_WORKSPACE_ID)),
+  list: (rawOptions) => withStore(async (store) => {
+    const workspaces = (await store.listWorkspaces(normalizeListOptions(rawOptions)))
+      .filter((workspace) => workspace.id !== MANAGED_PERSONAL_WORKSPACE_ID)
+    prewarmFirstActiveProject(workspaces, app.getPath('userData'))
+    return workspaces
+  }),
   get: (rawId) => withStore((store) => store.getWorkspace(assertUserManagedWorkspaceId(rawId))),
   'authorization:get': (rawId) => withStore(async (store) => {
     const projectId = assertUserManagedWorkspaceId(rawId, 'authorization')
@@ -240,6 +246,10 @@ const PROJECT_WORKSPACE_HANDLERS: Record<string, ProjectWorkspaceHandler> = {
   'import:data': (rawSource) => executeProjectPortableImportEffect(rawSource, app.getPath('userData')),
   'goals:list': (rawProjectId, rawOptions) => withReadService((reads) => reads.listGoals(
     optionalString(rawProjectId), normalizeListOptions(rawOptions)
+  )),
+  'contents:list': (rawProjectId, rawOptions) => withReadService((reads) => reads.listWorkspaceContents(
+    requiredString(rawProjectId, 'project contents project id'),
+    normalizeContentsOptions(rawOptions)
   )),
   'goals:get': (rawId) => withReadService((reads) => reads.getGoal(requiredString(rawId, 'goal id'))),
   'goals:create': (rawInput, rawOptions) => withCommandService((commands) => commands.createGoal(
@@ -408,35 +418,24 @@ async function exportProjectData(projectId: string) {
 
 export function registerProjectWorkspaceIpc(): void {
   const userDataRoot = app.getPath('userData')
-  const assignmentReadiness = startAssignmentOwnerReadiness(userDataRoot)
-  const importReadiness = assignmentReadiness.then(() => recoverPendingProjectImports(userDataRoot)).then(({ recovered, failures }) => {
-    if (recovered.length > 0) {
-      console.info(
-        `[caogen] Project import recovery completed: count=${recovered.length}; projects=${projectIds(recovered)}`
-      )
-    }
-    if (failures.length > 0) {
-      console.error(
-        `[caogen] Project import recovery blocked: count=${failures.length}; projects=${projectIds(failures)}`
-      )
-    }
-  })
+  startAssignmentOwnerReadiness(userDataRoot)
+  projectImportReadiness(userDataRoot)
   ipcMain.handle('projectWorkspace:invoke', async (event, rawAction: unknown, ...args: unknown[]) => {
     assertTrustedWorkflowLedgerSender(event)
-    await importReadiness
+    await projectImportReadiness(userDataRoot)
     const action = requiredString(rawAction, 'project workspace action')
     const handler = PROJECT_WORKSPACE_HANDLERS[action]
     if (!handler) throw new Error(`project workspace action is not supported: ${action}`)
-    const result = await withAssignmentOwnerReadiness(app.getPath('userData'), () => handler(...args))
-    if (PROJECT_WORKSPACE_MUTATIONS.has(action)) {
-      await verifyProjectWorkspaceMutation(action, args, result)
+    const mutation = PROJECT_WORKSPACE_MUTATIONS.has(action)
+    const invoke = async () => {
+      const result = await handler(...args)
+      if (mutation) await verifyProjectWorkspaceMutation(action, args, result)
+      return result
     }
-    return result
+    return mutation
+      ? await withAssignmentOwnerWriteAccess(userDataRoot, invoke)
+      : await withAssignmentOwnerReadAccess(userDataRoot, invoke)
   })
-}
-
-function projectIds(values: readonly { projectId: string }[]): string {
-  return [...new Set(values.map((value) => value.projectId))].sort().join(',')
 }
 
 async function verifyProjectWorkspaceMutation(action: string, args: unknown[], result: unknown): Promise<void> {
@@ -448,16 +447,16 @@ async function verifyProjectWorkspaceMutation(action: string, args: unknown[], r
 }
 
 function workspaceMutationProjectId(action: string, args: unknown[], result: unknown): string | undefined {
-  if (['create', 'createWithTemplate'].includes(action)) return recordId(result)
+  if (action === 'create' || action === 'createWithTemplate') return recordId(result)
   if (action === 'templates:apply') {
     return isRecord(args[0]) ? optionalString(args[0].projectId) : undefined
   }
-  if (['update', 'archive', 'restore', 'delete', 'purge'].includes(action)) {
+  if (WORKSPACE_ID_MUTATIONS.has(action)) {
     return optionalString(args[0])
   }
   if (action === 'connectors:mutate') return optionalString(args[0])
   if (action === 'knowledge:search') return isRecord(args[0]) ? optionalString(args[0].projectId) : undefined
-  if (action === 'goals:create' || action === 'workItems:create' || action === 'squads:create' || action === 'members:create' || action === 'invitations:create' || action === 'comments:create' || action === 'sharedApprovals:create') {
+  if (PROJECT_INPUT_MUTATIONS.has(action)) {
     return isRecord(args[0]) ? optionalString(args[0].projectId) : undefined
   }
   if (action === 'goalTask:create') {
@@ -681,19 +680,6 @@ function normalizeReorderPlacement(value: unknown): WorkItemReorderPlacement {
   return value
 }
 
-function normalizeListOptions(value: unknown): ListOptions {
-  if (value === undefined || value === null) return {}
-  const record = asRecord(value, 'list options')
-  assertAllowedKeys(record, new Set(['includeArchived', 'includeDeleted', 'goalId']), 'list options')
-  if (record.includeArchived !== undefined && typeof record.includeArchived !== 'boolean') throw new Error('includeArchived must be boolean')
-  if (record.includeDeleted !== undefined && typeof record.includeDeleted !== 'boolean') throw new Error('includeDeleted must be boolean')
-  return {
-    includeArchived: record.includeArchived as boolean | undefined,
-    includeDeleted: record.includeDeleted as boolean | undefined,
-    goalId: optionalString(record.goalId)
-  }
-}
-
 function normalizeCollaborationInboxListOptions(value: unknown): ProjectCollaborationInboxListOptions {
   if (value === undefined || value === null) return {}
   const record = normalizeInput<Record<string, unknown>>(
@@ -882,22 +868,27 @@ function requiredString(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value.trim() || /[\0-\x1f\x7f]/.test(value)) throw new Error(`${label} must be a non-empty string`)
   return value.trim()
 }
+
 function optionalString(value: unknown, label = 'value'): string | undefined {
   if (value === undefined || value === null || value === '') return undefined
   return requiredString(value, label)
 }
+
 function nonNegativeInteger(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error(`${label} must be a non-negative integer`)
   return value as number
 }
+
 function positiveInteger(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || (value as number) <= 0) throw new Error(`${label} must be a positive integer`)
   return value as number
 }
+
 function positiveNumber(value: unknown, label: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) throw new Error(`${label} must be positive`)
   return value
 }
+
 function finiteNumber(value: unknown, label: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${label} must be finite`)
   return value

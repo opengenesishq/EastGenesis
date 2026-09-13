@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { storedBusinessLineId } from '../business-line-ownership'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type {
   AcceptanceResult,
@@ -9,6 +10,7 @@ import type {
 import { createProjectGoalTask } from '../project-workspace/goal-task-service'
 import { ensureManagedPersonalWorkspace } from '../project-workspace/managed-personal-workspace'
 import { openProjectWorkspaceCommandService } from '../project-workspace/command-service'
+import type { ProjectWorkspaceCommandService } from '../project-workspace/command-service'
 import { openProjectWorkspaceStore } from '../project-workspace/store'
 import { resolveWorkspaceSessionCwd } from '../project-workspace/workspace-session-cwd'
 import { taskSnapshotsDbFile } from './task-snapshot'
@@ -18,6 +20,9 @@ const DEFAULT_LEASE_DURATION_MS = 15 * 60 * 1_000
 const MAX_MUTATION_ATTEMPTS = 8
 
 export interface PrepareCanonicalSystemOperationInput {
+  businessLineId?: string
+  /** Leave the canonical Goal planned and WorkItem ready until TaskKernel.plan. */
+  deferExecution?: boolean
   rootDir: string
   requestId: string
   objective: string
@@ -27,6 +32,8 @@ export interface PrepareCanonicalSystemOperationInput {
 }
 
 export interface CanonicalSystemOperationContext {
+  businessLineId?: string
+  executionDeferred: boolean
   rootDir: string
   requestId: string
   cwd: string
@@ -52,15 +59,16 @@ export async function prepareCanonicalSystemOperation(
   const created = await createProjectGoalTask({
     requestId: input.requestId,
     projectId: scope.workspace.id,
-    objective: input.objective
-  }, input.rootDir, { workItemOwner: SYSTEM_OWNER })
+    objective: input.objective,
+    businessLineId: input.businessLineId
+  }, input.rootDir, {
+    workItemOwner: SYSTEM_OWNER,
+    ...(input.deferExecution ? { goalStatus: 'planned', workItemStatus: 'ready' } : {})
+  })
   const leaseId = systemLeaseId(scope.workspace.id, input.requestId)
-  await makeWorkItemRunnable(
-    input.rootDir,
-    created.workItem.id,
-    leaseId,
-    input.leaseDurationMs
-  )
+  if (!input.deferExecution) {
+    await makeWorkItemRunnable(input.rootDir, created.workItem.id, leaseId, input.leaseDurationMs)
+  }
   return {
     rootDir: input.rootDir,
     requestId: input.requestId,
@@ -69,9 +77,67 @@ export async function prepareCanonicalSystemOperation(
     projectId: scope.workspace.id,
     goalId: created.goal.id,
     workItemId: created.workItem.id,
+    businessLineId: created.workItem.businessLineId,
+    executionDeferred: input.deferExecution,
     leaseId,
     ownerId: SYSTEM_OWNER.id
   }
+}
+
+/** Starts a deferred canonical operation and is idempotent after the first call. */
+export async function planCanonicalSystemOperation(
+  context: CanonicalSystemOperationContext,
+  leaseDurationMs = DEFAULT_LEASE_DURATION_MS
+): Promise<CanonicalSystemOperationContext> {
+  const rootDir = resolve(requiredText(context.rootDir, 'rootDir'))
+  const commands = await openProjectWorkspaceCommandService(rootDir)
+  await transitionGoalToRunning(rootDir, context.goalId, commands)
+  await makeWorkItemRunnable(rootDir, context.workItemId, context.leaseId, leaseDurationMs)
+  return { ...context, rootDir, executionDeferred: false }
+}
+
+/** Re-read canonical state immediately before a side effect is admitted. */
+export async function assertCanonicalSystemOperationReady(
+  context: CanonicalSystemOperationContext
+): Promise<void> {
+  const rootDir = resolve(requiredText(context.rootDir, 'rootDir'))
+  const store = await openProjectWorkspaceStore(rootDir)
+  const goal = await store.getGoal(context.goalId)
+  if (!goal || goal.status !== 'running') {
+    throw new Error(`canonical system operation Goal is not runnable:${context.goalId}`)
+  }
+  const item = await store.getWorkItem(context.workItemId)
+  const lease = item?.lease
+  if (!item || item.status !== 'running' || !lease || lease.id !== context.leaseId ||
+      lease.ownerId !== context.ownerId || lease.expiresAt <= Date.now()) {
+    throw new Error(`canonical system operation WorkItem lease is not runnable:${context.workItemId}`)
+  }
+}
+
+/** Resumes a canonical operation after an explicit approval or reconciliation. */
+export async function resumeCanonicalSystemOperation(
+  context: CanonicalSystemOperationContext
+): Promise<CanonicalSystemOperationContext> {
+  const rootDir = resolve(requiredText(context.rootDir, 'rootDir'))
+  const commands = await openProjectWorkspaceCommandService(rootDir)
+  await transitionGoalToRunning(rootDir, context.goalId, commands, new Set(['waiting_approval', 'blocked']))
+  const item = await (await openProjectWorkspaceStore(rootDir)).getWorkItem(context.workItemId)
+  if (item?.status === 'blocked') {
+    await makeWorkItemRunnable(rootDir, context.workItemId, context.leaseId, DEFAULT_LEASE_DURATION_MS)
+  } else {
+    await transitionWorkItemToRunning(rootDir, context.workItemId, context.leaseId, commands, new Set(['waiting_approval']))
+  }
+  return { ...context, rootDir, executionDeferred: false }
+}
+
+/** Cancels the canonical Goal and WorkItem, preserving their terminal history. */
+export async function stopCanonicalSystemOperation(
+  context: CanonicalSystemOperationContext
+): Promise<void> {
+  const rootDir = resolve(requiredText(context.rootDir, 'rootDir'))
+  const commands = await openProjectWorkspaceCommandService(rootDir)
+  await transitionGoalToCancelled(rootDir, context.goalId, commands)
+  await transitionWorkItemToCancelled(rootDir, context.workItemId, commands)
 }
 
 export async function settleCanonicalSystemOperation(
@@ -197,6 +263,92 @@ async function makeWorkItemRunnable(
   throw new Error(`canonical system operation WorkItem preparation retry exhausted:${workItemId}`)
 }
 
+async function transitionGoalToRunning(
+  rootDir: string,
+  goalId: string,
+  commands: ProjectWorkspaceCommandService,
+  allowedStatuses: ReadonlySet<Goal['status']> = new Set(['planned', 'running'])
+): Promise<void> {
+  for (let attempt = 0; attempt < MAX_MUTATION_ATTEMPTS; attempt += 1) {
+    const goal = await (await openProjectWorkspaceStore(rootDir)).getGoal(goalId)
+    if (!goal) throw new Error(`canonical system operation Goal is missing:${goalId}`)
+    if (goal.status === 'running') return
+    if (!allowedStatuses.has(goal.status)) {
+      throw new Error(`canonical system operation Goal cannot resume from ${goal.status}:${goalId}`)
+    }
+    try {
+      await commands.transitionGoal(goal.id, 'running', { expectedRevision: goal.revision })
+      return
+    } catch (error) {
+      if (attempt < MAX_MUTATION_ATTEMPTS - 1 && isStaleRevision(error)) continue
+      throw error
+    }
+  }
+}
+
+async function transitionWorkItemToRunning(
+  rootDir: string,
+  workItemId: string,
+  leaseId: string,
+  commands: ProjectWorkspaceCommandService,
+  allowedStatuses: ReadonlySet<WorkItem['status']>
+): Promise<void> {
+  for (let attempt = 0; attempt < MAX_MUTATION_ATTEMPTS; attempt += 1) {
+    const item = await (await openProjectWorkspaceStore(rootDir)).getWorkItem(workItemId)
+    if (!item) throw new Error(`canonical system operation WorkItem is missing:${workItemId}`)
+    if (item.status === 'running') return
+    if (!allowedStatuses.has(item.status)) {
+      throw new Error(`canonical system operation WorkItem cannot resume from ${item.status}:${workItemId}`)
+    }
+    if (!item.lease || item.lease.expiresAt <= Date.now() || item.lease.id !== leaseId || item.lease.ownerId !== SYSTEM_OWNER.id) {
+      throw new Error(`canonical system operation WorkItem approval lease is unavailable:${workItemId}`)
+    }
+    try {
+      await commands.transitionWorkItem(item.id, 'running', { expectedRevision: item.revision })
+      return
+    } catch (error) {
+      if (attempt < MAX_MUTATION_ATTEMPTS - 1 && isStaleRevision(error)) continue
+      throw error
+    }
+  }
+}
+
+async function transitionGoalToCancelled(
+  rootDir: string,
+  goalId: string,
+  commands: ProjectWorkspaceCommandService
+): Promise<void> {
+  for (let attempt = 0; attempt < MAX_MUTATION_ATTEMPTS; attempt += 1) {
+    const goal = await (await openProjectWorkspaceStore(rootDir)).getGoal(goalId)
+    if (!goal || goal.status === 'cancelled' || goal.status === 'completed' || goal.status === 'failed') return
+    try {
+      await commands.transitionGoal(goal.id, 'cancelled', { expectedRevision: goal.revision })
+      return
+    } catch (error) {
+      if (attempt < MAX_MUTATION_ATTEMPTS - 1 && isStaleRevision(error)) continue
+      throw error
+    }
+  }
+}
+
+async function transitionWorkItemToCancelled(
+  rootDir: string,
+  workItemId: string,
+  commands: ProjectWorkspaceCommandService
+): Promise<void> {
+  for (let attempt = 0; attempt < MAX_MUTATION_ATTEMPTS; attempt += 1) {
+    const item = await (await openProjectWorkspaceStore(rootDir)).getWorkItem(workItemId)
+    if (!item || item.status === 'cancelled' || item.status === 'done' || item.status === 'failed') return
+    try {
+      await commands.transitionWorkItem(item.id, 'cancelled', { expectedRevision: item.revision })
+      return
+    } catch (error) {
+      if (attempt < MAX_MUTATION_ATTEMPTS - 1 && isStaleRevision(error)) continue
+      throw error
+    }
+  }
+}
+
 async function settleWorkItem(
   context: CanonicalSystemOperationSettlementContext,
   acceptance: AcceptanceResult
@@ -299,6 +451,8 @@ function operationAcceptance(input: {
 }
 
 function normalizePrepareInput(input: PrepareCanonicalSystemOperationInput): {
+  businessLineId?: string
+  deferExecution: boolean
   rootDir: string
   requestId: string
   objective: string
@@ -311,6 +465,8 @@ function normalizePrepareInput(input: PrepareCanonicalSystemOperationInput): {
     throw new Error('canonical system operation leaseDurationMs is invalid')
   }
   return {
+    businessLineId: storedBusinessLineId(input.businessLineId),
+    deferExecution: input.deferExecution === true,
     rootDir: resolve(requiredText(input.rootDir, 'rootDir')),
     requestId: requiredText(input.requestId, 'requestId'),
     objective: requiredText(input.objective, 'objective'),

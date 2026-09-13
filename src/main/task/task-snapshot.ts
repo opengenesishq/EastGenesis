@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import initSqlJs from 'sql.js'
 import type {
@@ -12,6 +12,8 @@ import type {
 export { buildTaskSnapshot } from './task-snapshot-builder'
 export type { BuildTaskSnapshotInput } from './task-snapshot-builder'
 import { mergeTaskRunRecords } from './task-run'
+import { assertFrozenRoutingWrite } from './frozen-routing-policy'
+import { assertFrozenRoutingSnapshotOwner } from './frozen-routing-ownership'
 import { mergeTaskSnapshots } from './task-snapshot-merge'
 import {
   assertTaskDagFinalizationParentDeletable,
@@ -27,10 +29,9 @@ import {
   type WorkflowLedgerMigrationSource
 } from './workflow-ledger-migration'
 import { validateLegacyJsonMigrationSource } from './workflow-ledger-readiness'
-import { effectTargetsConflict } from './effect-target-conflict'
+import { findConflictingEffectLease } from './effect-lease-conflict'
 import { setupTaskSnapshotSchema } from './task-snapshot-schema'
 import { stableValueDigest } from './tool-idempotency'
-import { writeDurableFile } from '../durable-file'
 import {
   backfillWorkflowRecoverySessions,
   commitWorkflowLedgerReadMode,
@@ -54,11 +55,6 @@ const nodeRequire = createRequire(__filename)
 const STORE_VERSION = 9
 export const TASK_SNAPSHOT_EVENT_INTERVAL = 5
 const TASK_SNAPSHOT_DB_FILE = 'task-snapshots.db'
-const UNRESOLVED_EFFECT_STATUSES = new Set<EffectRecord['status']>([
-  'prepared',
-  'executing',
-  'waiting_reconciliation'
-])
 
 let sqlPromise: Promise<SqlJsStatic> | null = null
 const mutationQueues = new Map<string, Promise<unknown>>()
@@ -278,7 +274,7 @@ export function saveTaskRunBarrier(run: TaskRunRecord, rootDir?: string): Promis
       const persistedRuns = selectRecoveryTaskRuns(store.db, store.readMode)
       const previous = persistedRuns.find((item) => item.id === run.id) ?? null
       const candidateRun = previous ? mergeTaskRunRecords(previous, run) : run
-      const conflictingEffect = findConflictingEffectLease(persistedRuns, candidateRun)
+      const conflictingEffect = await findConflictingEffectLease(persistedRuns, candidateRun, rootDir ?? app.getPath('userData'))
       if (conflictingEffect) {
         throw new Error(
           `相同资源的外部效果在其他会话仍未收敛(${conflictingEffect.status})，已阻止第二个执行 lease`
@@ -307,39 +303,6 @@ export function saveTaskRunBarrier(run: TaskRunRecord, rootDir?: string): Promis
       store.db.close()
     }
   })
-}
-
-function findConflictingEffectLease(
-  persistedRuns: TaskRunRecord[],
-  incomingRun: TaskRunRecord
-): EffectRecord | undefined {
-  const incoming = (incomingRun.effects ?? []).filter((effect) =>
-    UNRESOLVED_EFFECT_STATUSES.has(effect.status)
-  )
-  if (incoming.length === 0) return undefined
-  for (let leftIndex = 0; leftIndex < incoming.length; leftIndex++) {
-    for (let rightIndex = leftIndex + 1; rightIndex < incoming.length; rightIndex++) {
-      if (effectLeasesConflict(incoming[leftIndex], incoming[rightIndex])) {
-        return incoming[rightIndex]
-      }
-    }
-  }
-  for (const persistedRun of persistedRuns) {
-    for (const effect of persistedRun.effects ?? []) {
-      if (!UNRESOLVED_EFFECT_STATUSES.has(effect.status)) continue
-      for (const candidate of incoming) {
-        if (candidate.id === effect.id) continue
-        if (effectLeasesConflict(candidate, effect)) return effect
-      }
-    }
-  }
-  return undefined
-}
-
-function effectLeasesConflict(left: EffectRecord, right: EffectRecord): boolean {
-  if (left.id === right.id) return false
-  if (effectResourceKey(left) === effectResourceKey(right)) return true
-  return effectTargetsConflict(left.target, right.target)
 }
 
 function assignResourceFencingTokens(
@@ -625,7 +588,53 @@ function validateLegacyJsonSource(sourceBytes: Uint8Array): TaskSnapshotRecord[]
 }
 
 async function persistStore(store: { db: SqlDatabase; path: string }): Promise<void> {
-  await writeDurableFile(store.path, store.db.export())
+  const tmpPath = `${store.path}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`
+  try {
+    await mkdir(dirname(store.path), { recursive: true, mode: 0o700 })
+    const handle = await open(tmpPath, 'w')
+    try {
+      await handle.writeFile(store.db.export())
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+    await renameWithRetry(tmpPath, store.path)
+    await syncParentDirectory(store.path)
+  } catch (error) {
+    await rm(tmpPath, { force: true }).catch(() => undefined)
+    throw error
+  }
+}
+
+async function syncParentDirectory(path: string): Promise<void> {
+  if (process.platform === 'win32') return
+  const handle = await open(dirname(path), 'r').catch(() => null)
+  if (!handle) return
+  try {
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+}
+
+async function renameWithRetry(tmpPath: string, targetPath: string): Promise<void> {
+  const maxAttempts = process.platform === 'win32' ? 5 : 1
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await rename(tmpPath, targetPath)
+      return
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (attempt >= maxAttempts || (code !== 'EPERM' && code !== 'EACCES' && code !== 'EBUSY')) {
+        throw error
+      }
+      await delay(20 * attempt)
+    }
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function readStoreVersion(db: SqlDatabase): number {
@@ -641,6 +650,7 @@ function upsertSnapshot(
 ): void {
   const previous = findRecoverySnapshot(db, snapshot.id, snapshot.sessionId, readMode)
   const next = previous ? mergeTaskSnapshots(previous, snapshot) : snapshot
+  assertFrozenRoutingSnapshotOwner(next)
   db.run(
     `
       INSERT INTO task_snapshots(id, session_id, updated_at, payload)
@@ -665,6 +675,7 @@ function upsertTaskRun(
 ): TaskRunRecord {
   const previous = findRecoveryTaskRun(db, run.id, readMode)
   const next = previous ? mergeTaskRunRecords(previous, run) : run
+  assertFrozenRoutingWrite(previous ?? undefined, next)
   const workflowContext = projectWorkflow
     ? resolveRunWorkflowProjectionContext(db, next, projectId, snapshot)
     : undefined

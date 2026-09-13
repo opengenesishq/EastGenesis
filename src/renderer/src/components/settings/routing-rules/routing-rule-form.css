@@ -1,0 +1,54 @@
+.rr-form {
+  --rr-border: #c8cdd2;
+  --rr-muted: #52616b;
+  max-width: 760px;
+  padding: 20px;
+  color: #182a32;
+  background: #fcfdfd;
+  border: 1px solid var(--rr-border);
+  border-radius: 12px;
+  font-family: system-ui, sans-serif;
+  line-height: 1.55;
+}
+.rr-form h3, .rr-form h4, .rr-form h5 { margin: 0 0 12px; }
+.rr-form h4 { font-size: 17px; }
+.rr-form h5 { font-size: 14px; }
+.rr-form label { display: grid; gap: 5px; margin: 10px 0; font-size: 14px; }
+.rr-form input:not([type="checkbox"]), .rr-form select {
+  box-sizing: border-box;
+  width: 100%; min-width: 0;
+  padding: 9px 10px;
+  background: #fff; color: inherit;
+  border: 1px solid var(--rr-border); border-radius: 6px;
+  font: inherit;
+}
+.rr-form button {
+  padding: 7px 11px;
+  border: 1px solid #8596a2;
+  background: #f3f7f8; color: #203b4c;
+  border-radius: 6px; font: inherit; cursor: pointer;
+}
+.rr-form button:disabled, .rr-form select:disabled { opacity: .65; cursor: default; }
+.rr-form :focus-visible { outline: 3px solid #3976a0; outline-offset: 2px; }
+.rr-form fieldset { margin: 12px 0; padding: 12px; border: 1px solid var(--rr-border); border-radius: 8px; min-width: 0; }
+.rr-form .rr-body { border: 0; margin: 0; padding: 0; }
+.rr-form legend { padding: 0 5px; font-weight: 600; }
+.rr-form .rr-section { border-top: 1px solid var(--rr-border); margin-top: 20px; padding-top: 18px; }
+.rr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.rr-form .rr-check { display: flex; align-items: flex-start; gap: 8px; }
+.rr-checks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 12px; }
+.rr-form .rr-checks label { display: flex; gap: 6px; }
+.rr-form .rr-hint { color: var(--rr-muted); font-size: 13px; margin: 8px 0; }
+.rr-form .rr-error { color: #922929; background: #fff2ee; padding: 8px 10px; border-radius: 6px; }
+.rr-form .rr-warning { color: #714c0b; background: #fff8e7; padding: 8px 10px; }
+.rr-form .rr-info { color: #285571; }
+.rr-form .rr-keyword-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin: 8px 0; }
+.rr-form .rr-target-row { margin: 14px 0; }
+.rr-form .rr-advanced { margin-top: 16px; }
+.rr-form summary { cursor: pointer; font-size: 14px; }
+.rr-form .rr-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 600px) {
+  .rr-form { padding: 12px; }
+  .rr-grid { grid-template-columns: 1fr; gap: 0; }
+  .rr-checks { grid-template-columns: repeat(2, 1fr); }
+}

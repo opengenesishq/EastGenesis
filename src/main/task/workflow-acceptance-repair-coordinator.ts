@@ -14,6 +14,18 @@ import type { ProjectWorkspaceCommandService } from '../project-workspace/comman
 
 const REPAIR_ID_NAMESPACE = 'caogen.workflow-acceptance-repair.v1'
 
+/**
+ * Every repair must have a stable execution owner, including source WorkItems
+ * that were created before owner assignment became part of the workflow gate.
+ * Keeping this in the deterministic repair binding prevents the runtime's
+ * first-start owner assignment from creating a restart-only binding conflict.
+ */
+export const WORKFLOW_REPAIR_DEFAULT_OWNER = {
+  type: 'human' as const,
+  id: 'local-user',
+  displayName: 'CaoGen Repair Runtime'
+}
+
 export type WorkflowAcceptanceRepairErrorCode =
   | 'WORKFLOW_REPAIR_ACCEPTANCE_INVALID'
   | 'WORKFLOW_REPAIR_SOURCE_NOT_FOUND'
@@ -312,7 +324,7 @@ function buildRepairWorkItemInput(
       `Original WorkItem: ${sourceWorkItem.id}.`
     ].join(' '),
     status: 'ready',
-    ...(sourceWorkItem.owner === undefined ? {} : { owner: clone(sourceWorkItem.owner) }),
+    owner: clone(sourceWorkItem.owner ?? WORKFLOW_REPAIR_DEFAULT_OWNER),
     acceptanceSpec: acceptance.criteria.map((criterion, index) => ({
       id: repairCriterionId(acceptance, index),
       criterion,
@@ -383,11 +395,11 @@ function assertSourceOwnership(acceptance: WorkflowAcceptanceRecord, source: Wor
 function assertRepairBinding(context: RepairContext, actual: WorkItem): WorkItem {
   const expected = repairBinding(context.repairInput)
   const observed = repairBinding(actual)
-  if (sha256(JSON.stringify(expected)) !== sha256(JSON.stringify(observed))) {
-    const mismatchedFields = Object.keys(expected).filter((field) =>
-      JSON.stringify(expected[field as keyof typeof expected]) !==
-      JSON.stringify(observed[field as keyof typeof observed])
-    )
+  const mismatchedFields = Object.keys(expected).filter((field) =>
+    JSON.stringify(expected[field as keyof typeof expected]) !==
+    JSON.stringify(observed[field as keyof typeof observed])
+  ).filter((field) => !isLegacyOwnerlessRepairBinding(field, expected, observed))
+  if (mismatchedFields.length > 0) {
     throw repairError(
       'WORKFLOW_REPAIR_CONFLICT',
       `repair WorkItem ${context.repairInput.id} conflicts with failed acceptance ${context.acceptance.id}`,
@@ -396,6 +408,22 @@ function assertRepairBinding(context: RepairContext, actual: WorkItem): WorkItem
     )
   }
   return clone(actual)
+}
+
+/**
+ * Repairs created before the deterministic runtime owner was introduced may
+ * have no owner at all. Treat that one absence as compatible only when the
+ * current binding expects the default owner; every explicit owner mismatch
+ * remains a conflict.
+ */
+function isLegacyOwnerlessRepairBinding(
+  field: string,
+  expected: ReturnType<typeof repairBinding>,
+  observed: ReturnType<typeof repairBinding>
+): boolean {
+  return field === 'owner' && observed.owner === null &&
+    expected.owner?.type === WORKFLOW_REPAIR_DEFAULT_OWNER.type &&
+    expected.owner.id === WORKFLOW_REPAIR_DEFAULT_OWNER.id
 }
 
 function repairBinding(item: WorkItem | (WorkItemInput & { id: string })): {

@@ -1,13 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
+import { assertPersistedSessionExecutionAllowed } from './session-execution-ownership'
 import { documentAttachmentsToPrompt, sessionImageAttachmentsRoot } from './attachmentOps'
 import { TranscriptWriter } from './transcript'
 import {
   getProvider,
   listProviders,
   markProviderKeyUsed,
-  providerIsReady,
   recordProviderKeySuccess,
   issueDirectProviderCredentialLease,
   issueProviderCredentialLease,
@@ -23,21 +23,26 @@ import {
   recordProviderAuthorizationAccountFailure,
 } from './provider/providerAuthorizationService'
 import { resolveOpenAiAuthConfig, type OpenAIAuthConfig } from './provider/openAiAuthorizationRouting'
-import { listHistory } from './history'
 import {
   acquireProviderRequest,
   classifyFailure,
-  pickModelAcrossProviders,
   recordFailure,
   releaseProviderRequest,
   recordSuccess
 } from './scheduler'
 import { recordModelFailure, recordModelSuccess } from './modelStats'
 import { getSettings } from './settings'
-import { createLegacyRoutingDecisionView, resolveSessionModelRoute } from './model/session-routing'
-import { settingsForCaoGenDrive } from './model/drive'
-import { assertRoutingExpertTargetAllowed } from './model/routing-expert-policy'
-import { calculateMonthlyBudgetSnapshot } from './model/monthly-budget'
+import { sessionRouteEvent } from './model/session-runtime-routing'
+import { withNativeRecoveryBoundary } from './model/native-recovery-boundary'
+import { resolveOpenAiSessionTurnRoute, nativeSessionRecoveryContext, assertNativeSessionRecoveryTarget } from './model/native-recovery-session'
+import { frozenRetryAllows } from './model/native-recovery-session'
+import { nativeHttpRefusalEvidence } from './model/native-http-refusal'
+import { runtimeConversationReplay, validateRuntimeContinuationContext } from './session-runtime-continuation-context'
+import { rebuildOpenAiTextHistory } from './openai-text-history'
+import { nativeRequestBudgetInput } from './model/native-request-budget'
+import { nativeTurnRejection } from './model/native-turn-rejection'
+import { boundedOpenAiRequestBody } from './model/native-output-limit'
+import { emitNativeUserMessage } from './native-user-message'
 import { canRotateProviderKey } from './providerKeyRouting'
 import { OPENAI_CODING_TOOLS, RESPONSES_CODING_TOOLS } from './openaiTools'
 import { NativeToolRuntime, type NativeToolExecutionResult } from './native-tool-runtime'
@@ -56,6 +61,7 @@ import { taskRuntimeRegistry } from './task/task-runtime-registry'
 import { effectReplayTargetDigest } from './task/effect-reconciler'
 import { taskStrategySystemPrompt, updateTaskStrategyMeta } from './task/task-strategy'
 import { buildWorkflowStageHandoffPrompt } from './task/workflow-stage-handoff'
+import { buildUserRulesSystemAppendSync } from './user-rules'
 import {
   assertOutboundContextAllowed,
   OutboundContextPolicyError,
@@ -95,7 +101,6 @@ import {
 } from './provider-chat-checkpoint'
 import {
   buildConfirmedToolReplayIndex,
-  buildPortableConversationReplay,
   findConfirmedToolReplay,
   portableConversationReplayDetail,
   recordConfirmedToolReplay,
@@ -112,7 +117,7 @@ import type {
 } from './openAiEngineTypes'
 import { formatProviderErrorContext, isResponsesConversationContext } from './openAiEngineTypes'
 import {
-  assertDigitalWorkerProviderDispatchAllowed, isDigitalWorkerProviderDispatchDeniedError
+  assertDigitalWorkerProviderDispatchAllowed
 } from './digital-worker/session-action-policy'
 import { AUTO_MODEL } from '../shared/types'
 import type { Engine, EngineEmit, EngineFactory } from './engine'
@@ -186,6 +191,7 @@ export class OpenAIEngine implements Engine {
     initialEventSeq = 0
   ) {
     this.meta = meta
+    this.routedModel = meta.modelRoutingDecision?.providerId === meta.providerId ? meta.modelRoutingDecision.model : undefined
     this.transcript = new TranscriptWriter(resumeSdkSessionId, initialEventSeq)
     if (!resumeSdkSessionId && meta.conversationForkSourceSdkSessionId) {
       this.transcript.seedFrom(meta.conversationForkSourceSdkSessionId, meta.conversationForkCheckpointId)
@@ -196,8 +202,9 @@ export class OpenAIEngine implements Engine {
       emit(entry.event, entry.seq, entry)
     }
     this.nativeToolRuntime = new NativeToolRuntime(this.meta, (event) => this.emit(event))
+    validateRuntimeContinuationContext(meta, this.transcript.readAll())
     this.restoreResponsesContext()
-    if (resumeSdkSessionId) {
+    if (resumeSdkSessionId && meta.runtimeContinuation?.state !== 'prepared') {
       this.meta.sdkSessionId = resumeSdkSessionId
       this.rebuildChatHistory()
       this.emit({ kind: 'init', sdkSessionId: resumeSdkSessionId, model: this.effectiveModel() })
@@ -206,24 +213,7 @@ export class OpenAIEngine implements Engine {
 
   /** resume 时从转录重建 chat 协议的多轮历史(仅文本;图片不回放) */
   private rebuildChatHistory(): void {
-    this.chatHistory = []
-    try {
-      for (const entry of this.transcript.read()) {
-        const ev = entry.event
-        if (ev.kind === 'user-message' && typeof ev.text === 'string' && ev.text) {
-          this.chatHistory.push({ role: 'user', content: ev.text })
-        } else if (ev.kind === 'assistant-message' && Array.isArray(ev.blocks)) {
-          const text = ev.blocks
-            .map((b) => (b.type === 'text' ? b.text : ''))
-            .join('')
-            .trim()
-          if (text) this.chatHistory.push({ role: 'assistant', content: text })
-        }
-      }
-    } catch {
-      // 历史损坏时从空上下文开始,不阻塞会话
-      this.chatHistory = []
-    }
+    this.chatHistory = rebuildOpenAiTextHistory(this.transcript.read())
   }
 
   async start(): Promise<void> {
@@ -265,16 +255,8 @@ export class OpenAIEngine implements Engine {
     this.turnRevisionEligible = normalizedPayload.images.length === 0 && normalizedPayload.documents.length === 0
     this.turnHadToolEvents = false
     this.modelAttempts.startTurn(messageId)
-    this.emit({
-      kind: 'user-message',
-      text: payload.text,
-      messageId,
-      attachments: payload.images?.map((image) => ({ id: image.id, mime: image.mime, bytes: image.bytes }))
-    })
-    if (this.meta.title === '新会话' && payload.text.trim()) {
-      this.meta.title = payload.text.trim().replace(/\s+/g, ' ').slice(0, 40)
-      this.emit({ kind: 'meta', meta: { ...this.meta } })
-    }
+    emitNativeUserMessage({ meta: this.meta, payload, messageId, emit: (event) => this.emit(event),
+      attachments: payload.images?.map((image) => ({ id: image.id, mime: image.mime, bytes: image.bytes })) })
 
     this.turnStartedAt = Date.now()
     this.assistantText = ''
@@ -283,7 +265,12 @@ export class OpenAIEngine implements Engine {
     this.recoveryExhaustedEmitted = false
     // 新一轮:重置故障切换防打转记录
     // auto 模式:跨厂商路由(openai 引擎切 Provider 无需重建,authConfig 每请求现读)
-    if (this.meta.model === AUTO_MODEL) this.autoRoute(payload)
+    try { this.autoRoute(payload) } catch (error) {
+      const resultText = error instanceof Error ? error.message : String(error)
+      this.emit({ kind: 'turn-result', isError: true, resultText, subtype: 'routing-blocked', durationMs: 0 })
+      this.rejectSend(resultText)
+      return
+    }
     // Initialize after auto routing so failover cannot select the active Provider again.
     this.recoveryState = new OpenAiRecoveryState(this.meta.providerId)
     this.abort = new AbortController()
@@ -303,119 +290,20 @@ export class OpenAIEngine implements Engine {
   /** 本轮路由选中的模型(meta.model 保持 auto 哨兵,下一轮重新路由) */
   private routedModel?: string
 
-  /** 跨厂商智能路由:候选 = 所有有 baseUrl 的 Provider(空 Base URL 不适配本引擎) */
+  /** Each turn reuses the same capability, budget and business-line policy as creation. */
   private autoRoute(payload: SendMessagePayload): void {
-    try {
-      const settings = settingsForCaoGenDrive(getSettings(), this.meta.driveMode)
-      const compatibleProviders = listProviders().filter((provider) => provider.engine === 'openai')
-      const routingProviders = this.meta.routingScope === 'provider'
-        ? compatibleProviders.filter((provider) => provider.id === this.meta.providerId)
-        : compatibleProviders
-      if (settings.smartModelRoutingEnabled || this.meta.routingScope === 'provider' || this.meta.routingScope === 'global') {
-        const monthlyBudget = calculateMonthlyBudgetSnapshot({
-          settings,
-          history: listHistory(),
-          currentSession: this.meta
-        })
-        const smart = resolveSessionModelRoute({
-          enabled: true,
-          currentModel: this.meta.model,
-          providerId: this.meta.providerId,
-          providers: routingProviders,
-          engine: this.meta.engine,
-          driveMode: this.meta.driveMode,
-          payload,
-          strategy: settings.schedulerStrategy,
-          sessionCostUsd: this.meta.costUsd,
-          sessionBudgetUsd: this.meta.budgetUsd,
-          settingsBudgetUsd: settings.budgetUsdPerSession,
-          monthlyBudgetRemainingUsd: monthlyBudget.remainingUsd,
-          fallbackProviderId: settings.fallbackProviderId,
-          fallbackModel: settings.fallbackModel,
-          lowCostProviderId: settings.lowCostProviderId,
-          lowCostModel: settings.lowCostModel,
-          strongReasoningProviderId: settings.strongReasoningProviderId,
-          strongReasoningModel: settings.strongReasoningModel,
-          reviewProviderId: settings.reviewProviderId,
-          reviewModel: settings.reviewModel,
-          researchProviderId: settings.researchProviderId,
-          researchModel: settings.researchModel,
-          planningProviderId: settings.planningProviderId,
-          planningModel: settings.planningModel,
-          codingProviderId: settings.codingProviderId,
-          codingModel: settings.codingModel,
-          testingProviderId: settings.testingProviderId,
-          testingModel: settings.testingModel,
-          documentationProviderId: settings.documentationProviderId,
-          documentationModel: settings.documentationModel,
-          modelRoutingRules: settings.modelRoutingRules,
-          routingExpertPolicy: settings.routingExpertPolicy,
-          projectPath: this.meta.sourceCwd ?? this.meta.cwd
-        })
-        if (smart.kind === 'routed') {
-          const routeChanged = smart.providerId !== this.meta.providerId || smart.model !== this.effectiveModel()
-          if (routeChanged) {
-            this.clearResponsesContext(this.protocol() === 'responses')
-            this.protocolOverride = undefined
-          }
-          this.modelAttempts.setRouteReason(smart.reason)
-          this.routedModel = smart.model
-          if (smart.switchedProvider) this.meta.providerId = smart.providerId
-          this.emit({
-            kind: 'routing',
-            model: smart.model,
-            reason: smart.reason,
-            providerId: smart.providerId,
-            providerName: smart.providerName,
-            decision: smart.decision,
-            crossValidationPlan: smart.crossValidationPlan
-          })
-          this.emit({ kind: 'meta', meta: { ...this.meta } })
-          return
-        }
-      }
-      // 候选:有端点且已配 key 的厂商(没 key 的选中必失败,不进池)
-      const candidates = routingProviders
-        .filter((p) => p.baseUrl.trim().length > 0 && providerIsReady(p))
-        .map((p) => ({ id: p.id, name: p.name, models: p.models }))
-      const decision = pickModelAcrossProviders({
-        candidates,
-        text: payload.text,
-        strategy: settings.schedulerStrategy,
-        currentProviderId: this.meta.providerId
-      })
-      if (!decision) return
-      const routeChanged = decision.providerId !== this.meta.providerId || decision.model !== this.effectiveModel()
-      if (routeChanged) {
-        this.clearResponsesContext(this.protocol() === 'responses')
-        this.protocolOverride = undefined
-      }
-      this.modelAttempts.setRouteReason(decision.reason)
-      this.routedModel = decision.model
-      if (decision.switchedProvider) {
-        this.meta.providerId = decision.providerId
-      }
-      this.emit({
-        kind: 'routing',
-        model: decision.model,
-        reason: decision.reason,
-        providerId: decision.providerId,
-        providerName: decision.providerName,
-        decision: createLegacyRoutingDecisionView({
-          providerId: decision.providerId,
-          providerName: decision.providerName,
-          model: decision.model,
-          strategy: settings.schedulerStrategy,
-          complexity: decision.complexity,
-          candidateCount: candidates.reduce((count, candidate) => count + candidate.models.filter(Boolean).length, 0),
-          switchedProvider: decision.switchedProvider,
-          reason: decision.reason
-        })
-      })
-      this.emit({ kind: 'meta', meta: { ...this.meta } })
-    } catch (err) {
-      console.error('[caogen] openai 引擎自动路由失败,沿用当前配置:', err)
+    const route = resolveOpenAiSessionTurnRoute(this.meta, payload, this.effectiveModel())
+    if (!route) return
+    if (route.providerId !== this.meta.providerId || route.model !== this.effectiveModel()) {
+      this.clearResponsesContext(this.protocol() === 'responses')
+      this.protocolOverride = undefined
     }
+    this.modelAttempts.setRouteReason(route.reason)
+    this.routedModel = route.model
+    this.meta.providerId = route.providerId
+    this.meta.modelRoutingDecision = route.decision
+    this.emit(sessionRouteEvent(route))
+    this.emit({ kind: 'meta', meta: { ...this.meta } })
   }
 
   rejectSend(message: string): void {
@@ -582,7 +470,10 @@ export class OpenAIEngine implements Engine {
   async setModel(model: string): Promise<void> {
     if (this.meta.model !== model) this.clearResponsesContext(this.protocol() === 'responses')
     this.protocolOverride = undefined
+    this.meta.routingScope = model === AUTO_MODEL ? (this.meta.routingScope === 'global' ? 'global' : 'provider') : 'fixed'
     this.meta.model = model
+    this.routedModel = undefined
+    this.meta.modelRoutingDecision = undefined
     this.emit({ kind: 'meta', meta: { ...this.meta } })
   }
 
@@ -597,6 +488,12 @@ export class OpenAIEngine implements Engine {
     if (this.disposePromise) return this.disposePromise
     this.disposePromise = this.disposeAndWait()
     return this.disposePromise
+  }
+
+  async retireForContinuation(): Promise<void> {
+    if (this.abort || this.pendingPermissions().length) throw new Error('执行中引擎不能交接')
+    await this.activeTurn
+    this.disposed = true
   }
 
   private async disposeAndWait(): Promise<void> {
@@ -615,7 +512,7 @@ export class OpenAIEngine implements Engine {
       const prepared = await this.augmentPayloadWithLayeredMemory(payload)
       this.activeOutboundContext = prepared.manifest
       auth = this.authConfig()
-      assertRoutingExpertTargetAllowed(auth.providerId, auth.baseUrl, getSettings().routingExpertPolicy)
+      assertNativeSessionRecoveryTarget(this.meta, { providerId: auth.providerId, model: this.effectiveModel(), baseUrl: auth.baseUrl })
       this.modelAttempts.setRouteReason(auth.authorizationRouteReason ?? 'Session uses the configured provider and model')
       this.recoveryState.models(this.meta.providerId).add(this.effectiveModel())
       if (!auth.available && auth.authMode !== 'none') throw new Error(this.missingKeyMessage())
@@ -648,14 +545,10 @@ export class OpenAIEngine implements Engine {
         this.finishTurn(true, '已中断', 'interrupted')
         return
       }
-      if (isDigitalWorkerProviderDispatchDeniedError(err)) {
+      const rejection = nativeTurnRejection(err)
+      if (rejection) {
         releaseProviderRequest(this.meta.providerId)
-        this.finishTurn(true, err.message, 'policy-denied')
-        return
-      }
-      if (err instanceof OutboundContextPolicyError) {
-        releaseProviderRequest(this.meta.providerId)
-        this.finishTurn(true, err.message, 'outbound-policy-denied')
+        this.finishTurn(true, rejection.message, rejection.subtype)
         return
       }
       if (isModelAttemptPersistenceError(err)) {
@@ -664,18 +557,23 @@ export class OpenAIEngine implements Engine {
         this.finishTurn(true, `模型请求账本${phase}落盘失败，已阻止请求重放:${err.message}`, 'ledger-error')
         return
       }
-      const text = errText(unwrapModelAttemptOperationError(err))
-      releaseProviderRequest(this.meta.providerId)
-      if (await this.tryProviderKeyFailover(text, payload, controller, auth)) return
-      recordFailure(this.meta.providerId, text)
-      recordModelFailure(this.effectiveModel())
-      if (await firstSuccessfulRecovery(
-        () => this.tryProviderModelFailover(text, payload, controller),
-        () => this.tryFailover(text, payload),
-        () => this.tryProtocolFailover(text, payload, controller)
-      )) return
-      this.emitRecoveryExhausted(text)
-      this.finishTurn(true, this.withProviderErrorContext(text), 'error')
+      await withNativeRecoveryBoundary(async () => {
+        const operationError = unwrapModelAttemptOperationError(err)
+        const refusal = nativeHttpRefusalEvidence(operationError)
+        const nativeRetryReason = refusal?.outcome
+        const text = errText(operationError)
+        releaseProviderRequest(this.meta.providerId)
+        if (await this.tryProviderKeyFailover(text, payload, controller, auth, nativeRetryReason)) return
+        recordFailure(this.meta.providerId, text)
+        recordModelFailure(this.effectiveModel())
+        if (await firstSuccessfulRecovery(
+          () => this.tryProviderModelFailover(text, payload, controller, nativeRetryReason),
+          () => this.tryFailover(text, payload, nativeRetryReason),
+          () => this.tryProtocolFailover(text, payload, controller, nativeRetryReason)
+        )) return
+        this.emitRecoveryExhausted(text)
+        this.finishTurn(true, this.withProviderErrorContext(text), 'error')
+      }, ({ message, subtype }) => this.finishTurn(true, message, subtype))
     }
   }
 
@@ -821,7 +719,7 @@ export class OpenAIEngine implements Engine {
     auth: OpenAIAuthConfig
   ): Promise<void> {
     const replay = this.responsesReplayRequired
-      ? buildPortableConversationReplay(this.transcript.read(), payload.messageId)
+      ? runtimeConversationReplay(this.meta, this.transcript.read(), payload.messageId)
       : null
     if (replay) this.refreshConfirmedToolReplay(payload.messageId)
     const confirmedToolReplay = this.activeConfirmedToolReplay
@@ -973,14 +871,17 @@ export class OpenAIEngine implements Engine {
   private async tryProviderModelFailover(
     errorText: string,
     payload: SendMessagePayload,
-    controller: AbortController
+    controller: AbortController,
+    nativeRetryReason?: 'rate_limited' | 'auth_failed'
   ): Promise<boolean> {
     const settings = getSettings()
     const providerId = this.meta.providerId?.trim()
-    if (this.disposed || !providerId || !this.recoveryState.canRecover(providerId, settings.failoverEnabled)) return false
+    const recoveryContext = nativeSessionRecoveryContext(this.meta, settings)
+    if (this.disposed || !providerId || !this.recoveryState.canRecover(providerId, settings.failoverEnabled, recoveryContext, nativeRetryReason)) return false
     const fromModel = this.effectiveModel()
     const failure = classifyFailure(errorText)
     const recovery = planOpenAiProviderModelRecovery({
+      recovery: recoveryContext,
       providerId,
       fromModel,
       exclude: this.recoveryState.models(providerId),
@@ -988,6 +889,7 @@ export class OpenAIEngine implements Engine {
       failure,
       outboundContext: this.activeOutboundContext,
       routingExpertPolicy: settings.routingExpertPolicy
+      ,nativeRetryReason, attempt: this.recoveryState.recoveryAttempts + 1
     })
     if (!recovery) return false
 
@@ -1015,13 +917,15 @@ export class OpenAIEngine implements Engine {
     return true
   }
 
-  private async tryFailover(errorText: string, payload: SendMessagePayload): Promise<boolean> {
+  private async tryFailover(errorText: string, payload: SendMessagePayload, nativeRetryReason?: 'rate_limited' | 'auth_failed'): Promise<boolean> {
     const settings = getSettings()
-    if (this.disposed || !this.recoveryState.canRecover(this.meta.providerId, settings.failoverEnabled)) return false
+    const recoveryContext = nativeSessionRecoveryContext(this.meta, settings)
+    if (this.disposed || !this.recoveryState.canRecover(this.meta.providerId, settings.failoverEnabled, recoveryContext, nativeRetryReason)) return false
     if (this.recoveryState.providers.size > OpenAIEngine.MAX_FAILOVERS_PER_TURN) return false
     const failure = classifyFailure(errorText)
     const fromId = this.meta.providerId
     const target = planOpenAiProviderFailover({
+      recovery: recoveryContext,
       currentProviderId: fromId,
       currentModel: this.effectiveModel(),
       exclude: this.recoveryState.providers,
@@ -1031,6 +935,7 @@ export class OpenAIEngine implements Engine {
       currentProtocol: this.protocol(),
       outboundContext: this.activeOutboundContext,
       routingExpertPolicy: settings.routingExpertPolicy
+      ,nativeRetryReason, attempt: this.recoveryState.recoveryAttempts + 1
     })
     if (!target) return false
 
@@ -1067,17 +972,22 @@ export class OpenAIEngine implements Engine {
   private async tryProtocolFailover(
     errorText: string,
     payload: SendMessagePayload,
-    controller: AbortController
+    controller: AbortController,
+    nativeRetryReason?: 'rate_limited' | 'auth_failed'
   ): Promise<boolean> {
     const settings = getSettings()
     const providerId = this.meta.providerId?.trim()
-    if (this.disposed || !providerId || !this.recoveryState.canRecover(providerId, settings.failoverEnabled)
+    const recoveryContext = nativeSessionRecoveryContext(this.meta, settings)
+    if (this.disposed || !providerId || !this.recoveryState.canRecover(providerId, settings.failoverEnabled, recoveryContext, nativeRetryReason)
       || this.protocol() !== 'responses') return false
     const recovery = planOpenAiProtocolRecovery({
+      recovery: recoveryContext,
       providerId,
       model: this.effectiveModel(),
       currentProtocol: this.protocol(),
-      failure: classifyFailure(errorText)
+      failure: classifyFailure(errorText),
+      routingExpertPolicy: settings.routingExpertPolicy,
+      nativeRetryReason, attempt: this.recoveryState.recoveryAttempts + 1
     })
     if (!recovery) return false
 
@@ -1122,14 +1032,19 @@ export class OpenAIEngine implements Engine {
     errorText: string,
     payload: SendMessagePayload,
     controller: AbortController,
-    auth: OpenAIAuthConfig | undefined
+    auth: OpenAIAuthConfig | undefined,
+    nativeRetryReason?: 'rate_limited' | 'auth_failed'
   ): Promise<boolean> {
     if (!auth) return false
     const settings = getSettings()
+    const recoveryContext = nativeSessionRecoveryContext(this.meta, settings)
     if (this.disposed || !this.meta.providerId || !auth.keyId
-      || !this.recoveryState.canRecover(this.meta.providerId, settings.failoverEnabled)) return false
+      || !this.recoveryState.canRecover(this.meta.providerId, settings.failoverEnabled, recoveryContext, nativeRetryReason)) return false
     const failure = classifyFailure(errorText)
     if (!canRotateProviderKey(failure)) return false
+    if (recoveryContext.frozenRetry && !frozenRetryAllows({ recovery: recoveryContext, providerId: this.meta.providerId,
+      model: this.effectiveModel(), protocol: this.protocol() === 'responses' ? 'openai.responses' : 'openai.chat-completions',
+      attempt: this.recoveryState.recoveryAttempts + 1, refusal: nativeRetryReason ? { outcome: nativeRetryReason } : undefined })) return false
     if (auth.authorizationAccountId) {
       if (auth.authorizationAccountExplicit) return false
       const next = recordProviderAuthorizationAccountFailure(this.meta.providerId, auth.authorizationAccountId)
@@ -1185,7 +1100,7 @@ export class OpenAIEngine implements Engine {
     if (replayRequired) this.refreshConfirmedToolReplay(payload.messageId)
     const confirmedToolReplay = this.activeConfirmedToolReplay
     if (replayRequired) {
-      const replay = buildPortableConversationReplay(replayEntries, payload.messageId)
+      const replay = runtimeConversationReplay(this.meta, replayEntries, payload.messageId)
       if (replay) {
         this.chatHistory = [{ role: 'system', content: replay.text }]
         this.emit({
@@ -1450,12 +1365,11 @@ export class OpenAIEngine implements Engine {
       }
     )
   }
-
   /** 编码 Agent 系统提示:工作目录 + 人设(每请求现算,设置变更即时生效) */
   private systemMessage(): ChatMessage {
     const settings = getSettings()
     const persona = settings.persona.trim()
-    const projectContext = buildProjectContextSystemAppendSync(this.meta.sourceCwd ?? this.meta.cwd)
+    const projectContext = [buildUserRulesSystemAppendSync(), buildProjectContextSystemAppendSync(this.meta.sourceCwd ?? this.meta.cwd)].filter(Boolean).join('\n\n')
     const providerPrompt = buildChinaProviderPromptAppend(this.providerAdapterContext())
     const lines = [
       projectContext,
@@ -1463,8 +1377,7 @@ export class OpenAIEngine implements Engine {
       taskStrategySystemPrompt(this.meta.taskStrategy),
       '你是 CaoGen 桌面工作室里的编码 Agent。',
       `当前工作目录: ${this.meta.cwd}`,
-      '你可以使用工具(bash/view/read_file/write_file/search_replace/edit_file/artifact_register/create_document/create_spreadsheet/create_presentation/create_pdf/list_dir/search_symbol/search_code/find_file/get_dependencies/web_search/project_knowledge_search/task_decompose/genesis_orchestrate/task_dispatch_dag/task_decompose_and_dispatch_dag/git_status/git_diff/git_stage/git_stage_all/git_commit/git_push/git_create_pr/git_create_issue/git_merge/code_forge_delivery/send_notification)读写项目文件、生成 Word/Excel/PowerPoint/PDF 办公成品、执行命令、进行带引用和 Evidence 的通用联网搜索、规划编排、发送已配置通知并完成 Git 流程。',
-      'web_search 只能使用 CaoGen Search Broker；必须保留真实抓取来源和内容摘要值。Provider 无结果、超时、无凭据、出口拒绝、失败或未知结果时，原样显示失败状态，不得把模型自述当作搜索成功。',
+      '你可以使用工具(bash/view/read_file/write_file/search_replace/edit_file/artifact_register/create_document/create_spreadsheet/create_presentation/create_pdf/list_dir/search_symbol/search_code/find_file/get_dependencies/task_decompose/genesis_orchestrate/task_dispatch_dag/task_decompose_and_dispatch_dag/git_status/git_diff/git_stage/git_stage_all/git_commit/git_push/git_create_pr/git_create_issue/git_merge/code_forge_delivery/send_notification)读写项目文件、生成 Word/Excel/PowerPoint/PDF 办公成品、执行命令、规划编排、发送已配置通知并完成 Git 流程。',
       '凡是通过 bash、外部工具或已有工作区文件形成的最终报告、需求、设计、代码包、测试报告、截图、回退包或安装包,必须调用 artifact_register 登记真实文件;只有 canonical Artifact/Evidence/Acceptance 返回成功后才可宣称已交付。',
       '开始任务时先用 search_symbol/search_code/find_file 定位相关文件和符号,不要盲猜路径;修改文件前用 get_dependencies 查看正向/反向依赖影响面。',
       '开始修改前再用 view 查看相关行号和上下文;已有文件编辑必须优先用 search_replace,old_str 至少包含前后 3 行上下文并保证唯一匹配。',
@@ -1547,6 +1460,7 @@ export class OpenAIEngine implements Engine {
     const providerId = this.meta.providerId || 'openai'
     const model = this.effectiveModel()
     const protocol = this.protocol() === 'chat' ? 'openai.chat-completions' : 'openai.responses'
+    init = { ...init, body: boundedOpenAiRequestBody(init.body, protocol, auth.baseUrl) }
     const deadlines = new WeakMap<Response, ProviderRequestDeadline>()
     return this.modelAttempts.fetch({
       run: taskRuntimeRegistry.get(this.meta.id),
@@ -1555,6 +1469,7 @@ export class OpenAIEngine implements Engine {
       protocol,
       url,
       init: { ...init, signal },
+      budgetScope: nativeRequestBudgetInput({ meta: this.meta, providerId, model, body: init.body }),
       signal,
       auth: { keyId: auth.keyId, keyLabel: auth.keyLabel },
       canonicalContextDigest: buildProviderNeutralContextDigest({
@@ -1563,6 +1478,7 @@ export class OpenAIEngine implements Engine {
       }),
       estimateCost: (usage) => estimateModelAttemptCostUsd({ providerId, model, protocol }, usage),
       executeFetch: async (operationId) => {
+        await assertPersistedSessionExecutionAllowed(this.meta, app.getPath('userData'))
         const deadline = new ProviderRequestDeadline(signal, timeouts, streaming)
         try {
           const response = await this.executeProviderFetch(url, { ...init, signal: deadline.signal }, auth, operationId)
@@ -1574,6 +1490,8 @@ export class OpenAIEngine implements Engine {
         }
       },
       preflight: async () => {
+        await assertPersistedSessionExecutionAllowed(this.meta, app.getPath('userData'))
+        assertNativeSessionRecoveryTarget(this.meta, { providerId, model, baseUrl: auth.baseUrl })
         await assertDigitalWorkerProviderDispatchAllowed(this.meta, app.getPath('userData'), {
           providerId,
           model,

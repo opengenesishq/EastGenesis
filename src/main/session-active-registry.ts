@@ -25,6 +25,7 @@ import {
   startActiveSessionEngines,
   type PreparedActiveSession
 } from './session-active-registry-restore'
+import { prepareSessionDomainOwnershipForActivation } from './session-domain-activation'
 
 export interface ActiveSessionRecoveryPlan {
   records: SessionMeta[]
@@ -97,9 +98,27 @@ export async function restoreActiveSessionRegistry(
     return { registryChanged: false, artifactsCanBePruned: false }
   }
 
+  // The active registry is durable recovery input, not an ownership source.
+  // Re-check canonical Workspace/Goal/WorkItem state before constructing any
+  // Engine so a deleted or tampered no-project task cannot be resurrected and
+  // only fail later when its first message is sent.
+  let restorable = plan.restorable
+  try {
+    restorable = await Promise.all(plan.restorable.map(async (record) => {
+      const ownership = await prepareSessionDomainOwnershipForActivation(record, app.getPath('userData'))
+      return { ...record, ...ownership }
+    }))
+  } catch (error) {
+    quarantineActiveSessionRegistryWrites(
+      `canonical ownership recovery rejected: ${error instanceof Error ? error.message : String(error)}`
+    )
+    console.error('[caogen] active session canonical ownership 预检失败，已阻止部分恢复:', error)
+    return { registryChanged: false, artifactsCanBePruned: false }
+  }
+
   const prepared: PreparedActiveSession[] = []
   try {
-    prepareActiveSessionEngines(plan.restorable, prepared)
+    prepareActiveSessionEngines(restorable, prepared)
   } catch (error) {
     await disposePreparedEngines(prepared)
     quarantineActiveSessionRegistryWrites(
@@ -111,9 +130,7 @@ export async function restoreActiveSessionRegistry(
 
   try {
     for (const item of prepared) {
-      if (item.projectPath && !item.meta.projectId && !item.meta.workspaceId) {
-        item.meta.projectId = touchProject(item.projectPath).id
-      }
+      if (item.projectPath) item.meta.projectId = touchProject(item.projectPath).id
     }
   } catch (error) {
     await disposePreparedEngines(prepared)

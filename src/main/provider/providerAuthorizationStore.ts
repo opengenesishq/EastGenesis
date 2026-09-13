@@ -31,6 +31,9 @@ import {
   storeProviderCredential
 } from '../providerCredentialRuntime'
 import { normalizeProviderAuthorizationAccountPolicy } from './providerAuthorizationRouting'
+import { stageProviderAuthorizationPoolDigest } from '../providers'
+import { changedAuthorizationPools, readAuthorizationPoolDocument } from './providerAuthorizationPoolIdentity'
+import { withProviderStoreMutationLock } from './providerStoreMutationLock'
 
 interface StoredProviderAuthorizationAccount {
   schemaVersion: 1
@@ -69,7 +72,7 @@ export function storeProviderAuthorizationAccount(input: {
   authenticatedAt: number
 }): ProviderAuthorizationAccountView {
   const current = clone(load())
-  const service = input.service ?? 'codex-oauth'
+  const service = input.service ?? 'xai-oauth'
   const previous = current.find((account) =>
     account.providerId === input.providerId && account.id === input.id && account.service === service)
   const ref = credentialRef(input.providerId, input.id, service)
@@ -152,7 +155,7 @@ export function recordStoredProviderAuthorizationQuota(
 export function resolveProviderAuthorizationRefreshToken(
   providerId: string,
   accountId: string,
-  service: ProviderAuthorizationService = 'codex-oauth'
+  service: ProviderAuthorizationService = 'xai-oauth'
 ): string {
   const account = load().find((item) =>
     item.providerId === providerId && item.id === accountId && item.service === service)
@@ -195,33 +198,46 @@ function load(): StoredProviderAuthorizationAccount[] {
   }
   if (process.platform !== 'win32') chmodSync(file, 0o600)
   const value = JSON.parse(readFileSync(file, 'utf8')) as unknown
-  if (!Array.isArray(value) || !value.every(isStoredAccount)) {
+  if (!Array.isArray(value)) {
     throw new Error('Provider authorization store is corrupted')
   }
-  cache = clone(value)
+  const supported = value.filter((entry) => !hasUnsupportedAuthorizationService(entry))
+  if (!supported.every(isStoredAccount)) throw new Error('Provider authorization store is corrupted')
+  if (supported.length !== value.length) persist(supported)
+  cache = clone(supported)
   return cache
 }
 
 function persist(accounts: StoredProviderAuthorizationAccount[]): void {
   if (!accounts.every(isStoredAccount)) throw new Error('Provider authorization store value is invalid')
-  const file = storeFile()
-  const temp = `${file}.tmp-${process.pid}-${randomUUID()}`
-  mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
-  try {
-    const descriptor = openSync(temp, 'wx', 0o600)
+  // Hold the Provider mutation lock across both files. The identity revision is
+  // staged first, then the authorization pool is committed while no competing
+  // Provider/profile or OAuth-pool writer can interleave. If the second write
+  // fails, the staged revision intentionally remains conservative and execution
+  // stays blocked until the same desired pool is retried or reconciled.
+  withProviderStoreMutationLock(app.getPath('userData'), () => {
+    const changes = changedAuthorizationPools(readAuthorizationPoolDocument(app.getPath('userData')), accounts)
+    for (const change of changes) stageProviderAuthorizationPoolDigest(change.providerId, change.digest)
+    const file = storeFile()
+    const temp = `${file}.tmp-${process.pid}-${randomUUID()}`
+    mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
     try {
-      writeFileSync(descriptor, `${JSON.stringify(accounts, null, 2)}\n`, 'utf8')
-      fsyncSync(descriptor)
-    } finally {
-      closeSync(descriptor)
+      const descriptor = openSync(temp, 'wx', 0o600)
+      try {
+        writeFileSync(descriptor, `${JSON.stringify(accounts, null, 2)}\n`, 'utf8')
+        fsyncSync(descriptor)
+      } finally {
+        closeSync(descriptor)
+      }
+      renameSync(temp, file)
+      if (process.platform !== 'win32') chmodSync(file, 0o600)
+    } catch (error) {
+      cache = null
+      try { unlinkSync(temp) } catch { /* best effort */ }
+      throw error
     }
-    renameSync(temp, file)
-    if (process.platform !== 'win32') chmodSync(file, 0o600)
-  } catch (error) {
-    try { unlinkSync(temp) } catch { /* best effort */ }
-    throw error
-  }
-  cache = clone(accounts)
+    cache = clone(accounts)
+  })
 }
 
 function toView(
@@ -253,12 +269,9 @@ function credentialRef(
   accountId: string,
   service: ProviderAuthorizationService
 ): { providerId: string; keyId: string } {
-  const prefix = service === 'codex-oauth'
-    ? 'codex-refresh'
-    : service === 'github-copilot' ? 'github-token' : 'xai-refresh'
   return {
     providerId: `provider-authorization:${providerId}`,
-    keyId: `${prefix}:${createHash('sha256').update(accountId).digest('hex')}`
+    keyId: `xai-refresh:${createHash('sha256').update(accountId).digest('hex')}`
   }
 }
 
@@ -355,7 +368,12 @@ function validStoredTimestamp(value: number): boolean {
 }
 
 function isAuthorizationService(value: unknown): value is ProviderAuthorizationService {
-  return value === 'codex-oauth' || value === 'github-copilot' || value === 'xai-oauth'
+  return value === 'xai-oauth'
+}
+
+function hasUnsupportedAuthorizationService(value: unknown): boolean {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value)
+    && 'service' in value && !isAuthorizationService(value.service))
 }
 
 function validId(value: string, label: string): string {

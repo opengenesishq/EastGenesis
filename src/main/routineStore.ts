@@ -7,11 +7,9 @@ import { writeDurableFile } from './durable-file'
 import type { EngineKind, PermissionModeId, RoutineNotificationOptions } from '../shared/types'
 
 export type RoutinePermissionMode = PermissionModeId
-type RoutineDefinitionFields = Pick<Routine, 'name' | 'prompt' | 'content' | 'projectId' | 'goalTemplateId' | 'digitalWorkerId' | 'projectCwd' | 'schedule' | 'frequency' | 'providerId' | 'model' | 'engine' | 'permissionMode' | 'budgetUsd' | 'notification' | 'enabled'>
 
 export interface Routine extends Record<string, unknown> {
   id: string
-  revision: number
   name: string
   prompt: string
   content?: string
@@ -63,7 +61,6 @@ export type CreateRoutineInput = {
 } & Record<string, unknown>
 
 export type UpdateRoutineInput = {
-  expectedRevision?: number
   name?: string
   prompt?: string
   content?: string
@@ -90,7 +87,7 @@ export interface MarkRunOptions {
 }
 
 interface RoutineFile {
-  version: 2
+  version: 1
   routines: Routine[]
 }
 
@@ -102,7 +99,7 @@ export class RoutineStoreValidationError extends Error {
 }
 
 const ROUTINES_FILE = 'routines.json'
-const STORE_VERSION = 2
+const STORE_VERSION = 1
 const MINUTE_MS = 60_000
 const routineStoreWriteQueues = new Map<string, Promise<void>>()
 const PERMISSION_MODES = new Set<RoutinePermissionMode>([
@@ -119,8 +116,6 @@ const DEFAULT_NOTIFICATION: RoutineNotificationOptions = {
 }
 const SCHEMA_KEYS = new Set([
   'id',
-  'revision',
-  'expectedRevision',
   'name',
   'prompt',
   'content',
@@ -157,11 +152,48 @@ export async function createRoutine(rootDir: string, input: CreateRoutineInput):
     const file = await readStore(rootDir)
     const now = Date.now()
     const id = normalizeOptionalString(input.id, 'id') || randomUUID()
-    const existing = file.routines.find((routine) => routine.id === id)
-    const routine = normalizeCreatedRoutine(input, id, now, existing)
-    if (existing) {
-      if (isDeepStrictEqual(existing, routine)) return existing
-      throw new RoutineStoreValidationError(`Routine already exists with different content: ${id}`)
+
+    if (file.routines.some((routine) => routine.id === id)) {
+      throw new RoutineStoreValidationError(`Routine already exists: ${id}`)
+    }
+
+    const createdAt = normalizeOptionalTimestamp(input.createdAt, 'createdAt') ?? now
+    const updatedAt = normalizeOptionalTimestamp(input.updatedAt, 'updatedAt') ?? createdAt
+    const prompt = normalizeRequiredString(input.prompt ?? input.content, 'prompt')
+    const schedule = normalizeRequiredString(input.schedule ?? input.frequency, 'schedule')
+    const projectId = normalizeOptionalId(input.projectId, 'projectId')
+    const projectCwd = normalizeOptionalString(input.projectCwd, 'projectCwd')?.trim() || undefined
+    if (!projectId && !projectCwd) {
+      throw new RoutineStoreValidationError('projectId or projectCwd is required')
+    }
+    const routine: Routine = {
+      ...copyUnknownFields(input),
+      id,
+      name: normalizeRequiredString(input.name, 'name'),
+      prompt,
+      content: normalizeOptionalString(input.content, 'content') ?? prompt,
+      projectId,
+      goalTemplateId: normalizeOptionalId(input.goalTemplateId, 'goalTemplateId'),
+      digitalWorkerId: normalizeOptionalId(input.digitalWorkerId, 'digitalWorkerId'),
+      projectCwd,
+      schedule,
+      frequency: normalizeOptionalString(input.frequency, 'frequency') ?? schedule,
+      providerId: normalizeOptionalString(input.providerId, 'providerId') ?? '',
+      model: normalizeOptionalString(input.model, 'model') ?? '',
+      engine: normalizeOptionalEngine(input.engine),
+      permissionMode: normalizePermissionMode(input.permissionMode ?? 'default'),
+      budgetUsd: normalizeBudget(input.budgetUsd ?? 0),
+      notification: normalizeNotificationOptions(input.notification),
+      enabled: normalizeOptionalBoolean(input.enabled, 'enabled') ?? true,
+      createdAt,
+      updatedAt,
+      lastRunAt: normalizeNullableTimestamp(input.lastRunAt, 'lastRunAt') ?? null
+    }
+    const nextRunAt = normalizeNullableTimestamp(input.nextRunAt, 'nextRunAt')
+    if (nextRunAt !== null) routine.nextRunAt = nextRunAt
+    else if (routine.enabled && !hasOwn(input, 'nextRunAt')) {
+      const seeded = computeInitialNextRun(routine.schedule, now)
+      if (seeded !== null) routine.nextRunAt = seeded
     }
 
     file.routines.push(routine)
@@ -181,7 +213,6 @@ export async function updateRoutine(
     if (index === -1) return null
 
   const current = file.routines[index]
-  assertExpectedRoutineRevision(current, patch.expectedRevision)
   const prompt = hasOwn(patch, 'prompt')
     ? normalizeRequiredString(patch.prompt, 'prompt')
     : hasOwn(patch, 'content')
@@ -205,7 +236,6 @@ export async function updateRoutine(
     ...copyUnknownFields(current),
     ...copyUnknownFields(patch),
     id: current.id,
-    revision: current.revision + 1,
     name: hasOwn(patch, 'name') ? normalizeRequiredString(patch.name, 'name') : current.name,
     prompt,
     content: hasOwn(patch, 'content')
@@ -260,16 +290,11 @@ export async function updateRoutine(
   })
 }
 
-export async function deleteRoutine(rootDir: string, id: string, expectedRevision?: number): Promise<boolean> {
+export async function deleteRoutine(rootDir: string, id: string): Promise<boolean> {
   return withRoutineStoreWriteLock(rootDir, async () => {
     const file = await readStore(rootDir)
-    const routine = file.routines.find((candidate) => candidate.id === id)
-    if (!routine) return false
-    const expected = normalizeOptionalRevision(expectedRevision, 'expectedRevision')
-    if (expected !== undefined && expected !== routine.revision) {
-      throw new RoutineStoreValidationError(`Routine revision conflict: expected ${expected}, got ${routine.revision}`)
-    }
     const nextRoutines = file.routines.filter((routine) => routine.id !== id)
+    if (nextRoutines.length === file.routines.length) return false
     await writeStore(rootDir, nextRoutines)
     return true
   })
@@ -404,7 +429,6 @@ function normalizeStoredRoutine(value: unknown): Routine | null {
     const routine: Routine = {
       ...copyUnknownFields(value),
       id,
-      revision: normalizeStoredRevision(value.revision),
       name: normalizeRequiredString(value.name, 'name'),
       prompt: normalizeRequiredString(value.prompt ?? value.content, 'prompt'),
       content: normalizeOptionalString(value.content, 'content') ?? normalizeRequiredString(value.prompt ?? value.content, 'prompt'),
@@ -431,70 +455,6 @@ function normalizeStoredRoutine(value: unknown): Routine | null {
   } catch {
     return null
   }
-}
-
-function normalizeCreatedRoutine(
-  input: CreateRoutineInput,
-  id: string,
-  now: number,
-  existing?: Routine
-): Routine {
-  return {
-    ...copyUnknownFields(input),
-    id,
-    revision: 1,
-    ...normalizeCreatedRoutineFields(input),
-    ...normalizeCreatedRoutineTiming(input, now, existing)
-  }
-}
-
-function normalizeCreatedRoutineFields(input: CreateRoutineInput): RoutineDefinitionFields {
-  const prompt = normalizeRequiredString(input.prompt ?? input.content, 'prompt')
-  const schedule = normalizeRequiredString(input.schedule ?? input.frequency, 'schedule')
-  const projectId = normalizeOptionalId(input.projectId, 'projectId')
-  const projectCwd = normalizeOptionalString(input.projectCwd, 'projectCwd')?.trim() || undefined
-  if (!projectId && !projectCwd) throw new RoutineStoreValidationError('projectId or projectCwd is required')
-  return {
-    name: normalizeRequiredString(input.name, 'name'),
-    prompt,
-    content: normalizeOptionalString(input.content, 'content') ?? prompt,
-    projectId,
-    goalTemplateId: normalizeOptionalId(input.goalTemplateId, 'goalTemplateId'),
-    digitalWorkerId: normalizeOptionalId(input.digitalWorkerId, 'digitalWorkerId'),
-    projectCwd,
-    schedule,
-    frequency: normalizeOptionalString(input.frequency, 'frequency') ?? schedule,
-    providerId: normalizeOptionalString(input.providerId, 'providerId') ?? '',
-    model: normalizeOptionalString(input.model, 'model') ?? '',
-    engine: normalizeOptionalEngine(input.engine),
-    permissionMode: normalizePermissionMode(input.permissionMode ?? 'default'),
-    budgetUsd: normalizeBudget(input.budgetUsd ?? 0),
-    notification: normalizeNotificationOptions(input.notification),
-    enabled: normalizeOptionalBoolean(input.enabled, 'enabled') ?? true
-  }
-}
-
-function normalizeCreatedRoutineTiming(
-  input: CreateRoutineInput,
-  now: number,
-  existing?: Routine
-): Pick<Routine, 'createdAt' | 'updatedAt' | 'lastRunAt'> & { nextRunAt?: number } {
-  const createdAt = normalizeOptionalTimestamp(input.createdAt, 'createdAt') ?? existing?.createdAt ?? now
-  const updatedAt = normalizeOptionalTimestamp(input.updatedAt, 'updatedAt') ?? existing?.updatedAt ?? createdAt
-  const timing: Pick<Routine, 'createdAt' | 'updatedAt' | 'lastRunAt'> & { nextRunAt?: number } = {
-    createdAt,
-    updatedAt,
-    lastRunAt: normalizeNullableTimestamp(input.lastRunAt, 'lastRunAt') ?? null
-  }
-  const nextRunAt = normalizeNullableTimestamp(input.nextRunAt, 'nextRunAt')
-  if (nextRunAt !== null) timing.nextRunAt = nextRunAt
-  else if (!hasOwn(input, 'nextRunAt') && existing?.nextRunAt !== undefined) timing.nextRunAt = existing.nextRunAt
-  else if ((normalizeOptionalBoolean(input.enabled, 'enabled') ?? true) && !hasOwn(input, 'nextRunAt')) {
-    const schedule = normalizeRequiredString(input.schedule ?? input.frequency, 'schedule')
-    const seeded = computeInitialNextRun(schedule, now)
-    if (seeded !== null) timing.nextRunAt = seeded
-  }
-  return timing
 }
 
 function resolveRootDir(rootDir: string): string {
@@ -608,25 +568,6 @@ function normalizeOptionalTimestamp(value: unknown, field: string): number | und
     throw new RoutineStoreValidationError(`${field} must be a non-negative timestamp`)
   }
   return value
-}
-
-function normalizeOptionalRevision(value: unknown, field: string): number | undefined {
-  if (value === undefined || value === null) return undefined
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
-    throw new RoutineStoreValidationError(`${field} must be a positive integer`)
-  }
-  return value
-}
-
-function normalizeStoredRevision(value: unknown): number {
-  return normalizeOptionalRevision(value, 'revision') ?? 1
-}
-
-function assertExpectedRoutineRevision(routine: Routine, value: unknown): void {
-  const expected = normalizeOptionalRevision(value, 'expectedRevision')
-  if (expected !== undefined && expected !== routine.revision) {
-    throw new RoutineStoreValidationError(`Routine revision conflict: expected ${expected}, got ${routine.revision}`)
-  }
 }
 
 function normalizeNullableTimestamp(value: unknown, field: string): number | null {

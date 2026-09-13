@@ -1,3 +1,7 @@
+import { mediaTarget, binding, outputIdentities, localOutputIdentities, operationIdFor, bindingDigest } from './media-operation-identity'
+import { mediaRequestBudgetScope, withMediaRequestBudget, reconcileMediaRequestBudget } from './media-request-budget'
+import { mediaAgentOrigin, type MediaAgentExecutionContext } from './media-agent-context'
+import { localMediaCost as nonBillableMediaCost } from './media-cost'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import type {
@@ -18,8 +22,6 @@ import type {
   MediaCharacterBibleInput,
   MediaCompositionInput,
   MediaCompositionResult,
-  MediaExportInput,
-  MediaExportResult,
   MediaContinuityCheckInput,
   MediaContinuityCheckResult,
   MediaContinuityFinding,
@@ -51,31 +53,31 @@ import { MEDIA_SCHEMA_VERSION } from '../../shared/media-types'
 import type { EffectRecord } from '../../shared/types'
 import { registerCanonicalProducedArtifact } from '../task/artifact-production-boundary'
 import {
-  getLatestPersistedArtifactLifecycleByLineage,
   getPersistedArtifactLifecycle,
   purgePersistedArtifactContent,
   revisePersistedArtifactRetention
 } from '../task/artifact-lifecycle-api'
 import { assertDataPurgeAllowed } from '../data-lifecycle/retention-authority'
-import { artifactBlobPath, assertRegularContent } from '../task/artifact-lifecycle-content'
-import { copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm } from 'node:fs/promises'
+import { lstat, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { promisify } from 'node:util'
-import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import {
-  createPersistedWorkflowArtifactEdge,
-  queryPersistedWorkflowArtifactGraph
-} from '../task/workflow-ledger-artifact-graph-api'
-import { createWorkflowEvidence } from '../task/workflow-ledger-api'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { createPersistedWorkflowArtifactEdge } from '../task/workflow-ledger-artifact-graph-api'
 import { executeInteractiveOperationEffect } from '../task/operation-effect-gateway'
 import {
   prepareCanonicalSystemOperation,
-  settleCanonicalSystemOperation,
   type CanonicalSystemOperationContext
 } from '../task/system-operation-context'
+import { TaskKernel } from '../task/task-kernel'
 import { stableValueDigest } from '../task/tool-idempotency'
 import type { MediaJobOperationTarget } from './media-job-effect-target'
 import { executeRemoteMediaOperation } from './media-provider-runtime'
+import { bindMediaJobBusinessLine, createBusinessLineProduction, replayMediaJobBusinessLine } from './media-business-line'
+import { missingMediaReconciliationIdentity, observedMediaProviderJobId } from './media-reconciliation-identity'
+import { reconcileMediaOperationEffects, settleTerminal } from './media-reconcile-effects'
+import { nextTransition, isTerminal } from './media-job-transition'
+import { withMediaJobOperationQueue } from './media-job-operation-queue'
+import { mediaJobIdForKey } from './media-submission-identity'
+import { mediaProfileForJob, prepareMediaRoute, runtimeMediaProviders, runtimeMediaStudio } from './media-routing-runtime'
 import { buildMinimalSubprocessEnv } from '../security/subprocess-environment'
 import {
   getMediaStore,
@@ -92,23 +94,15 @@ import {
 
 const execFileAsync = promisify(execFile)
 
-type MediaJobProviderOperation = 'submit' | 'poll' | 'download' | 'cancel'
-
-type MediaAdvanceTransition = {
-  operation: MediaJobProviderOperation
-  status: MediaJobOperationTarget['expectedStatus']
-  reason?: string
-}
-
 export class MediaRuntime implements MediaApi {
   constructor(private readonly rootDir: string) {}
 
   getMediaStudio(projectId?: string): Promise<MediaStudioSnapshot> {
-    return getMediaStore(this.rootDir).getMediaStudio(projectId)
+    return runtimeMediaStudio(getMediaStore(this.rootDir), projectId)
   }
 
   listMediaProviders(): Promise<MediaProviderProfile[]> {
-    return getMediaStore(this.rootDir).listMediaProviders()
+    return runtimeMediaProviders(getMediaStore(this.rootDir))
   }
 
   upsertMediaProvider(input: MediaProviderProfileInput): Promise<MediaProviderProfile> {
@@ -124,7 +118,7 @@ export class MediaRuntime implements MediaApi {
   }
 
   createVideoProduction(input: MediaProductionInput): Promise<VideoProduction> {
-    return getMediaStore(this.rootDir).createVideoProduction(input)
+    return createBusinessLineProduction(getMediaStore(this.rootDir), input, this.rootDir)
   }
 
   reviseVideoProduction(input: MediaProductionRevisionInput): Promise<VideoProduction> {
@@ -176,8 +170,9 @@ export class MediaRuntime implements MediaApi {
     return store.updateMediaAssetRetention(input)
   }
 
-  setMediaAssetEgress(input: MediaAssetEgressInput): Promise<MediaAsset> {
-    return getMediaStore(this.rootDir).setMediaAssetEgress(input)
+  async setMediaAssetEgress(input: MediaAssetEgressInput): Promise<MediaAsset> {
+    const store = getMediaStore(this.rootDir)
+    return store.setMediaAssetEgress(input, (await runtimeMediaProviders(store)).find((profile) => profile.id === input.mediaProviderId))
   }
 
   setMediaVoiceCloneAuthorization(input: MediaVoiceCloneAuthorizationInput): Promise<MediaAsset> {
@@ -257,7 +252,7 @@ export class MediaRuntime implements MediaApi {
     const bytes = Buffer.from(`${JSON.stringify(reportBody, null, 2)}\n`, 'utf8')
     const reportDigest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`
     const identity = bindingDigest(`${production.id}\0${production.revision}\0${reportDigest}`)
-    const context = await this.prepareJobContext(`continuity:${identity}`, production.title, production.projectId)
+    const context = await this.prepareJobContext(`continuity:${identity}`, production.title, production.projectId, production.businessLineId)
     const ids = localOutputIdentities('media-continuity', identity)
     const target = mediaTarget({
       context,
@@ -323,7 +318,7 @@ export class MediaRuntime implements MediaApi {
       resultSummary: (result) => JSON.stringify({ passed: result.summary.passed, findingCount: result.findings.length })
     })
     if (!outcome.value) throw new Error(outcome.status === 'failed' ? outcome.error : 'Continuity Check is waiting for reconciliation')
-    await settleCanonicalSystemOperation(context, {
+    await new TaskKernel(context.rootDir).deliver(context, {
       status: outcome.value.summary.passed ? 'passed' : 'failed', evidenceRefs: [outcome.value.summary.evidenceId], verifiedBy: 'media-continuity-check'
     })
     return outcome.value
@@ -340,7 +335,7 @@ export class MediaRuntime implements MediaApi {
     if (!production) throw new Error('MediaAsset Project/Production scope is invalid')
     const imported = await importMediaFile(input.sourcePath, this.rootDir, input.projectId, input.mediaType)
     const identity = bindingDigest(`${production.id}\0${imported.digest}\0${input.kind}`)
-    const context = await this.prepareJobContext(`asset-import:${identity}`, production.title, production.projectId)
+    const context = await this.prepareJobContext(`asset-import:${identity}`, production.title, production.projectId, production.businessLineId)
     const ids = localOutputIdentities('media-asset', identity)
     const target = mediaTarget({
       context,
@@ -352,7 +347,7 @@ export class MediaRuntime implements MediaApi {
       expectedStatus: 'succeeded',
       ...ids
     })
-    const outcome = await executeInteractiveOperationEffect({
+    const outcome = await executeInteractiveOperationEffect<MediaAsset>({
       rootDir: this.rootDir,
       operationId: target.runId.slice('operation:'.length),
       kind: 'media_generation',
@@ -403,7 +398,7 @@ export class MediaRuntime implements MediaApi {
       resultSummary: (asset) => JSON.stringify({ assetId: asset.id, digest: asset.digest })
     })
     if (!outcome.value) throw new Error(outcome.status === 'failed' ? outcome.error : 'Media asset import is waiting for reconciliation')
-    await settleCanonicalSystemOperation(context, {
+    await new TaskKernel(context.rootDir).deliver(context, {
       status: 'passed', evidenceRefs: [ids.evidenceId!], verifiedBy: 'media-asset-import'
     })
     return outcome.value
@@ -435,7 +430,7 @@ export class MediaRuntime implements MediaApi {
     const previousComposition = production.assets
       .filter((asset) => asset.kind === 'video' && asset.authorization?.source === 'local_composition' && asset.artifactId)
       .sort((left, right) => right.version - left.version || right.createdAt - left.createdAt)[0]
-    const context = await this.prepareJobContext(`compose:${identity}`, production.title, production.projectId)
+    const context = await this.prepareJobContext(`compose:${identity}`, production.title, production.projectId, production.businessLineId)
     const ids = localOutputIdentities('media-composition', identity)
     const target = mediaTarget({
       context,
@@ -447,7 +442,7 @@ export class MediaRuntime implements MediaApi {
       expectedStatus: 'succeeded',
       ...ids
     })
-    const outcome = await executeInteractiveOperationEffect({
+    const outcome = await executeInteractiveOperationEffect<MediaCompositionResult>({
       rootDir: this.rootDir,
       operationId: target.runId.slice('operation:'.length),
       kind: 'media_generation',
@@ -541,233 +536,29 @@ export class MediaRuntime implements MediaApi {
       resultSummary: (result) => JSON.stringify({ assetId: result.asset.id, digest: result.output.digest })
     })
     if (!outcome.value) throw new Error(outcome.status === 'failed' ? outcome.error : 'Media composition is waiting for reconciliation')
-    await settleCanonicalSystemOperation(context, {
+    await new TaskKernel(context.rootDir).deliver(context, {
       status: 'passed', evidenceRefs: [ids.evidenceId!], verifiedBy: 'media-ffmpeg-composition'
     })
     return outcome.value
   }
 
-  async exportMediaProduction(input: MediaExportInput): Promise<MediaExportResult> {
-    const store = getMediaStore(this.rootDir)
-    const production = (await store.getMediaStudio(input.projectId)).productions.find((item) => item.id === input.productionId)
-    if (!production) throw new Error('Media export Project/Production scope is invalid')
-    const asset = input.assetId
-      ? production.assets.find((item) => item.id === input.assetId)
-      : finalAssetForProduction(production)
-    if (!asset || asset.kind !== 'video' || asset.contentStatus !== 'available' || !asset.artifactId) {
-      throw new Error('Media export requires an available video Asset with a canonical Artifact')
-    }
-    const sourceArtifactId = asset.artifactId
-    const lifecycle = await getPersistedArtifactLifecycle(asset.artifactId, this.rootDir)
-    if (!lifecycle || lifecycle.projectId !== input.projectId) throw new Error('Media export source Artifact is unavailable')
-    const sourcePath = lifecycle.storageKind === 'source_ref'
-      ? lifecycle.sourceRef
-      : artifactBlobPath(this.rootDir, lifecycle.digest)
-    if (!sourcePath) throw new Error('Media export source content is unavailable')
-    await assertRegularContent(sourcePath, lifecycle.digest, lifecycle.sizeBytes)
-    const destinationPath = input.destinationPath ? resolve(input.destinationPath) : undefined
-    if (!destinationPath) throw new Error('Media export destination is required')
-    if (destinationPath === resolve(sourcePath)) throw new Error('Media export destination must differ from source content')
-
-    await mkdir(dirname(destinationPath), { recursive: true, mode: 0o700 })
-    const temporaryPath = `${destinationPath}.${process.pid}.${bindingDigest(`${asset.artifactId}\0${destinationPath}`)}.tmp`
-    await rm(temporaryPath, { force: true })
-    try {
-      await copyFile(sourcePath, temporaryPath)
-      await assertRegularContent(temporaryPath, lifecycle.digest, lifecycle.sizeBytes)
-      await rename(temporaryPath, destinationPath)
-      await assertRegularContent(destinationPath, lifecycle.digest, lifecycle.sizeBytes)
-    } catch (error) {
-      await rm(temporaryPath, { force: true })
-      throw new Error(`Media export failed: ${error instanceof Error ? error.message : String(error)}`)
-    }
-    const canonicalDestinationPath = await realpath(destinationPath)
-
-    const identity = bindingDigest(`${asset.artifactId}\0${destinationPath}`)
-    const exportArtifactId = `artifact:media-export:${identity}`
-    const exportEvidenceId = `evidence:media-export:${identity}`
-    const exportAcceptanceId = `acceptance:media-export:${identity}`
-    const lineageId = `lineage:media-export:${asset.artifactId}`
-    const existing = await getPersistedArtifactLifecycle(exportArtifactId, this.rootDir)
-    if (existing) {
-      if (existing.projectId !== production.projectId || existing.digest !== lifecycle.digest || existing.sizeBytes !== lifecycle.sizeBytes ||
-          existing.storageKind !== 'source_ref' || !existing.sourceRef || await realpath(existing.sourceRef) !== canonicalDestinationPath) {
-        throw new Error(`Media export existing Artifact does not match the requested source and destination:${JSON.stringify({
-          existingProjectId: existing.projectId,
-          requestedProjectId: production.projectId,
-          existingDigest: existing.digest,
-          requestedDigest: lifecycle.digest,
-          existingSizeBytes: existing.sizeBytes,
-          requestedSizeBytes: lifecycle.sizeBytes,
-          existingStorageKind: existing.storageKind,
-          existingSourceRef: existing.sourceRef,
-          requestedDestinationPath: destinationPath
-        })}`)
-      }
-      await ensureMediaExportLineage({
-        exportArtifactId,
-        sourceArtifactId,
-        identity,
-        projectId: production.projectId,
-        sourceArtifactVersion: lifecycle.version,
-        rootDir: this.rootDir
-      })
-      if (existing.goalId) {
-        await settleCanonicalSystemOperation({
-          rootDir: this.rootDir,
-          goalId: existing.goalId,
-          workItemId: existing.workItemId
-        }, { status: 'passed', evidenceRefs: [exportEvidenceId], verifiedBy: 'media-export' })
-      }
-      return {
-        canceled: false,
-        filePath: destinationPath,
-        sourceArtifactId,
-        artifactId: exportArtifactId,
-        evidenceId: exportEvidenceId,
-        acceptanceId: exportAcceptanceId,
-        digest: existing.digest,
-        sizeBytes: existing.sizeBytes,
-        mediaType: asset.mediaType ?? 'video/mp4'
-      }
-    }
-    const context = await this.prepareJobContext(`export:${asset.artifactId}:${destinationPath}`, production.title, production.projectId)
-    const previous = await getLatestPersistedArtifactLifecycleByLineage({
-      projectId: production.projectId,
-      workItemId: context.workItemId,
-      lineageId,
-      kind: 'custom'
-    }, this.rootDir)
-    const target = mediaTarget({
-      context,
-      operationId: `media-export-${identity}`,
-      operation: 'export',
-      mediaJobId: `media-export:${identity}`,
-      externalJobId: `local-export:${identity}`,
-      idempotencyKey: `media-export:${identity}`,
-      expectedStatus: 'succeeded',
-      artifactId: exportArtifactId,
-      evidenceId: exportEvidenceId,
-      acceptanceId: exportAcceptanceId
-    })
-    const persistExport = async (): Promise<Awaited<ReturnType<typeof registerCanonicalProducedArtifact>>> => {
-      const registered = await registerCanonicalProducedArtifact({
-        lifecycle: {
-          id: exportArtifactId,
-          projectId: production.projectId,
-          goalId: context.goalId,
-          workItemId: context.workItemId,
-          runId: target.runId,
-          lineageId,
-          kind: 'custom',
-          title: `${asset.title} export`,
-          version: (previous?.version ?? 0) + 1,
-          provenance: 'explicit',
-          supersedesId: previous?.artifactId,
-          mediaType: asset.mediaType ?? 'video/mp4',
-          retention: { mode: 'retain' },
-          content: { storageKind: 'source_ref', sourceRef: destinationPath, expectedDigest: lifecycle.digest },
-          metadata: {
-            producer: 'media-export',
-            sourceArtifactId: asset.artifactId,
-            sourceArtifactVersion: lifecycle.version,
-            destinationFileName: basename(destinationPath),
-            destinationDigest: lifecycle.digest,
-            destinationSizeBytes: lifecycle.sizeBytes
-          }
-        },
-        evidence: {
-          id: exportEvidenceId,
-          kind: 'delivery_check',
-          title: 'Video export integrity',
-          summary: 'The exported file was copied from the canonical video Artifact and matches its SHA-256 digest.',
-          verifier: 'media-export',
-          uri: pathToFileURL(destinationPath).href,
-          metadata: {
-            sourceArtifactId: asset.artifactId,
-            sourceArtifactVersion: lifecycle.version,
-            digest: lifecycle.digest,
-            sizeBytes: lifecycle.sizeBytes
-          }
-        },
-        acceptance: {
-          id: exportAcceptanceId,
-          criterionId: `${exportAcceptanceId}:criterion:integrity`,
-          criterion: 'The exported video file exists at the requested location and matches the canonical source Artifact digest.',
-          status: 'passed',
-          verifier: 'media-export',
-          authorizesWorkflowStage: true
-        },
-        externalLocation: {
-          id: `artifact-location:media-export:${identity}`,
-          kind: 'external',
-          uri: pathToFileURL(destinationPath).href,
-          checksum: lifecycle.digest,
-          sizeBytes: lifecycle.sizeBytes,
-          mediaType: asset.mediaType ?? 'video/mp4',
-          metadata: { sourceArtifactId: asset.artifactId, sourceArtifactVersion: lifecycle.version }
-        },
-        attachToStage: true
-      }, this.rootDir)
-      return registered
-    }
-    const outcome = await executeInteractiveOperationEffect({
-      rootDir: this.rootDir,
-      operationId: target.runId.slice('operation:'.length),
-      kind: 'media_generation',
-      title: 'Export video file',
-      sourceSessionId: `media:${target.mediaJobId}`,
-      projectId: context.projectId,
-      workspaceId: context.workspaceId,
-      goalId: context.goalId,
-      workItemId: context.workItemId,
-      cwd: context.cwd,
-      toolName: 'media_job_operation',
-      toolInput: target,
-      execute: async () => {
-        const registered = await persistExport()
-        await ensureMediaExportLineage({
-          exportArtifactId,
-          sourceArtifactId,
-          identity,
-          projectId: production.projectId,
-          sourceArtifactVersion: lifecycle.version,
-          rootDir: this.rootDir
-        })
-        return { artifactId: registered.artifact.id, digest: registered.lifecycle.digest }
-      },
-      isSuccess: Boolean
-    })
-    const persisted = await getPersistedArtifactLifecycle(exportArtifactId, this.rootDir)
-    if (outcome.status === 'waiting_reconciliation') {
-      throw new Error(`Media export is waiting for reconciliation:${outcome.snapshotId}:${outcome.error}`)
-    }
-    if (outcome.status !== 'completed' || !outcome.value || !persisted) {
-      throw new Error(outcome.status === 'failed' ? outcome.error : 'Media export did not produce a durable Artifact')
-    }
-    await settleCanonicalSystemOperation(context, {
-      status: 'passed', evidenceRefs: [exportEvidenceId], verifiedBy: 'media-export'
-    })
-    return {
-      canceled: false,
-      filePath: destinationPath,
-      sourceArtifactId,
-      artifactId: exportArtifactId,
-      evidenceId: exportEvidenceId,
-      acceptanceId: exportAcceptanceId,
-      digest: persisted.digest,
-      sizeBytes: persisted.sizeBytes,
-      mediaType: asset.mediaType ?? 'video/mp4'
-    }
+  async submitMediaJob(input: MediaJobInput, agentContext?: MediaAgentExecutionContext): Promise<MediaJobRecord> {
+    return withMediaJobOperationQueue(this.rootDir, mediaJobIdForKey(input.idempotencyKey), () => this.submitQueuedMediaJob(input, agentContext))
   }
 
-  async submitMediaJob(input: MediaJobInput): Promise<MediaJobRecord> {
+  private async submitQueuedMediaJob(input: MediaJobInput, agentContext?: MediaAgentExecutionContext): Promise<MediaJobRecord> {
     const store = getMediaStore(this.rootDir)
     const existing = await store.findMediaJobByIdempotencyKey(input.idempotencyKey)
-    if (existing) return existing
+    if (existing) return replayMediaJobBusinessLine(existing, input)
+    input = await bindMediaJobBusinessLine(store, input, this.rootDir)
     await store.assertProjectStorageAvailable(input.projectId)
-    const validated = await store.validateMediaJobInput(input)
-    const context = await this.prepareJobContext(validated.jobId, validated.production.title, validated.production.projectId)
+    const production = (await store.getMediaStudio(input.projectId)).productions.find((item) => item.id === input.productionId)!
+    const scope = mediaRequestBudgetScope(production, agentContext)
+    const routed = await prepareMediaRoute(store, input, { rootDir: this.rootDir, scope })
+    if (agentContext) routed.executionBinding.agentOrigin = mediaAgentOrigin(agentContext)
+    input = routed.input
+    const validated = await store.validateMediaJobInput(input, routed.executionBinding.profile)
+    const context = await this.prepareJobContext(validated.jobId, validated.production.title, validated.production.projectId, input.businessLineId)
     const operationId = operationIdFor(validated.jobId, 'submit', 0)
     const target = mediaTarget({
       context,
@@ -778,14 +569,14 @@ export class MediaRuntime implements MediaApi {
       idempotencyKey: input.idempotencyKey,
       expectedStatus: 'submitting'
     })
-    return this.executeOperation(context, target, async (effect) => {
+    return withMediaRequestBudget({ rootDir: this.rootDir, jobId: validated.jobId, scope, binding: routed.executionBinding,
+      readJob: () => store.getMediaJob(validated.jobId), execute: () => this.executeOperation(context, target, async (effect) => {
       const operationBinding = binding(context, target.runId, effect.id)
-      const prepared = await store.prepareMediaJobSubmission(input, operationBinding)
+      const prepared = await store.prepareMediaJobSubmission(input, operationBinding, routed.executionBinding)
       if (prepared.providerMode !== 'remote' || !prepared.mediaProviderId) {
         return store.commitMediaJobOperation(prepared.id, { operation: 'submit', status: 'submitting', binding: operationBinding })
       }
-      const profile = (await store.listMediaProviders()).find((provider) => provider.id === prepared.mediaProviderId)
-      if (!profile) throw new Error('Media Provider was deleted')
+      const profile = await mediaProfileForJob(store, prepared)
       const observation = await executeRemoteMediaOperation(profile, prepared, 'submit', this.rootDir)
       return store.commitMediaJobOperation(prepared.id, {
         operation: 'submit',
@@ -794,7 +585,7 @@ export class MediaRuntime implements MediaApi {
         reason: observation.reason,
         remoteOutputRef: observation.outputUrl,
         remoteOutputMediaType: observation.mediaType,
-        providerExternalJobId: observation.externalJobId,
+        providerExternalJobId: observedMediaProviderJobId(prepared, observation),
         preparedOutputPath: observation.outputFilePath,
         preparedOutputDigest: observation.outputDigest,
         preparedOutputSizeBytes: observation.outputSizeBytes,
@@ -803,10 +594,14 @@ export class MediaRuntime implements MediaApi {
         actualUsd: observation.actualUsd,
         billingReceiptDigest: observation.billingReceiptDigest
       })
-    })
+    }) })
   }
 
   async advanceMediaJob(jobId: string): Promise<MediaJobRecord> {
+    return withMediaJobOperationQueue(this.rootDir, jobId, () => this.advanceQueuedMediaJob(jobId))
+  }
+
+  private async advanceQueuedMediaJob(jobId: string): Promise<MediaJobRecord> {
     const store = getMediaStore(this.rootDir)
     const job = await store.getMediaJob(jobId)
     if (!job) throw new Error('MediaJob was not found')
@@ -817,7 +612,7 @@ export class MediaRuntime implements MediaApi {
     }
     const production = (await store.getMediaStudio(job.projectId)).productions.find((item) => item.id === job.productionId)
     if (!production) throw new Error('MediaJob Production was not found')
-    const context = await this.prepareJobContext(job.id, production.title, job.projectId)
+    const context = await this.prepareJobContext(job.id, production.title, job.projectId, job.businessLineId ?? production.businessLineId)
     const transition = nextTransition(job)
     const operationId = operationIdFor(job.id, transition.operation, job.statusHistory.length)
     const identities = transition.operation === 'download' ? outputIdentities(job.id) : undefined
@@ -835,14 +630,14 @@ export class MediaRuntime implements MediaApi {
       const operationBinding = binding(context, target.runId, effect.id)
       const observation = job.providerMode === 'remote' && job.mediaProviderId
         ? await executeRemoteMediaOperation(
-          (await store.listMediaProviders()).find((provider) => provider.id === job.mediaProviderId) ?? (() => { throw new Error('Media Provider was deleted') })(),
+          await mediaProfileForJob(store, job),
           job,
           transition.operation,
           this.rootDir
         )
         : undefined
       if (observation && observation.status !== transition.status) {
-        return store.commitMediaJobOperation(job.id, { operation: transition.operation, status: observation.status, binding: operationBinding, reason: observation.reason, remoteOutputRef: observation.outputUrl, remoteOutputMediaType: observation.mediaType, providerExternalJobId: observation.externalJobId, preparedOutputPath: observation.outputFilePath, preparedOutputDigest: observation.outputDigest, preparedOutputSizeBytes: observation.outputSizeBytes, downloadReceivedBytes: observation.downloadReceivedBytes, downloadTotalBytes: observation.downloadTotalBytes, actualUsd: observation.actualUsd, billingReceiptDigest: observation.billingReceiptDigest })
+        return store.commitMediaJobOperation(job.id, { operation: transition.operation, status: observation.status, binding: operationBinding, reason: observation.reason, remoteOutputRef: observation.outputUrl, remoteOutputMediaType: observation.mediaType, providerExternalJobId: observedMediaProviderJobId(job, observation), preparedOutputPath: observation.outputFilePath, preparedOutputDigest: observation.outputDigest, preparedOutputSizeBytes: observation.outputSizeBytes, downloadReceivedBytes: observation.downloadReceivedBytes, downloadTotalBytes: observation.downloadTotalBytes, actualUsd: observation.actualUsd, billingReceiptDigest: observation.billingReceiptDigest })
       }
       if (transition.operation === 'download' && transition.status === 'succeeded') {
         const output = observation?.outputFilePath && observation.outputDigest && observation.outputSizeBytes
@@ -850,20 +645,25 @@ export class MediaRuntime implements MediaApi {
           : await persistMediaOutput(job, target, effect, this.rootDir)
         return store.commitMediaJobOperation(job.id, { ...transition, binding: operationBinding, output })
       }
-      return store.commitMediaJobOperation(job.id, { ...transition, binding: operationBinding, remoteOutputRef: observation?.outputUrl, remoteOutputMediaType: observation?.mediaType, providerExternalJobId: observation?.externalJobId, preparedOutputPath: observation?.outputFilePath, preparedOutputDigest: observation?.outputDigest, preparedOutputSizeBytes: observation?.outputSizeBytes, downloadReceivedBytes: observation?.downloadReceivedBytes, downloadTotalBytes: observation?.downloadTotalBytes, actualUsd: observation?.actualUsd, billingReceiptDigest: observation?.billingReceiptDigest })
+      return store.commitMediaJobOperation(job.id, { ...transition, binding: operationBinding, remoteOutputRef: observation?.outputUrl, remoteOutputMediaType: observation?.mediaType, providerExternalJobId: observedMediaProviderJobId(job, observation), preparedOutputPath: observation?.outputFilePath, preparedOutputDigest: observation?.outputDigest, preparedOutputSizeBytes: observation?.outputSizeBytes, downloadReceivedBytes: observation?.downloadReceivedBytes, downloadTotalBytes: observation?.downloadTotalBytes, actualUsd: observation?.actualUsd, billingReceiptDigest: observation?.billingReceiptDigest })
     })
+    if (transition.operation === 'poll') await reconcileMediaOperationEffects(result, this.rootDir)
     if (isTerminal(result.status)) await settleTerminal(context, result)
     return result
   }
 
   async cancelMediaJob(jobId: string): Promise<MediaJobRecord> {
+    return withMediaJobOperationQueue(this.rootDir, jobId, () => this.cancelQueuedMediaJob(jobId))
+  }
+
+  private async cancelQueuedMediaJob(jobId: string): Promise<MediaJobRecord> {
     const store = getMediaStore(this.rootDir)
     const job = await store.getMediaJob(jobId)
     if (!job) throw new Error('MediaJob was not found')
     if (isTerminal(job.status)) return job
     const production = (await store.getMediaStudio(job.projectId)).productions.find((item) => item.id === job.productionId)
     if (!production) throw new Error('MediaJob Production was not found')
-    const context = await this.prepareJobContext(job.id, production.title, job.projectId)
+    const context = await this.prepareJobContext(job.id, production.title, job.projectId, job.businessLineId ?? production.businessLineId)
     const operationId = operationIdFor(job.id, 'cancel', job.statusHistory.length)
     const target = mediaTarget({
       context,
@@ -877,20 +677,25 @@ export class MediaRuntime implements MediaApi {
     const result = await this.executeOperation(context, target, async (effect) => {
       let status: MediaJobRecord['status'] = 'cancelled'
       let reason = 'Cancelled by user'
+      let actualUsd: number | undefined, billingReceiptDigest: string | undefined
       if (job.providerMode === 'remote' && job.mediaProviderId) {
-        const profile = (await store.listMediaProviders()).find((provider) => provider.id === job.mediaProviderId)
-        if (!profile) throw new Error('Media Provider was deleted')
+        const profile = await mediaProfileForJob(store, job)
         const observation = await executeRemoteMediaOperation(profile, job, 'cancel', this.rootDir)
         status = observation.status
         reason = observation.reason ?? reason
+        actualUsd = observation.actualUsd; billingReceiptDigest = observation.billingReceiptDigest
       }
-      return store.commitMediaJobOperation(job.id, { operation: 'cancel', status, binding: binding(context, target.runId, effect.id), reason })
+      return store.commitMediaJobOperation(job.id, { operation: 'cancel', status, binding: binding(context, target.runId, effect.id), reason, actualUsd, billingReceiptDigest })
     })
     await settleTerminal(context, result)
     return result
   }
 
   async reconcileMediaJob(jobId: string): Promise<MediaJobRecord> {
+    return withMediaJobOperationQueue(this.rootDir, jobId, () => this.reconcileQueuedMediaJob(jobId))
+  }
+
+  private async reconcileQueuedMediaJob(jobId: string): Promise<MediaJobRecord> {
     const store = getMediaStore(this.rootDir)
     const job = await store.getMediaJob(jobId)
     if (!job) throw new Error('MediaJob was not found')
@@ -898,11 +703,11 @@ export class MediaRuntime implements MediaApi {
     if (job.providerMode !== 'remote' || !job.mediaProviderId) {
       throw new Error('Only remote MediaJobs can query an external result')
     }
+    if (missingMediaReconciliationIdentity(job, 'poll')) return job
     const production = (await store.getMediaStudio(job.projectId)).productions.find((item) => item.id === job.productionId)
     if (!production) throw new Error('MediaJob Production was not found')
-    const profile = (await store.listMediaProviders()).find((provider) => provider.id === job.mediaProviderId)
-    if (!profile) throw new Error('Media Provider was deleted')
-    const context = await this.prepareJobContext(job.id, production.title, job.projectId)
+    const profile = await mediaProfileForJob(store, job)
+    const context = await this.prepareJobContext(job.id, production.title, job.projectId, job.businessLineId ?? production.businessLineId)
     const operationId = operationIdFor(job.id, 'reconcile', job.statusHistory.length)
     const target = mediaTarget({
       context,
@@ -922,7 +727,7 @@ export class MediaRuntime implements MediaApi {
         reason: observation.reason,
         remoteOutputRef: observation.outputUrl,
         remoteOutputMediaType: observation.mediaType,
-        providerExternalJobId: observation.externalJobId,
+        providerExternalJobId: observedMediaProviderJobId(job, observation),
         preparedOutputPath: observation.outputFilePath,
         preparedOutputDigest: observation.outputDigest,
         preparedOutputSizeBytes: observation.outputSizeBytes,
@@ -932,6 +737,7 @@ export class MediaRuntime implements MediaApi {
         billingReceiptDigest: observation.billingReceiptDigest
       })
     })
+    await reconcileMediaOperationEffects(result, this.rootDir)
     if (isTerminal(result.status)) await settleTerminal(context, result)
     return result
   }
@@ -939,13 +745,13 @@ export class MediaRuntime implements MediaApi {
   private prepareJobContext(
     jobId: string,
     productionTitle: string,
-    projectId: string
+    projectId: string, businessLineId?: string
   ): Promise<CanonicalSystemOperationContext> {
     return prepareCanonicalSystemOperation({
       rootDir: this.rootDir,
       requestId: `media-${bindingDigest(jobId)}`,
       objective: `Generate and verify media for ${productionTitle}`,
-      workspaceId: projectId
+      workspaceId: projectId, businessLineId
     })
   }
 
@@ -978,7 +784,7 @@ export class MediaRuntime implements MediaApi {
         outputDigest: job.output?.digest
       })
     })
-    if (outcome.value) return outcome.value
+    if (outcome.value) { reconcileMediaRequestBudget(outcome.value, this.rootDir); return outcome.value }
     if (outcome.status === 'waiting_reconciliation') {
       const persisted = await getMediaStore(this.rootDir).getMediaJob(target.mediaJobId)
       if (persisted) return persisted
@@ -987,22 +793,6 @@ export class MediaRuntime implements MediaApi {
     if (outcome.status === 'failed') throw new Error(outcome.error)
     throw new Error('MediaJob operation completed without a durable result')
   }
-}
-
-function nextTransition(job: MediaJobRecord): MediaAdvanceTransition {
-  if (job.status === 'requested') return { operation: 'submit', status: 'submitting' }
-  if (job.status === 'submitting') return { operation: 'poll', status: 'running' }
-  if (job.status === 'running') {
-    if (job.providerMode === 'remote') return { operation: 'poll', status: 'running' }
-    if (job.mockScenario === 'failure') return { operation: 'poll', status: 'failed', reason: 'Mock Provider reported generation failure' }
-    if (job.mockScenario === 'rate_limit') return { operation: 'poll', status: 'failed', reason: 'Mock Provider rate limit exhausted the bounded attempt' }
-    if (job.mockScenario === 'unknown_result') {
-      return { operation: 'poll', status: 'waiting_reconciliation', reason: 'Mock Provider result is intentionally unknown' }
-    }
-    return { operation: 'poll', status: 'downloading' }
-  }
-  if (job.status === 'downloading') return { operation: 'download', status: 'succeeded' }
-  throw new Error(`MediaJob cannot advance from ${job.status}`)
 }
 
 function requiredRetentionExpiry(value: unknown): number {
@@ -1353,145 +1143,6 @@ async function persistCompositionGraph(input: {
   }
 }
 
-async function settleTerminal(context: CanonicalSystemOperationContext, job: MediaJobRecord): Promise<void> {
-  const evidenceId = job.output?.evidenceId ?? await recordTerminalMediaJobEvidence(context, job)
-  await settleCanonicalSystemOperation(context, {
-    status: job.status === 'succeeded' ? 'passed' : 'failed',
-    evidenceRefs: [evidenceId],
-    verifiedBy: 'media-runtime'
-  })
-}
-
-async function recordTerminalMediaJobEvidence(
-  context: CanonicalSystemOperationContext,
-  job: MediaJobRecord
-): Promise<string> {
-  const terminal = {
-    mediaJobId: job.id,
-    externalJobId: job.externalJobId,
-    providerMode: job.providerMode,
-    status: job.status,
-    reason: job.error ?? null,
-    statusHistory: job.statusHistory.map((event) => ({
-      status: event.status,
-      runId: event.runId ?? null,
-      effectId: event.effectId ?? null,
-      reason: event.reason ?? null
-    }))
-  }
-  const contentDigest = stableValueDigest(terminal)
-  const evidenceId = `evidence:media-job-terminal:${contentDigest}`
-  await createWorkflowEvidence({
-    evidenceId,
-    projectId: context.projectId,
-    goalId: context.goalId,
-    workItemId: context.workItemId,
-    runId: job.runId,
-    kind: 'observation',
-    title: `Media job ${job.status}`,
-    summary: job.error ?? `Media job reached terminal status: ${job.status}`,
-    contentDigest,
-    metadata: terminal
-  }, context.rootDir, {
-    source: 'runtime',
-    verifier: 'media-runtime',
-    observedAt: job.finishedAt ?? job.updatedAt
-  })
-  return evidenceId
-}
-
-async function ensureMediaExportLineage(input: {
-  exportArtifactId: string
-  sourceArtifactId: string
-  identity: string
-  projectId: string
-  sourceArtifactVersion: number
-  rootDir: string
-}): Promise<void> {
-  const edgeId = `artifact-edge:media-export-source:${input.identity}`
-  const graph = await queryPersistedWorkflowArtifactGraph(input.exportArtifactId, input.rootDir)
-  const existing = graph.outbound.find((edge) => edge.id === edgeId)
-  if (existing) {
-    if (existing.toArtifactId !== input.sourceArtifactId || existing.relation !== 'derived_from' || existing.projectId !== input.projectId) {
-      throw new Error(`Media export lineage edge conflicts with the requested source:${edgeId}`)
-    }
-    return
-  }
-  await createPersistedWorkflowArtifactEdge({
-    id: edgeId,
-    fromArtifactId: input.exportArtifactId,
-    toArtifactId: input.sourceArtifactId,
-    relation: 'derived_from',
-    projectId: input.projectId,
-    metadata: { producer: 'media-export', sourceArtifactVersion: input.sourceArtifactVersion }
-  }, input.rootDir)
-}
-
-function mediaTarget(input: {
-  context: CanonicalSystemOperationContext
-  operationId: string
-  operation: MediaJobOperationTarget['operation']
-  mediaJobId: string
-  externalJobId: string
-  idempotencyKey: string
-  expectedStatus: MediaJobOperationTarget['expectedStatus']
-  artifactId?: string
-  evidenceId?: string
-  acceptanceId?: string
-}): MediaJobOperationTarget {
-  return {
-    kind: 'media_job_operation',
-    operation: input.operation,
-    mediaJobId: input.mediaJobId,
-    externalJobId: input.externalJobId,
-    idempotencyKeyDigest: stableValueDigest(input.idempotencyKey),
-    projectId: input.context.projectId,
-    goalId: input.context.goalId,
-    workItemId: input.context.workItemId,
-    runId: `operation:${input.operationId}`,
-    expectedStatus: input.expectedStatus,
-    ...(input.artifactId ? { artifactId: input.artifactId } : {}),
-    ...(input.evidenceId ? { evidenceId: input.evidenceId } : {}),
-    ...(input.acceptanceId ? { acceptanceId: input.acceptanceId } : {})
-  }
-}
-
-function binding(
-  context: CanonicalSystemOperationContext,
-  runId: string,
-  effectId: string
-): MediaJobCanonicalBinding {
-  return { goalId: context.goalId, workItemId: context.workItemId, runId, effectId }
-}
-
-function outputIdentities(jobId: string): Pick<MediaJobOperationTarget, 'artifactId' | 'evidenceId' | 'acceptanceId'> {
-  const value = bindingDigest(jobId)
-  return {
-    artifactId: `artifact:media-output:${value}`,
-    evidenceId: `evidence:media-output:${value}`,
-    acceptanceId: `acceptance:media-output:${value}`
-  }
-}
-
-function localOutputIdentities(
-  prefix: string,
-  value: string
-): Pick<MediaJobOperationTarget, 'artifactId' | 'evidenceId' | 'acceptanceId'> {
-  return {
-    artifactId: `artifact:${prefix}:${value}`,
-    evidenceId: `evidence:${prefix}:${value}`,
-    acceptanceId: `acceptance:${prefix}:${value}`
-  }
-}
-
-function operationIdFor(jobId: string, operation: string, sequence: number): string {
-  return `media-${operation}-${bindingDigest(`${jobId}\0${sequence}`)}`
-}
-
-function bindingDigest(value: string): string {
-  return createHash('sha256').update(`caogen.media-runtime.v1\0${value}`).digest('hex').slice(0, 32)
-}
-
 async function mockOutput(job: MediaJobRecord, rootDir: string): Promise<{
   bytes: Buffer
   mediaType: string
@@ -1570,7 +1221,6 @@ function mediaOperationTitle(operation: MediaJobOperationTarget['operation']): s
     cancel: 'Cancel media generation',
     asset_import: 'Import media asset',
     compose: 'Compose local video draft',
-    export: 'Export video file',
     continuity_check: 'Check media continuity'
   })[operation]
 }
@@ -1605,32 +1255,6 @@ function evaluateContinuity(
 
 function nextAssetVersion(assets: readonly MediaAsset[], kind: MediaAsset['kind'], title: string): number {
   return assets.filter((asset) => asset.kind === kind && asset.title === title).reduce((max, asset) => Math.max(max, asset.version), 0) + 1
-}
-
-function finalAssetForProduction(production: VideoProduction): MediaAsset | undefined {
-  const adopted = production.finalAssetId
-    ? production.assets.find((asset) => asset.id === production.finalAssetId)
-    : undefined
-  return adopted ?? production.assets
-    .filter((asset) => asset.kind === 'video' && asset.authorization?.source === 'local_composition')
-    .sort((left, right) => right.version - left.version || right.createdAt - left.createdAt)[0]
-}
-
-function isTerminal(status: MediaJobRecord['status']): boolean {
-  return status === 'succeeded' || status === 'failed' || status === 'cancelled'
-}
-
-function nonBillableMediaCost(source: 'non_billable_local' | 'mock_zero'): MediaJobRecord['cost'] {
-  return {
-    schemaVersion: MEDIA_SCHEMA_VERSION,
-    currency: 'USD',
-    estimatedUsd: 0,
-    actualUsd: 0,
-    status: 'settled',
-    source,
-    billable: false,
-    observedAt: Date.now()
-  }
 }
 
 const runtimes = new Map<string, MediaRuntime>()

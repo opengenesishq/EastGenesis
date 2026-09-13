@@ -3,6 +3,7 @@ import { useT } from '../../i18n'
 
 export const DEFAULT_OFFICE_SETTINGS: OfficeSettings = {
   qualityMode: 'auto',
+  resolutionMode: 'adaptive',
   showBadges: true,
   liveliness: 1,
   catEars: false,
@@ -91,6 +92,13 @@ export default function OfficeAppearanceSettings({ layout, office, onLayoutChang
           {QUALITY_OPTIONS.map((option) => <button key={option.value} type="button" className={`office-quality-option ${office.qualityMode === option.value ? 'active' : ''}`} aria-pressed={office.qualityMode === option.value} data-office-quality-option={option.value} onClick={() => onOfficeChange({ qualityMode: option.value })}>{t(option.labelKey)}</button>)}
         </div>
       </div>
+      <label className="field-label">画面清晰度
+        <select className="select select-block" data-office-resolution-mode value={office.resolutionMode ?? 'sharp'}
+          onChange={(event) => onOfficeChange({ resolutionMode: event.target.value as 'sharp' | 'adaptive' })}>
+          <option value="sharp">高清优先 · 保持屏幕像素密度</option>
+          <option value="adaptive">流畅优先 · 允许降低分辨率</option>
+        </select>
+      </label>
       <label className="settings-check">
         <input type="checkbox" checked={office.showBadges} onChange={(event) => onOfficeChange({ showBadges: event.target.checked })} />
         {t('officeShowBadges')}

@@ -37,6 +37,19 @@ export interface SupervisorRunAccountingBase {
   costUsd: number
 }
 
+/**
+ * The canonical WorkItem execution lease captured when a Supervisor Run is
+ * reserved.  A Supervisor row is durable and may outlive the in-memory
+ * Session, so it must retain the WorkItem fencing identity it was admitted
+ * under.  A later lease takeover then fails closed instead of silently
+ * allowing the old Run to execute under a new owner.
+ */
+export interface SupervisorWorkItemLeaseBinding {
+  id: string
+  ownerId: string
+  fencingToken: number
+}
+
 export interface SupervisorRunUsage extends UsageTotals {
   costUsd: number
   turns: number
@@ -69,6 +82,8 @@ export interface SupervisorRunRecord {
   maxRetries: number
   /** Immutable Goal budget snapshot inherited by the WorkItem when this Run was created. */
   budget?: GoalBudget
+  /** Canonical WorkItem execution lease captured at Run reservation time. */
+  workItemLease?: SupervisorWorkItemLeaseBinding
   /** Session accounting at Run creation; cumulative USD cost is measured from this base. */
   accountingBase?: SupervisorRunAccountingBase
   /** Durable usage attributable only to this Run. */
@@ -130,12 +145,14 @@ export interface SupervisorRunInput {
   origin?: SupervisorRunOrigin
   maxRetries?: number
   budget?: GoalBudget
+  /** Main-process derived; renderer create requests may not provide this. */
+  workItemLease?: SupervisorWorkItemLeaseBinding
   accountingBase?: SupervisorRunAccountingBase
   createdAt?: number
 }
 
 /** Renderer-facing create shape. Policy/accounting are derived in main from the canonical WorkItem. */
-export type SupervisorRunCreateInput = Omit<SupervisorRunInput, 'budget' | 'accountingBase' | 'origin'>
+export type SupervisorRunCreateInput = Omit<SupervisorRunInput, 'budget' | 'accountingBase' | 'origin' | 'workItemLease'>
 
 export interface SupervisorMutationOptions {
   expectedRevision?: number

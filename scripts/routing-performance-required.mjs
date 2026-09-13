@@ -109,7 +109,19 @@ function fixtureProviders() {
     engine: providerIndex % 2 === 0 ? 'openai' : 'anthropic',
     hasToken: true,
     ready: true,
-    models: families.map((family, modelIndex) => `${family}-${providerIndex}-${modelIndex}`)
+    models: families.map((family, modelIndex) => `${family}-${providerIndex}-${modelIndex}`),
+    // This is a routing throughput gate, so every synthetic candidate must
+    // satisfy the request's hard tools/context requirements. Without an
+    // explicit capability profile, fallback metadata correctly rejects most
+    // candidates and the fixture no longer represents a 100-candidate run.
+    advancedConfig: {
+      schemaVersion: 1,
+      modelProfiles: families.map((family, modelIndex) => ({
+        model: `${family}-${providerIndex}-${modelIndex}`,
+        capabilities: ['tools', 'coding', 'reasoning', 'summarization', 'longContext'],
+        contextWindow: 200_000
+      }))
+    }
   }))
 }
 

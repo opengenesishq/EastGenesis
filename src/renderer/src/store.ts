@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { interruptSession } from './store/session-interrupt'
 import { AUTO_MODEL, CAOGEN_DRIVE_POLICIES } from '../../shared/types'
 import { DIRECT_SUBAGENT_LIMIT_MESSAGE, MAX_DIRECT_SUBAGENT_TASKS } from '../../shared/agent-capacity-policy'
 import {
@@ -82,13 +83,14 @@ import { createProviderProfileStoreActions, type ProviderProfileStoreActions } f
 import { createTaskRecoveryActions, refreshTaskRecoveryAfterEvent, type TaskRecoveryActions } from './store/task-recovery-actions'
 import { createPluginRegistryActions, type PluginRegistryActions } from './store/plugin-registry-actions'
 import { createExperienceModeSlice, type ExperienceModeSlice } from './store/experience-mode'
+import { createBusinessLineSlice, businessLineCreateOptions, businessLineSessionSettings, type BusinessLineSlice } from './store/business-line-slice'
 import { createTaskPlanSlice, type TaskPlanSlice } from './store/task-plan-slice'
 import {
   createProjectWorkspaceStoreSlice, nextStudioSessionNonce,
   type ProjectWorkspaceStoreSlice
 } from './store/project-workspace-actions'
 import { captureClosingSession, removeClosingSession, restoreClosingSession } from './store/session-close-state'
-import type { PanelId, PanelOpenContext } from './components/workbench/panels'
+import type { PanelId, PanelOpenContext } from './components/workbench/panel-types'
 import { createSettingsNavigationSlice, type SettingsNavigationSlice } from './store/settings-navigation'
 import { createWelcomeDraftSlice, type WelcomeDraftSlice } from './store/welcome-draft'
 import { createResourceCatalogSlice, type ResourceCatalogSlice } from './store/resource-catalog'
@@ -97,6 +99,7 @@ import { sendStartSuggestionMessage } from './store/start-suggestion-send'
 import { mergeHydratedSessionPermissions, SessionTranscriptHydrator } from './store/session-transcript-hydrator'
 import { createTerminalActions } from './store/terminal-actions'
 import { historyResumeOptions, sessionExperienceMode, sessionProjectionPatch } from './store/session-experience'
+import { invalidateProjectTestResult } from './store/project-test-review'
 import { createBrowserActions } from './store/browser-actions'
 import {
   activeFileTab,
@@ -653,8 +656,6 @@ export interface WorkbenchState {
   fileDiagnosticsError?: string
   fileLoading: boolean
   fileSaving: boolean
-  /** DeveloperPanel 最近一次明确请求的子视图。 */
-  developerView: 'files' | 'tests' | 'debug' | 'refactor'
   fileSessionId?: string
   fileTabs: FileEditorTab[]
   activeFileTabBySession: Record<string, string>
@@ -733,7 +734,7 @@ export interface RewindPanelState {
   reason?: 'button' | 'shortcut' | 'command'
 }
 
-export interface AppStore extends ExperienceModeSlice, SettingsNavigationSlice, TaskRecoveryActions, WelcomeDraftSlice, ResourceCatalogSlice, ProviderProfileStoreActions, PluginRegistryActions, TaskPlanSlice, ProjectWorkspaceStoreSlice {
+export interface AppStore extends BusinessLineSlice, ExperienceModeSlice, SettingsNavigationSlice, TaskRecoveryActions, WelcomeDraftSlice, ResourceCatalogSlice, ProviderProfileStoreActions, PluginRegistryActions, TaskPlanSlice, ProjectWorkspaceStoreSlice {
   ready: boolean
   hydrated: boolean
   sessions: Record<string, SessionState>
@@ -778,7 +779,7 @@ export interface AppStore extends ExperienceModeSlice, SettingsNavigationSlice, 
   sendQuickbarClipboard(options: QuickbarDispatchOptions): Promise<QuickbarDispatchResult | undefined>
   sendQuickbarScreenshot(options: QuickbarDispatchOptions): Promise<QuickbarDispatchResult | undefined>
   sendQuickbarFiles(options: QuickbarDispatchOptions): Promise<QuickbarDispatchResult | undefined>
-  interrupt(): Promise<void>
+  interrupt(sessionId?: string): Promise<void>
   closeSession(id: string): Promise<void>
   respondPermission(sessionId: string, requestId: string, allow: boolean, message?: string): Promise<void>
   restoreCheckpoint(
@@ -958,7 +959,6 @@ function reduceBrowserEvent(state: AppStore, event: BrowserEvent): AppStore {
       }
   }
 }
-
 export const useStore = create<AppStore>((set, get) => {
   const clearStreamBuffer = (sessionId: string): void => {
     const buffer = streamDeltaBuffers.get(sessionId)
@@ -966,7 +966,6 @@ export const useStore = create<AppStore>((set, get) => {
     if (buffer.frame !== null) cancelStreamFrame(buffer.frame)
     streamDeltaBuffers.delete(sessionId)
   }
-
   const flushStreamBuffer = (sessionId: string): void => {
     const buffer = streamDeltaBuffers.get(sessionId)
     if (!buffer) return
@@ -989,7 +988,6 @@ export const useStore = create<AppStore>((set, get) => {
       }
     })
   }
-
   const queueStreamDelta = (
     sessionId: string,
     seq: number,
@@ -1015,7 +1013,6 @@ export const useStore = create<AppStore>((set, get) => {
     }
     streamDeltaBuffers.set(sessionId, buffer)
   }
-
   type PanelActivator = (context?: PanelOpenContext) => void
   const panelActivators: Record<PanelId, PanelActivator> = {
     diff: () => {
@@ -1152,7 +1149,6 @@ export const useStore = create<AppStore>((set, get) => {
       // StudioResultPanel 内部 useStudioResult 自动拉取数据，无需激活副作用
     }
   }
-
   return {
   ready: false,
   hydrated: false,
@@ -1239,12 +1235,12 @@ export const useStore = create<AppStore>((set, get) => {
   taskSnapshotsLoading: false,
   view: 'list',
   ...createExperienceModeSlice(
-    (update) => set(update),
+    (update) => set({ ...update, ...(update.experienceMode ? { settings: { ...get().settings, selectedBusinessLineId: update.experienceMode } } : {}) }),
     async (experienceMode) => {
-      const settings = await window.agentDesk.updateSettings({ experienceMode })
-      set({ settings })
+      set({ settings: await window.agentDesk.updateSettings({ experienceMode, selectedBusinessLineId: experienceMode }) })
     }
   ),
+  ...createBusinessLineSlice(set, get),
   ...createProviderProfileStoreActions(set, get),
   ...createPluginRegistryActions(set, get),
   ...createTaskPlanSlice((update) => set(update), () => get()),
@@ -1277,7 +1273,6 @@ export const useStore = create<AppStore>((set, get) => {
     fileDiagnostics: [],
     fileLoading: false,
     fileSaving: false,
-    developerView: 'files',
     fileTabs: [],
     activeFileTabBySession: {},
     currentFileContent: '',
@@ -1305,8 +1300,7 @@ export const useStore = create<AppStore>((set, get) => {
   showNewSession: false,
   newSessionProjectId: null,
   showCommandPalette: false,
-  showTaskRecovery: true,
-
+  showTaskRecovery: false,
   async init() {
     if (get().ready) return
     set({ ready: true })
@@ -1324,7 +1318,7 @@ export const useStore = create<AppStore>((set, get) => {
     ])
     const initialActiveId = get().activeId ?? metas[0]?.id ?? null
     const activeMeta = metas.find((meta) => meta.id === initialActiveId)
-    const restoredProjection = activeMeta && settings.experienceMode !== 'video'
+    const restoredProjection = activeMeta && settings.experienceMode !== 'video' && sessionExperienceMode(activeMeta) === settings.experienceMode
       ? sessionProjectionPatch(get().studioSessionNavigationNonce, activeMeta)
       : { experienceMode: settings.experienceMode, studioSessionNavigationNonce: get().studioSessionNavigationNonce }
     set((s) => {
@@ -1375,7 +1369,6 @@ export const useStore = create<AppStore>((set, get) => {
     })
     await transcriptHydration
   },
-
   handleEvent(sessionId, event, seq, eventId) {
     if (event.kind === 'subagent-result' || event.kind === 'task-dag-update') {
       flushStreamBuffer(sessionId)
@@ -1449,7 +1442,6 @@ export const useStore = create<AppStore>((set, get) => {
       }
     })
   },
-
   handleTerminalEvent(event) {
     set((s) => {
       const current = s.workbench.terminal
@@ -1490,20 +1482,18 @@ export const useStore = create<AppStore>((set, get) => {
       return s
     })
   },
-
   handleBrowserEvent(event) {
     set((state) => reduceBrowserEvent(state, event))
   },
-
   async createSession(opts) {
-    const meta = await window.agentDesk.createSession(opts)
+    const meta = await window.agentDesk.createSession(businessLineCreateOptions(opts, get().settings))
     set((s) => ({
       sessions: {
         ...s.sessions,
         [meta.id]: drainPendingEvents(meta.id, s.sessions[meta.id] ?? newSessionState(meta))
       },
       order: s.order.includes(meta.id) ? s.order : [...s.order, meta.id],
-      activeId: meta.id,
+      activeId: meta.id, settings: businessLineSessionSettings(s.settings, meta),
       ...sessionProjectionPatch(s.studioSessionNavigationNonce, meta),
       showNewSession: false,
       newSessionProjectId: null
@@ -1524,7 +1514,6 @@ export const useStore = create<AppStore>((set, get) => {
     void get().refreshProjects() // 新会话的 cwd 已被主进程收藏,刷新项目列表
     return meta.id
   },
-
   async syncSession(sessionId) {
     const meta = (await window.agentDesk.listSessions()).find((candidate) => candidate.id === sessionId)
     if (!meta) return false
@@ -1540,7 +1529,6 @@ export const useStore = create<AppStore>((set, get) => {
     }))
     return true
   },
-
   async startSessionWithPrompt(opts, prompt) {
     const sessionId = await get().createSession(opts)
     const text = prompt.trim()
@@ -1669,7 +1657,6 @@ export const useStore = create<AppStore>((set, get) => {
       return undefined
     }
   },
-
   async resumeFromHistory(entry) {
     await get().createSession(historyResumeOptions(entry))
   },
@@ -1718,7 +1705,7 @@ export const useStore = create<AppStore>((set, get) => {
     const previousId = get().activeId
     if (previousId && previousId !== id) closeNativeBrowserView(previousId)
     set((s) => ({
-      activeId: id,
+      activeId: id, settings: businessLineSessionSettings(s.settings, s.sessions[id]?.meta ?? {}),
       ...sessionProjectionPatch(s.studioSessionNavigationNonce, s.sessions[id]?.meta ?? {}),
       showNewSession: false,
       newSessionProjectId: null,
@@ -1807,41 +1794,10 @@ export const useStore = create<AppStore>((set, get) => {
     }
   },
 
-  async interrupt() {
-    const id = get().activeId
-    if (!id) return
-    await window.agentDesk.interrupt(id)
-    const [metas, history, taskSnapshots] = await Promise.all([
-      window.agentDesk.listSessions(),
-      window.agentDesk.listHistory(),
-      window.agentDesk.listTaskSnapshots()
-    ])
-    const interruptedMeta = metas.find((meta) => meta.id === id)
-    if (!interruptedMeta) {
+  async interrupt(sessionId) {
+    await interruptSession({ getState: get, setState: set }, sessionId, (id) => {
       closeNativeBrowserView(id)
       pendingEvents.delete(id)
-    }
-    set((s) => {
-      if (interruptedMeta) {
-        const session = s.sessions[id]
-        return {
-          sessions: session
-            ? { ...s.sessions, [id]: { ...session, meta: interruptedMeta } }
-            : s.sessions,
-          history,
-          taskSnapshots
-        }
-      }
-      const sessions = { ...s.sessions }
-      delete sessions[id]
-      const order = s.order.filter((sessionId) => sessionId !== id)
-      return {
-        sessions,
-        order,
-        activeId: s.activeId === id ? (order[order.length - 1] ?? null) : s.activeId,
-        history,
-        taskSnapshots
-      }
     })
   },
 
@@ -1929,6 +1885,7 @@ export const useStore = create<AppStore>((set, get) => {
     const id = get().activeId
     if (!id) return undefined
     const result = await window.agentDesk.restoreCheckpoint(id, messageId, mode, dryRun)
+    if (!dryRun && !result.error && result.applied && mode !== 'chat') invalidateProjectTestResult(id)
     if (!dryRun && result.transcript) {
       set((s) => {
         const session = s.sessions[id]
@@ -2039,7 +1996,9 @@ export const useStore = create<AppStore>((set, get) => {
   },
 
   setView(view) {
-    set({ view })
+    // All Control Room entrypoints share the sidebar's navigation intent,
+    // including when recovery attention hydrates after the scene opens.
+    set({ view, ...(view === 'office' ? { showTaskRecovery: false } : {}) })
   },
 
   openPanel(id, context) {
@@ -2048,8 +2007,7 @@ export const useStore = create<AppStore>((set, get) => {
       workbench: {
         ...s.workbench,
         activePanelId: id,
-        mountedPanels: new Set(s.workbench.mountedPanels).add(id),
-        ...(id === 'files' && context?.developerView ? { developerView: context.developerView } : {})
+        mountedPanels: new Set(s.workbench.mountedPanels).add(id)
       }
     }))
     panelActivators[id]?.(context)
@@ -2155,6 +2113,7 @@ export const useStore = create<AppStore>((set, get) => {
       }
     }))
     const result = await window.agentDesk.applyWorkspaceHunk(id, filePath, hunkPatch)
+    if (result.ok) invalidateProjectTestResult(id)
     set((s) => ({
       workbench: {
         ...s.workbench,
@@ -2181,6 +2140,7 @@ export const useStore = create<AppStore>((set, get) => {
       }
     }))
     const result = await window.agentDesk.discardWorkspaceHunk(id, filePath, hunkPatch)
+    if (result.ok) invalidateProjectTestResult(id)
     set((s) => ({
       workbench: {
         ...s.workbench,
@@ -2198,6 +2158,7 @@ export const useStore = create<AppStore>((set, get) => {
     if (!id) return undefined
     set((s) => ({ workbench: { ...s.workbench, gitBusy: true, gitError: undefined, gitMessage: undefined } }))
     const result = await window.agentDesk.stageFiles(id, paths)
+    if (result.ok) invalidateProjectTestResult(id)
     set((s) => ({
       workbench: {
         ...s.workbench,
@@ -2215,6 +2176,7 @@ export const useStore = create<AppStore>((set, get) => {
     if (!id) return undefined
     set((s) => ({ workbench: { ...s.workbench, gitBusy: true, gitError: undefined, gitMessage: undefined } }))
     const result = await window.agentDesk.stageAll(id)
+    if (result.ok) invalidateProjectTestResult(id)
     set((s) => ({
       workbench: {
         ...s.workbench,
@@ -2232,6 +2194,7 @@ export const useStore = create<AppStore>((set, get) => {
     if (!id) return undefined
     set((s) => ({ workbench: { ...s.workbench, gitBusy: true, gitError: undefined, gitMessage: undefined } }))
     const result = await window.agentDesk.unstageFiles(id, paths)
+    if (result.ok) invalidateProjectTestResult(id)
     set((s) => ({
       workbench: {
         ...s.workbench,
@@ -2785,6 +2748,7 @@ export const useStore = create<AppStore>((set, get) => {
     }))
     try {
       const result = await window.agentDesk.writeTextFile(id, currentFilePath, currentFileContent)
+      if (result.ok) invalidateProjectTestResult(id)
       set((s) => {
         if (!result.ok) {
           return s.activeId === id
@@ -3204,7 +3168,7 @@ export const useStore = create<AppStore>((set, get) => {
   async toggleRoutine(id, enabled) {
     set((s) => ({ workbench: { ...s.workbench, routineError: undefined, routineMessage: undefined } }))
     try {
-      const routine = await window.agentDesk.updateRoutine(id, { enabled, expectedRevision: get().workbench.routines.find((item) => item.id === id)?.revision })
+      const routine = await window.agentDesk.updateRoutine(id, { enabled })
       set((s) => ({
         workbench: {
           ...s.workbench,
@@ -3279,8 +3243,8 @@ export const useStore = create<AppStore>((set, get) => {
   async deleteRoutine(id) {
     set((s) => ({ workbench: { ...s.workbench, routineError: undefined, routineMessage: undefined } }))
     try {
-      const current = get().workbench.routines.find((routine) => routine.id === id)
-      const ok = await window.agentDesk.deleteRoutine(id, current?.revision)
+      const routineName = get().workbench.routines.find((routine) => routine.id === id)?.name ?? 'Routine'
+      const ok = await window.agentDesk.deleteRoutine(id)
       set((s) => ({
         workbench: ok
           ? {
@@ -3290,7 +3254,7 @@ export const useStore = create<AppStore>((set, get) => {
                 s.workbench.selectedRoutineId === id
                   ? (s.workbench.routines.find((routine) => routine.id !== id)?.id ?? null)
                   : s.workbench.selectedRoutineId,
-              routineMessage: `${current?.name ?? 'Routine'} 已删除`,
+              routineMessage: `${routineName} 已删除`,
               routineError: undefined
             }
           : {

@@ -14,22 +14,25 @@ import {
   runSearchReplace,
   searchReplacementArgs
 } from './agent/tools/search-replace'
-import { GUI_TOOLS, executeGuiTool, isGuiToolName } from './agent/tools/gui-tools'
+import { GUI_TOOLS } from './agent/tools/gui-tools'
 import { formatViewResult, runView } from './agent/tools/view'
 import { formatSearchSymbolResult, runSearchSymbol } from './agent/tools/search-symbol'
 import { formatSearchCodeResult, runSearchCode } from './agent/tools/search-code'
 import { formatFindFileResult, runFindFile } from './agent/tools/find-file'
 import { formatDependenciesResult, runGetDependencies } from './agent/tools/get-dependencies'
 import { GIT_TOOLS, executeGitTool, isGitToolName } from './agent/tools/git-tools'
-import { BROWSER_TOOLS, executeBrowserTool, isBrowserToolName } from './agent/tools/browser-tools'
+import { BROWSER_TOOLS } from './agent/tools/browser-tools'
 import { P2_TOOLS, executeP2Tool, isP2ToolName } from './agent/tools/p2-tools'
+import { MEDIA_TOOLS } from './agent/tools/media-tool-definitions'
+import { OFFICE_REVISION_TOOLS } from './agent/tools/office-revision-tools'
+import { executeContextBoundTool } from './agent/tools/context-bound-tools'
+import type { ToolDefinition } from './agent/tools/tool-types'
+export type { ToolDefinition } from './agent/tools/tool-types'
 import {
   CREATE_DOCUMENT_TOOL,
   CREATE_PDF_TOOL,
   CREATE_PRESENTATION_TOOL,
-  CREATE_SPREADSHEET_TOOL,
-  executeOfficeArtifactTool,
-  isOfficeArtifactTool
+  CREATE_SPREADSHEET_TOOL
 } from './agent/tools/office-artifact'
 import { clipToolOutput } from './agent/tool-output'
 import type { CodeForgeWorktreeContext } from './code-forge/delivery'
@@ -48,8 +51,6 @@ import {
   builtinMcpServerTemplates,
   callMcpTool,
   discoverMcpServer,
-  loadClaudeDesktopMcpServers,
-  summarizeClaudeDesktopMcpImport,
   type McpServerConfig
 } from './mcp/mcp-client'
 import {
@@ -87,14 +88,6 @@ import type {
  * - 权限审批由引擎层按 permissionMode 决定,这里只负责执行
  */
 
-export interface ToolDefinition {
-  type: 'function'
-  function: {
-    name: string
-    description: string
-    parameters: Record<string, unknown>
-  }
-}
 export interface ToolExecResult {
   ok: boolean
   output: string
@@ -118,8 +111,6 @@ export interface ToolExecutionOptions {
   sessionMeta?: SessionMeta
   userDataRoot?: string
   toolUseId?: string
-  runId?: string
-  searchBroker?: import('./search/search-broker').SearchBroker
 }
 
 const READ_MAX_BYTES = 200 * 1024
@@ -748,20 +739,10 @@ export const OPENAI_CODING_TOOLS: ToolDefinition[] = [
       }
     }
   },
-  {
-    type: 'function',
-    function: {
-      name: 'mcp_import_claude_desktop',
-      description: '读取系统默认位置的 Claude Desktop MCP 配置，并返回不含命令参数、环境变量、headers 或完整 URL 的摘要。',
-      parameters: {
-        type: 'object',
-        properties: {}
-      }
-    }
-  },
   ...GIT_TOOLS,
   ...BROWSER_TOOLS,
   ...P2_TOOLS,
+  ...MEDIA_TOOLS, ...OFFICE_REVISION_TOOLS,
   ...GUI_TOOLS
 ]
 
@@ -853,17 +834,6 @@ function authorizedMcpConfigArg(
     requestedConfig
   })
 }
-async function importClaudeDesktopMcp(args: Record<string, unknown>): Promise<ToolExecResult> {
-  if (Object.keys(args).length > 0) {
-    return { ok: false, output: 'mcp_import_claude_desktop 只读取系统默认配置位置，不接受路径或其他参数' }
-  }
-  try {
-    return { ok: true, output: clip(JSON.stringify(summarizeClaudeDesktopMcpImport(await loadClaudeDesktopMcpServers()), null, 2)) }
-  } catch {
-    return { ok: false, output: '无法读取或解析系统默认位置的 Claude Desktop MCP 配置' }
-  }
-}
-
 function engineArg(value: unknown): EngineKind | undefined {
   return value === 'anthropic' || value === 'gemini' || value === 'openai' ? value : undefined
 }
@@ -986,8 +956,8 @@ export async function executeCodingTool(
 ): Promise<ToolExecResult> {
   try {
     if (options.signal?.aborted) return { ok: false, output: '操作已中断' }
-    if (isBrowserToolName(name)) return clipExecResult(await executeBrowserTool(name, args, options.sessionId))
-    if (isGuiToolName(name)) return clipExecResult(await executeGuiTool(name, args, cwd, options.signal))
+    const contextBound = executeContextBoundTool(name, args, cwd, options)
+    if (contextBound) return clipExecResult(await contextBound)
     if (isGitToolName(name)) {
       return clipExecResult(await executeGitTool(name, args, cwd, {
         sessionId: options.sessionId,
@@ -1000,31 +970,8 @@ export async function executeCodingTool(
         effectTarget: options.effectTarget,
         sessionMeta: options.sessionMeta,
         userDataRoot: options.userDataRoot,
-        toolUseId: options.toolUseId,
-        runId: options.runId,
-        searchBroker: options.searchBroker
+        toolUseId: options.toolUseId
       }))
-    }
-    if (isOfficeArtifactTool(name)) {
-      const artifact = await executeOfficeArtifactTool(
-        name,
-        args,
-        cwd,
-        options.effectTarget,
-        options.signal
-      )
-      return {
-        ok: true,
-        output: clip(JSON.stringify({
-          path: artifact.path,
-          sha256: artifact.sha256,
-          bytes: artifact.bytes,
-          mediaType: artifact.mediaType,
-          artifactKind: artifact.artifactKind,
-          title: artifact.title,
-          sourceRefs: artifact.sourceRefs
-        }))
-      }
     }
     switch (name) {
       case 'bash':
@@ -1265,8 +1212,6 @@ export async function executeCodingTool(
       }
       case 'mcp_builtin_servers':
         return { ok: true, output: clip(JSON.stringify({ servers: builtinMcpServerTemplates() }, null, 2)) }
-      case 'mcp_import_claude_desktop':
-        return importClaudeDesktopMcp(args)
       default:
         return { ok: false, output: `未知工具: ${name}` }
     }

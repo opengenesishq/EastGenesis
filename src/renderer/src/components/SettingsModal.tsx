@@ -27,8 +27,6 @@ import type {
   EngineInfo,
   GuiAutomationGrantView,
   McpProbeResult,
-  ModelRoutingRule,
-  ModelRoutingTaskKind,
   PermissionRuleConfig,
   PermissionRuleRiskOperator,
   PermissionModeId,
@@ -56,6 +54,7 @@ import ProviderUsageDashboard from './settings/ProviderUsageDashboard'
 import ProviderGatewayPanel from './settings/ProviderGatewayPanel'
 import OfficeAppearanceSettings, { DEFAULT_OFFICE_SETTINGS } from './settings/OfficeAppearanceSettings'
 import DataRetentionSettings from './settings/DataRetentionSettings'
+import RoutingRulesPanel from './settings/RoutingRulesPanel'
 type ProviderSettingsSurface = 'configuration' | 'gateway' | 'usage'
 type ProviderProbeState = {
   providerId: string
@@ -63,18 +62,6 @@ type ProviderProbeState = {
   message: string
   error?: ProviderModelFetchError
 } | null
-const ROUTING_RULE_TASK_OPTIONS: Array<{ value: ModelRoutingTaskKind; labelKey: string }> = [
-  { value: 'research', labelKey: 'routingTaskResearch' },
-  { value: 'planning', labelKey: 'routingTaskPlanning' },
-  { value: 'coding', labelKey: 'routingTaskCoding' },
-  { value: 'testing', labelKey: 'routingTaskTesting' },
-  { value: 'documentation', labelKey: 'routingTaskDocumentation' },
-  { value: 'reasoning', labelKey: 'routingTaskReasoning' },
-  { value: 'review', labelKey: 'routingTaskReview' },
-  { value: 'summarization', labelKey: 'routingTaskSummarization' },
-  { value: 'vision', labelKey: 'routingTaskVision' },
-  { value: 'longContext', labelKey: 'routingTaskLongContext' }
-]
 const PERMISSION_CAPABILITY_OPTIONS: Array<{ value: ToolSemanticCapability; labelKey: string }> = [
   { value: 'workspaceRead', labelKey: 'permissionCapabilityWorkspaceRead' },
   { value: 'workspaceWrite', labelKey: 'permissionCapabilityWorkspaceWrite' },
@@ -92,23 +79,6 @@ const TASK_MODEL_ROLE_OPTIONS = [
   { labelKey: 'modelRoleTesting', providerKey: 'testingProviderId', modelKey: 'testingModel' },
   { labelKey: 'modelRoleDocumentation', providerKey: 'documentationProviderId', modelKey: 'documentationModel' }
 ] as const
-
-function createRoutingRule(): ModelRoutingRule {
-  const suffix =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  return {
-    id: `route-${suffix}`,
-    enabled: true,
-    name: '',
-    match: '',
-    keywordMode: 'any',
-    taskKinds: [],
-    providerId: '',
-    model: ''
-  }
-}
 
 function uniqueModelOptions(
   providers: ProviderView[],
@@ -282,34 +252,6 @@ export default function SettingsPage(): React.JSX.Element {
       }
     })
   }
-  const updateRoutingRule = (id: string, patch: Partial<ModelRoutingRule>): void =>
-    setDraft((d) => ({
-      ...d,
-      modelRoutingRules: (d.modelRoutingRules ?? []).map((rule) =>
-        rule.id === id ? { ...rule, ...patch } : rule
-      )
-    }))
-  const setRoutingRuleTaskKind = (id: string, taskKind: ModelRoutingTaskKind, enabled: boolean): void =>
-    setDraft((d) => ({
-      ...d,
-      modelRoutingRules: (d.modelRoutingRules ?? []).map((rule) => {
-        if (rule.id !== id) return rule
-        const taskKinds = enabled
-          ? [...new Set([...(rule.taskKinds ?? []), taskKind])]
-          : (rule.taskKinds ?? []).filter((item) => item !== taskKind)
-        return { ...rule, taskKinds }
-      })
-    }))
-  const addRoutingRule = (): void =>
-    setDraft((d) => ({
-      ...d,
-      modelRoutingRules: [...(d.modelRoutingRules ?? []), createRoutingRule()]
-    }))
-  const deleteRoutingRule = (id: string): void =>
-    setDraft((d) => ({
-      ...d,
-      modelRoutingRules: (d.modelRoutingRules ?? []).filter((rule) => rule.id !== id)
-    }))
   const updatePermissionRule = (id: string, patch: Partial<PermissionRuleConfig>): void =>
     setDraft((d) => ({
       ...d,
@@ -342,7 +284,11 @@ export default function SettingsPage(): React.JSX.Element {
     setSaving(true)
     setSaveError('')
     try {
-      await updateSettings(draft)
+      // Routing rules have their own versioned CAS editor. Do not include the
+      // legacy field in ordinary settings writes: once V1 is active, the main
+      // process intentionally rejects that domain on this path.
+      const { modelRoutingRules: _legacyRoutingRules, ...ordinaryDraft } = draft
+      await updateSettings(ordinaryDraft)
       await refreshProviders()
       setShowSettings(false)
     } catch (error) {
@@ -445,6 +391,7 @@ export default function SettingsPage(): React.JSX.Element {
 
   const TABS: Array<{ id: SettingsTab; label: string; icon: LucideIcon }> = [
     { id: 'control', label: t('tabControlCenter'), icon: LayoutDashboard },
+    { id: 'routing', label: '智能路由', icon: Sparkles },
     { id: 'general', label: t('tabGeneral'), icon: Settings2 },
     { id: 'permissions', label: t('tabPermissions'), icon: ShieldCheck },
     { id: 'project', label: t('tabProject'), icon: FolderCog },
@@ -457,7 +404,7 @@ export default function SettingsPage(): React.JSX.Element {
     { id: 'migrate', label: t('tabMigrate'), icon: Database }
   ]
   const TAB_GROUPS: Array<{ label: string; ids: SettingsTab[] }> = [
-    { label: t('settingsGroupWorkspace'), ids: ['control', 'general', 'permissions', 'project'] },
+    { label: t('settingsGroupWorkspace'), ids: ['control', 'routing', 'general', 'permissions', 'project'] },
     { label: t('settingsGroupPersonalization'), ids: ['persona', 'office'] },
     { label: t('settingsGroupIntegrations'), ids: ['providers', 'notifications', 'plugins'] },
     { label: t('settingsGroupData'), ids: ['data', 'migrate'] }
@@ -465,6 +412,7 @@ export default function SettingsPage(): React.JSX.Element {
   const searchTerm = settingsSearch.trim().toLocaleLowerCase()
   const searchTerms: Partial<Record<SettingsTab, string>> = {
     control: 'model routing provider health usage control center',
+    routing: 'versioned routing rules provider model preview fallback budget business line',
     general: 'language theme startup layout',
     permissions: 'permission access terminal browser workspace',
     project: 'project rules workspace',
@@ -577,6 +525,8 @@ export default function SettingsPage(): React.JSX.Element {
                 onEditProvider={(provider) => openProviderEditor(provider)}
               />
             )}
+
+            {tab === 'routing' && <RoutingRulesPanel />}
 
             {tab === 'general' && (
               <>
@@ -852,151 +802,14 @@ export default function SettingsPage(): React.JSX.Element {
                   </div>
                 </div>
 
-                <div className="settings-section">
+                <div className="settings-section" data-routing-legacy-notice>
                   <div className="settings-section-head">
                     <h3 className="settings-h3">{t('customRoutingRules')}</h3>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={addRoutingRule}>
-                      {t('addRoutingRule')}
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTab('routing')}>
+                      {t('openRoutingRules')}
                     </button>
                   </div>
-                  <p className="settings-hint">{t('customRoutingRulesHint')}</p>
-                  {(draft.modelRoutingRules ?? []).map((rule, index) => (
-                    <div key={rule.id} className="routing-rule-card">
-                      <div className="routing-rule-head">
-                        <label className="settings-check routing-rule-toggle">
-                          <input
-                            type="checkbox"
-                            checked={rule.enabled}
-                            onChange={(e) => updateRoutingRule(rule.id, { enabled: e.target.checked })}
-                          />
-                          {t('routingRuleEnabled')}
-                        </label>
-                        <span className="routing-rule-order">#{index + 1}</span>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => deleteRoutingRule(rule.id)}
-                        >
-                          {t('delete')}
-                        </button>
-                      </div>
-                      <label className="field-label">
-                        {t('routingRuleName')}
-                        <input
-                          className="input"
-                          value={rule.name}
-                          placeholder={t('routingRuleNamePlaceholder')}
-                          onChange={(e) => updateRoutingRule(rule.id, { name: e.target.value })}
-                        />
-                      </label>
-                      <label className="field-label">
-                        {t('routingRuleMatch')}
-                        <textarea
-                          className="input textarea"
-                          value={rule.match}
-                          placeholder={t('routingRuleMatchPlaceholder')}
-                          rows={2}
-                          onChange={(e) => updateRoutingRule(rule.id, { match: e.target.value })}
-                        />
-                      </label>
-                      <div className="settings-grid-2">
-                        <label className="field-label">
-                          {t('routingRuleProvider')}
-                          <select
-                            className="select select-block"
-                            value={rule.providerId}
-                            onChange={(e) => updateRoutingRule(rule.id, { providerId: e.target.value })}
-                          >
-                            <option value="">{t('noRoleProvider')}</option>
-                            {providers.map((provider) => (
-                              <option key={provider.id} value={provider.id}>
-                                {provider.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="field-label">
-                          {t('routingRuleModel')}
-                          <select
-                            className="select select-block"
-                            value={rule.model}
-                            onChange={(e) => updateRoutingRule(rule.id, { model: e.target.value })}
-                          >
-                            <option value="">{t('noRoleModel')}</option>
-                            {uniqueModelOptions(providers, rule.providerId, rule.model).map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                      <div className="routing-rule-condition-grid">
-                        <label className="field-label">
-                          {t('routingRuleKeywordMode')}
-                          <select
-                            className="select select-block"
-                            value={rule.keywordMode ?? 'any'}
-                            onChange={(e) => updateRoutingRule(rule.id, { keywordMode: e.target.value === 'all' ? 'all' : 'any' })}
-                          >
-                            <option value="any">{t('routingRuleKeywordAny')}</option>
-                            <option value="all">{t('routingRuleKeywordAll')}</option>
-                          </select>
-                        </label>
-                        <label className="field-label">
-                          {t('routingRuleWhenStrategy')}
-                          <select
-                            className="select select-block"
-                            value={rule.whenStrategy ?? ''}
-                            onChange={(e) => updateRoutingRule(rule.id, {
-                              whenStrategy: e.target.value ? e.target.value as SchedulerStrategy : undefined
-                            })}
-                          >
-                            <option value="">{t('routingRuleAnyStrategy')}</option>
-                            {STRATEGY_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="field-label">
-                          {t('routingRuleMinRisk')}
-                          <select
-                            className="select select-block"
-                            value={rule.minRiskLevel ?? ''}
-                            onChange={(e) => updateRoutingRule(rule.id, {
-                              minRiskLevel:
-                                e.target.value === 'low' || e.target.value === 'medium' || e.target.value === 'high'
-                                  ? e.target.value
-                                  : undefined
-                            })}
-                          >
-                            <option value="">{t('routingRuleAnyRisk')}</option>
-                            <option value="low">{t('routingRiskLow')}</option>
-                            <option value="medium">{t('routingRiskMedium')}</option>
-                            <option value="high">{t('routingRiskHigh')}</option>
-                          </select>
-                        </label>
-                      </div>
-                      <fieldset className="routing-rule-task-field">
-                        <legend>{t('routingRuleTaskKinds')}</legend>
-                        <div className="routing-rule-task-grid">
-                          {ROUTING_RULE_TASK_OPTIONS.map((option) => (
-                            <label key={option.value} className="routing-rule-task-option">
-                              <input
-                                type="checkbox"
-                                checked={(rule.taskKinds ?? []).includes(option.value)}
-                                onChange={(e) => setRoutingRuleTaskKind(rule.id, option.value, e.target.checked)}
-                              />
-                              <span>{t(option.labelKey)}</span>
-                            </label>
-                          ))}
-                        </div>
-                        <small>{t('routingRuleTaskKindsHint')}</small>
-                      </fieldset>
-                    </div>
-                  ))}
+                  <p className="settings-hint">{t('routingRulesManagedInRoutingTab')}</p>
                 </div>
 
                 <label className="field-label">{t('schedulerStrategy')}</label>
@@ -1637,9 +1450,9 @@ export default function SettingsPage(): React.JSX.Element {
                 <h3 className="settings-h3">{t('tabPlugins')}</h3>
                 <p className="settings-hint">{t('pluginsInfo')}</p>
                 <div className="plugins-paths">
-                  <code>~/.claude/skills/</code>
-                  <code>~/.claude/agents/</code>
-                  <code>.claude/settings.json → mcpServers</code>
+                  <code>~/.caogen/skills/</code>
+                  <code>~/.caogen/plugins/</code>
+                  <code>.caogen/mcp/mcp.json</code>
                 </div>
               </>
             )}

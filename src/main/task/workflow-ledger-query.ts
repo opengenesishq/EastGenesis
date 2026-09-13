@@ -10,6 +10,10 @@ import type {
   WorkflowRunRecord,
   WorkflowWorkItemRecord
 } from '../../shared/workflow-types'
+import type {
+  WorkflowEventAppendState,
+  WorkflowEventReferenceIndex
+} from './workflow-ledger-query-types'
 import {
   canonicalJson,
   cursorOffset,
@@ -33,6 +37,13 @@ import {
   assertTaskEvidenceEventCoverage,
   resolveArtifactGraphEntity
 } from './workflow-ledger-integrity'
+import {
+  buildProjectionEventIndex,
+  latestEntityEvent,
+  type ProjectionEventIndex
+} from './workflow-ledger-projection-index'
+
+export type { WorkflowEventAppendState, WorkflowEventReferenceIndex } from './workflow-ledger-query-types'
 
 const GOAL_COLUMNS = { id: 'id', project_id: 'projectId', status: 'status', revision: 'revision', updated_at: 'updatedAt' }
 const WORK_ITEM_COLUMNS = { id: 'id', project_id: 'projectId', goal_id: 'goalId', status: 'status', revision: 'revision', current_run_id: 'currentRunId', updated_at: 'updatedAt' }
@@ -101,6 +112,24 @@ export function readEvidenceLinks(db: WorkflowLedgerDatabase): WorkflowEvidenceL
   )
 }
 
+export function readAndVerifyEventAppendState(
+  db: WorkflowLedgerDatabase,
+  options: {
+    requireTaskEvidenceCoverage?: boolean
+    requireProjectionBinding?: boolean
+  } = {}
+): WorkflowEventAppendState {
+  const events = readWorkflowEventChain(db)
+  const references = verifyEventReferences(db, events)
+  if (options.requireTaskEvidenceCoverage !== false) {
+    assertTaskEvidenceEventCoverage(events, references)
+  }
+  if (options.requireProjectionBinding !== false) {
+    assertProjectionEventBindings(events, references)
+  }
+  return { events, references }
+}
+
 export function readAndVerifyEvents(
   db: WorkflowLedgerDatabase,
   options: {
@@ -108,15 +137,7 @@ export function readAndVerifyEvents(
     requireProjectionBinding?: boolean
   } = {}
 ): WorkflowEventRecord[] {
-  const rows = readWorkflowEventChain(db)
-  const index = verifyEventReferences(db, rows)
-  if (options.requireTaskEvidenceCoverage !== false) {
-    assertTaskEvidenceEventCoverage(rows, index)
-  }
-  if (options.requireProjectionBinding !== false) {
-    assertProjectionEventBindings(rows, index)
-  }
-  return rows
+  return readAndVerifyEventAppendState(db, options).events
 }
 
 /** Read and verify only the event hash chain, without dereferencing mutable projections. */
@@ -143,6 +164,14 @@ export function assertWorkflowEventReferences(
   event: WorkflowEventRecord
 ): void {
   verifyEventReference(db, event, buildEventReferenceIndex(db))
+}
+
+export function assertWorkflowEventReferencesWithIndex(
+  db: WorkflowLedgerDatabase,
+  event: WorkflowEventRecord,
+  index: WorkflowEventReferenceIndex
+): void {
+  verifyEventReference(db, event, index)
 }
 
 export function findWorkflowGoal(db: WorkflowLedgerDatabase, id: string): WorkflowGoalRecord | null {
@@ -301,16 +330,6 @@ function verifyEventChain(events: readonly WorkflowEventRecord[]): void {
     if (event.prevDigest !== previousDigest) throw new WorkflowLedgerCorruptionError('event previous digest mismatch', event.seq)
     previousDigest = event.digest
   })
-}
-
-export interface WorkflowEventReferenceIndex {
-  goals: Map<string, WorkflowGoalRecord>
-  workItems: Map<string, WorkflowWorkItemRecord>
-  runs: Map<string, WorkflowRunRecord>
-  artifacts: Map<string, WorkflowArtifactRecord>
-  acceptances: Map<string, WorkflowAcceptanceRecord>
-  evidenceLinks: Map<string, WorkflowEvidenceLinkRecord>
-  taskEvidence: Map<string, TaskEvidenceRecord> | null
 }
 
 /**
@@ -560,10 +579,11 @@ function assertProjectionEventBindings(
   events: readonly WorkflowEventRecord[],
   index: WorkflowEventReferenceIndex
 ): void {
+  const projectionEvents = buildProjectionEventIndex(events)
   for (const goal of index.goals.values()) {
     assertProjectionEvent(
       goal,
-      latestEntityEvent(events, 'goal', goal.id, new Set(['goal.created', 'goal.updated'])),
+      latestEntityEvent(projectionEvents, 'goal', goal.id, ['goal.created', 'goal.updated']),
       `workflow:goal:${goal.id}:revision:${goal.revision}`,
       'Goal'
     )
@@ -571,7 +591,7 @@ function assertProjectionEventBindings(
   for (const item of index.workItems.values()) {
     assertProjectionEvent(
       item,
-      latestEntityEvent(events, 'work_item', item.id, new Set(['work_item.created', 'work_item.updated'])),
+      latestEntityEvent(projectionEvents, 'work_item', item.id, ['work_item.created', 'work_item.updated']),
       `workflow:work-item:${item.id}:revision:${item.revision}`,
       'WorkItem'
     )
@@ -579,25 +599,24 @@ function assertProjectionEventBindings(
   for (const artifact of index.artifacts.values()) {
     assertProjectionEvent(
       artifact,
-      latestEntityEvent(events, 'artifact', artifact.id, new Set(['artifact.created'])),
+      latestEntityEvent(projectionEvents, 'artifact', artifact.id, ['artifact.created']),
       `workflow:artifact:${artifact.id}:version:${artifact.version}`,
       'Artifact'
     )
   }
-  assertAcceptanceEventBindings(events, index.acceptances)
-  assertRunEventBindings(events, index.runs)
-  assertEvidenceLinkEventBindings(events, index.evidenceLinks)
+  assertAcceptanceEventBindings(projectionEvents, index.acceptances)
+  assertRunEventBindings(projectionEvents, index.runs)
+  assertEvidenceLinkEventBindings(projectionEvents, index.evidenceLinks)
 }
 
 function assertAcceptanceEventBindings(
-  events: readonly WorkflowEventRecord[],
+  projectionEvents: ProjectionEventIndex,
   acceptances: Map<string, WorkflowAcceptanceRecord>
 ): void {
-  const kinds = new Set(['acceptance.created', 'acceptance.updated'])
   for (const acceptance of acceptances.values()) {
     assertProjectionEvent(
       acceptance,
-      latestEntityEvent(events, 'acceptance', acceptance.id, kinds),
+      latestEntityEvent(projectionEvents, 'acceptance', acceptance.id, ['acceptance.created', 'acceptance.updated']),
       `workflow:acceptance:${acceptance.id}:revision:${acceptance.revision}`,
       'Acceptance'
     )
@@ -605,11 +624,11 @@ function assertAcceptanceEventBindings(
 }
 
 function assertRunEventBindings(
-  events: readonly WorkflowEventRecord[],
+  projectionEvents: ProjectionEventIndex,
   runs: Map<string, WorkflowRunRecord>
 ): void {
   for (const run of runs.values()) {
-    const event = latestRunProjectionEvent(events, run.id)
+    const event = projectionEvents.runProjections.get(run.id)
     if (!event) throw new WorkflowLedgerCorruptionError(`Run ${run.id} has no projection event`)
     const expected = runProjectionEventPayload(run)
     for (const [field, value] of Object.entries(expected)) {
@@ -624,13 +643,11 @@ function assertRunEventBindings(
 }
 
 function assertEvidenceLinkEventBindings(
-  events: readonly WorkflowEventRecord[],
+  projectionEvents: ProjectionEventIndex,
   links: Map<string, WorkflowEvidenceLinkRecord>
 ): void {
   for (const link of links.values()) {
-    const event = latestEvent(events, (candidate) =>
-      candidate.kind === 'evidence.linked' && candidate.payload.id === link.id
-    )
+    const event = projectionEvents.evidenceLinks.get(link.id)
     assertProjectionEvent(link, event, `workflow:evidence-link:${link.id}`, 'Evidence Link')
   }
 }
@@ -650,34 +667,6 @@ function assertProjectionEvent(
   }
 }
 
-function latestEntityEvent(
-  events: readonly WorkflowEventRecord[],
-  entityType: WorkflowEventRecord['entityType'],
-  entityId: string,
-  kinds: ReadonlySet<string>
-): WorkflowEventRecord | undefined {
-  return latestEvent(events, (event) =>
-    event.entityType === entityType && event.entityId === entityId && kinds.has(event.kind)
-  )
-}
-
-function latestRunProjectionEvent(
-  events: readonly WorkflowEventRecord[],
-  runId: string
-): WorkflowEventRecord | undefined {
-  return latestEvent(events, (event) =>
-    event.entityType === 'run' && event.entityId === runId && isRunProjectionEvent(event)
-  )
-}
-
-function isRunProjectionEvent(event: WorkflowEventRecord): boolean {
-  if (event.kind === 'run.projected' || event.kind === 'run.recovered') return true
-  const payload = event.payload
-  return typeof payload.runId === 'string' && typeof payload.workItemId === 'string' &&
-    typeof payload.taskId === 'string' && typeof payload.status === 'string' &&
-    typeof payload.revision === 'number' && typeof payload.attempt === 'number'
-}
-
 function runProjectionEventPayload(run: WorkflowRunRecord): Record<string, unknown> {
   return {
     runId: run.id,
@@ -687,16 +676,6 @@ function runProjectionEventPayload(run: WorkflowRunRecord): Record<string, unkno
     revision: run.revision,
     attempt: run.attempt
   }
-}
-
-function latestEvent(
-  events: readonly WorkflowEventRecord[],
-  predicate: (event: WorkflowEventRecord) => boolean
-): WorkflowEventRecord | undefined {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    if (predicate(events[index])) return events[index]
-  }
-  return undefined
 }
 
 function eventConflict(event: WorkflowEventRecord, reason: string): never {

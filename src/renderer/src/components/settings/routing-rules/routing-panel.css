@@ -1,0 +1,11 @@
+.rr-panel-context { display: grid; gap: 12px; min-width: 0; margin: 0 0 20px; padding: 12px 0; border: 0; border-bottom: 1px solid var(--border-color, #c8cdd2); }
+.rr-panel-context legend { font-weight: 600; }
+.rr-panel-context label { display: grid; gap: 5px; min-width: 0; }
+.rr-panel-context select, .rr-panel-context textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: 8px; font: inherit; color: var(--text-primary, #182a32); background: var(--bg-primary, #fff); border: 1px solid var(--border-color, #9aabaa); border-radius: 5px; }
+.rr-panel-context textarea { resize: vertical; }
+.rr-panel-comparison { padding: 16px 0; margin-bottom: 20px; border-bottom: 1px solid var(--border-color, #c8cdd2); }
+.rr-panel-comparison h3, .rr-panel-comparison h4 { margin: 0 0 8px; font-size: 14px; }
+.rr-panel-comparison-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; padding: 12px 0; border-top: 1px solid var(--border-color, #c8cdd2); }
+.rr-panel-comparison-row ul { padding-left: 18px; margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.rr-panel-error { margin-bottom: 12px; }
+@media (max-width: 760px) { .rr-panel-comparison-row { grid-template-columns: minmax(0, 1fr); } }

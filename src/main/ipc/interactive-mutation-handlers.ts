@@ -2,6 +2,7 @@ import { app, ipcMain } from 'electron'
 import type { CheckpointRestoreMode } from '../../shared/types'
 import { sessionManager } from '../sessionManager'
 import { executeInteractiveOperationEffect } from '../task/operation-effect-gateway'
+import { registerExportedWorktreePatch } from '../task/worktree-patch-artifact'
 import { createManagedWorktreeMergePatch, exportManagedWorktreePatch } from '../worktrees'
 import {
   executeInteractiveOperationEffectDiscardHunk,
@@ -68,9 +69,22 @@ function registerGitMutationIpc(): void {
 }
 
 function registerWorktreeMutationIpc(): void {
-  ipcMain.handle('worktrees:exportPatch', (_event, id: string) => {
+  ipcMain.handle('worktrees:exportPatch', async (_event, id: string) => {
     authorize(id, '导出 worktree patch')
-    return exportManagedWorktreePatch(id)
+    const session = sessionManager.get(id)
+    const projectId = session?.meta.workspaceId ?? session?.meta.projectId
+    const creatingRun = sessionManager.getTaskRun(id)
+    if (!projectId || !creatingRun) {
+      return { ok: false, error: '导出 Patch 需要当前会话的规范任务与运行归属' }
+    }
+    const exported = exportManagedWorktreePatch(id)
+    if (!exported.ok) return exported
+    return registerExportedWorktreePatch({
+      sessionId: id,
+      projectId,
+      creatingRunId: creatingRun.id,
+      rootInput: { workflowRoot: app.getPath('userData'), workspaceRoot: app.getPath('userData') }
+    }, exported)
   })
   ipcMain.handle('worktrees:mergePatch', (_event, id: string) => {
     authorize(id, '生成 worktree 合并 patch')

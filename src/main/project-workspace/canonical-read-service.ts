@@ -1,25 +1,34 @@
-import { lstat } from 'node:fs/promises'
+import { lstat, stat } from 'node:fs/promises'
+import { MANAGED_PERSONAL_WORKSPACE_ID } from '../../shared/project-workspace-types'
 import type {
   Goal,
   ProjectWorkspace,
   ProjectWorkspaceState,
+  ProjectWorkspaceContents,
+  ProjectWorkspaceContentsOptions,
   WorkItem
 } from '../../shared/project-workspace-types'
 import { digest, requiredId } from './codec'
 import {
   listVerifiedCanonicalProjectWorkspaceIds,
   readVerifiedCanonicalProjectWorkspaceView,
+  VerifiedCanonicalProjectWorkspaceViewError,
   type VerifiedCanonicalProjectWorkspaceView
 } from './ledger-canonical-view'
 import {
   ensureProjectWorkspaceLedgerProjection,
-  ensureProjectWorkspaceLedgerProjectionForScopedRead
+  ensureProjectWorkspaceLedgerProjectionForScopedRead,
+  preflightProjectWorkspaceLedgerBridgeForCanonicalRead
 } from './ledger-migration'
+import {
+  buildProjectWorkspaceAggregateFromState
+} from './ledger-migration-source'
 import { createProjectWorkspaceLedgerShadowBoundary } from './ledger-shadow-write'
 import { createProjectWorkspaceCanonicalWriteBoundary } from './canonical-write'
 import { ProjectWorkspaceError } from './errors'
 import { projectWorkspaceFile } from './persistence'
 import { openProjectWorkspaceStore, type ListOptions } from './store'
+import { taskSnapshotsDbFile } from '../task/task-snapshot'
 
 export type ProjectWorkspaceReadMode = 'legacy' | 'compare' | 'canonical'
 
@@ -27,6 +36,15 @@ export const PROJECT_WORKSPACE_READ_MODE_ENV = 'CAOGEN_PROJECT_WORKSPACE_READ_MO
 
 const MAX_STABILITY_ATTEMPTS = 3
 const canonicalSnapshotFlights = new Map<string, Promise<CanonicalReadSnapshot>>()
+const canonicalSnapshotCache = new Map<string, CanonicalSnapshotCacheEntry>()
+const CANONICAL_PREWARM_CACHE_MS = 5_000
+
+interface CanonicalSnapshotCacheEntry {
+  snapshot: CanonicalReadSnapshot
+  scope: CanonicalReadScope
+  sourceFingerprint: string
+  expiresAt: number
+}
 
 interface CanonicalReadSnapshot {
   state: ProjectWorkspaceState
@@ -63,6 +81,14 @@ export class ProjectWorkspaceReadService {
     readonly rootDir?: string,
     readonly mode: ProjectWorkspaceReadMode = getProjectWorkspaceReadMode()
   ) {}
+
+  /** One verified revision for dispatch ownership and lifecycle decisions. */
+  async getWorkspaceExecutionState(projectId: string): Promise<{ workspace?: ProjectWorkspace; goals: Goal[]; workItems: WorkItem[] }> {
+    const workspaceId = requiredId(projectId, 'projectId')
+    const snapshot = await this.readCanonicalSnapshot({ kind: 'workspace', workspaceId })
+    const view = snapshot.views.find((item) => item.workspaceId === workspaceId)
+    return { workspace: view?.workspace, goals: view?.goals ?? [], workItems: view?.workItems ?? [] }
+  }
 
   async listGoals(projectId?: string, options: ListOptions = {}): Promise<Goal[]> {
     if (this.mode === 'legacy') return (await openProjectWorkspaceStore(this.rootDir)).listGoals(projectId, options)
@@ -112,20 +138,101 @@ export class ProjectWorkspaceReadService {
     return canonical
   }
 
+  /**
+   * Read the two collections used by the Project first view from one verified
+   * Workspace snapshot. Keeping this operation here (rather than composing
+   * two IPC calls) guarantees one canonical lock/read and one parity check.
+   */
+  async listWorkspaceContents(
+    projectId: string,
+    options: ProjectWorkspaceContentsOptions = {}
+  ): Promise<ProjectWorkspaceContents> {
+    const normalizedProjectId = requiredId(projectId, 'projectId')
+    const goalOptions = options.goals ?? {}
+    const workItemOptions = options.workItems ?? {}
+    if (this.mode === 'legacy') {
+      const store = await openProjectWorkspaceStore(this.rootDir)
+      return {
+        projectId: normalizedProjectId,
+        goals: await store.listGoals(normalizedProjectId, goalOptions),
+        workItems: await store.listWorkItems(normalizedProjectId, workItemOptions)
+      }
+    }
+    const snapshot = await this.readCanonicalSnapshot({ kind: 'workspace', workspaceId: normalizedProjectId })
+    const goals = filterGoals(snapshot, normalizedProjectId, goalOptions)
+    const workItems = filterWorkItems(snapshot, normalizedProjectId, workItemOptions)
+    if (this.mode === 'compare') {
+      assertParity('Goal list', goals, filterLegacyGoals(snapshot.state, normalizedProjectId, goalOptions))
+      assertParity('WorkItem list', workItems, filterLegacyWorkItems(snapshot.state, normalizedProjectId, workItemOptions))
+    }
+    return { projectId: normalizedProjectId, goals, workItems }
+  }
+
   private readCanonicalSnapshot(scope: CanonicalReadScope): Promise<CanonicalReadSnapshot> {
     const boundary = createProjectWorkspaceLedgerShadowBoundary(this.rootDir)
     const flightKey = `${boundary.rootDir}\u0000${canonicalScopeKey(scope)}`
+    const cached = canonicalSnapshotCache.get(flightKey)
+    if (cached && cached.expiresAt > Date.now()) {
+      return this.validateCachedSnapshot(boundary, flightKey, cached)
+    }
+    if (cached) canonicalSnapshotCache.delete(flightKey)
     const existing = canonicalSnapshotFlights.get(flightKey)
     if (existing) return existing
     const flight = createProjectWorkspaceCanonicalWriteBoundary(boundary.rootDir).reconcile()
       .then(() => boundary.withConsistentProjectionRead((rootDir) => this.readStableSnapshot(rootDir, scope)))
     canonicalSnapshotFlights.set(flightKey, flight)
+    // Release the single-flight entry as soon as the verified read settles.
+    // Cache fingerprinting is advisory and must not keep a completed promise
+    // visible to a subsequent read (especially after a source revision change).
     void flight.finally(() => {
       if (canonicalSnapshotFlights.get(flightKey) === flight) {
         canonicalSnapshotFlights.delete(flightKey)
       }
     }).catch(() => undefined)
+    void flight.then(async (snapshot) => {
+      try {
+        canonicalSnapshotCache.set(flightKey, {
+          snapshot,
+          scope,
+          sourceFingerprint: await canonicalSourceFingerprint(boundary.rootDir),
+          expiresAt: Date.now() + CANONICAL_PREWARM_CACHE_MS
+        })
+      } catch {
+        // A cache miss remains correct if the filesystem changes while the
+        // best-effort startup cache fingerprint is being collected.
+      }
+    }).catch(() => undefined)
     return flight
+  }
+
+  /**
+   * Start the same fully verified read used by the renderer before the user
+   * opens a Project. The short-lived cache is guarded by source/ledger bytes,
+   * so this only moves work earlier; it never weakens canonical validation.
+   */
+  async prewarmProject(projectId: string): Promise<void> {
+    await this.readCanonicalSnapshot({ kind: 'workspace', workspaceId: requiredId(projectId, 'projectId') })
+  }
+
+  private async validateCachedSnapshot(
+    boundary: ReturnType<typeof createProjectWorkspaceLedgerShadowBoundary>,
+    flightKey: string,
+    cached: CanonicalSnapshotCacheEntry
+  ): Promise<CanonicalReadSnapshot> {
+    const valid = await boundary.withConsistentProjectionRead(async (rootDir) => {
+      // Bridge journals are part of the canonical-read safety boundary. A
+      // source/DB stat fingerprint alone cannot detect a newly introduced
+      // in-progress journal, so re-run the strict preflight before reuse.
+      for (const view of cached.snapshot.views) {
+        await preflightProjectWorkspaceLedgerBridgeForCanonicalRead(view.workspaceId, rootDir)
+      }
+      const state = await (await openProjectWorkspaceStore(rootDir)).getState()
+      if (state.revision !== cached.snapshot.state.revision) return false
+      return await canonicalSourceFingerprint(rootDir) === cached.sourceFingerprint
+    }).catch(() => false)
+    if (valid) return cached.snapshot
+    canonicalSnapshotCache.delete(flightKey)
+    return this.readCanonicalSnapshot(cached.scope)
   }
 
   private async readStableSnapshot(rootDir: string, scope: CanonicalReadScope): Promise<CanonicalReadSnapshot> {
@@ -135,15 +242,8 @@ export class ProjectWorkspaceReadService {
       const before = await store.getState()
       try {
         const workspaces = workspacesForScope(before, scope)
-        for (const workspace of workspaces) {
-          if (scope.kind === 'all') {
-            await ensureProjectWorkspaceLedgerProjection(workspace.id, rootDir)
-          } else {
-            await ensureProjectWorkspaceLedgerProjectionForScopedRead(workspace.id, rootDir)
-          }
-        }
         const views = await Promise.all(workspaces.map((workspace) =>
-          readVerifiedCanonicalProjectWorkspaceView(workspace.id, rootDir)
+          readCurrentCanonicalView(before, workspace.id, rootDir, scope.kind === 'all')
         ))
         const after = await store.getState()
         if (after.revision !== before.revision) continue
@@ -162,11 +262,109 @@ export class ProjectWorkspaceReadService {
   }
 }
 
+async function readCurrentCanonicalView(
+  state: ProjectWorkspaceState,
+  workspaceId: string,
+  rootDir: string,
+  requireGlobalValidation: boolean
+): Promise<VerifiedCanonicalProjectWorkspaceView> {
+  const aggregate = buildProjectWorkspaceAggregateFromState(
+    state,
+    workspaceId,
+    requireGlobalValidation ? 'global' : 'workspace'
+  )
+  const expectedDigest = digest({
+    workspace: aggregate.workspace,
+    goals: aggregate.goals,
+    workItems: aggregate.workItems
+  })
+  await preflightProjectWorkspaceLedgerBridgeForCanonicalRead(workspaceId, rootDir)
+  try {
+    const view = await readVerifiedCanonicalProjectWorkspaceView(workspaceId, rootDir)
+    assertCanonicalSourceStateRevision(state, view)
+    if (view.projectionDigest === expectedDigest) return view
+  } catch (error) {
+    if (!(error instanceof VerifiedCanonicalProjectWorkspaceViewError) || error.code !== 'MIGRATION_EVENT_MISSING') {
+      throw error
+    }
+  }
+  if (requireGlobalValidation) await ensureProjectWorkspaceLedgerProjection(workspaceId, rootDir)
+  else await ensureProjectWorkspaceLedgerProjectionForScopedRead(workspaceId, rootDir)
+  const view = await readVerifiedCanonicalProjectWorkspaceView(workspaceId, rootDir)
+  assertCanonicalSourceStateRevision(state, view)
+  if (view.projectionDigest !== expectedDigest) {
+    throw new ProjectWorkspaceError(
+      'canonical_projection_digest_mismatch',
+      `Workspace ${workspaceId} verified projection differs from the current ProjectWorkspace source`
+    )
+  }
+  return view
+}
+
+function assertCanonicalSourceStateRevision(
+  state: ProjectWorkspaceState,
+  view: VerifiedCanonicalProjectWorkspaceView
+): void {
+  if (state.revision >= view.stateRevision) return
+  throw new ProjectWorkspaceError(
+    'SOURCE_REVISION_REGRESSION',
+    `Workspace ${view.workspaceId} source store revision regressed below its verified canonical high-water mark`,
+    { sourceStateRevision: state.revision, canonicalStateRevision: view.stateRevision }
+  )
+}
+
 export function createProjectWorkspaceReadService(
   rootDir?: string,
   mode: ProjectWorkspaceReadMode = getProjectWorkspaceReadMode()
 ): ProjectWorkspaceReadService {
   return new ProjectWorkspaceReadService(rootDir, mode)
+}
+
+/**
+ * Best-effort startup hydration for the first Project visit. Every item still
+ * goes through the canonical reader; this merely lets that verified result be
+ * ready before the renderer asks for it.
+ */
+export async function prewarmProjectWorkspaceCanonicalReads(rootDir?: string): Promise<void> {
+  const store = await openProjectWorkspaceStore(rootDir)
+  const projects = (await store.listWorkspaces({ includeArchived: false, includeDeleted: false }))
+    .filter((project) => project.id !== MANAGED_PERSONAL_WORKSPACE_ID && project.status === 'active')
+  for (const project of projects) {
+    try {
+      await prewarmProjectWorkspaceCanonicalRead(project.id, rootDir)
+    } catch {
+      // Startup prewarming is advisory. The foreground canonical read remains
+      // responsible for surfacing a durable corruption or migration error.
+    }
+  }
+}
+
+/**
+ * Warm one Project's verified snapshot for the next foreground visit. This is
+ * intentionally single-project and single-flight; callers must not fan out
+ * prewarm work across every Project because Ledger verification is CPU-bound.
+ */
+export async function prewarmProjectWorkspaceCanonicalRead(
+  projectId: string,
+  rootDir?: string
+): Promise<void> {
+  await createProjectWorkspaceReadService(rootDir, 'canonical').prewarmProject(
+    requiredId(projectId, 'projectId')
+  )
+}
+
+async function canonicalSourceFingerprint(rootDir: string): Promise<string> {
+  const paths = [projectWorkspaceFile(rootDir), taskSnapshotsDbFile(rootDir)]
+  const parts = await Promise.all(paths.map(async (filePath) => {
+    try {
+      const info = await stat(filePath)
+      return `${filePath}:${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}`
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return `${filePath}:missing`
+      throw error
+    }
+  }))
+  return parts.join('|')
 }
 
 async function assertCanonicalSourceRegistry(rootDir: string): Promise<void> {

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
+import { assertPersistedSessionExecutionAllowed } from './session-execution-ownership'
 import {
   documentAttachmentsToPrompt,
   imageAttachmentRefToContentBlock,
@@ -15,10 +16,10 @@ import {
   buildAnthropicUserContent,
   durableImageReferences,
   finalStopFailure,
-  rebuildAnthropicHistory,
-  rebuildPortableAnthropicHistory,
   type AnthropicImageResolver
 } from './anthropic-history'
+import { rebuildSessionAnthropicHistory } from './session-anthropic-history'
+import { nativeRequestBudgetInput } from './model/native-request-budget'
 import {
   type AnthropicMessagesContentBlock,
   type AnthropicMessagesMessage,
@@ -38,7 +39,10 @@ import { OPENAI_CODING_TOOLS } from './openaiTools'
 import { buildProjectContextSystemAppendSync } from './agent/context-loader'
 import type { AnthropicMessagesTarget } from './provider/anthropicMessagesTarget'
 import { getSettings } from './settings'
-import { assertRoutingExpertTargetAllowed } from './model/routing-expert-policy'
+import { resolveNativeSessionTarget, nativeModelProtocol, nativeModelErrorSubtype } from './model/native-session-target'
+import { nativeSessionRecoveryContext, assertNativeSessionRecoveryTarget } from './model/native-recovery-session'
+import { nativeHttpRefusalEvidence } from './model/native-http-refusal'
+import { emitNativeUserMessage } from './native-user-message'
 import { listHistory } from './history'
 import { normalizeStableMessagePayload, type StableMessagePayload } from './stable-message-payload'
 import {
@@ -47,6 +51,7 @@ import {
 import { runHasUnresolvedEffects } from './task/effect-runtime'
 import { taskStrategySystemAppend, updateTaskStrategyMeta } from './task/task-strategy'
 import { buildWorkflowStageHandoffPrompt } from './task/workflow-stage-handoff'
+import { buildUserRulesSystemAppendSync } from './user-rules'
 import {
   assertOutboundContextAllowed,
   OutboundContextPolicyError,
@@ -121,7 +126,6 @@ export class AnthropicEngine implements Engine {
   private readonly dependencies: AnthropicEngineDependencies
   private readonly nativeToolRuntime: NativeToolRuntime
   private readonly historyImageResolver: AnthropicImageResolver
-  private readonly portableHistory: boolean
   private abort: AbortController | null = null
   private activeTurn: Promise<void> | null = null
   private activeOutboundContext?: OutboundContextManifest
@@ -148,6 +152,7 @@ export class AnthropicEngine implements Engine {
     dependencies: Partial<AnthropicEngineDependencies> = {}
   ) {
     this.meta = meta
+    this.resolvedModel = meta.modelRoutingDecision?.providerId === meta.providerId ? meta.modelRoutingDecision.model : undefined
     this.transcript = new TranscriptWriter(resumeSdkSessionId, initialEventSeq)
     if (!resumeSdkSessionId && meta.conversationForkSourceSdkSessionId) {
       this.transcript.seedFrom(meta.conversationForkSourceSdkSessionId, meta.conversationForkCheckpointId)
@@ -168,11 +173,8 @@ export class AnthropicEngine implements Engine {
         sessionImageAttachmentsRoot(app.getPath('userData'), sourceSessionId ?? meta.id)
       ) as AnthropicMessagesContentBlock
     )
-    this.portableHistory = Boolean(meta.conversationForkSourceSdkSessionId)
-    this.history = this.portableHistory
-      ? rebuildPortableAnthropicHistory(this.transcript.readAll())
-      : rebuildAnthropicHistory(this.transcript.readAll(), this.historyImageResolver)
-    if (resumeSdkSessionId) {
+    this.history = rebuildSessionAnthropicHistory(meta, this.transcript.readAll(), this.historyImageResolver)
+    if (resumeSdkSessionId && meta.runtimeContinuation?.state !== 'prepared') {
       this.meta.sdkSessionId = resumeSdkSessionId
       this.emit({ kind: 'init', sdkSessionId: resumeSdkSessionId, model: effectiveSessionModel(this.meta, this.resolvedModel) })
     }
@@ -182,11 +184,7 @@ export class AnthropicEngine implements Engine {
     if (this.disposed) return
     this.setStatus('starting')
     try {
-      const target = this.dependencies.resolveTarget({
-        providerId: this.meta.providerId,
-        model: this.meta.model
-      })
-      assertRoutingExpertTargetAllowed(target.providerId, target.baseUrl, getSettings().routingExpertPolicy)
+      const target = resolveNativeSessionTarget({ meta: this.meta, dependencies: this.dependencies, emit: (event) => this.emit(event) })
       this.resolvedModel = target.model
       if (!this.meta.sdkSessionId) {
         this.meta.sdkSessionId = `${this.dependencies.sessionIdPrefix}-${randomUUID()}`
@@ -226,16 +224,7 @@ export class AnthropicEngine implements Engine {
       this.rejectSend(anthropicErrorText(error))
       return
     }
-    this.emit({
-      kind: 'user-message',
-      text: payload.text,
-      messageId,
-      attachments
-    })
-    if (this.meta.title === '新会话' && payload.text) {
-      this.meta.title = payload.text.replace(/\s+/g, ' ').slice(0, 40)
-      this.emit({ kind: 'meta', meta: { ...this.meta } })
-    }
+    emitNativeUserMessage({ meta: this.meta, payload, messageId, attachments, emit: (event) => this.emit(event) })
 
     this.assistantText = ''
     this.thinkingText = ''
@@ -286,9 +275,7 @@ export class AnthropicEngine implements Engine {
       return { mode, checkpointId: messageId, canRewind: false, applied: false, error: '会话仍在运行' }
     }
     const result = restoreProviderChatCheckpoint(this.transcript, messageId, mode, dryRun, (entries) => {
-      this.history = this.portableHistory
-        ? rebuildPortableAnthropicHistory(entries)
-        : rebuildAnthropicHistory(entries, this.historyImageResolver)
+      this.history = rebuildSessionAnthropicHistory(this.meta, entries, this.historyImageResolver)
     })
     if (result.applied) {
       this.emit({
@@ -318,8 +305,10 @@ export class AnthropicEngine implements Engine {
   }
 
   async setModel(model: string): Promise<void> {
+    this.meta.routingScope = model === AUTO_MODEL ? (this.meta.routingScope === 'global' ? 'global' : 'provider') : 'fixed'
     this.meta.model = model
     this.resolvedModel = model && model !== AUTO_MODEL ? model : undefined
+    this.meta.modelRoutingDecision = undefined
     this.emit({ kind: 'meta', meta: { ...this.meta } })
   }
 
@@ -336,13 +325,15 @@ export class AnthropicEngine implements Engine {
     return this.disposePromise
   }
 
+  async retireForContinuation(): Promise<void> {
+    if (this.abort || this.pendingPermissions().length) throw new Error('执行中引擎不能交接')
+    await this.activeTurn
+    this.disposed = true
+  }
+
   private async runTurn(payload: StableMessagePayload, controller: AbortController): Promise<void> {
     try {
-      const target = this.dependencies.resolveTarget({
-        providerId: this.meta.providerId,
-        model: this.meta.model
-      })
-      assertRoutingExpertTargetAllowed(target.providerId, target.baseUrl, getSettings().routingExpertPolicy)
+      const target = resolveNativeSessionTarget({ meta: this.meta, dependencies: this.dependencies, emit: (event) => this.emit(event), payload })
       rememberAnthropicRecoveryTarget(this.recoveryState, target)
       this.resolvedModel = target.model
       const layered = await augmentNativePayloadWithLayeredMemory(payload, this.meta, app.getPath('userData'))
@@ -451,7 +442,7 @@ export class AnthropicEngine implements Engine {
           redactProviderCredentials(failureText)
         )
         if (!this.logicalRequestCanReplay(controller, textOffset, thinkingOffset)) throw error
-        const recovery = this.recoverTarget(activeTarget, failureText)
+        const recovery = this.recoverTarget(activeTarget, failureText, nativeHttpRefusalEvidence(operationError)?.outcome)
         if (!recovery) throw error
         lineage = {
           requestId: error.requestId,
@@ -469,7 +460,7 @@ export class AnthropicEngine implements Engine {
     controller: AbortController,
     lineage?: AnthropicAttemptLineage
   ): Promise<AnthropicMessagesResult> {
-    const projectContext = buildProjectContextSystemAppendSync(this.meta.sourceCwd ?? this.meta.cwd)
+    const projectContext = [buildUserRulesSystemAppendSync(), buildProjectContextSystemAppendSync(this.meta.sourceCwd ?? this.meta.cwd)].filter(Boolean).join('\n\n')
     const request = this.dependencies.applyRuntimeToRequest({
       model: target.model,
       maxTokens: DEFAULT_MAX_TOKENS,
@@ -480,13 +471,42 @@ export class AnthropicEngine implements Engine {
     }, target.credentialProvider.advancedConfig?.runtime)
     rememberAnthropicRecoveryTarget(this.recoveryState, target)
     if (target.keyId) this.dependencies.markProviderKeyUsed(target.providerId, target.keyId)
+    const body = this.dependencies.buildWireBody(request)
+    const assertPhysicalRequestAllowed = async (): Promise<void> => {
+      await assertPersistedSessionExecutionAllowed(this.meta, app.getPath('userData'))
+      // The SDK may issue more than one physical request during a single
+      // Messages attempt. Re-run the canonical route and outbound policy gate
+      // for every such request, rather than relying only on the outer attempt
+      // preflight.
+      assertNativeSessionRecoveryTarget(this.meta, target, this.dependencies.listProviders(), this.dependencies.getSettings())
+      await assertDigitalWorkerProviderDispatchAllowed(this.meta, app.getPath('userData'), {
+        providerId: target.providerId,
+        model: target.model,
+        protocol: nativeModelProtocol(this.dependencies.recoveryEngineKind)
+      })
+      const manifest = this.activeOutboundContext
+      if (!manifest) {
+        throw new OutboundContextPolicyError(
+          'OUTBOUND_CONTEXT_STALE',
+          '模型请求缺少外发上下文清单，已阻止发送'
+        )
+      }
+      await assertOutboundContextAllowed({
+        manifest,
+        rootDir: app.getPath('userData'),
+        providerId: target.providerId,
+        model: target.model,
+        engine: this.meta.engine
+      })
+    }
     return this.dependencies.modelAttempts.execute({
       run: this.dependencies.getRun(this.meta.id),
       providerId: target.providerId,
       model: target.model,
+      routeReason: this.meta.modelRoutingDecision?.selectionReason,
       endpoint: target.endpoint,
       method: 'POST',
-      body: this.dependencies.buildWireBody(request),
+      body, budgetScope: nativeRequestBudgetInput({ meta: this.meta, providerId: target.providerId, model: target.model, body }),
       canonicalContextDigest: buildProviderNeutralContextDigest({
         entries: this.transcript.readAll(),
         outboundContext: this.activeOutboundContext
@@ -496,29 +516,10 @@ export class AnthropicEngine implements Engine {
       estimateCost: (usage) => estimateModelAttemptCostUsd({
         providerId: target.providerId,
         model: target.model,
-        protocol: 'anthropic.messages'
+        protocol: nativeModelProtocol(this.dependencies.recoveryEngineKind)
       }, usage),
       preflight: async () => {
-        assertRoutingExpertTargetAllowed(target.providerId, target.baseUrl, getSettings().routingExpertPolicy)
-        await assertDigitalWorkerProviderDispatchAllowed(this.meta, app.getPath('userData'), {
-          providerId: target.providerId,
-          model: target.model,
-          protocol: 'anthropic.messages'
-        })
-        const manifest = this.activeOutboundContext
-        if (!manifest) {
-          throw new OutboundContextPolicyError(
-            'OUTBOUND_CONTEXT_STALE',
-            '模型请求缺少外发上下文清单，已阻止发送'
-          )
-        }
-        await assertOutboundContextAllowed({
-          manifest,
-          rootDir: app.getPath('userData'),
-          providerId: target.providerId,
-          model: target.model,
-          engine: this.meta.engine
-        })
+        await assertPhysicalRequestAllowed()
       },
       ...(lineage ?? {}),
       operation: (operationId) => this.dependencies.streamMessage({
@@ -529,7 +530,8 @@ export class AnthropicEngine implements Engine {
         signal: controller.signal,
         onText: (text) => this.appendText(text),
         onThinking: (text) => this.appendThinking(text),
-        fetch: (url, init = {}) => {
+        fetch: async (url, init = {}) => {
+          await assertPhysicalRequestAllowed()
           const scope = providerCredentialScopeForSession(this.meta, target.providerId, operationId)
           const selection = target.issueCredentialLease(scope)
           if (target.credentialProvider.authMode !== 'none' && (!selection.available || !selection.lease)) {
@@ -561,12 +563,14 @@ export class AnthropicEngine implements Engine {
 
   private recoverTarget(
     current: AnthropicMessagesTarget,
-    failureText: string
+    failureText: string,
+    nativeRetryReason?: 'rate_limited' | 'auth_failed'
   ): AnthropicRecoveryTarget | undefined {
     const failure = this.dependencies.classifyFailure(failureText)
     const settings = this.dependencies.getSettings()
     const providers = this.dependencies.listProviders()
     const recovery = recoverAnthropicTarget({
+      recovery: nativeSessionRecoveryContext(this.meta, settings),
       current,
       failure,
       settings,
@@ -580,6 +584,7 @@ export class AnthropicEngine implements Engine {
       pickFailoverTarget: this.dependencies.pickFailoverTarget,
       pickProviderModelFailoverTarget: this.dependencies.pickProviderModelFailoverTarget,
       engineKind: this.dependencies.recoveryEngineKind
+      ,nativeRetryReason
     })
     if (!recovery) {
       if (!this.recoveryExhaustedEmitted
@@ -774,7 +779,7 @@ export class AnthropicEngine implements Engine {
     this.finishTurn(
       true,
       redactProviderCredentials(anthropicErrorText(unwrapModelAttemptOperationError(error))),
-      'error'
+      nativeModelErrorSubtype(error)
     )
   }
 
@@ -806,6 +811,7 @@ export class AnthropicEngine implements Engine {
   private recordUsage(result: AnthropicMessagesResult): void {
     this.turnUsage = aggregateAnthropicUsage(this.turnUsage, result)
     this.meta.usage = this.turnUsage
+    this.meta.contextTokens = result.usage.input + result.usage.cacheRead + result.usage.cacheCreation
   }
 
   private emitSkippedToolResults(
@@ -852,7 +858,6 @@ export class AnthropicEngine implements Engine {
     if (isError) this.setStatus('error', resultText)
     else this.setStatus('idle')
   }
-
   private emit(event: AgentEvent): void {
     if (event.kind === 'tool-start' || event.kind === 'tool-result' ||
         event.kind === 'permission-request' || event.kind === 'permission-resolved') {

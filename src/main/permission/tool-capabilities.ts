@@ -10,6 +10,12 @@ export const TOOL_SEMANTIC_CAPABILITIES: readonly ToolSemanticCapability[] = [
 ]
 
 const COMPOSITE_TOOL_CAPABILITIES: ToolSemanticCapability[] = [...TOOL_SEMANTIC_CAPABILITIES]
+const SCOPED_TOOL_CAPABILITIES: Record<string, ToolSemanticCapability[] | undefined> = {
+  inspect_office_artifact: ['workspaceRead'], plan_office_revision: ['workspaceRead'], revise_office_artifact: ['workspaceRead', 'workspaceWrite'],
+  project_knowledge_search: ['workspaceRead', 'network'], inspect_media: ['workspaceRead'],
+  create_video_production: ['workspaceWrite'], submit_media_job: ['network', 'workspaceWrite'],
+  advance_media_job: ['network', 'workspaceWrite'], reconcile_media_job: ['network', 'workspaceWrite']
+}
 
 const INTERACTIVE_GUI_TOOLS = new Set([
   'gui_activate_window',
@@ -24,7 +30,6 @@ const NETWORK_TOOLS = new Set([
   'web_search',
   'mcp_discover',
   'mcp_builtin_servers',
-  'mcp_import_claude_desktop',
   'china_notify',
   'gitee_prepare',
   'git_push',
@@ -54,7 +59,8 @@ export function classifyToolCapabilities(
   toolInput: Record<string, unknown>
 ): ToolSemanticCapability[] {
   const normalized = normalizeToolName(toolName)
-  if (normalized === 'project_knowledge_search') return ['workspaceRead', 'network']
+  const scoped = SCOPED_TOOL_CAPABILITIES[normalized]
+  if (scoped) return [...scoped]
   if (normalized === 'bash' || normalized === 'mcp_call_tool' || normalized.toLowerCase().startsWith('mcp__')) {
     return [...COMPOSITE_TOOL_CAPABILITIES]
   }

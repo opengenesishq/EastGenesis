@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw, Settings2 } from 'lucide-react'
-import { AUTO_MODEL } from '../../../../shared/types'
 import { useT } from '../../i18n'
 import { useStore } from '../../store'
 import ProviderProfileManager from './ProviderProfileManager'
@@ -16,6 +15,7 @@ import type {
   ProviderAuthorizationStatus,
   ProviderView
 } from '../../../../shared/types'
+import ProviderModelCapabilitySummary from '../ProviderModelCapabilitySummary'
 
 interface ProviderProbe {
   providerId: string
@@ -46,30 +46,14 @@ export default function ProviderList({
   onRemove
 }: Props): React.JSX.Element {
   const t = useT()
-  const defaultProviderId = useStore((state) => state.settings.defaultProviderId)
-  const updateSettings = useStore((state) => state.updateSettings)
-  const [settingDefaultId, setSettingDefaultId] = useState('')
-  const [defaultError, setDefaultError] = useState('')
-  const setDefault = async (provider: ProviderView): Promise<void> => {
-    setSettingDefaultId(provider.id)
-    setDefaultError('')
-    try {
-      await updateSettings({ defaultProviderId: provider.id, defaultModel: AUTO_MODEL })
-    } catch (cause) {
-      setDefaultError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setSettingDefaultId('')
-    }
-  }
   return (
     <ProviderProfileManager providers={providers} onAdd={onAdd}>
       <ProviderProfileSyncPanel />
       <ProviderProfileWebDavPanel />
       <ProviderProfileS3Panel />
       <ProviderAccountOverview providers={providers} onEdit={onEdit} />
-      {defaultError && <div className="notice notice-error provider-profile-notice" role="alert">{defaultError}</div>}
       <div className="provider-list">
-        {providers.length === 0 && <ProviderEmpty onAdd={onAdd} />}
+        {providers.length === 0 && <div className="provider-empty">{t('providerEmpty')}</div>}
         {providers.map((provider) => (
           <ProviderListRow
             key={provider.id}
@@ -77,30 +61,13 @@ export default function ProviderList({
             health={health.find((item) => item.providerId === (provider.id || 'local-login'))}
             providerProbe={providerProbe}
             checking={checkingProviderId === provider.id}
-            isDefault={provider.id === defaultProviderId}
-            settingDefault={settingDefaultId === provider.id}
             onProbe={onProbe}
             onEdit={onEdit}
             onRemove={onRemove}
-            onSetDefault={(next) => void setDefault(next)}
           />
         ))}
       </div>
     </ProviderProfileManager>
-  )
-}
-
-function ProviderEmpty({ onAdd }: { onAdd: () => void }): React.JSX.Element {
-  const t = useT()
-  return (
-    <div className="provider-empty" role="status" data-provider-empty>
-      <strong>{t('providerEmpty')}</strong>
-      <span>{t('providerEmptyHint')}</span>
-      <button type="button" className="btn btn-primary btn-sm" data-provider-empty-action onClick={onAdd}>
-        <Settings2 size={14} aria-hidden="true" />
-        {t('providerEmptyAction')}
-      </button>
-    </div>
   )
 }
 
@@ -109,6 +76,11 @@ function ProviderAccountOverview({ providers, onEdit }: { providers: ProviderVie
   const authorized = providers.filter((provider) => provider.authorization?.status === 'authorized').length
   const modelCount = new Set(providers.flatMap((provider) => provider.models)).size
   const keyCount = providers.reduce((total, provider) => total + (provider.keyCount ?? (provider.hasToken ? 1 : 0)), 0)
+  const modelProfiles = providers.flatMap((provider) => {
+    const profiles = provider.advancedConfig?.modelProfiles ?? []
+    const known = new Set(profiles.flatMap((profile) => [profile.model, ...(profile.aliases ?? [])]).map((model) => model.toLowerCase()))
+    return [...profiles, ...provider.models.filter((model) => !known.has(model.toLowerCase())).map((model) => ({ model }))]
+  })
   return (
     <section className="provider-account-overview" aria-label={t('providerAccountOverviewTitle')} data-provider-account-overview>
       <div className="provider-account-overview-head">
@@ -126,6 +98,7 @@ function ProviderAccountOverview({ providers, onEdit }: { providers: ProviderVie
         <AccountMetric value={modelCount} label={t('providerAccountOverviewModels')} />
         <AccountMetric value={keyCount} label={t('providerAccountOverviewKeys')} />
       </div>
+      <ProviderModelCapabilitySummary profiles={modelProfiles} compact />
       <ProviderAuthorizationOverview providers={providers} onEdit={onEdit} />
       <ProviderBalanceOverview providers={providers} />
     </section>
@@ -361,23 +334,17 @@ function ProviderListRow({
   health,
   providerProbe,
   checking,
-  isDefault,
-  settingDefault,
   onProbe,
   onEdit,
-  onRemove,
-  onSetDefault
+  onRemove
 }: {
   provider: ProviderView
   health: ProviderHealthView | undefined
   providerProbe: ProviderProbe | null
   checking: boolean
-  isDefault: boolean
-  settingDefault: boolean
   onProbe: (provider: ProviderView) => void
   onEdit: (provider: ProviderView) => void
   onRemove: (provider: ProviderView) => void
-  onSetDefault: (provider: ProviderView) => void
 }): React.JSX.Element {
   const t = useT()
   const pricedModels = provider.advancedConfig?.modelProfiles?.filter((profile) => Boolean(profile.pricing)).length ?? 0
@@ -386,9 +353,8 @@ function ProviderListRow({
       <div className="provider-row-body">
         <div className="provider-row-name">
           {provider.name}
-          {isDefault && <span className="provider-tag provider-tag-default">{t('providerDefault')}</span>}
           <ProviderCredentialTag provider={provider} />
-          <ProviderHealthSummary health={health} />
+          <ProviderHealthDot health={health} />
         </div>
         <div className="provider-row-sub">
           {provider.baseUrl || t('officialEndpoint')} · {t('modelsCount', { n: provider.models.length })} ·{' '}
@@ -414,10 +380,7 @@ function ProviderListRow({
         <button className="btn btn-ghost btn-sm" disabled={checking} onClick={() => onProbe(provider)}>
           {checking ? t('providerProbing') : t('providerProbe')}
         </button>
-        {!isDefault && <button className="btn btn-ghost btn-sm" disabled={settingDefault || !provider.ready} data-provider-set-default onClick={() => onSetDefault(provider)}>
-          {settingDefault ? t('providerSettingDefault') : t('providerSetDefault')}
-        </button>}
-        <button className="btn btn-ghost btn-sm" data-provider-edit onClick={() => onEdit(provider)}>
+        <button className="btn btn-ghost btn-sm" onClick={() => onEdit(provider)}>
           {t('providerConfigure')}
         </button>
         <button className="btn btn-ghost btn-sm" onClick={() => onRemove(provider)}>
@@ -450,63 +413,36 @@ function ProviderCredentialTag({ provider }: { provider: ProviderView }): React.
   return null
 }
 
-function ProviderHealthSummary({ health }: { health: ProviderHealthView | undefined }): React.JSX.Element {
+function ProviderHealthDot({ health }: { health: ProviderHealthView | undefined }): React.JSX.Element | null {
   const t = useT()
-  if (!health) {
-    return (
-      <span className="provider-health-summary is-unknown" data-provider-health-summary role="status">
-        <span className="health-dot health-unknown" aria-hidden="true" />
-        <span className="provider-health-label">{t('providerHealthNotChecked')}</span>
-      </span>
-    )
-  }
-  const failure = safeProviderHealthMessage(health.recentFailures?.[0]?.message ?? health.lastError)
-  const probeFailure = safeProviderHealthMessage(health.lastProbeError)
-  const status = health.circuitState === 'open'
-    ? { key: 'providerHealthCircuitOpen', className: 'is-open', dot: 'health-bad', detail: failure }
+  if (!health) return null
+  const title = health.circuitState === 'open'
+    ? t('healthCircuitOpenTip', {
+        error: health.recentFailures?.[0]?.message ?? health.lastError ?? '-'
+      })
     : health.circuitState === 'half_open'
-      ? { key: 'providerHealthCircuitHalfOpen', className: 'is-half-open', dot: 'health-warn', detail: '' }
-      : !health.healthy
-        ? { key: 'providerHealthUnhealthy', className: 'is-unhealthy', dot: 'health-bad', detail: failure }
-        : failure
-          ? { key: 'providerHealthDegraded', className: 'is-degraded', dot: 'health-warn', detail: failure }
-          : probeFailure
-            ? { key: 'providerHealthProbeFailed', className: 'is-degraded', dot: 'health-warn', detail: probeFailure }
-            : { key: 'providerHealthHealthy', className: 'is-healthy', dot: 'health-ok', detail: '' }
-  const label = status.key === 'providerHealthHealthy'
-    ? t(status.key, {
+      ? t('healthCircuitHalfOpenTip')
+      : health.healthy
+    ? t('healthOkTip', {
         s: health.successes,
         f: health.failures,
         latencyMs: health.latencyEmaMs ?? health.lastLatencyMs ?? '-'
       })
-    : status.key === 'providerHealthUnhealthy'
-      ? t(status.key, { n: health.consecutiveFailures })
-      : t(status.key)
-  const accessibleLabel = status.detail ? `${label} · ${status.detail}` : label
+    : t('healthBadTip', {
+        n: health.consecutiveFailures,
+        error: health.recentFailures?.[0]?.message ?? health.lastError ?? '-'
+      })
+  const statusClass = health.circuitState === 'open'
+    ? 'health-bad'
+    : health.circuitState === 'half_open'
+      ? 'health-warn'
+      : health.healthy ? 'health-ok' : 'health-bad'
   return (
     <span
-      className={`provider-health-summary ${status.className}`}
-      data-provider-health-summary
-      role="status"
-      aria-label={accessibleLabel}
-      title={accessibleLabel}
-    >
-      <span className={`health-dot ${status.dot}`} aria-hidden="true" />
-      <span className="provider-health-label">{label}</span>
-      {status.detail && <span className="provider-health-detail">{status.detail}</span>}
-    </span>
+      className={`health-dot ${statusClass}`}
+      title={title}
+    />
   )
-}
-
-function safeProviderHealthMessage(value: string | undefined): string {
-  if (!value) return ''
-  return value
-    .replace(/\s+/g, ' ')
-    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/gi, '[redacted]')
-    .replace(/(bearer\s+)[A-Za-z0-9._~+/=-]+/gi, '$1[redacted]')
-    .replace(/((?:api[-_ ]?key|token|secret)\s*[:=]\s*)[^\s,;]+/gi, '$1[redacted]')
-    .replace(/(?:https?|wss?):\/\/[^\s"'<>]+/gi, '[URL]')
-    .slice(0, 180)
 }
 
 function providerCredentialSummary(provider: ProviderView, t: ReturnType<typeof useT>): string {

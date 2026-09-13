@@ -618,20 +618,15 @@ function canonicalExistingDirectory(path: string): string {
 }
 
 function looksLikePlugin(dir: string): boolean {
-  if (existsSync(join(dir, '.caogen-plugin', 'plugin.json'))) return true
   if (existsSync(join(dir, 'plugin.json'))) return true
-  if (existsSync(join(dir, '.codex-plugin', 'plugin.json'))) return true
+  if (existsSync(join(dir, '.caogen-plugin', 'plugin.json'))) return true
   if (existsSync(join(dir, 'SKILL.md'))) return true
   return readdirSync(dir, { withFileTypes: true }).some((entry) => entry.isFile() && entry.name.endsWith('.md'))
 }
 
 function installName(sourceDir: string): string {
   let name = basename(sourceDir)
-  for (const manifestPath of [
-    join(sourceDir, '.caogen-plugin', 'plugin.json'),
-    join(sourceDir, '.codex-plugin', 'plugin.json'),
-    join(sourceDir, 'plugin.json')
-  ]) {
+  for (const manifestPath of [join(sourceDir, 'plugin.json'), join(sourceDir, '.caogen-plugin', 'plugin.json')]) {
     try {
       const manifestStat = lstatSync(manifestPath)
       if (!manifestStat.isFile() || manifestStat.isSymbolicLink() || manifestStat.size > MAX_MANIFEST_BYTES) continue

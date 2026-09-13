@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
+import { CheckCircle2, FlaskConical, LoaderCircle, Play, RotateCcw, XCircle } from 'lucide-react'
 import { useStore } from '../../store'
 import { useT } from '../../i18n'
 import type { GitFileStatus, WorkspaceDiffFile, WorkspaceDiffHunk, WorkspaceDiffLine } from '../../../../shared/types'
+import { useProjectTests } from './useProjectTests'
 
 function fileLabel(file: WorkspaceDiffFile): string {
   if (file.status === 'renamed') return `${file.oldPath} -> ${file.newPath}`
@@ -36,7 +38,157 @@ function statusLabel(file: GitFileStatus): string {
   return flags.join(' + ') || file.kind
 }
 
+type ProjectTests = ReturnType<typeof useProjectTests>
+
+function gitTestState(tests: ProjectTests): string {
+  const required = tests.commands.length > 0
+  if (tests.loading || tests.runningHere) return 'loading'
+  if (tests.stale) return 'stale'
+  if (gitTestEvidenceFailed(tests)) return 'evidence-failed'
+  if (!required) return 'not-required'
+  if (gitTestPassed(tests)) return 'passed'
+  return tests.result ? 'failed' : 'required'
+}
+
+function gitTestLabel(tests: ProjectTests, t: (key: string) => string): string {
+  if (tests.stale) return t('projectReviewTestsStale')
+  if (gitTestEvidenceFailed(tests)) return t('projectReviewTestEvidenceFailed')
+  if (tests.commands.length === 0) return t('projectReviewNoTests')
+  if (gitTestPassed(tests)) return t('projectReviewTestsPassed')
+  return tests.result ? t('projectReviewTestsFailed') : t('projectReviewNeedsTest')
+}
+
+function gitTestPassed(tests: ProjectTests): boolean {
+  return tests.result?.status === 'passed' && Boolean(tests.result.evidenceId) && !tests.result.evidenceError && !tests.stale
+}
+
+function gitTestEvidenceFailed(tests: ProjectTests): boolean {
+  return Boolean(tests.result?.evidenceError || (tests.result?.status === 'passed' && !tests.result.evidenceId))
+}
+
+function GitTestIcon({ tests }: { tests: ProjectTests }): React.JSX.Element {
+  if (tests.loading || tests.runningHere) return <LoaderCircle className="test-spin" size={14} />
+  if (gitTestEvidenceFailed(tests)) return <XCircle size={14} />
+  if (gitTestPassed(tests) || tests.commands.length === 0) return <CheckCircle2 size={14} />
+  if (tests.result && !tests.stale) return <XCircle size={14} />
+  return <FlaskConical size={14} />
+}
+
+function GitTestReview({
+  tests,
+  pendingChanges,
+  openLatestRewindPanel,
+  t
+}: {
+  tests: ProjectTests
+  pendingChanges: number
+  openLatestRewindPanel: (source?: 'command' | 'button' | 'shortcut') => void
+  t: (key: string) => string
+}): React.JSX.Element {
+  const defaultTest = tests.commands.find((command) => command.default) ?? tests.commands[0]
+  return (
+    <div className="project-review-flow" data-project-review-state={gitTestState(tests)}>
+      <div className="project-review-status">
+        <span className="project-review-status-icon" aria-hidden="true">
+          <GitTestIcon tests={tests} />
+        </span>
+        <span>{gitTestLabel(tests, t)}</span>
+        {pendingChanges > 0 && <span className="project-review-pending">{pendingChanges} {t('projectReviewPendingChanges')}</span>}
+      </div>
+      <div className="project-review-actions">
+        <button type="button" className="btn btn-ghost btn-sm" disabled={!defaultTest || tests.loading || Boolean(tests.runningCommandId)} onClick={() => defaultTest && void tests.run(defaultTest)}>
+          {tests.runningHere ? <LoaderCircle className="test-spin" size={14} aria-hidden="true" /> : <Play size={14} aria-hidden="true" />}
+          {t('projectReviewRunDefault')}
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => openLatestRewindPanel('button')}>
+          <RotateCcw size={14} aria-hidden="true" />
+          {t('projectReviewUndo')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function GitFileSelection({
+  files,
+  selected,
+  allSelected,
+  onToggleAll,
+  onToggle
+}: {
+  files: GitFileStatus[]
+  selected: Set<string>
+  allSelected: boolean
+  onToggleAll: () => void
+  onToggle: (path: string) => void
+}): React.JSX.Element {
+  if (files.length === 0) return <div className="git-file-empty">No Git changes</div>
+  return (
+    <div className="git-file-list">
+      <label className="git-file-row git-file-row-all">
+        <input type="checkbox" checked={allSelected} onChange={onToggleAll} />
+        <span>选择全部文件</span>
+        <b>{files.length}</b>
+      </label>
+      {files.map((file) => (
+        <label key={`${file.path}-${file.indexStatus}-${file.worktreeStatus}`} className="git-file-row">
+          <input type="checkbox" checked={selected.has(file.path)} onChange={() => onToggle(file.path)} />
+          <span className="git-file-path" title={file.path}>{file.oldPath ? `${file.oldPath} -> ${file.path}` : file.path}</span>
+          <span className="git-file-state">{statusLabel(file)}</span>
+        </label>
+      ))}
+    </div>
+  )
+}
+
+function GitCommitActions({
+  gitBusy,
+  selectedCount,
+  filesLength,
+  onStage,
+  onStageAll,
+  onUnstage
+}: {
+  gitBusy: boolean
+  selectedCount: number
+  filesLength: number
+  onStage: () => void
+  onStageAll: () => void
+  onUnstage: () => void
+}): React.JSX.Element {
+  return <div className="git-commit-actions">
+    <button className="btn btn-ghost btn-sm" disabled={gitBusy || selectedCount === 0} onClick={onStage}>Stage selected</button>
+    <button className="btn btn-ghost btn-sm" disabled={gitBusy || filesLength === 0} onClick={onStageAll}>Stage all</button>
+    <button className="btn btn-ghost btn-sm" disabled={gitBusy || selectedCount === 0} onClick={onUnstage}>Unstage selected</button>
+  </div>
+}
+
+function GitCommitForm({
+  message,
+  canCommit,
+  onMessageChange,
+  onCommit
+}: {
+  message: string
+  canCommit: boolean
+  onMessageChange: (message: string) => void
+  onCommit: () => void
+}): React.JSX.Element {
+  return <div className="git-commit-form">
+    <input className="git-commit-input" value={message} placeholder="Commit message" onChange={(event) => onMessageChange(event.target.value)} onKeyDown={(event) => {
+      if (event.key === 'Enter' && canCommit) { event.preventDefault(); onCommit() }
+    }} />
+    <button className="btn btn-primary btn-sm" disabled={!canCommit} onClick={onCommit}>Commit</button>
+  </div>
+}
+
+function commitAllowed(message: string, staged: number | undefined, busy: boolean, tests: ProjectTests): boolean {
+  if (!message.trim() || !staged || busy || tests.loading || tests.runningHere || tests.error || gitTestEvidenceFailed(tests)) return false
+  return tests.commands.length === 0 || gitTestPassed(tests)
+}
+
 function GitCommitBox(): React.JSX.Element {
+  const t = useT()
   const {
     gitBusy,
     gitError,
@@ -49,6 +201,8 @@ function GitCommitBox(): React.JSX.Element {
   const stageAllGitFiles = useStore((s) => s.stageAllGitFiles)
   const unstageGitFiles = useStore((s) => s.unstageGitFiles)
   const commitGit = useStore((s) => s.commitGit)
+  const openLatestRewindPanel = useStore((s) => s.openLatestRewindPanel)
+  const tests = useProjectTests()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [message, setMessage] = useState('')
 
@@ -58,7 +212,8 @@ function GitCommitBox(): React.JSX.Element {
     [files, selected]
   )
   const allSelected = files.length > 0 && selectedPaths.length === files.length
-  const canCommit = Boolean(message.trim()) && Boolean(gitStatus?.staged) && !gitBusy
+  const canCommit = commitAllowed(message, gitStatus?.staged, gitBusy, tests)
+  const pendingChanges = (gitStatus?.unstaged ?? 0) + (gitStatus?.untracked ?? 0)
 
   useEffect(() => {
     setSelected((current) => {
@@ -88,7 +243,7 @@ function GitCommitBox(): React.JSX.Element {
     <section className="git-commit-box">
       <div className="git-commit-head">
         <div>
-          <div className="git-commit-title">Git</div>
+          <div className="git-commit-title">{t('projectReviewTitle')}</div>
           <div className="git-commit-sub">
             {gitStatus?.branch || 'detached'} · {gitStatus?.staged ?? 0} staged · {gitStatus?.unstaged ?? 0} unstaged · {gitStatus?.untracked ?? 0} untracked
           </div>
@@ -101,62 +256,14 @@ function GitCommitBox(): React.JSX.Element {
       {gitError && <div className="notice notice-error git-commit-notice">{gitError}</div>}
       {gitMessage && <div className="notice notice-info git-commit-notice">{gitMessage}</div>}
 
-      {files.length > 0 ? (
-        <div className="git-file-list">
-          <label className="git-file-row git-file-row-all">
-            <input type="checkbox" checked={allSelected} onChange={toggleAll} />
-            <span>选择全部文件</span>
-            <b>{files.length}</b>
-          </label>
-          {files.map((file) => (
-            <label key={`${file.path}-${file.indexStatus}-${file.worktreeStatus}`} className="git-file-row">
-              <input type="checkbox" checked={selected.has(file.path)} onChange={() => togglePath(file.path)} />
-              <span className="git-file-path" title={file.path}>{file.oldPath ? `${file.oldPath} -> ${file.path}` : file.path}</span>
-              <span className="git-file-state">{statusLabel(file)}</span>
-            </label>
-          ))}
-        </div>
-      ) : (
-        <div className="git-file-empty">No Git changes</div>
-      )}
+      <GitTestReview tests={tests} pendingChanges={pendingChanges} openLatestRewindPanel={openLatestRewindPanel} t={t} />
 
-      <div className="git-commit-actions">
-        <button className="btn btn-ghost btn-sm" disabled={gitBusy || selectedCount === 0} onClick={() => void stageGitFiles(selectedPaths)}>
-          Stage selected
-        </button>
-        <button className="btn btn-ghost btn-sm" disabled={gitBusy || files.length === 0} onClick={() => void stageAllGitFiles()}>
-          Stage all
-        </button>
-        <button className="btn btn-ghost btn-sm" disabled={gitBusy || selectedCount === 0} onClick={() => void unstageGitFiles(selectedPaths)}>
-          Unstage selected
-        </button>
-      </div>
-
-      <div className="git-commit-form">
-        <input
-          className="git-commit-input"
-          value={message}
-          placeholder="Commit message"
-          onChange={(event) => setMessage(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && canCommit) {
-              event.preventDefault()
-              void commitGit(message).then((result) => {
-                if (result?.ok) setMessage('')
-              })
-            }
-          }}
-        />
-        <button
-          className="btn btn-primary btn-sm"
-          disabled={!canCommit}
-          onClick={() => void commitGit(message).then((result) => {
-            if (result?.ok) setMessage('')
-          })}
-        >
-          Commit
-        </button>
-      </div>
+      <GitFileSelection files={files} selected={selected} allSelected={allSelected} onToggleAll={toggleAll} onToggle={togglePath} />
+      <GitCommitActions gitBusy={gitBusy} selectedCount={selectedCount} filesLength={files.length}
+        onStage={() => void stageGitFiles(selectedPaths)} onStageAll={() => void stageAllGitFiles()} onUnstage={() => void unstageGitFiles(selectedPaths)} />
+      <GitCommitForm message={message} canCommit={canCommit} onMessageChange={setMessage} onCommit={() => {
+        void commitGit(message).then((result) => { if (result?.ok) { setMessage(''); tests.invalidate() } })
+      }} />
     </section>
   )
 }

@@ -181,6 +181,12 @@ try {
     'corrupt remote store fails closed'
   )
 
+  await assertRejects(
+    webhookApi.startRemoteWebhookServer({ rootDir: userData, host: '0.0.0.0', port: 0 }),
+    /non-loopback listeners require explicit TLS/,
+    'non-loopback webhook listeners reject plain HTTP without explicit TLS'
+  )
+
   const address = await webhookApi.startRemoteWebhookServer({ rootDir: userData, host: '127.0.0.1', port: 0 })
   const baseUrl = `http://${address.host}:${address.port}`
   const pairing = await webhookApi.createRemotePairingSession({ ttlMs: 30_000, projectId: workspace.id })

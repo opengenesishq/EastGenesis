@@ -306,7 +306,7 @@ function buildIsolationStrategy(input: {
       const slug = slugify(lane.id)
       return {
         laneId: lane.id,
-        branch: `codex/genesis-${shortId}-${slug}`,
+        branch: `caogen/genesis-${shortId}-${slug}`,
         worktreePath: path.join(plannedRoot, slug),
         baseCwd: input.cwd,
         created: false

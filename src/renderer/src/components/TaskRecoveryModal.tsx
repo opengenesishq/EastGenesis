@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Ban, CirclePause, Play, RotateCcw } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type {
@@ -15,8 +15,25 @@ import {
   ModelAttemptRecoveryPanel
 } from './ModelAttemptRecoveryPanel'
 import { isTaskSnapshotRecoverable, TaskRecoveryItem } from './TaskRecoveryItem'
+import { requestProjectWorkspaceNavigation } from './studio/projectWorkspaceNavigation'
 
 type SupervisorControlAction = 'pause' | 'cancel' | 'resume' | 'retry'
+
+function useRecoveryAttentionRefresh(
+  ready: boolean,
+  showTaskRecovery: boolean,
+  refreshWorkflowAttention: () => Promise<void>
+): void {
+  const initialHydrationOwnedByStore = useRef(true)
+  useEffect(() => {
+    if (!ready || !showTaskRecovery) return
+    if (initialHydrationOwnedByStore.current) {
+      initialHydrationOwnedByStore.current = false
+      return
+    }
+    void refreshWorkflowAttention()
+  }, [ready, refreshWorkflowAttention, showTaskRecovery])
+}
 
 export default function TaskRecoveryModal(): React.JSX.Element | null {
   const recovery = useTaskRecoveryView()
@@ -57,10 +74,7 @@ function useTaskRecoveryView() {
   const attentionCount = attentionWorkItems.length + attentionSupervisorRuns.length + permissionSessions
     .reduce((total, session) => total + session.pendingPermissions.length, 0)
 
-  useEffect(() => {
-    if (!ready || !showTaskRecovery) return
-    void refreshWorkflowAttention()
-  }, [ready, refreshWorkflowAttention, showTaskRecovery])
+  useRecoveryAttentionRefresh(ready, showTaskRecovery, refreshWorkflowAttention)
 
   const recover = async (snapshot: TaskSnapshotRecord): Promise<void> => {
     setBusyId(snapshot.id)
@@ -124,8 +138,9 @@ function useTaskRecoveryView() {
   }
 
   const close = (): void => setShowTaskRecovery(false)
-  const openProject = (projectId: string): void => {
+  const openProject = (projectId: string, workItemId?: string): void => {
     openProjectWorkspace(projectId)
+    if (workItemId) requestProjectWorkspaceNavigation(projectId, 'work-item', workItemId)
     close()
   }
   const openSession = (sessionId: string): void => {
@@ -140,7 +155,9 @@ function useTaskRecoveryView() {
     attentionLoading,
     attentionSupervisorRuns,
     attentionWorkItems,
-    available: ready && (recoverable.length > 0 || modelAttemptReconciliations.length > 0 || attentionCount > 0),
+    // An explicit open must remain visible even when every queue is empty.
+    // Readiness still prevents rendering before the canonical store is ready.
+    available: ready,
     busyId,
     close,
     controlSupervisorRun,
@@ -170,9 +187,16 @@ function TaskRecoveryDrawer({ recovery }: { recovery: TaskRecoveryView }): React
     attempts: recovery.modelAttemptReconciliations.length,
     snapshots: recovery.recoverable.length
   })
+  const empty = recovery.attentionCount === 0 && recovery.modelAttemptReconciliations.length === 0 && recovery.recoverable.length === 0
+  const settled = !recovery.loading && !recovery.attentionLoading
+  const failed = Boolean(recovery.error || recovery.attentionError || recovery.attentionActionError)
   return (
     <aside
       className="task-recovery-drawer no-drag"
+      data-task-recovery-drawer="true"
+      data-task-recovery-attention-count={recovery.attentionCount}
+      data-task-recovery-snapshot-count={recovery.recoverable.length}
+      data-task-recovery-model-attempt-count={recovery.modelAttemptReconciliations.length}
       role="dialog"
       aria-modal="false"
       aria-labelledby="task-recovery-title"
@@ -198,8 +222,12 @@ function TaskRecoveryDrawer({ recovery }: { recovery: TaskRecoveryView }): React
         {recovery.error && <div className="notice notice-error task-recovery-notice">{recovery.error}</div>}
         {recovery.attentionError && <div className="notice notice-error task-recovery-notice">{recovery.attentionError}</div>}
         {recovery.attentionActionError && <div className="notice notice-error task-recovery-notice">{recovery.attentionActionError}</div>}
-        {recovery.loading && <div className="task-recovery-meta">正在刷新恢复候选...</div>}
-        {recovery.attentionLoading && <div className="task-recovery-meta">正在刷新工作流事项...</div>}
+        {recovery.loading && <div className="task-recovery-meta">{recovery.language === 'zh' ? '正在刷新恢复候选...' : 'Refreshing recovery candidates...'}</div>}
+        {recovery.attentionLoading && <div className="task-recovery-meta">{recovery.language === 'zh' ? '正在刷新工作流事项...' : 'Refreshing workflow attention...'}</div>}
+        {empty && settled && !failed && <div className="task-recovery-attention" role="status" data-task-recovery-empty="true">
+          <header><h3>{labels.emptyTitle}</h3></header>
+          <p className="task-recovery-meta">{labels.emptyDescription}</p>
+        </div>}
 
         <div className="task-recovery-list">
           <WorkflowAttentionPanel
@@ -250,11 +278,13 @@ function TaskRecoveryDrawer({ recovery }: { recovery: TaskRecoveryView }): React
 function taskRecoveryLabels(
   language: string,
   counts: { attention: number; attempts: number; snapshots: number }
-): { close: string; later: string; subtitle: string; title: string } {
+): { close: string; later: string; subtitle: string; title: string; emptyTitle: string; emptyDescription: string } {
   if (language === 'zh') {
     return {
       close: '关闭恢复中心',
       later: '稍后处理',
+      emptyTitle: '当前没有待处理事项',
+      emptyDescription: '没有待审批权限、需要对账的模型请求或可恢复的任务。出现需要处理的事项时会显示在这里。',
       subtitle: `检测到 ${counts.snapshots} 个任务快照、${counts.attempts} 个模型请求和 ${counts.attention} 个工作流事项。`,
       title: '恢复中心'
     }
@@ -262,6 +292,8 @@ function taskRecoveryLabels(
   return {
     close: 'Close Recovery Center',
     later: 'Review later',
+    emptyTitle: 'No items need attention',
+    emptyDescription: 'There are no pending permissions, model requests to reconcile, or recoverable tasks. Items that need review will appear here.',
     subtitle: `${counts.snapshots} task snapshots, ${counts.attempts} model requests, and ${counts.attention} workflow items need review.`,
     title: 'Recovery Center'
   }
@@ -281,7 +313,7 @@ function WorkflowAttentionPanel({
   permissionSessions: Array<{ meta: { id: string; title?: string }; pendingPermissions: unknown[] }>
   busyId: string | null
   onControlSupervisorRun: (run: SupervisorRunRecord, action: SupervisorControlAction) => Promise<void>
-  onOpenProject: (projectId: string) => void
+  onOpenProject: (projectId: string, workItemId?: string) => void
   onOpenSession: (sessionId: string) => void
 }): React.JSX.Element | null {
   if (workItems.length === 0 && supervisorRuns.length === 0 && permissionSessions.length === 0) return null
@@ -309,7 +341,7 @@ function WorkflowAttentionPanel({
                 busy={busyId === `supervisor:${run.id}`}
                 onControl={onControlSupervisorRun}
               />
-              <button type="button" className="btn btn-ghost btn-sm" disabled={busyId !== null} onClick={() => onOpenProject(run.projectId)}>打开项目</button>
+              <button type="button" className="btn btn-ghost btn-sm" disabled={busyId !== null} onClick={() => onOpenProject(run.projectId, run.workItemId)}>打开项目</button>
             </div>
           </div>
         ))}
@@ -317,7 +349,7 @@ function WorkflowAttentionPanel({
           <div className="task-recovery-attention-row" role="listitem" key={`work-item:${item.id}`}>
             <span className="task-recovery-attention-state">{attentionStateLabel(item.acceptance?.status === 'failed' ? 'acceptance_failed' : item.status)}</span>
             <div><strong>{item.title}</strong><small>{item.description || item.id}</small></div>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => onOpenProject(item.projectId)}>打开项目</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => onOpenProject(item.projectId, item.id)}>打开任务</button>
           </div>
         ))}
       </div>

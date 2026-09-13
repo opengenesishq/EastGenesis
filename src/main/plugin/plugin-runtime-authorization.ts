@@ -1,14 +1,9 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, type Dirent } from 'node:fs'
-import { homedir } from 'node:os'
-import { basename, dirname, join, resolve } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { basename, join, resolve } from 'node:path'
 import type { PluginRegistryItem } from '../../shared/types'
 import type { SkillDefinition, SkillLoadDiagnostic, SkillLoadResult } from '../skill/skill-loader'
-import {
-  defaultClaudeDesktopConfigPath,
-  normalizeMcpServerConfig,
-  type McpServerConfig
-} from '../mcp/mcp-client'
+import { normalizeMcpServerConfig, type McpServerConfig } from '../mcp/mcp-client'
 import {
   approvePluginRegistryItem,
   pluginRegistryItemKey,
@@ -18,7 +13,10 @@ import {
   writePluginRegistryState
 } from '../pluginRegistry'
 import { inspectPluginRegistryItemTrust } from './plugin-trust'
-import { caogenExtensionRegistryRoots } from './caogen-extension-roots'
+import {
+  caogenExtensionRegistryRoots,
+  isCaogenExtensionRegistryRoot
+} from './caogen-extension-roots'
 
 export interface AuthorizedMcpRuntimeConfig {
   serverId: string
@@ -48,8 +46,7 @@ interface AuthorizeMcpBindingInput {
 const RUNTIME_SCAN_OPTIONS = {
   maxFiles: 3_000,
   maxDepth: 8,
-  maxReadBytes: 1024 * 1024,
-  includeSiblingProjectMcp: true
+  maxReadBytes: 1024 * 1024
 } as const
 
 let configuredUserDataRoot: string | undefined
@@ -150,6 +147,9 @@ export function authorizeMcpRuntimeBinding(input: AuthorizeMcpBindingInput): Aut
   const parsedKey = parseRegistryItemKey(binding.registryItemKey)
   if (parsedKey.kind !== 'mcp' || parsedKey.name !== binding.serverId) {
     throw new Error('MCP runtime binding does not identify the approved server')
+  }
+  if (!isCaogenExtensionRegistryRoot(parsedKey.sourceRoot)) {
+    throw new Error('MCP runtime binding points outside CaoGen-owned extension roots; import and approve it again')
   }
   const state = readPluginRegistryState(pluginRegistryStateFile())
   const view = scanPluginRegistry([parsedKey.sourceRoot], RUNTIME_SCAN_OPTIONS, state)
@@ -281,59 +281,11 @@ function authorizationDiagnostic(path: string, message: string): SkillLoadDiagno
 }
 
 function skillRegistryRoots(projectRoot?: string): string[] {
-  // Keep the registry anchor at `.caogen` so approvals made by the Plugin
-  // Registry and runtime Skill filtering derive the same stable item key.
   return uniqueExistingRoots(caogenExtensionRegistryRoots([projectRoot]))
 }
 
 function mcpRegistryRoots(projectRoot?: string): string[] {
-  const projectClaudeRoot = projectRoot?.trim()
-    ? resolve(join(resolve(projectRoot), '.claude'))
-    : undefined
-  return [...new Set([
-    // Keep the absent project .claude root: Plugin Registry uses it as the
-    // ownership anchor for the sibling project-level .mcp.json file. Scan it
-    // before user roots so a large registry cannot exhaust the shared budget.
-    ...(projectClaudeRoot ? [projectClaudeRoot] : []),
-    ...uniqueExistingRoots([
-      join(homedir(), '.claude'),
-      dirname(defaultClaudeDesktopConfigPath()),
-      ...codexPluginPackageRoots()
-    ]),
-    // Explicit interoperability roots must remain discoverable even when the
-    // CaoGen-managed tree is large enough to exhaust the shared scan budget.
-    ...uniqueExistingRoots(caogenExtensionRegistryRoots([projectRoot]))
-  ])]
-}
-
-function codexPluginPackageRoots(): string[] {
-  const cacheRoot = join(homedir(), '.codex', 'plugins', 'cache')
-  if (!existsSync(cacheRoot)) return []
-  const roots: string[] = []
-  const stack: Array<{ path: string; depth: number }> = [{ path: cacheRoot, depth: 0 }]
-  while (stack.length > 0 && roots.length < 500) {
-    const current = stack.pop()
-    if (!current || current.depth > 5) continue
-    let entries
-    try {
-      entries = readdirSync(current.path, { withFileTypes: true }) as Dirent[]
-    } catch {
-      continue
-    }
-    if (
-      entries.some((entry) => entry.isDirectory() && entry.name === '.codex-plugin') ||
-      entries.some((entry) => entry.isFile() && entry.name === 'plugin.json')
-    ) {
-      roots.push(current.path)
-      continue
-    }
-    for (const entry of entries) {
-      if (entry.isDirectory() && entry.name !== 'node_modules' && entry.name !== '.git') {
-        stack.push({ path: join(current.path, entry.name), depth: current.depth + 1 })
-      }
-    }
-  }
-  return roots
+  return uniqueExistingRoots(caogenExtensionRegistryRoots([projectRoot]))
 }
 
 function uniqueExistingRoots(values: string[]): string[] {

@@ -81,3 +81,16 @@
   .video-studio-project-picker { width: 100%; }
   .video-studio-project-picker .input { min-width: 0; width: 100%; flex: 1; }
 }
+.video-storyboard-planner {
+  padding: 12px;
+  margin: 12px 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.video-storyboard-planner summary { cursor: pointer; font-weight: 600; }
+.video-storyboard-planner p { color: var(--text-dim); font-size: 12px; }
+.video-storyboard-planner textarea { width: 100%; min-height: 76px; margin: 8px 0; }
+.video-storyboard-planner label { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.video-storyboard-planner label input { width: 96px; }
+.video-storyboard-planner fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 10px 0; min-width: 0; }
+.video-storyboard-draft-shot { border-top: 1px solid var(--border); padding: 10px 0; }

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 
@@ -56,8 +56,6 @@ const allowedSecretLine = new RegExp(
     'smoke-token',
     'wrong-token',
     'aliyun-token-for-smoke',
-    'coding-token-for-smoke',
-    'wechat-token-for-smoke',
     'new-secret-value',
     'access-token-value',
     'access-token-rotated',
@@ -92,7 +90,7 @@ const findings = []
 scanCurrentTrackedFiles()
 scanIndexFiles()
 if (scanWorktree) scanWorktreeSensitivePaths()
-if (scanHistory) await scanGitHistory()
+if (scanHistory) scanGitHistory()
 
 if (findings.length > 0) {
   console.error('Secret scan failed:')
@@ -136,89 +134,17 @@ function scanWorktreeSensitivePaths() {
   }
 }
 
-async function scanGitHistory() {
+function scanGitHistory() {
+  const revisions = gitList(['rev-list', '--all'])
   const historicalFiles = new Set(gitList(['log', '--all', '--name-only', '--pretty=format:', '-z']))
   for (const file of historicalFiles) checkForbiddenPath(file, 'history')
-  // Scan each reachable blob once. `git grep <pattern> <all revisions>` walks
-  // every historical tree for every pattern and becomes quadratic in a large
-  // repository. Blob traversal preserves full-history coverage while making
-  // the required gate bounded by the number of unique file contents.
-  await readReachableHistoryBlobs()
-}
-
-function readReachableHistoryBlobs() {
-  const objects = gitList(['rev-list', '--objects', '--all'])
-    .map((entry) => {
-      const separator = entry.indexOf(' ')
-      return separator > 0 ? { oid: entry.slice(0, separator), file: entry.slice(separator + 1) } : undefined
-    })
-    .filter((entry) => entry?.oid && entry.file)
-  if (objects.length === 0) return []
-
-  return new Promise((resolve, reject) => {
-    const child = spawn('git', ['cat-file', '--batch'], { cwd: repoRoot })
-    let stderr = ''
-    let buffer = Buffer.alloc(0)
-    let objectIndex = 0
-    child.stderr.on('data', (chunk) => { stderr += String(chunk) })
-    child.stdout.on('data', (chunk) => {
-      buffer = buffer.length === 0 ? Buffer.from(chunk) : Buffer.concat([buffer, chunk])
-      while (objectIndex < objects.length) {
-        const headerEnd = buffer.indexOf(0x0a)
-        if (headerEnd < 0) return
-        const header = buffer.subarray(0, headerEnd).toString('utf8').split(' ')
-        const size = Number(header[2])
-        if (!Number.isSafeInteger(size) || size < 0) {
-          reject(new Error(`git cat-file returned an invalid header for ${objects[objectIndex].oid}`))
-          child.kill()
-          return
-        }
-        const bodyStart = headerEnd + 1
-        if (buffer.length < bodyStart + size + 1) return
-        if (header[1] === 'blob') {
-          scanHistoryBlob({
-            oid: objects[objectIndex].oid,
-            file: objects[objectIndex].file,
-            content: buffer.subarray(bodyStart, bodyStart + size)
-          })
-        }
-        buffer = buffer.subarray(bodyStart + size + 1)
-        objectIndex += 1
-      }
-    })
-    child.on('error', reject)
-    child.on('close', (status) => {
-      if (status !== 0) reject(new Error(`git cat-file --batch failed: ${stderr}`))
-      else if (objectIndex !== objects.length) reject(new Error(`git cat-file returned ${objectIndex}/${objects.length} objects`))
-      else resolve()
-    })
-    child.stdin.end(`${objects.map(({ oid }) => oid).join('\n')}\n`)
-  })
-}
-
-function scanHistoryBlob({ oid, file, content }) {
-  if (content.includes(0)) return
-  const lines = content.toString('utf8').split(/\r?\n/)
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index]
-    if (allowedSecretLine.test(line)) continue
-    const location = `${oid}:${file}:${index + 1}:${line}`
-    for (const name of historyPatternNames(line)) findings.push(`${name} in history: ${safeHistoryLocation(location)}`)
+  for (const [name, pattern] of historyGrepPatterns) {
+    const output = gitGrepHistory(pattern, revisions)
+    for (const line of output.split(/\r?\n/).filter(Boolean)) {
+      if (allowedSecretLine.test(line)) continue
+      findings.push(`${name} in history: ${safeHistoryLocation(line)}`)
+    }
   }
-}
-
-function historyPatternNames(line) {
-  const matches = []
-  if (/(?<![A-Za-z0-9_-])sk-(?:proj-|ant-api03-)?[A-Za-z0-9_-]{20,}/i.test(line)) matches.push('openai-or-anthropic-key')
-  if (/(?:ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})/i.test(line)) matches.push('github-token')
-  if (/(?:AKIA|ASIA)[0-9A-Z]{16}/.test(line)) matches.push('aws-access-key')
-  if (/AIza[0-9A-Za-z_-]{20,}/.test(line)) matches.push('google-api-key')
-  if (/xox[baprs]-[A-Za-z0-9-]{20,}/.test(line)) matches.push('slack-token')
-  if (/BEGIN [A-Z ]*PRIVATE KEY/i.test(line)) matches.push('private-key-block')
-  if (/(^|[^?&A-Za-z0-9_])(?:api[_-]?key|token|secret|password|passwd|client_secret|private[_-]?key)\s*[:=]\s*['"][^'"]{12,}['"]/i.test(line)) {
-    matches.push('hardcoded-secret-assignment')
-  }
-  return matches
 }
 
 function checkForbiddenPath(file, scope) {
@@ -267,6 +193,20 @@ function readGitBlob(revision, file) {
     })
   } catch {
     return undefined
+  }
+}
+
+function gitGrepHistory(pattern, revisions) {
+  if (revisions.length === 0) return ''
+  try {
+    return execFileSync('git', ['grep', '-nI', '-E', pattern, ...revisions, '--', '.'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore']
+    })
+  } catch (error) {
+    return error.status === 1 ? '' : String(error.stdout ?? '')
   }
 }
 

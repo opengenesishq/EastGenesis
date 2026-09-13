@@ -192,7 +192,19 @@ export default function ProviderLogoBadge({
   }, [compact, hasLogoAsset, height, mark, width])
 
   return (
-    <group position={position} rotation={rotation} scale={scale}>
+    <group
+      name={`office-provider-badge-${logo.key}`}
+      position={position}
+      rotation={rotation}
+      scale={scale}
+      userData={{
+        officeProviderBadge: true,
+        officeProviderKey: logo.key,
+        officeProviderLabel: logo.label,
+        officeProviderWordmark: logo.wordmark,
+        officeProviderBadgeDescription: `Provider: ${logo.label}`
+      }}
+    >
       <RoundedBox args={[width, height, depth]} radius={Math.min(width, height) * 0.13} smoothness={3} castShadow receiveShadow>
         <meshStandardMaterial color="#151b22" metalness={0.42} roughness={0.44} />
       </RoundedBox>

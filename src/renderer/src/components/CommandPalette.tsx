@@ -1,59 +1,16 @@
+import './task-entry-groups.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { modelOptionsForProvider, useStore } from '../store'
 import { useT } from '../i18n'
 import {
   buildPaletteCommands,
   buildPluginCommands,
-  filterCommandItems,
-  type CommandDescriptor
+  filterCommandItems
 } from '../commands'
 import { projectedPaletteItems } from './experience/projectedComposerCommands'
-import type { HistoryEntry, SessionMeta } from '../../../shared/types'
-import type { ExperienceMode } from '../store/experience-mode'
-import { sessionExperienceMode } from '../store/session-experience'
-
-type PaletteSection = 'command' | 'session' | 'history' | 'plugin'
-
-interface PaletteItem extends CommandDescriptor {
-  section: PaletteSection
-}
-
-function belongsToEntrance(
-  mode: ExperienceMode,
-  record: Pick<SessionMeta, 'workspaceId' | 'projectId' | 'goalId' | 'workItemId' | 'experienceModeOverride'>
-): boolean {
-  if (mode === 'video') return false
-  return mode === sessionExperienceMode(record)
-}
-
-function activeSessionPaletteItems(
-  mode: ExperienceMode,
-  order: string[],
-  sessions: ReturnType<typeof useStore.getState>['sessions'],
-  selectSession: (id: string) => void
-): PaletteItem[] {
-  return order.flatMap((id, index) => {
-    const session = sessions[id]
-    if (!session || !belongsToEntrance(mode, session.meta)) return []
-    return [{ id: `session:${id}`, title: session.meta.title, hint: session.meta.cwd,
-      searchText: `${session.meta.title} ${session.meta.cwd} ${session.meta.sourceCwd ?? ''} ${index + 1}`,
-      section: 'session' as const, run: () => selectSession(id) }]
-  })
-}
-
-function historyPaletteItems(
-  mode: ExperienceMode,
-  history: HistoryEntry[],
-  openSessionIds: Set<string>,
-  openSdkIds: Set<string>,
-  resume: (entry: HistoryEntry) => Promise<void>
-): PaletteItem[] {
-  return history.filter((entry) => !openSessionIds.has(entry.id) && !openSdkIds.has(entry.sdkSessionId))
-    .filter((entry) => belongsToEntrance(mode, entry))
-    .map((entry) => ({ id: `history:${entry.id}`, title: entry.title, hint: entry.sourceCwd ?? entry.cwd,
-      searchText: `${entry.title} ${entry.cwd} ${entry.sourceCwd ?? ''}`,
-      section: 'history' as const, run: () => void resume(entry) }))
-}
+import { cancelOfficeIdlePrewarm } from './office/loadOffice'
+import { resolveSelectedBusinessLine } from '../../../shared/business-line-types'
+import { taskPaletteItems, runPaletteItem, type PaletteItem, type PaletteSection } from './task-palette-items'
 
 function useCloseOnEscape(setVisible: (visible: boolean) => void): void {
   useEffect(() => {
@@ -71,8 +28,10 @@ function useCloseOnEscape(setVisible: (visible: boolean) => void): void {
 export default function CommandPalette(): React.JSX.Element {
   const t = useT()
   const experienceMode = useStore((s) => s.experienceMode)
+  const lineId = useStore((s) => resolveSelectedBusinessLine(s.settings).id)
   const projection = experienceMode === 'studio' ? 'studio' : 'assistant'
   const [query, setQuery] = useState('')
+  const [taskGroup, setTaskGroup] = useState<PaletteItem>()
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const order = useStore((s) => s.order)
@@ -113,21 +72,7 @@ export default function CommandPalette(): React.JSX.Element {
   }, [loadPluginRegistryForSlash, pluginRegistry, pluginRegistryLoading])
   const close = (): void => setShowCommandPalette(false)
 
-  const focusSidebarSearch = (): void => {
-    setView('list')
-    requestAnimationFrame(() => {
-      const input = document.querySelector<HTMLInputElement>('.sidebar-search')
-      if (!input) return
-      input.focus()
-      input.select()
-    })
-  }
-
   const items = useMemo<PaletteItem[]>(() => {
-    const openSessionIds = new Set(order)
-    const openSdkIds = new Set(
-      order.map((id) => sessions[id]?.meta.sdkSessionId).filter((id): id is string => Boolean(id))
-    )
     const activeMeta = activeId ? sessions[activeId]?.meta : undefined
     const commandItems: PaletteItem[] = buildPaletteCommands({
       t,
@@ -147,7 +92,7 @@ export default function CommandPalette(): React.JSX.Element {
         setExperienceMode('video')
         requestAnimationFrame(() => window.dispatchEvent(new Event('caogen:video-new')))
       },
-      openControlRoom: () => setView('office'),
+      openControlRoom: () => { cancelOfficeIdlePrewarm(); setView('office') },
       openLatestRewindPanel,
       openDiffPanel,
       openBrowserPanel,
@@ -162,20 +107,19 @@ export default function CommandPalette(): React.JSX.Element {
       setModel
     }).map((item) => ({ ...item, section: 'command' }))
 
-    const activeSessionItems = activeSessionPaletteItems(experienceMode, order, sessions, selectSession)
-    const historyItems = historyPaletteItems(experienceMode, history, openSessionIds, openSdkIds, resumeFromHistory)
+    const taskItems = taskPaletteItems({ lineId, order, sessions, history, selectSession, resume: resumeFromHistory })
 
     const pluginItems: PaletteItem[] = buildPluginCommands(pluginRegistry?.items ?? [], {
       sendPluginRegistryItemToAgent,
       dispatchPluginAgent
     }).map((item) => ({ ...item, section: 'plugin' }))
 
-    const projected = projectedPaletteItems(projection, [...commandItems, ...activeSessionItems, ...historyItems, ...pluginItems])
+    const projected = projectedPaletteItems(projection, [...commandItems, ...taskItems, ...pluginItems])
     return experienceMode === 'video'
       ? projected.filter((item) => item.section === 'command' && !item.id.startsWith('slash:'))
       : projected
   }, [
-    activeId,
+    activeId, lineId,
     dispatchPluginAgent,
     experienceMode,
     history,
@@ -208,7 +152,7 @@ export default function CommandPalette(): React.JSX.Element {
     updateSettings
   ])
 
-  const matches = useMemo(() => filterCommandItems(query, items).slice(0, 80), [items, query])
+  const matches = useMemo(() => filterCommandItems(query, taskGroup?.children ?? items).slice(0, 80), [items, query, taskGroup])
 
   useEffect(() => {
     setActiveIndex(0)
@@ -218,11 +162,7 @@ export default function CommandPalette(): React.JSX.Element {
     if (activeIndex >= matches.length) setActiveIndex(Math.max(0, matches.length - 1))
   }, [activeIndex, matches.length])
 
-  const runItem = (item: PaletteItem | undefined): void => {
-    if (!item) return
-    close()
-    item.run?.()
-  }
+  const runItem = (item: PaletteItem | undefined): void => runPaletteItem(item, close, (group) => { setTaskGroup(group); setQuery('') })
 
   const sectionLabel = (section: PaletteSection): string => {
     if (section === 'session') return t('commandSectionSession')
@@ -265,6 +205,7 @@ export default function CommandPalette(): React.JSX.Element {
           placeholder={t('commandPalettePlaceholder')}
           onChange={(e) => setQuery(e.target.value)}
         />
+        <PaletteTaskScope group={taskGroup} onBack={() => { setTaskGroup(undefined); setQuery('') }} />
         <div className="command-palette-list">
           {matches.length === 0 ? (
             <div className="command-palette-empty">{t('commandNoResults')}</div>
@@ -289,4 +230,19 @@ export default function CommandPalette(): React.JSX.Element {
       </div>
     </div>
   )
+}
+
+function focusSidebarSearch(): void {
+  useStore.getState().setView('list')
+  requestAnimationFrame(() => {
+    const input = document.querySelector<HTMLInputElement>('.sidebar-search')
+    if (!input) return
+    input.focus()
+    input.select()
+  })
+}
+
+function PaletteTaskScope({ group, onBack }: { group?: PaletteItem; onBack(): void }): React.JSX.Element | null {
+  if (!group) return null
+  return <div className="command-palette-task-scope"><button type="button" className="btn btn-secondary btn-sm" onClick={onBack}>返回全部任务与命令</button><span>{group.title}</span></div>
 }

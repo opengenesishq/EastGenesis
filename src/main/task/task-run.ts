@@ -14,6 +14,8 @@ import type {
   ToolExecutionRecord
 } from '../../shared/types'
 import { isEffectRecord, isTaskStepRecord, isToolExecutionRecord } from './task-execution'
+import { isFrozenRoutingPolicyForRun, mergeFrozenRoutingPolicy } from './frozen-routing-policy'
+import { canonicalJson } from './workflow-ledger-canonical'
 
 const TERMINAL_STATUSES = new Set<TaskRunStatus>(['completed', 'failed', 'cancelled'])
 const SNAPSHOT_OPTIONAL_QUARANTINE_STATUSES = new Set<TaskRunStatus>([
@@ -153,6 +155,7 @@ export function mergeTaskRunRecords(
   current: TaskRunRecord,
   incoming: TaskRunRecord
 ): TaskRunRecord {
+  const routingPolicy = mergeFrozenRoutingPolicy(current, incoming)
   if (current.id !== incoming.id || current.sessionId !== incoming.sessionId) return incoming
   const preferred = compareTaskRunFreshness(current, incoming) >= 0 ? current : incoming
   const other = preferred === current ? incoming : current
@@ -179,6 +182,7 @@ export function mergeTaskRunRecords(
       (left, right) => mergeToolExecutions(left, right, effects)
     ),
     effects,
+    ...(routingPolicy ? { routingPolicy } : {}),
     ...(continuation ? { continuation } : {}),
     ...(operation ? { operation } : {}),
     ...(digitalWorkerBinding ? { digitalWorkerBinding } : {})
@@ -192,7 +196,7 @@ function mergeRunContinuation(
 ): TaskRunContinuation | undefined {
   if (!current) return incoming
   if (!incoming) return current
-  if (JSON.stringify(current) !== JSON.stringify(incoming)) {
+  if (canonicalJson(current) !== canonicalJson(incoming)) {
     throw new Error('TaskRun continuation lineage is immutable')
   }
   return current
@@ -567,6 +571,7 @@ function isTaskRunOptionalFields(record: Record<string, unknown>): boolean {
     isOptionalString(record.lastAppliedEventId),
     isOptionalString(record.lastEventKind),
     isOptionalString(record.error),
+    isFrozenRoutingPolicyForRun(record),
     record.continuation === undefined || isTaskRunContinuation(record.continuation),
     isOptionalDigitalWorkerBinding(record.digitalWorkerBinding),
     record.operation === undefined || isTaskRunOperationMetadata(record.operation)

@@ -1,5 +1,4 @@
 import {
-  AUTO_MODEL,
   type AppSettings,
   type LocalComputeActivationOptions,
   type LocalComputeActivationResult,
@@ -9,6 +8,7 @@ import {
   type ProviderProfileRollbackResult,
   type ProviderView
 } from '../../../shared/types'
+import { initialProviderRoutingPatch } from './provider-onboarding-policy'
 
 export interface ProviderProfileStoreActions {
   refreshProviders(): Promise<void>
@@ -42,11 +42,8 @@ export function createProviderProfileStoreActions(
     async activateLocalCompute(options) {
       const result = await window.agentDesk.activateLocalCompute(options)
       if (result.provider) {
-        await get().updateSettings({
-          defaultProviderId: result.provider.id,
-          defaultModel: AUTO_MODEL,
-          smartModelRoutingEnabled: true
-        })
+        const patch = initialProviderRoutingPatch(get().settings, get().providers, result.provider.id)
+        if (patch) await get().updateSettings(patch)
       }
       await get().refreshProviders()
       return result

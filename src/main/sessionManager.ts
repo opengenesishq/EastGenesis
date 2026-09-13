@@ -1,18 +1,23 @@
 import { app, BrowserWindow, powerSaveBlocker } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import { createEngine } from './engine'
+import { preparePlacedSessionEngine } from './session-engine-creation'
+import { prepareRuntimeContinuation } from './session-runtime-continuation'
+import { clearSessionTurnRoute } from './model/session-turn-route'
+import { normalizeSessionTurnCost } from './session-model-cost'
 import type { Engine } from './engine'
 import { registerBuiltinEngines } from './engines'
 import { fixPathForGuiLaunch } from './pathFix'
 import { configureModelStatsDir } from './modelStats'
 import { configureAcceptanceQualityFeedback } from './model/acceptance-quality-feedback'
 import { configureProviderHealthDir } from './providerHealth'
-import { upsertHistory, listHistory } from './history'
+import { SessionHistoryRepository } from './session-history-repository'
 import { getSettings } from './settings'
 import { calculateMonthlyBudgetSnapshot } from './model/monthly-budget'
 import { checkpointRestoreEffectBoundary } from './checkpoint-effect-boundary'
 import { normalizeStableMessagePayload } from './stable-message-payload'
 import { withSessionOperationQueue } from './session-operation-queue'
+import { assertPersistedSessionExecutionAllowed } from './session-execution-ownership'
 import {
   cleanupTranscripts, readTranscriptEntries, restoreTranscriptIfMissing,
   shouldPersistConversationLedgerEvent, transcriptForkSeedEntries
@@ -21,20 +26,24 @@ import { touchProject } from './projects'
 import { inspectManagedWorktreeRegistryRecord, managedWorktreeRecordForSession } from './worktrees'
 import {
   assertTaskSnapshotWorktreeProjection,
-  managedSessionPlacement, prepareSessionCreationDraft,
-  sessionMetaForPlacement, sessionMetaForRecovery, synchronousSessionPlacement,
+  managedSessionPlacement,
+  sessionMetaForRecovery, synchronousSessionPlacement,
   type SessionCreationDraft, type SessionWorktreePlacement
 } from './session-create-lifecycle'
 import { prepareSessionIdentityForActivation } from './session-domain-activation'
+import { prepareIdentifiedSessionDraft, SessionResumeCreationGuard } from './session-creation-identity'
+import { authorizeOfficeRevisionSend } from './office-revision/intent'
 import { configureDigitalWorkerActionPolicyRoot } from './digital-worker/action-policy'
 import { digitalWorkerSendPolicyError } from './digital-worker/session-action-policy'
 import { bindAndValidateTaskRun, resolveDigitalWorkerSessionScope } from './digital-worker/session-binding'
 import { deletePendingSessionCreation, listPendingSessionCreations, savePendingSessionCreation } from './session-creation-journal'
 import {
-  activeSessionRecoveryBlocks, managedSessionActivationRecoveryError, planPendingSessionCreations,
+  managedSessionActivationRecoveryError, planPendingSessionCreations,
   requiresEffectReconciliation, sessionCreationResolutionBarrier,
   type PendingSessionRecoveryPlan
 } from './session-creation-recovery'
+import { completeManagedSessionInitialization } from './session-managed-initialization'
+import { planPersonalTaskStartupRecovery } from './personal-task/personal-task-startup-recovery'
 import {
   activeSessionArtifactsCanBePruned,
   activeSessionRegistryPreserveIds,
@@ -45,8 +54,8 @@ import {
   type ActiveSessionRegistryRestoreResult
 } from './session-active-registry'
 import {
-  buildTaskSnapshotReplayPrompts, canTrackCost, cleanOneLine, effectiveBudgetUsd, estimateTurnCostUsd,
-  managedSessionSendGateError, managedTaskRunSendGateError, mapWithConcurrencyInOrder, normalizePositiveNumber, normalizeTaskId, rejectSessionSend, requireDagPromptAccepted, sendableSession, shouldDispatchChildResult,
+  buildTaskSnapshotReplayPrompts, canTrackCost, cleanOneLine, effectiveBudgetUsd,
+  managedSessionSendGateError, managedTaskRunSendGateError, mapWithConcurrencyInOrder, normalizeTaskId, rejectSessionSend, requireDagPromptAccepted, sendableSession, shouldDispatchChildResult,
   shouldPersistActiveRegistry, shouldResumeDagFinalization, subagentCwd, subtaskStatusFromDag,
   subtaskStatusFromSession, withSessionCreationJournalBarrier, SessionWorkflowRuntime,
   type ManagedSessionCreationOptions
@@ -73,6 +82,12 @@ import { DIRECT_SUBAGENT_LIMIT_MESSAGE, MAX_DIRECT_SUBAGENT_TASKS } from '../sha
 import { AgentCapacityCoordinator } from './agent/agent-capacity-coordinator'
 import { provisionDagChildSession } from './agent/dag-child-provisioner'
 import { createTaskRun, createSessionTaskRun, isTaskRunTerminal, transitionTaskRun } from './task/task-run'
+import { bindFrozenRunRoutingPolicy } from './task/frozen-routing-binding'
+import { frozenPolicyForSessionRun } from './task/frozen-routing-from-session'
+import { assertFrozenRunRequestTarget, frozenRoutingPolicyForRun } from './task/frozen-routing-policy'
+import { getProvider, getProviderConnectionIdentity } from './providers'
+import { resolveProviderRuntimeTarget, resolveOpenAIProtocol } from './provider/providerRuntimeTarget'
+import { isLocalProviderUrl } from './model/routing-expert-policy'
 import { recoverTaskExecutionState } from './task/task-execution'
 import { taskRuntimeRegistry } from './task/task-runtime-registry'
 import { reconcileSnapshotWithReceipts } from './task/task-recovery'
@@ -184,10 +199,15 @@ type CheckpointOperationAttempt<T extends { error?: string }> = {
 }
 class SessionManager {
   private readonly sessions = new Map<string, Engine>()
+  private readonly resumeCreationGuard = new SessionResumeCreationGuard(() =>
+    [...this.sessions.values()].map((session) => session.meta))
   private readonly sessionStarts = new SessionStartCoordinator((id) => this.sessions.get(id))
   private readonly taskPlans = new TaskPlanSessionCoordinator(
     (id) => this.sessions.get(id), () => app.getPath('userData'))
   private readonly taskRuns = taskRuntimeRegistry
+  /** Lazily resolved so recovery/test harnesses that compose the facade without running the constructor remain safe. */
+  private sessionHistory: SessionHistoryRepository | undefined
+  private readonly rejectedSendSessions = new Set<string>()
   private readonly sessionEventListeners = new Set<(payload: SessionEventPayload) => void>()
   private readonly notifications = new SessionNotificationCoordinator(
     (id) => this.sessions.get(id)?.meta)
@@ -259,7 +279,6 @@ class SessionManager {
     dagRuntimes: (sessionId) => this.snapshotDagRuntimesFor(sessionId),
     onAcceptanceFailure: async (failure) => { await this.startWorkflowAcceptanceRepairFromFailure(failure) }
   }, { userDataRoot: app.getPath('userData') })
-  /** 非 Claude 引擎由 SessionManager 统一托管防休眠;Claude AgentSession 内部已有同等保护。 */
   private readonly enginePowerBlockers = new Map<string, number>()
   private preservingSnapshotsOnDispose = false
   private readonly effectRecoveryPreservedSessions = new Set<string>()
@@ -289,13 +308,12 @@ class SessionManager {
     await this.whenInitialized()
     const id = idInput.trim()
     if (!id) return false
-    const history = listHistory().find((entry) => entry.id === id)
+    const history = this.historyRepository().findById(id)
     if (!history) return false
-    const closing = this.closingSessions.get(history.id)
-    if (closing) await closing
     const active = [...this.sessions.values()].find((session) =>
       session.meta.id === history.id || session.meta.sdkSessionId === history.sdkSessionId)
     if (active) throw new Error('活动会话不能删除；请先停止并关闭会话。')
+
     await this.workflow.flush(history.id)
     this.workflow.assertRecoveryResolved(history.id)
     const snapshot = await getTaskSnapshot(history.id)
@@ -307,6 +325,7 @@ class SessionManager {
     if (this.dagFinalizationCoordinator.hasIncomplete(history.id)) {
       throw new Error('DAG finalizer 尚未完成，不能删除父任务会话。')
     }
+
     const worktree = inspectManagedWorktreeRegistryRecord(history.id)
     if ('error' in worktree) throw new Error(worktree.error)
     if (worktree.record?.state === 'active') {
@@ -842,8 +861,10 @@ class SessionManager {
 
   /** Compatibility entrypoint for resume, non-Git and non-isolated sessions. */
   async create(opts: CreateSessionOptions): Promise<SessionMeta> {
-    const draft = await this.validatedSessionCreationDraft(opts)
-    return this.activateSessionCreation(draft, synchronousSessionPlacement(draft))
+    return this.resumeCreationGuard.run(opts, async () => {
+      const draft = await this.validatedSessionCreationDraft(opts)
+      return this.activateSessionCreation(draft, synchronousSessionPlacement(draft))
+    })
   }
 
   /** Creates a session only after any managed worktree effect is durably confirmed. */
@@ -851,7 +872,14 @@ class SessionManager {
     opts: CreateSessionOptions,
     lifecycle: ManagedSessionCreationOptions = {}
   ): Promise<SessionMeta> {
-    const draft = await this.validatedSessionCreationDraft(opts)
+    return this.resumeCreationGuard.run(opts, () => this.createManagedWithClaim(opts, lifecycle))
+  }
+
+  private async createManagedWithClaim(
+    opts: CreateSessionOptions,
+    lifecycle: ManagedSessionCreationOptions
+  ): Promise<SessionMeta> {
+    const draft = await this.validatedSessionCreationDraft(opts, lifecycle.reservedSessionId)
     savePendingSessionCreation(draft)
     let placement: SessionWorktreePlacement
     try {
@@ -869,19 +897,14 @@ class SessionManager {
     }
   }
 
-  private sessionCreationDraft(opts: CreateSessionOptions): SessionCreationDraft {
-    const parentMeta = opts.parentSessionId ? this.sessions.get(opts.parentSessionId)?.meta : undefined
-    const draft = prepareSessionCreationDraft(opts, parentMeta)
-    if (this.sessions.has(draft.baseMeta.id)) throw new Error(`会话已在运行:${draft.baseMeta.id}`)
-    return draft
-  }
-
-  private async validatedSessionCreationDraft(opts: CreateSessionOptions): Promise<SessionCreationDraft> {
+  private async validatedSessionCreationDraft(opts: CreateSessionOptions, reservedSessionId?: string): Promise<SessionCreationDraft> {
     await restoreConversationLedgerJsonlFromArchive(
       opts.resumeSdkSessionId ?? opts.forkFromSdkSessionId,
       app.getPath('userData')
     )
-    const draft = this.sessionCreationDraft(opts)
+    const draft = prepareIdentifiedSessionDraft({ options: opts, reservedSessionId,
+      parentMeta: opts.parentSessionId ? this.sessions.get(opts.parentSessionId)?.meta : undefined,
+      hasSession: (id) => this.sessions.has(id) })
     let baseMeta = await prepareSessionIdentityForActivation(
       draft.baseMeta, app.getPath('userData'), draft.opts.resumeSdkSessionId !== undefined)
     if (baseMeta.conversationForkSourceSessionId) {
@@ -930,7 +953,7 @@ class SessionManager {
         await this.writeTaskSnapshot(prepared.meta.id, 'created', 0, undefined, undefined, true)
         return { ...prepared.meta }
       },
-      () => this.acknowledgeSessionCreation(draft.baseMeta.id, true),
+      () => { if (!lifecycle.awaitStart) this.acknowledgeSessionCreation(draft.baseMeta.id, true) },
       async () => {
         if (!prepared) return
         if (this.sessions.get(prepared.meta.id) === prepared.session) {
@@ -944,42 +967,27 @@ class SessionManager {
         }
       }
     )
-    try {
-      await lifecycle.beforeStart?.(meta)
-    } catch (error) {
-      if (prepared && this.sessions.get(meta.id) === prepared.session) {
-        this.sessions.delete(meta.id)
-        this.persistActiveSessions()
-        await prepared.session.dispose().catch(() => undefined)
+    return completeManagedSessionInitialization({
+      meta, session: prepared?.session, lifecycle,
+      acknowledge: () => this.acknowledgeSessionCreation(meta.id, true),
+      persistInitialized: () => this.writeTaskSnapshot(meta.id, 'created', 0, undefined, undefined, true),
+      rollbackBeforeStart: async () => {
+        if (prepared && this.sessions.get(meta.id) === prepared.session) {
+          this.sessions.delete(meta.id)
+          this.persistActiveSessions()
+          await prepared.session.dispose().catch(() => undefined)
+        }
+        await deleteTaskSnapshot(meta.id).catch(() => undefined)
       }
-      await deleteTaskSnapshot(meta.id).catch(() => undefined)
-      throw error
-    }
-    void prepared?.session.start()
-    return meta
+    })
   }
 
   private prepareSessionEngine(
     draft: SessionCreationDraft,
     worktree: SessionWorktreePlacement
   ): { meta: SessionMeta; session: Engine } {
-    const meta = sessionMetaForPlacement(draft, worktree)
-    resolveDigitalWorkerSessionScope(meta, app.getPath('userData'))
-    const initialEventSeq = meta.conversationForkSourceSdkSessionId
-      ? transcriptForkSeedEntries(
-        meta.conversationForkSourceSdkSessionId,
-        meta.conversationForkCheckpointId
-      )
-        .reduce((max, entry) => Math.max(max, entry.seq), 0)
-      : 0
-    const session = createEngine(
-      meta.engine,
-      meta,
-      (event, seq, identity) => this.dispatch(meta.id, event, seq, identity),
-      draft.opts.resumeSdkSessionId,
-      initialEventSeq
-    )
-    return { meta, session }
+    return preparePlacedSessionEngine(draft, worktree,
+      (event, seq, identity) => this.dispatch(draft.baseMeta.id, event, seq, identity))
   }
 
   private acknowledgeSessionCreation(sessionId: string, strict = false): void {
@@ -1016,14 +1024,24 @@ class SessionManager {
     input: string | SendMessagePayload,
     options: { modelAttemptRecoveryReplay?: boolean; supervisorControlReplay?: boolean }
   ): Promise<boolean> {
-    const session = this.sessions.get(id)
+    let session = this.sessions.get(id)
     if (!session) return false
     if (!this.taskPlans.authorizeSend(session)) return false
     const currentRun = this.taskRuns.get(id)
-    const sendGateError = managedSessionSendGateError(
-      this.taskSnapshotReplay.blocksOrdinarySend(id, options),
+    const sendGateError = managedSessionSendGateError(this.taskSnapshotReplay.blocksOrdinarySend(id, options),
       this.supervisor.blocksSend(id, currentRun, options.supervisorControlReplay === true))
-    if (sendGateError) return rejectSessionSend(session, sendGateError)
+    if (sendGateError) return this.rejectBeforeRun(session, sendGateError)
+    const ownershipGateError = managedTaskRunSendGateError(session.meta, false, null)
+    if (ownershipGateError) return this.rejectBeforeRun(session, ownershipGateError)
+    if (!sendableSession(session, currentRun)) return false
+    // Reading history does not authorize another Run after its task ends.
+    if (session.meta.workspaceId) {
+      try {
+        await assertPersistedSessionExecutionAllowed(session.meta, app.getPath('userData'))
+      } catch (error) {
+        return this.rejectBeforeRun(session, `Canonical task ownership validation failed; Provider request was blocked: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
     const nextRun = !currentRun || isTaskRunTerminal(currentRun.status)
       ? createSessionTaskRun(session.meta)
       : currentRun
@@ -1034,41 +1052,68 @@ class SessionManager {
       supervisorControlReplay: options.supervisorControlReplay,
       activeSessions: [...this.sessions.values()].map((candidate) => candidate.meta)
     })
-    if (workerPolicyError) {
-      session.rejectSend(workerPolicyError)
-      return false
-    }
-    const modelAttemptDecision = this.modelAttemptRecoveryGate
-      .decideSend(id, currentRun, Boolean(options.modelAttemptRecoveryReplay))
-    if (!modelAttemptDecision.allowed) {
-      session.rejectSend(modelAttemptDecision.error ?? 'ModelAttempt 恢复门禁拒绝发送')
-      return false
-    }
-    const runGateError = managedTaskRunSendGateError(session.meta,
-      runHasUnresolvedEffects(currentRun),
-      this.budgetError(session)
-    )
+    if (workerPolicyError) return rejectSessionSend(session, workerPolicyError)
+    await this.modelAttemptRecoveryGate.refreshBeforeSend(id)
+    const modelAttemptDecision = this.modelAttemptRecoveryGate.decideSend(id, currentRun,
+      Boolean(options.modelAttemptRecoveryReplay))
+    if (!modelAttemptDecision.allowed) return rejectSessionSend(session,
+      modelAttemptDecision.error ?? 'ModelAttempt 恢复门禁拒绝发送')
+    const runGateError = this.budgetError(session)
     if (runGateError) return rejectSessionSend(session, runGateError)
-    if (!sendableSession(session)) return false
+    const payload = normalizeStableMessagePayload(input)
+    payload.messageId ??= randomUUID()
+    // Evaluate and reserve the canonical WorkItem target before a possible
+    // cross-protocol continuation.  The continuation consumes this route and
+    // installs the same target on the successor Engine; binding remains after
+    // the durable Run snapshot below.
+    let pendingFrozenPolicy: ReturnType<typeof frozenPolicyForSessionRun> | undefined
     try {
+      await authorizeOfficeRevisionSend({ meta: session.meta, payload, run: nextRun, rootDir: app.getPath('userData') })
       await this.supervisor.authorizeSend(session, nextRun,
         { supervisorControlReplay: options.supervisorControlReplay })
       await this.sessionStarts.ensure(id, session)
+      if (nextRun.sessionId === session.meta.id && session.meta.workItemId && !nextRun.routingPolicy) {
+        pendingFrozenPolicy = frozenPolicyForSessionRun(session.meta, nextRun, payload, currentRun)
+        if (!pendingFrozenPolicy) throw new Error('Canonical WorkItem Run lacks a complete V1 frozen routing policy; Provider request was blocked.')
+      }
+      session = await prepareRuntimeContinuation({ session, payload, run: currentRun,
+        emit: (event, seq, identity) => this.dispatch(id, event, seq, identity),
+        install: async (successor) => {
+          this.sessions.set(id, successor)
+          this.sessionStarts.forget(id)
+          await this.writeTaskSnapshot(id, 'important-event', 0, undefined, undefined, true)
+          this.persistActiveSessions(true)
+        } })
     } catch (error) {
+      session = this.sessions.get(id) ?? session
+      clearSessionTurnRoute(session.meta)
       session.rejectSend(supervisorSendError(error))
       return false
     }
-    if (nextRun !== currentRun) this.taskRuns.set(id, nextRun)
+    this.registerNewTaskRun(id, currentRun, nextRun)
     try {
       await this.writeTaskSnapshot(id, 'important-event', 0, nextRun.lastEventKind, undefined, true)
+      // A completed Run may still have a terminal snapshot cleanup queued by
+      // the event dispatcher. Drain the snapshot mutation queue before the
+      // first bind of a successor Run so the canonical projection is visible
+      // to the immutable frozen-policy binder.
+      await listTaskSnapshots()
+      if (nextRun.sessionId === session.meta.id && session.meta.workItemId && !nextRun.routingPolicy) {
+        const policy = pendingFrozenPolicy
+        if (!policy) throw new Error('Canonical WorkItem Run lacks a complete V1 frozen routing policy; Provider request was blocked.')
+        const bound = await bindFrozenRunRoutingPolicy({ runId: nextRun.id, sessionId: nextRun.sessionId,
+          expectedRunRevision: nextRun.revision, policy }, app.getPath('userData'))
+        this.taskRuns.set(id, bound)
+      }
     } catch (error) {
+      clearSessionTurnRoute(session.meta)
       session.rejectSend(`TaskRun 持久化失败，已阻止 Provider 请求：${error instanceof Error ? error.message : String(error)}`)
       return false
     }
     try {
-      const payload = normalizeStableMessagePayload(input)
-      session.send({ ...payload, messageId: payload.messageId ?? randomUUID() })
+      session.send(payload)
     } catch (error) {
+      clearSessionTurnRoute(session.meta)
       const message = error instanceof Error ? error.message : String(error)
       if (options.supervisorControlReplay === true) {
         session.rejectSend(message)
@@ -1083,6 +1128,18 @@ class SessionManager {
     this.modelAttemptRecoveryGate.acceptedSend(id, modelAttemptDecision)
     await this.supervisor.settleAcceptedSend(id)
     return true
+  }
+
+  private registerNewTaskRun(id: string, currentRun: TaskRunRecord | undefined, nextRun: TaskRunRecord): void {
+    if (nextRun !== currentRun) this.taskRuns.set(id, nextRun)
+  }
+
+  private rejectBeforeRun(session: Engine, message: string): false {
+    // Engine.rejectSend emits its status synchronously. This is feedback for
+    // the rejected message, not an execution event belonging to the old Run.
+    this.rejectedSendSessions.add(session.meta.id)
+    try { return rejectSessionSend(session, message) }
+    finally { this.rejectedSendSessions.delete(session.meta.id) }
   }
   async controlSupervisorRun(
     store: SupervisorStateStore,
@@ -1212,13 +1269,21 @@ class SessionManager {
     const parent = this.sessions.get(parentSessionId)
     if (!parent) throw new Error('父会话不存在')
     requirePlanningTaskStrategy(parent.meta, '拆解任务 DAG')
+    const existingRun = this.taskRuns.get(parentSessionId)
+    const frozenTarget = existingRun ? frozenRoutingPolicyForRun(existingRun)?.initialTarget : undefined
+    if (frozenTarget && (input.providerId && input.providerId !== frozenTarget.providerId || input.model && input.model !== frozenTarget.model)) {
+      throw new Error('DAG 拆解不能覆盖当前 Run 的冻结 Provider/Model 目标。')
+    }
     const request: TaskDecomposeInput = {
       ...input,
       cwd: input.cwd ?? parent.meta.sourceCwd ?? parent.meta.cwd,
-      providerId: input.providerId ?? parent.meta.providerId,
-      model: input.model ?? parent.meta.model
+      providerId: frozenTarget?.providerId ?? input.providerId ?? parent.meta.providerId,
+      model: frozenTarget?.model ?? input.model ?? parent.meta.model
     }
-    const run = this.taskRuns.get(parentSessionId)
+    if (request.useModel !== false && request.model === 'auto') {
+      throw new Error('DAG 拆解需要已冻结的具体模型目标，无法使用 auto。')
+    }
+    const run = existingRun
     const activeStep = [...(run?.steps ?? [])].reverse().find((step) => !step.finishedAt)
     const attemptContext = run
       ? {
@@ -1231,6 +1296,37 @@ class SessionManager {
       modelDecomposer: createModelDagDecomposer(request, attemptContext, {
         fetch,
         preflight: async ({ providerId, model, body }) => {
+          const provider = getProvider(providerId)
+          if (!provider) throw new Error(`DAG Provider ${providerId} 不存在。`)
+          const runtimeTarget = resolveProviderRuntimeTarget(provider, { appId: 'caogen', model })
+          const effectiveProtocol = runtimeTarget.protocol ?? resolveOpenAIProtocol(runtimeTarget)
+          const frozenProtocol = provider.engine === 'anthropic'
+            ? 'anthropic.messages'
+            : provider.engine === 'gemini'
+              ? 'google.generative-language'
+              : effectiveProtocol === 'responses' ? 'openai.responses' : 'openai.chat-completions'
+          const requestedProtocol = Array.isArray(body.input) ? 'openai.responses' : 'openai.chat-completions'
+          // The model DAG adapter currently serializes OpenAI-compatible
+          // Chat/Responses payloads. A native Anthropic/Gemini target must
+          // fail at the routing boundary until a native DAG adapter exists;
+          // sending this body to a native endpoint would violate the frozen
+          // protocol contract and could otherwise be hidden by local fallback.
+          if (provider.engine !== 'openai') {
+            throw new Error(`DAG protocol ${frozenProtocol} 暂无原生适配器，不能把 OpenAI 请求体发送到 ${provider.engine} Provider。`)
+          }
+          if (provider.engine === 'openai' && requestedProtocol !== frozenProtocol) {
+            throw new Error('DAG protocol does not match the effective Provider endpoint binding.')
+          }
+          assertFrozenRunRequestTarget({
+            run,
+            providerId,
+            model: runtimeTarget.model || model,
+            protocol: frozenProtocol,
+            connectionIdentity: getProviderConnectionIdentity(providerId)
+          })
+          if (getSettings().routingExpertPolicy.locality === 'local_only' && !isLocalProviderUrl(runtimeTarget.baseUrl)) {
+            throw new Error('DAG effective endpoint is remote under local_only routing policy.')
+          }
           const serializedBody = JSON.stringify(body)
           const outbound = await prepareOutboundContext({
             meta: parent.meta,
@@ -1662,9 +1758,7 @@ class SessionManager {
       sdkSessionId: snapshot.execution.sdkSessionId,
       resumeSessionAt: snapshot.execution.resumeSessionAt
     }
-    if (!meta.unassigned && !meta.projectId && !meta.workspaceId) {
-      meta.projectId = touchProject(meta.sourceCwd ?? meta.cwd).id
-    }
+    if (!meta.unassigned && !meta.workspaceId && !meta.projectId) meta.projectId = touchProject(meta.sourceCwd ?? meta.cwd).id
     resolveDigitalWorkerSessionScope(meta, app.getPath('userData'))
     bindAndValidateTaskRun(meta, recoveredRun)
     await restoreConversationLedgerJsonlFromArchive(
@@ -1833,7 +1927,7 @@ class SessionManager {
     const workflowRecoveryBlocks = await this.workflow.recover(imported)
     await this.supervisor.hydrateSendGates(persistedTaskRuns)
     const recoverable = await this.reconcileTaskSnapshots(imported, workflowRecoveryBlocks)
-    const activeRecoveryBlocks = activeSessionRecoveryBlocks(recoverable)
+    const { activeRecoveryBlocks, pendingCreationSnapshots } = await planPersonalTaskStartupRecovery(recoverable, app.getPath('userData'))
     this.modelAttemptRecoveryGate.blockActiveSessions(activeRecoveryBlocks)
     const activeRecoveryPlan = planActiveSessionRecovery(activeRecoveryBlocks, new Set(this.sessions.keys()))
     const snapshotSdkSessionIds = new Map(recoverable.flatMap((snapshot) => {
@@ -1846,7 +1940,7 @@ class SessionManager {
       snapshotSdkSessionIds
     )
     const archiveIdentities = [
-      ...listHistory().map((entry) => conversationArchiveIdentityFor(entry)),
+      ...this.historyRepository().list().map((entry) => conversationArchiveIdentityFor(entry)),
       ...recoverable.map((snapshot) => conversationArchiveIdentityFor(
         snapshot.meta,
         snapshot.execution.sdkSessionId ?? snapshot.meta.sdkSessionId
@@ -1871,13 +1965,13 @@ class SessionManager {
       new Set([...activeRecoveryBlocks, ...ledgerBlockedActiveSessions]),
       preservedActiveRegistrySessionIds
     )
-    await this.restorePendingSessionCreations(recoverable)
+    await this.restorePendingSessionCreations(pendingCreationSnapshots)
     await this.recoverAndStartWorkflowAcceptanceRepairs()
     await this.dagFinalizationCoordinator.autoRecoverParents(recoverable)
     for (const session of this.sessions.values()) {
       await this.dagFinalizationCoordinator.resumeForParent(session.meta.id)
     }
-    const keep = new Set(listHistory().map((h) => h.sdkSessionId))
+    const keep = new Set(this.historyRepository().sdkSessionIds())
     for (const snapshot of recoverable) {
       const sdkSessionId = snapshot.execution.sdkSessionId ?? snapshot.meta.sdkSessionId
       if (sdkSessionId) keep.add(sdkSessionId)
@@ -2103,6 +2197,13 @@ class SessionManager {
     const session = this.sessions.get(sessionId)
     const normalizedEvent = session ? this.normalizeTurnResultCost(session, rawEvent) : rawEvent
     const event = redactSensitiveValue(normalizedEvent)
+    const payload: SessionEventPayload = { sessionId, ...identity, event }
+    if (this.rejectedSendSessions.has(sessionId)) {
+      this.publishSessionEvent(payload)
+      this.persist(sessionId)
+      this.persistActiveSessions()
+      return
+    }
     const runBeforeEvent = this.taskRuns.get(sessionId)
     handleSessionTaskRunEvent(this.taskRuns, sessionId, event, identity, {
       cwd: session?.meta.cwd ?? '',
@@ -2122,11 +2223,7 @@ class SessionManager {
         event.kind === 'turn-result'
       )
     }
-    const payload: SessionEventPayload = { sessionId, ...identity, event }
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send('session:event', payload)
-    }
-    this.emitToSubscribers(payload)
+    this.publishSessionEvent(payload)
     this.dispatchChildResult(sessionId, session, event)
     this.handleEnginePowerBlocker(sessionId, event)
     this.notifications.handle(sessionId, event)
@@ -2496,11 +2593,11 @@ class SessionManager {
     const budget = effectiveBudgetUsd(session.meta)
     const monthlyBudget = calculateMonthlyBudgetSnapshot({
       settings: getSettings(),
-      history: listHistory(),
+      history: this.historyRepository().list(),
       currentSession: session.meta
     })
     if (budget <= 0 && monthlyBudget.limitUsd <= 0) return null
-    if (!canTrackCost(session.meta)) {
+    if (session.meta.model !== 'auto' && !canTrackCost(session.meta)) {
       return '当前引擎不提供费用回传,无法保证预算闸门;请关闭预算或切换到支持费用统计的引擎后继续。'
     }
     if (monthlyBudget.exceeded) {
@@ -2513,16 +2610,7 @@ class SessionManager {
   }
 
   private normalizeTurnResultCost(session: Engine, event: AgentEvent): AgentEvent {
-    if (event.kind !== 'turn-result') return event
-    const reportedCost = normalizePositiveNumber(event.costUsd)
-    const estimatedCost = reportedCost === undefined ? estimateTurnCostUsd(session.meta, event) : undefined
-    const turnCost = reportedCost ?? estimatedCost
-    if (turnCost === undefined) return event
-
-    const current = normalizePositiveNumber(session.meta.costUsd) ?? 0
-    const nextCost = reportedCost !== undefined && reportedCost >= current ? reportedCost : current + turnCost
-    session.meta.costUsd = nextCost
-    return { ...event, costUsd: nextCost }
+    return normalizeSessionTurnCost(session.meta, event)
   }
 
   private persist(sessionId: string): void {
@@ -2530,47 +2618,11 @@ class SessionManager {
     if (!session) return
     const meta = session.meta
     if (!meta.sdkSessionId) return
-    upsertHistory({
-      id: meta.id,
-      title: meta.title,
-      cwd: meta.cwd,
-      driveMode: meta.driveMode,
-      parentSessionId: meta.parentSessionId,
-      orchestrationId: meta.orchestrationId,
-      childTaskId: meta.childTaskId,
-      childRole: meta.childRole,
-      isolated: meta.isolated,
-      sourceCwd: meta.sourceCwd,
-      projectId: meta.projectId,
-      workspaceId: meta.workspaceId,
-      goalId: meta.goalId,
-      workItemId: meta.workItemId, digitalWorkerBinding: meta.digitalWorkerBinding,
-      unassigned: meta.unassigned,
-      personalWorkspaceId: meta.personalWorkspaceId,
-      experienceModeOverride: meta.experienceModeOverride,
-      repoRoot: meta.repoRoot,
-      worktreePath: meta.worktreePath,
-      branch: meta.branch,
-      baseBranch: meta.baseBranch,
-      baseSha: meta.baseSha,
-      worktreeState: meta.worktreeState,
-      model: meta.model,
-      providerId: meta.providerId,
-      routingScope: meta.routingScope,
-      engine: meta.engine,
-      taskStrategy: meta.taskStrategy,
-      permissionMode: meta.permissionMode,
-      sdkSessionId: meta.sdkSessionId,
-      conversationForkSourceSdkSessionId: meta.conversationForkSourceSdkSessionId,
-      conversationForkCheckpointId: meta.conversationForkCheckpointId,
-      conversationForkSourceSessionId: meta.conversationForkSourceSessionId,
-      conversationForkSourceRunId: meta.conversationForkSourceRunId,
-      responsesContext: meta.responsesContext,
-      createdAt: meta.createdAt,
-      updatedAt: Date.now(),
-      costUsd: meta.costUsd,
-      resumeSessionAt: meta.resumeSessionAt
-    })
+    this.historyRepository().upsertSession({ ...meta, sdkSessionId: meta.sdkSessionId })
+  }
+
+  private historyRepository(): SessionHistoryRepository {
+    return this.sessionHistory ??= new SessionHistoryRepository()
   }
 
   private async restoreActiveSessions(
@@ -2597,6 +2649,13 @@ class SessionManager {
       .filter((meta) => meta.status !== 'closed' && (strict || Boolean(meta.sdkSessionId)))
       .map((meta) => ({ ...meta }))
     writeActiveSessionRegistry(active, strict)
+  }
+
+  private publishSessionEvent(payload: SessionEventPayload): void {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('session:event', payload)
+    }
+    this.emitToSubscribers(payload)
   }
 
   private emitToSubscribers(payload: SessionEventPayload): void {

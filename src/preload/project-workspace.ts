@@ -15,6 +15,7 @@ import type {
   ProjectSquadPatch,
   ProjectWorkItemCommentCreateInput,
   ProjectWorkspaceDeleteOptions,
+  ProjectWorkspaceContentsOptions,
   ProjectWorkspaceInput,
   ProjectWorkspaceLeaseOptions,
   ProjectWorkspaceListOptions,
@@ -44,6 +45,7 @@ const invokeProjectWorkspace = (action: string, ...args: unknown[]) =>
 /** Renderer-safe bridge for the native ProjectWorkspace domain. */
 export const projectWorkspaceApi: Pick<AgentDeskApi,
   | 'listProjectWorkspaces' | 'getProjectWorkspace' | 'createProjectWorkspace' | 'createProjectWorkspaceWithTemplate'
+  | 'listProjectWorkspaceContents'
   | 'getProjectAuthorization'
   | 'previewProjectKnowledge'
   | 'searchProjectKnowledge'
@@ -78,6 +80,8 @@ export const projectWorkspaceApi: Pick<AgentDeskApi,
   listProjectWorkspaces: (options?: ProjectWorkspaceListOptions) =>
     invokeProjectWorkspace('list', options),
   getProjectWorkspace: (id: string) => invokeProjectWorkspace('get', id),
+  listProjectWorkspaceContents: (projectId: string, options?: ProjectWorkspaceContentsOptions) =>
+    invokeProjectWorkspace('contents:list', projectId, options),
   getProjectAuthorization: (projectId: string) => invokeProjectWorkspace('authorization:get', projectId),
   previewProjectKnowledge: (projectId: string) => invokeProjectWorkspace('knowledge:preview', projectId),
   searchProjectKnowledge: (input: ProjectKnowledgeSearchInput) => invokeProjectWorkspace('knowledge:search', input),

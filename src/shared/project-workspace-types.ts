@@ -1,9 +1,9 @@
+import type { BusinessLineBinding } from './business-line-types'
 /**
  * ProjectWorkspace is deliberately independent from the legacy path-centric
  * Project type. A workspace may have no resources at all; resources are
  * optional links and never form the workspace identity.
  */
-
 export const PROJECT_WORKSPACE_SCHEMA_VERSION = 1 as const
 export const MANAGED_PERSONAL_WORKSPACE_ID = 'caogen-managed-personal-workspace' as const
 
@@ -564,7 +564,7 @@ export interface WorkItemLease {
   fencingToken: number
 }
 
-export interface WorkItem {
+export interface WorkItem extends BusinessLineBinding {
   schemaVersion: ProjectWorkspaceSchemaVersion
   id: string
   projectId: string
@@ -592,7 +592,7 @@ export interface WorkItem {
   lease?: WorkItemLease
 }
 
-export interface WorkItemInput {
+export interface WorkItemInput extends BusinessLineBinding {
   id?: string
   projectId: string
   goalId?: string
@@ -983,11 +983,8 @@ export interface MutationOptions {
 }
 
 /** Renderer-facing contract for the native ProjectWorkspace domain. */
-export interface ProjectWorkspaceListOptions {
-  includeArchived?: boolean
-  includeDeleted?: boolean
-  goalId?: string
-}
+import type { ProjectWorkspaceContents, ProjectWorkspaceContentsOptions, ProjectWorkspaceListOptions } from './project-workspace-contents-types'
+export type { ProjectWorkspaceContents, ProjectWorkspaceContentsOptions, ProjectWorkspaceListOptions }
 
 export interface ProjectWorkspaceDeleteOptions extends MutationOptions {
   permanent?: boolean
@@ -1000,7 +997,7 @@ export interface ProjectWorkspaceLeaseOptions extends MutationOptions {
   fencingToken?: number
 }
 
-export interface ProjectGoalTaskInput {
+export interface ProjectGoalTaskInput extends BusinessLineBinding {
   /** Stable across retries of one user action; never reused for a different objective. */
   requestId: string
   projectId: string
@@ -1083,6 +1080,7 @@ export interface ProjectDeletionResult {
 export interface ProjectWorkspaceApi {
   listProjectWorkspaces(options?: ProjectWorkspaceListOptions): Promise<ProjectWorkspace[]>
   getProjectWorkspace(id: string): Promise<ProjectWorkspace | undefined>
+  listProjectWorkspaceContents(projectId: string, options?: ProjectWorkspaceContentsOptions): Promise<ProjectWorkspaceContents>
   getProjectAuthorization(projectId: string): Promise<ProjectAuthorizationView>
   previewProjectKnowledge(projectId: string): Promise<ProjectKnowledgePreview>
   searchProjectKnowledge(input: ProjectKnowledgeSearchInput): Promise<ProjectKnowledgeSearchResult>
@@ -1186,6 +1184,7 @@ export function isWorkItemType(value: unknown): value is WorkItemType {
 export function isGoalRiskLevel(value: unknown): value is GoalRiskLevel {
   return value === 'low' || value === 'medium' || value === 'high' || value === 'critical'
 }
+
 export function isAcceptanceSatisfied(value: AcceptanceResult | undefined): boolean {
   return value?.status === 'passed' || value?.status === 'waived'
 }

@@ -10,6 +10,7 @@ const statePath = requiredEnv('CAOGEN_COMPOSER_ATTACHMENTS_STATE')
 const screenshotDir = requiredEnv('CAOGEN_COMPOSER_ATTACHMENTS_SCREENSHOTS')
 const userDataDir = path.join(root, 'userData')
 const projectDir = path.join(root, 'workspace')
+const STARTUP_TIMEOUT_MS = 30_000
 const PASTE_IMAGE_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 process.env.CAOGEN_USER_DATA_DIR = userDataDir
 process.env.CAOGEN_MEMORY_DIR = path.join(root, 'memory')
@@ -29,17 +30,17 @@ async function run() {
   const server = await startResponsesServer()
   try {
     require(outMain)
-    await waitFor(() => ipcMain._invokeHandlers?.has('attachments:copyDocument') && ipcMain._invokeHandlers?.has('sessions:create'), 10_000)
+    await waitFor(() => ipcMain._invokeHandlers?.has('attachments:copyDocument') && ipcMain._invokeHandlers?.has('sessions:create'), STARTUP_TIMEOUT_MS)
     const provider = await invoke('providers:create', {
       name: 'Composer Attachment Mock', baseUrl: server.baseUrl, token: 'test-only',
       models: ['mock-attachments'], engine: 'openai', openaiProtocol: 'responses'
     })
     const alpha = await createSession(provider.id, 'Attachment Alpha')
     const beta = await createSession(provider.id, 'Attachment Beta')
-    const win = await waitForWindow()
+    const win = await waitForWindow(STARTUP_TIMEOUT_MS)
     win.setSize(1200, 800)
     win.webContents.reload()
-    await waitForRenderer(win, `document.body.innerText.includes('CaoGen')`)
+    await waitForRenderer(win, `document.body.innerText.includes('CaoGen')`, STARTUP_TIMEOUT_MS)
     await selectSession(win, alpha.id)
 
     const button = await rendererValue(win, `(() => { const el = document.querySelector('.composer-attach'); return { exists: !!el, label: el?.getAttribute('aria-label'), width: el?.getBoundingClientRect().width }; })()`)
@@ -148,12 +149,8 @@ async function chooseMention(win, query, expected) {
 
 async function createSession(providerId, title) {
   return invoke('sessions:create', {
-    cwd: projectDir, engine: 'openai', providerId, model: 'mock-attachments',
-    routingScope: 'fixed', permissionMode: 'default', isolated: false,
-    // This fixture exercises the Assistant composer. A temporary cwd is still
-    // required for @file resolution, but must not auto-project the session into
-    // the Project sidebar via a legacy path-derived projectId.
-    unassigned: true, experienceModeOverride: 'assistant', title
+    cwd: projectDir, unassigned: true, engine: 'openai', providerId, model: 'mock-attachments',
+    routingScope: 'fixed', permissionMode: 'default', isolated: false, title
   })
 }
 
@@ -215,13 +212,13 @@ async function capture(win, name) {
 async function invoke(channel, ...args) {
   const handler = ipcMain._invokeHandlers?.get(channel)
   if (!handler) throw new Error(`IPC channel not registered: ${channel}`)
-  const win = await waitForWindow()
-  await waitForRenderer(win, `location.protocol === 'file:'`)
+  const win = await waitForWindow(STARTUP_TIMEOUT_MS)
+  await waitForRenderer(win, `location.protocol === 'file:'`, STARTUP_TIMEOUT_MS)
   return handler({ sender: win.webContents, senderFrame: win.webContents.mainFrame }, ...args)
 }
 
-function waitForWindow() {
-  return waitFor(() => BrowserWindow.getAllWindows().find((window) => !window.isDestroyed()), 10_000)
+function waitForWindow(timeoutMs = 10_000) {
+  return waitFor(() => BrowserWindow.getAllWindows().find((window) => !window.isDestroyed()), timeoutMs)
 }
 
 function waitForRenderer(win, expression, timeoutMs = 10_000) {

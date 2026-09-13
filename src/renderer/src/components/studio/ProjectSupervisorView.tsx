@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Ban, CirclePause, Play, RefreshCw, RotateCcw } from 'lucide-react'
 import type { SupervisorRunRecord, WorkItem } from '../../../../shared/types'
+import { useStore } from '../../store'
 
 type SupervisorAction = 'pause' | 'resume' | 'cancel' | 'retry'
 
@@ -23,6 +24,7 @@ export function ProjectSupervisorView({
   workItems,
   onRefreshProject
 }: ProjectSupervisorViewProps): React.JSX.Element {
+  useStore((state) => state.settings.language)
   const [runs, setRuns] = useState<SupervisorRunRecord[]>([])
   const [loading, setLoading] = useState(false)
   const [busyId, setBusyId] = useState('')
@@ -88,31 +90,31 @@ export function ProjectSupervisorView({
     <section className="pws-section pws-supervisor" aria-labelledby="project-supervisor-title" data-project-supervisor>
       <div className="pws-section-header">
         <div className="pws-section-title">
-          <h2 id="project-supervisor-title">执行控制</h2>
-          <span aria-label={`${runs.length} 个执行 Run`}>{runs.length}</span>
+          <h2 id="project-supervisor-title">{localized('执行控制', 'Execution controls')}</h2>
+          <span aria-label={localized(`${runs.length} 个执行 Run`, `${runs.length} execution runs`)}>{runs.length}</span>
         </div>
         <button
           type="button"
           className="btn btn-ghost btn-icon-sm"
           disabled={loading || Boolean(busyId)}
-          aria-label="刷新执行状态"
-          title="刷新执行状态"
+          aria-label={localized('刷新执行状态', 'Refresh execution status')}
+          title={localized('刷新执行状态', 'Refresh execution status')}
           onClick={() => void refresh()}
         >
           <RefreshCw size={14} className={loading ? 'pws-supervisor-spin' : undefined} aria-hidden="true" />
         </button>
       </div>
 
-      <div className="pws-supervisor-summary" aria-label="执行状态摘要">
-        <span><strong>{statusCounts.running}</strong> 运行</span>
-        <span><strong>{statusCounts.waiting}</strong> 等待处理</span>
-        <span><strong>{statusCounts.paused}</strong> 已暂停</span>
+      <div className="pws-supervisor-summary" aria-label={localized('执行状态摘要', 'Execution status summary')}>
+        <span><strong>{statusCounts.running}</strong> {localized('运行', 'running')}</span>
+        <span><strong>{statusCounts.waiting}</strong> {localized('等待处理', 'waiting')}</span>
+        <span><strong>{statusCounts.paused}</strong> {localized('已暂停', 'paused')}</span>
         <span data-alert={statusCounts.blocked + statusCounts.failed > 0}>
-          <strong>{statusCounts.blocked + statusCounts.failed}</strong> 需介入
+          <strong>{statusCounts.blocked + statusCounts.failed}</strong> {localized('需介入', 'need attention')}
         </span>
       </div>
 
-      {runs.length === 0 && !loading && <p className="pws-muted">当前项目没有可控制的执行 Run。</p>}
+      {runs.length === 0 && !loading && <p className="pws-muted">{localized('当前项目没有可控制的执行 Run。', 'This project has no controllable execution runs.')}</p>}
       {runs.length > 0 && (
         <div className="pws-supervisor-list" role="list" aria-live="polite">
           {runs.map((run) => (
@@ -126,7 +128,7 @@ export function ProjectSupervisorView({
           ))}
         </div>
       )}
-      {error && <p className="pws-work-item-control-error" role="alert">执行控制失败: {error}</p>}
+      {error && <p className="pws-work-item-control-error" role="alert">{localized('执行控制失败', 'Execution control failed')}: {error}</p>}
     </section>
   )
 }
@@ -152,11 +154,11 @@ function SupervisorRunRow({
       <div className="pws-supervisor-run-detail">
         <span>{usageLabel(run)}</span>
         <span>{retryLabel(run)}</span>
-        {run.lease && <span>控制租约 {run.lease.fencingToken}</span>}
+        {run.lease && <span>{localized('控制租约', 'Control lease')} {run.lease.fencingToken}</span>}
         <time dateTime={new Date(run.updatedAt).toISOString()}>{formatUpdatedAt(run.updatedAt)}</time>
       </div>
       {run.error && <p className="pws-supervisor-run-error">{run.error}</p>}
-      <div className="pws-supervisor-run-actions" aria-label={`${workItemTitle ?? run.workItemId} 的执行操作`}>
+      <div className="pws-supervisor-run-actions" aria-label={localized(`${workItemTitle ?? run.workItemId} 的执行操作`, `Execution actions for ${workItemTitle ?? run.workItemId}`)}>
         {controls.map((control) => {
           const Icon = control.Icon
           return (
@@ -185,18 +187,18 @@ function controlsFor(run: SupervisorRunRecord): Array<{
 }> {
   if (run.status === 'running' || run.status === 'waiting_approval') {
     return [
-      { action: 'pause', label: '暂停执行', Icon: CirclePause },
-      { action: 'cancel', label: '取消执行', Icon: Ban }
+      { action: 'pause', label: localized('暂停执行', 'Pause execution'), Icon: CirclePause },
+      { action: 'cancel', label: localized('取消执行', 'Cancel execution'), Icon: Ban }
     ]
   }
   if (run.status === 'queued' || run.status === 'paused' || run.status === 'blocked') {
     return [
-      { action: 'resume', label: '恢复执行', Icon: Play },
-      { action: 'cancel', label: '取消执行', Icon: Ban }
+      { action: 'resume', label: localized('恢复执行', 'Resume execution'), Icon: Play },
+      { action: 'cancel', label: localized('取消执行', 'Cancel execution'), Icon: Ban }
     ]
   }
   if (run.status === 'failed' || run.status === 'waiting_reconciliation') {
-    return [{ action: 'retry', label: '授权重试', Icon: RotateCcw }]
+    return [{ action: 'retry', label: localized('授权重试', 'Authorize retry'), Icon: RotateCcw }]
   }
   return []
 }
@@ -223,25 +225,25 @@ function countStatuses(runs: readonly SupervisorRunRecord[]): {
 function usageLabel(run: SupervisorRunRecord): string {
   const tokens = (run.usage?.input ?? 0) + (run.usage?.output ?? 0)
   if (run.budget?.maxTokens !== undefined) return `${tokens}/${run.budget.maxTokens} tokens`
-  if (run.usage?.turns !== undefined) return `${run.usage.turns} 轮 · ${tokens} tokens`
+  if (run.usage?.turns !== undefined) return localized(`${run.usage.turns} 轮 · ${tokens} tokens`, `${run.usage.turns} turns · ${tokens} tokens`)
   return `${tokens} tokens`
 }
 
 function retryLabel(run: SupervisorRunRecord): string {
-  return `重试 ${run.retryCount}/${run.maxRetries}`
+  return localized(`重试 ${run.retryCount}/${run.maxRetries}`, `Retries ${run.retryCount}/${run.maxRetries}`)
 }
 
 function statusLabel(status: SupervisorRunRecord['status']): string {
   const labels: Record<SupervisorRunRecord['status'], string> = {
-    queued: '待执行',
-    running: '运行中',
-    waiting_approval: '待审批',
-    waiting_reconciliation: '待对账',
-    paused: '已暂停',
-    blocked: '受阻',
-    failed: '失败',
-    completed: '已完成',
-    cancelled: '已取消'
+    queued: localized('待执行', 'Queued'),
+    running: localized('运行中', 'Running'),
+    waiting_approval: localized('待审批', 'Awaiting approval'),
+    waiting_reconciliation: localized('待对账', 'Awaiting reconciliation'),
+    paused: localized('已暂停', 'Paused'),
+    blocked: localized('受阻', 'Blocked'),
+    failed: localized('失败', 'Failed'),
+    completed: localized('已完成', 'Completed'),
+    cancelled: localized('已取消', 'Cancelled')
   }
   return labels[status]
 }
@@ -254,4 +256,8 @@ function formatUpdatedAt(value: number): string {
 
 function errorMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
+}
+
+function localized(chinese: string, english: string): string {
+  return useStore.getState().settings.language === 'en' ? english : chinese
 }

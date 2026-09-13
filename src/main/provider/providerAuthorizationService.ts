@@ -1,45 +1,19 @@
-import { app } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import type {
   ProviderAuthorizationPollResult, ProviderAuthorizationQuotaView, ProviderAuthorizationService,
   ProviderDeviceAuthorizationView, ProviderQuickAuthorizationPollResult, ProviderQuickDeviceAuthorizationView
 } from '../../shared/provider-authorization-types'
 import type { Provider, ProviderView } from '../../shared/types'
-import { resolveAppVersion } from '../appVersion'
 import {
   createProvider,
   deleteProvider,
   getProvider,
   issueDirectProviderCredentialLease,
   toView,
-  updateProvider
+  updateProvider,
+  updateProviderForVerifiedOAuthRefresh
 } from '../providers'
 import type { ProviderCredentialLeaseScope } from '../providerCredentialBroker'
-import {
-  CodexOAuthError,
-  codexOAuthIdentity,
-  fetchCodexOAuthModels,
-  fetchCodexOAuthQuota,
-  pollCodexDeviceAuthorization,
-  refreshCodexOAuthTokens,
-  startCodexDeviceAuthorization,
-  type CodexOAuthTokens
-} from './codexOAuthClient'
-import {
-  COPILOT_API_VERSION,
-  COPILOT_EDITOR_VERSION,
-  COPILOT_INTEGRATION_ID,
-  COPILOT_PLUGIN_VERSION,
-  COPILOT_USER_AGENT,
-  fetchGitHubCopilotModels,
-  fetchGitHubCopilotQuota,
-  GITHUB_COPILOT_API_BASE,
-  GitHubCopilotOAuthError,
-  pollGitHubCopilotDeviceAuthorization,
-  refreshGitHubCopilotToken,
-  startGitHubCopilotDeviceAuthorization,
-  type GitHubCopilotTokens
-} from './githubCopilotOAuthClient'
 import {
   fetchXaiOAuthModels,
   fetchXaiOAuthQuota,
@@ -67,9 +41,6 @@ import {
 import type { ProviderAuthorizationRoutingDecision } from './providerAuthorizationRouting'
 import { providerAuthorizationAccountFetch, providerCredentialFetch } from './providerAuthorizationCredentialFetch'
 
-const CODEX_RESPONSES_ENDPOINT = 'https://chatgpt.com/backend-api/codex/responses'
-const CODEX_MODEL_FALLBACK = 'gpt-5.4'
-const COPILOT_MODEL_FALLBACK = 'gpt-4.1'
 const XAI_MODEL_FALLBACK = 'grok-4'
 const REFRESH_BUFFER_MS = 60_000
 
@@ -87,10 +58,7 @@ interface PendingAuthorization {
   tokenEndpoint?: string
 }
 
-type AuthorizationTokens =
-  | { service: 'codex-oauth'; tokens: CodexOAuthTokens }
-  | { service: 'github-copilot'; tokens: GitHubCopilotTokens }
-  | { service: 'xai-oauth'; tokens: XaiOAuthTokens }
+type AuthorizationTokens = { service: 'xai-oauth'; tokens: XaiOAuthTokens }
 
 const pending = new Map<string, PendingAuthorization>()
 const refreshes = new Map<string, Promise<ProviderView>>()
@@ -106,7 +74,7 @@ export interface ProviderAuthorizationAccountLease {
 
 export async function startProviderAuthorization(
   providerId: string,
-  serviceOrFetch: ProviderAuthorizationService | typeof fetch = 'codex-oauth',
+  serviceOrFetch: ProviderAuthorizationService | typeof fetch = 'xai-oauth',
   fetchOrNow: typeof fetch | number = fetch,
   requestedNow = Date.now()
 ): Promise<ProviderDeviceAuthorizationView> {
@@ -167,7 +135,7 @@ export async function pollProviderAuthorization(
 }
 
 export async function startQuickProviderAuthorization(
-  serviceOrFetch: ProviderAuthorizationService | typeof fetch = 'codex-oauth',
+  serviceOrFetch: ProviderAuthorizationService | typeof fetch = 'xai-oauth',
   fetchOrNow: typeof fetch | number = fetch,
   requestedNow = Date.now()
 ): Promise<ProviderQuickDeviceAuthorizationView> {
@@ -282,7 +250,7 @@ export async function issueProviderAuthorizationAccountLease(
       authMode: 'api-key',
       baseUrl: provider.baseUrl,
       credentialMigrationRequired: false,
-      customHeaders: runtimeAuthorizationHeaders(provider, service, normalizedAccountId),
+      customHeaders: runtimeAuthorizationHeaders(provider),
       credentialHeaderNames: ['authorization']
     },
     lease: selection.lease
@@ -345,18 +313,10 @@ export async function queryProviderAuthorizationQuota(
   if (provider.authorization?.status !== 'authorized' || !accountId) {
     throw new Error('Provider does not have an active authorization')
   }
-  let quota: ProviderAuthorizationQuotaView
-  if (service === 'github-copilot') {
-    const githubToken = resolveProviderAuthorizationRefreshToken(provider.id, accountId, service)
-    quota = await fetchGitHubCopilotQuota(provider.id, accountId, githubToken, fetchImpl, now)
-  } else {
-    const credentialFetch = accountId === provider.authorization?.accountId
-      ? providerCredentialFetch(provider, fetchImpl)
-      : await accountCredentialFetch(provider, accountId, service, fetchImpl, now)
-    quota = service === 'codex-oauth'
-      ? await fetchCodexOAuthQuota(provider.id, accountId, credentialFetch, now)
-      : await fetchXaiOAuthQuota(provider.id, accountId, 'lease-managed', credentialFetch, now)
-  }
+  const credentialFetch = accountId === provider.authorization?.accountId
+    ? providerCredentialFetch(provider, fetchImpl)
+    : await accountCredentialFetch(provider, accountId, service, fetchImpl, now)
+  const quota = await fetchXaiOAuthQuota(provider.id, accountId, 'lease-managed', credentialFetch, now)
   recordProviderAuthorizationQuota(quota, service)
   if (quota.status === 'expired') {
     const next = markProviderAuthorizationAccountFailure(provider, accountId, now)
@@ -386,11 +346,7 @@ async function createPendingFlow(
   now: number,
   providerId?: string
 ): Promise<PendingAuthorization> {
-  const started = service === 'codex-oauth'
-    ? await startCodexDeviceAuthorization(fetchImpl)
-    : service === 'github-copilot'
-      ? await startGitHubCopilotDeviceAuthorization(fetchImpl)
-      : await startXaiDeviceAuthorization(fetchImpl)
+  const started = await startXaiDeviceAuthorization(fetchImpl)
   return {
     flowId: randomUUID(),
     mode,
@@ -398,15 +354,11 @@ async function createPendingFlow(
     providerId,
     deviceAuthId: started.deviceAuthId,
     userCode: started.userCode,
-    verificationUri: 'verificationUri' in started
-      ? started.verificationUri
-      : 'https://auth.openai.com/codex/device',
+    verificationUri: started.verificationUri,
     expiresAt: now + started.expiresInSeconds * 1000,
     intervalSeconds: started.intervalSeconds,
     nextPollAt: now,
-    ...('tokenEndpoint' in started && typeof started.tokenEndpoint === 'string'
-      ? { tokenEndpoint: started.tokenEndpoint }
-      : {})
+    tokenEndpoint: started.tokenEndpoint
   }
 }
 
@@ -415,18 +367,6 @@ async function pollAuthorization(
   fetchImpl: typeof fetch,
   now: number
 ): Promise<AuthorizationTokens> {
-  if (flow.service === 'codex-oauth') {
-    return {
-      service: flow.service,
-      tokens: await pollCodexDeviceAuthorization(flow.deviceAuthId, flow.userCode, fetchImpl, now)
-    }
-  }
-  if (flow.service === 'github-copilot') {
-    return {
-      service: flow.service,
-      tokens: await pollGitHubCopilotDeviceAuthorization(flow.deviceAuthId, fetchImpl, now)
-    }
-  }
   if (!flow.tokenEndpoint) throw new Error('xAI authorization flow was invalid')
   return {
     service: flow.service,
@@ -504,13 +444,9 @@ async function refreshAccountTokens(
   now: number
 ): Promise<AuthorizationTokens> {
   const stored = resolveProviderAuthorizationRefreshToken(providerId, accountId, service)
-  let credentials: AuthorizationTokens
-  if (service === 'codex-oauth') {
-    credentials = { service, tokens: await refreshCodexOAuthTokens(stored, fetchImpl, now) }
-  } else if (service === 'github-copilot') {
-    credentials = { service, tokens: await refreshGitHubCopilotToken(stored, accountId, fetchImpl, now) }
-  } else {
-    credentials = { service, tokens: await refreshXaiOAuthTokens(stored, fetchImpl, now) }
+  const credentials: AuthorizationTokens = {
+    service,
+    tokens: await refreshXaiOAuthTokens(stored, fetchImpl, now)
   }
   storeProviderAuthorizationAccount({
     id: accountId,
@@ -563,31 +499,7 @@ function clearRuntimeAccountToken(
   runtimeAccountTokens.delete(`${providerId}:${service}:${accountId}`)
 }
 
-function runtimeAuthorizationHeaders(
-  provider: Provider,
-  service: ProviderAuthorizationService,
-  accountId: string
-): string {
-  if (service === 'codex-oauth') {
-    return [
-      stripManagedHeaders(provider.customHeaders, ['chatgpt-account-id', 'originator', 'version']),
-      `chatgpt-account-id: ${accountId}`,
-      'originator: codex_cli_rs',
-      `version: ${resolveAppVersion(() => app.getVersion())}`
-    ].filter(Boolean).join('\n')
-  }
-  if (service === 'github-copilot') {
-    return [
-      stripManagedHeaders(provider.customHeaders, [
-        'copilot-integration-id', 'editor-version', 'editor-plugin-version', 'user-agent', 'x-github-api-version'
-      ]),
-      `copilot-integration-id: ${COPILOT_INTEGRATION_ID}`,
-      `editor-version: ${COPILOT_EDITOR_VERSION}`,
-      `editor-plugin-version: ${COPILOT_PLUGIN_VERSION}`,
-      `user-agent: ${COPILOT_USER_AGENT}`,
-      `x-github-api-version: ${COPILOT_API_VERSION}`
-    ].filter(Boolean).join('\n')
-  }
+function runtimeAuthorizationHeaders(provider: Provider): string {
   return provider.customHeaders ?? ''
 }
 
@@ -599,79 +511,7 @@ async function configureProvider(
   fetchImpl: typeof fetch,
   now: number
 ): Promise<ProviderView> {
-  if (credentials.service === 'codex-oauth') {
-    return configureProviderForCodex(providerId, accountId, label, credentials.tokens, fetchImpl, now)
-  }
-  if (credentials.service === 'github-copilot') {
-    return configureProviderForCopilot(providerId, accountId, label, credentials.tokens, fetchImpl, now)
-  }
   return configureProviderForXai(providerId, accountId, label, credentials.tokens, fetchImpl, now)
-}
-
-async function configureProviderForCodex(
-  providerId: string,
-  accountId: string,
-  label: string,
-  tokens: CodexOAuthTokens,
-  fetchImpl: typeof fetch,
-  now: number
-): Promise<ProviderView> {
-  const previous = requireOpenAiProvider(providerId, 'codex-oauth')
-  const models = await fetchCodexOAuthModels(tokens.accessToken, accountId, fetchImpl).catch(() => [])
-  const customHeaders = [
-    stripManagedHeaders(previous.customHeaders, ['chatgpt-account-id', 'originator', 'version']),
-    `chatgpt-account-id: ${accountId}`,
-    'originator: codex_cli_rs',
-    `version: ${resolveAppVersion(() => app.getVersion())}`
-  ].filter(Boolean).join('\n')
-  return updateAuthorizedProvider(previous, {
-    service: 'codex-oauth',
-    baseUrl: CODEX_RESPONSES_ENDPOINT,
-    protocol: 'responses',
-    token: tokens.accessToken,
-    tokenLabel: `ChatGPT OAuth - ${label}`,
-    expiresAt: tokens.expiresAt,
-    models,
-    customHeaders,
-    accountId,
-    label,
-    now
-  })
-}
-
-async function configureProviderForCopilot(
-  providerId: string,
-  accountId: string,
-  label: string,
-  tokens: GitHubCopilotTokens,
-  fetchImpl: typeof fetch,
-  now: number
-): Promise<ProviderView> {
-  const previous = requireOpenAiProvider(providerId, 'github-copilot')
-  const models = await fetchGitHubCopilotModels(tokens.accessToken, tokens.apiBaseUrl, fetchImpl).catch(() => [])
-  const customHeaders = [
-    stripManagedHeaders(previous.customHeaders, [
-      'copilot-integration-id', 'editor-version', 'editor-plugin-version', 'user-agent', 'x-github-api-version'
-    ]),
-    `copilot-integration-id: ${COPILOT_INTEGRATION_ID}`,
-    `editor-version: ${COPILOT_EDITOR_VERSION}`,
-    `editor-plugin-version: ${COPILOT_PLUGIN_VERSION}`,
-    `user-agent: ${COPILOT_USER_AGENT}`,
-    `x-github-api-version: ${COPILOT_API_VERSION}`
-  ].filter(Boolean).join('\n')
-  return updateAuthorizedProvider(previous, {
-    service: 'github-copilot',
-    baseUrl: tokens.apiBaseUrl || GITHUB_COPILOT_API_BASE,
-    protocol: 'chat',
-    token: tokens.accessToken,
-    tokenLabel: `GitHub Copilot - ${label}`,
-    expiresAt: tokens.expiresAt,
-    models,
-    customHeaders,
-    accountId,
-    label,
-    now
-  })
 }
 
 async function configureProviderForXai(
@@ -682,6 +522,7 @@ async function configureProviderForXai(
   fetchImpl: typeof fetch,
   now: number
 ): Promise<ProviderView> {
+  if (tokens.accountId !== accountId) throw new Error('OAuth refresh returned a different authorization principal')
   const previous = requireOpenAiProvider(providerId, 'xai-oauth')
   const models = await fetchXaiOAuthModels(tokens.accessToken, fetchImpl).catch(() => [])
   return updateAuthorizedProvider(previous, {
@@ -715,7 +556,7 @@ function updateAuthorizedProvider(
     now: number
   }
 ): ProviderView {
-  return updateProvider(previous.id, {
+  const patch: Parameters<typeof updateProvider>[1] = {
     baseUrl: input.baseUrl,
     engine: 'openai',
     openaiProtocol: input.protocol,
@@ -736,7 +577,10 @@ function updateAuthorizedProvider(
       lastAuthenticatedAt: input.now,
       accountRoutingMode: previous.authorization?.accountRoutingMode ?? 'preferred'
     }
-  }, { allowAuthorizationHeaders: true })
+  }
+  return previous.authorization?.provider === input.service && previous.authorization.accountId === input.accountId
+    ? updateProviderForVerifiedOAuthRefresh(previous.id, patch, { service: input.service, accountId: input.accountId })
+    : updateProvider(previous.id, patch)
 }
 
 async function accountCredentialFetch(
@@ -752,7 +596,7 @@ async function accountCredentialFetch(
     accountId,
     runtimeAccountKeyId(provider.id, service, accountId),
     runtimeAccessToken(credentials),
-    runtimeAuthorizationHeaders(provider, service, accountId),
+    runtimeAuthorizationHeaders(provider),
     fetchImpl
   )
 }
@@ -772,20 +616,15 @@ function requireAuthorizationService(provider: Provider): ProviderAuthorizationS
 }
 
 function authorizationIdentity(credentials: AuthorizationTokens): { accountId: string; label: string } {
-  if (credentials.service === 'codex-oauth') return codexOAuthIdentity(credentials.tokens)
   return { accountId: credentials.tokens.accountId, label: credentials.tokens.label }
 }
 
 function authorizationStoredCredential(credentials: AuthorizationTokens): string {
-  return credentials.service === 'github-copilot'
-    ? credentials.tokens.githubToken
-    : credentials.tokens.refreshToken
+  return credentials.tokens.refreshToken
 }
 
 function authorizationErrorCode(error: unknown): string | undefined {
-  return error instanceof CodexOAuthError || error instanceof GitHubCopilotOAuthError || error instanceof XaiOAuthError
-    ? error.code
-    : undefined
+  return error instanceof XaiOAuthError ? error.code : undefined
 }
 
 function accountLabel(providerId: string, accountId: string, service: ProviderAuthorizationService): string {
@@ -802,27 +641,14 @@ function authorizationAuthenticatedAt(
     .find((account) => account.id === accountId)?.authenticatedAt
 }
 
-function stripManagedHeaders(value: string | undefined, names: string[]): string {
-  const managed = new Set(names.map((name) => name.toLowerCase()))
-  return (value ?? '').split(/\r?\n/)
-    .filter((line) => !managed.has(line.split(':', 1)[0]?.trim().toLowerCase()))
-    .join('\n')
-    .trim()
-}
-
 function quickProviderInput(service: ProviderAuthorizationService): Parameters<typeof createProvider>[0] {
-  const config = service === 'codex-oauth'
-    ? { name: 'ChatGPT Codex', baseUrl: CODEX_RESPONSES_ENDPOINT, models: [CODEX_MODEL_FALLBACK], protocol: 'responses' as const }
-    : service === 'github-copilot'
-      ? { name: 'GitHub Copilot', baseUrl: GITHUB_COPILOT_API_BASE, models: [COPILOT_MODEL_FALLBACK], protocol: 'chat' as const }
-      : { name: 'xAI OAuth', baseUrl: XAI_API_BASE, models: [XAI_MODEL_FALLBACK], protocol: 'chat' as const }
   return {
-    name: config.name,
-    baseUrl: config.baseUrl,
-    models: config.models,
+    name: 'xAI OAuth',
+    baseUrl: XAI_API_BASE,
+    models: [XAI_MODEL_FALLBACK],
     authMode: 'api-key',
     engine: 'openai',
-    openaiProtocol: config.protocol,
+    openaiProtocol: 'chat',
     credentialHeaderNames: ['authorization'],
     authorization: {
       schemaVersion: 1,
@@ -865,9 +691,7 @@ function prunePending(now: number): void {
 }
 
 function serviceLabel(service: ProviderAuthorizationService | undefined): string {
-  if (service === 'github-copilot') return 'GitHub Copilot'
-  if (service === 'xai-oauth') return 'xAI'
-  return 'Codex OAuth'
+  return service === 'xai-oauth' ? 'xAI' : 'subscription'
 }
 
 function authorizationStartArguments(
@@ -877,7 +701,7 @@ function authorizationStartArguments(
 ): { service: ProviderAuthorizationService; fetchImpl: typeof fetch; now: number } {
   if (typeof serviceOrFetch === 'function') {
     return {
-      service: 'codex-oauth',
+      service: 'xai-oauth',
       fetchImpl: serviceOrFetch,
       now: typeof fetchOrNow === 'number' ? fetchOrNow : requestedNow
     }

@@ -1,4 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
+import type { NativeRequestBudgetInput } from '../model/native-request-budget'
+import { releaseUnsentModelBudget, reserveModelAttemptBudget, settleModelAttemptBudget } from './model-attempt-budget'
+import { isModelRouteError } from '../model/model-route-error'
+import { nativeHttpRefusalEvidence } from '../model/native-http-refusal'
 import type {
   ModelAttemptCompleteInput,
   ModelAttemptOutcome,
@@ -12,6 +16,7 @@ import {
 } from './model-attempt-api'
 
 export interface RuntimeModelAttemptInput {
+  budgetScope?: NativeRequestBudgetInput
   runId: string
   requestId: string
   stepId?: string
@@ -144,7 +149,11 @@ export async function beginPersistedModelAttempt(
   const effectiveInput = await resolveRetryAuthorizedInput(input, dependencies)
   const attemptId = effectiveInput.id ?? dependencies.randomId()
   const startedAt = effectiveInput.startedAt ?? dependencies.now()
-  const attempt = await persistRuntimeStart(effectiveInput, attemptId, startedAt, dependencies)
+  try { reserveModelAttemptBudget({ ...effectiveInput, id: attemptId }) }
+  catch (error) { if (isModelRouteError(error)) throw error; throw new ModelAttemptPersistenceError('start', false, attemptId, error) }
+  let attempt: ModelAttemptRecord
+  try { attempt = await persistRuntimeStart(effectiveInput, attemptId, startedAt, dependencies) }
+  catch (error) { releaseUnsentModelBudget(attemptId, effectiveInput.budgetScope); throw error }
   let settlementStarted = false
 
   const settle = async (
@@ -153,13 +162,16 @@ export async function beginPersistedModelAttempt(
   ): Promise<ModelAttemptRecord> => {
     if (settlementStarted) throw new ModelAttemptSettlementError(attempt.id)
     settlementStarted = true
-    return persistRuntimeCompletion(
+    const completed = await persistRuntimeCompletion(
       attempt,
       completion,
       effectiveInput.rootDir,
       dependencies,
       cause
     )
+    try { settleModelAttemptBudget(attemptId, effectiveInput.budgetScope, completion) }
+    catch (error) { throw new ModelAttemptPersistenceError('complete', true, attemptId, error) }
+    return completed
   }
 
   return {
@@ -240,6 +252,9 @@ export function classifyRuntimeModelFailure(
   if (context.aborted || errorName(error) === 'AbortError') {
     return { status: 'cancelled', outcome: 'cancelled' }
   }
+  const refusal = nativeHttpRefusalEvidence(error)
+  if (refusal) return { status: 'failed', outcome: refusal.outcome,
+    errorClass: refusal.outcome === 'auth_failed' ? 'provider_auth' : 'provider_rate_limit' }
   const message = errorMessage(error)
   if (/\b(?:401|403)\b|auth(?:entication|orization)?|unauthori[sz]ed|forbidden/i.test(message)) {
     return { status: 'failed', outcome: 'auth_failed', errorClass: 'provider_auth' }

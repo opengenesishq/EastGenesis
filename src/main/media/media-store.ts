@@ -1,4 +1,15 @@
+import { parseVideoScript } from './media-script-parser'
+import { assertSameBusinessLine, newBusinessLineId, storedBusinessLineId } from '../business-line-ownership'
+import { assertProductionCreationReplay, mediaProductionCreationDigest, productionScript } from './media-production-identity'
+import { parseVideoStoryboardDraft } from '../../shared/video-storyboard-types'
+import { localMediaCost as localCost, normalizeMediaCost, providerEstimatedCost, validMoney } from './media-cost'
 import { createHash, randomUUID } from 'node:crypto'
+import type { MediaExecutionBinding } from '../../shared/media-types'
+import { assertMediaSubmissionBudget } from './media-budget'
+import { resolveSubmissionMediaProfile } from './media-submission-profile'
+import { assertMediaSubmissionReconciled } from './media-reconciliation-identity'
+import { mediaJobIdForKey, normalizeMediaIdempotencyKey } from './media-submission-identity'
+import { mediaStoreRoot } from './media-store-root'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type {
@@ -64,6 +75,7 @@ interface MediaDocument {
 }
 
 export interface MediaJobCanonicalBinding {
+  businessLineId?: string
   goalId: string
   workItemId: string
   runId: string
@@ -158,6 +170,7 @@ export function normalizeMediaProjectSliceForImport(value: unknown): MediaProjec
 function migrateProduction(raw: Record<string, unknown>): VideoProduction {
   const production = clone(raw) as unknown as VideoProduction
   production.schemaVersion = MEDIA_SCHEMA_VERSION
+  production.businessLineId = storedBusinessLineId(raw.businessLineId)
   production.episodes = (production.episodes ?? []).map((record) => ({ ...record, schemaVersion: MEDIA_SCHEMA_VERSION }))
   production.scenes = (production.scenes ?? []).map((record) => ({ ...record, schemaVersion: MEDIA_SCHEMA_VERSION }))
   production.shots = (production.shots ?? []).map((record) => ({
@@ -222,6 +235,7 @@ function migrateProduction(raw: Record<string, unknown>): VideoProduction {
 function migrateJob(raw: Record<string, unknown>): MediaJobRecord {
   const job = clone(raw) as unknown as MediaJobRecord
   job.schemaVersion = MEDIA_SCHEMA_VERSION
+  job.businessLineId = storedBusinessLineId(raw.businessLineId)
   job.providerMode = job.providerMode === 'remote' ? 'remote' : 'mock'
   job.operation = validMediaOperation(job.operation) ? job.operation : defaultMediaOperation(job.capability)
   job.parameters = normalizeGenerationParameters(job.parameters)
@@ -302,6 +316,19 @@ function migrateProvider(raw: Record<string, unknown> | MediaProviderProfile): M
   const endpointClass = ['mock', 'openai-compatible', 'anthropic-compatible', 'openai-image', 'openai-speech', 'openai-video', 'generic-async', 'local-ffmpeg'].includes(String(value.endpointClass))
     ? value.endpointClass as MediaProviderProfile['endpointClass']
     : 'mock'
+  const rawVerification = value.verification && typeof value.verification === 'object'
+    ? value.verification as NonNullable<MediaProviderProfile['verification']>
+    : undefined
+  const verification = rawVerification && ['verified', 'failed', 'unknown'].includes(rawVerification.state)
+    ? {
+      state: rawVerification.state,
+      ...(Array.isArray(rawVerification.operations)
+        ? { operations: rawVerification.operations.filter((item): item is MediaOperation => validMediaOperation(item)) }
+        : {}),
+      ...(Number.isFinite(rawVerification.verifiedAt) ? { verifiedAt: Number(rawVerification.verifiedAt) } : {}),
+      ...(typeof rawVerification.reason === 'string' ? { reason: rawVerification.reason.slice(0, 240) } : {})
+    } as NonNullable<MediaProviderProfile['verification']>
+    : undefined
   return {
     schemaVersion: MEDIA_SCHEMA_VERSION,
     id: requiredId(value.id ?? `media-provider:${randomUUID()}`, 'media provider id'),
@@ -318,6 +345,7 @@ function migrateProvider(raw: Record<string, unknown> | MediaProviderProfile): M
     ...(validMediaPathTemplate(value.downloadPathTemplate) ? { downloadPathTemplate: value.downloadPathTemplate } : {}),
     ...(validMediaPathTemplate(value.cancelPathTemplate) ? { cancelPathTemplate: value.cancelPathTemplate } : {}),
     ...(validMoney(value.estimatedCostUsd) ? { estimatedCostUsd: value.estimatedCostUsd } : {}),
+    ...(verification ? { verification } : {}),
     enabled: value.enabled !== false,
     createdAt: Number.isFinite(value.createdAt) ? Number(value.createdAt) : now,
     updatedAt: Number.isFinite(value.updatedAt) ? Number(value.updatedAt) : now
@@ -363,11 +391,11 @@ export class MediaStore {
     await previous
     try {
       const state = await this.read()
-      const previousDocument = canonicalJson(state), result = fn(state, Date.now())
-      if (canonicalJson(state) === previousDocument) return clone(result)
+      const result = fn(state, Date.now())
       state.revision += 1
-      try { await writeDurableFile(this.filePath, `${canonicalJson(state)}\n`, { mode: 0o600 }) } catch (error) { this.state = undefined; this.initialLoad = undefined; throw error }
-      this.state = state; return clone(result)
+      await writeDurableFile(this.filePath, `${canonicalJson(state)}\n`, { mode: 0o600 })
+      this.state = state
+      return clone(result)
     } finally {
       release()
     }
@@ -486,7 +514,7 @@ export class MediaStore {
   }
 
   async findMediaJobByIdempotencyKey(idempotencyKey: string): Promise<MediaJobRecord | undefined> {
-    const key = requiredText(idempotencyKey, 'idempotencyKey')
+    const key = normalizeMediaIdempotencyKey(idempotencyKey)
     return clone((await this.read()).jobs.find((item) => item.idempotencyKey === key))
   }
 
@@ -583,19 +611,16 @@ export class MediaStore {
     return this.mutate((state, now) => {
       const projectId = requiredId(input.projectId, 'projectId')
       const title = requiredText(input.title, 'production title').slice(0, 240)
-      const script = requiredText(input.script, 'production script').slice(0, 200_000)
+      const script = productionScript(input.script)
       const existing = input.id ? state.productions.find((item) => item.id === input.id) : undefined
       if (existing) {
-        if (existing.projectId !== projectId || existing.title !== title || existing.script !== script) {
-          throw new Error('VideoProduction identity conflict')
-        }
+        assertProductionCreationReplay(existing, input, { projectId, title, script })
         return existing
       }
       const id = input.id?.trim() || `production:${randomUUID()}`
       const episodeId = `episode:${randomUUID()}`
-      const parsed = input.autoStructure === false
-        ? [{ title: 'Scene 1', summary: script.slice(0, 500), shots: [] }]
-        : parseVideoScript(script)
+      const parsed = input.storyboardDraft ? parseVideoStoryboardDraft(input.storyboardDraft).scenes
+        : input.autoStructure === false ? [{ title: 'Scene 1', summary: script.slice(0, 500), shots: [] }] : parseVideoScript(script)
       const scenes: VideoScene[] = parsed.map((item) => ({
         schemaVersion: MEDIA_SCHEMA_VERSION,
         id: `scene:${randomUUID()}`,
@@ -621,6 +646,8 @@ export class MediaStore {
         schemaVersion: MEDIA_SCHEMA_VERSION,
         id,
         projectId,
+        businessLineId: newBusinessLineId(input.businessLineId, undefined, 'video'),
+        creationRequestDigest: mediaProductionCreationDigest(input),
         title,
         script,
         revision: 1,
@@ -670,9 +697,10 @@ export class MediaStore {
     return this.mutate((state, now) => {
       const production = state.productions.find((item) => item.id === requiredId(input.productionId, 'productionId'))
       if (!production) throw new Error('VideoProduction was not found')
-      const script = requiredText(input.script, 'production script').slice(0, 200_000)
-      if (script === production.script) return production
-      const parsed = parseVideoScript(script)
+      const script = productionScript(input.script)
+      if (input.expectedRevision !== undefined && input.expectedRevision !== production.revision) throw new Error('制作项目已更新，请重新生成或核对分镜草稿后再采用')
+      if (script === production.script && !input.storyboardDraft) return production
+      const parsed = input.storyboardDraft ? parseVideoStoryboardDraft(input.storyboardDraft).scenes : parseVideoScript(script)
       const episode = production.episodes[0]
       if (!episode) throw new Error('VideoProduction Episode is missing')
       const scenes: VideoScene[] = parsed.map((item) => ({
@@ -1071,11 +1099,11 @@ export class MediaStore {
     })
   }
 
-  setMediaAssetEgress(input: MediaAssetEgressInput): Promise<MediaAsset> {
+  setMediaAssetEgress(input: MediaAssetEgressInput, catalogProfile?: MediaProviderProfile): Promise<MediaAsset> {
     return this.mutate((state, now) => {
       const production = state.productions.find((item) => item.id === requiredId(input.productionId, 'productionId') && item.projectId === requiredId(input.projectId, 'projectId'))
       const asset = production?.assets.find((item) => item.id === requiredId(input.assetId, 'assetId'))
-      const provider = state.providers.find((item) => item.id === requiredId(input.mediaProviderId, 'mediaProviderId'))
+      const provider = resolveSubmissionMediaProfile(state.providers, input.mediaProviderId, catalogProfile)
       if (!production || !asset || !provider) throw new Error('Media egress target is invalid')
       if (asset.contentStatus !== 'available') throw new Error('MediaAsset content is not available')
       if (!provider.enabled || !provider.operations.includes(input.operation)) throw new Error('Media Provider does not support this operation')
@@ -1259,7 +1287,7 @@ export class MediaStore {
     })
   }
 
-  validateMediaJobInput(input: MediaJobInput): Promise<{ production: VideoProduction; jobId: string; externalJobId: string }> {
+  validateMediaJobInput(input: MediaJobInput, selectedProfile?: MediaProviderProfile): Promise<{ production: VideoProduction; jobId: string; externalJobId: string }> {
     return this.read().then((state) => {
       const projectId = requiredId(input.projectId, 'projectId')
       const productionId = requiredId(input.productionId, 'productionId')
@@ -1273,8 +1301,8 @@ export class MediaStore {
         : undefined
       if (input.dialogueCueId && !dialogueCue) throw new Error('Media job Dialogue cue is outside Shot scope')
       if (input.dialogueCueId && input.capability !== 'tts') throw new Error('Dialogue cue binding requires a TTS capability')
-      const idempotencyKey = requiredText(input.idempotencyKey, 'idempotencyKey').slice(0, 240)
-      const mediaProvider = state.providers.find((provider) => provider.id === input.mediaProviderId)
+      const idempotencyKey = normalizeMediaIdempotencyKey(input.idempotencyKey)
+      const mediaProvider = selectedProfile ?? state.providers.find((provider) => provider.id === input.mediaProviderId)
       const operation = input.operation ?? defaultMediaOperation(input.capability)
       normalizeGenerationParameters(input.parameters)
       if (mediaProvider && mediaProvider.id !== 'media-provider:mock-local' && input.inputAssetIds?.length) {
@@ -1287,29 +1315,18 @@ export class MediaStore {
       if (mediaProvider && mediaProvider.id !== 'media-provider:mock-local' && operation === 'speech.voice-clone') {
         assertVoiceCloneAuthorization(production, input.inputAssetIds ?? [], Date.now())
       }
-      if (mediaProvider && mediaProvider.id !== 'media-provider:mock-local') {
-        const settled = state.jobs.filter((job) => job.productionId === production.id && job.cost.billable && job.cost.status === 'settled')
-          .reduce((sum, job) => sum + (job.cost.actualUsd ?? 0), 0)
-        const reserved = state.jobs.filter((job) => job.productionId === production.id && job.cost.billable && job.cost.status === 'estimated' && !['failed', 'cancelled'].includes(job.status))
-          .reduce((sum, job) => sum + job.cost.estimatedUsd, 0)
-        if (mediaProvider.estimatedCostUsd === undefined && production.budget.limitUsd !== undefined && production.budget.limitUsd > 0) {
-          throw new Error('Media Provider has no price estimate; budget policy blocks this billable request')
-        }
-        if (production.budget.limitUsd !== undefined && production.budget.limitUsd > 0 && settled + reserved + (mediaProvider.estimatedCostUsd ?? 0) > production.budget.limitUsd) {
-          throw new Error('Media budget would be exceeded by this request')
-        }
-      }
+      assertMediaSubmissionBudget(production, state.jobs, mediaProvider)
       return {
         production: clone(production),
-        jobId: `media-job:${sha256(idempotencyKey).slice(0, 32)}`,
+        jobId: mediaJobIdForKey(idempotencyKey),
         externalJobId: `${input.mediaProviderId && input.mediaProviderId !== 'media-provider:mock-local' ? 'remote' : 'mock'}:${sha256(idempotencyKey)}`
       }
     })
   }
 
-  prepareMediaJobSubmission(input: MediaJobInput, binding: MediaJobCanonicalBinding): Promise<MediaJobRecord> {
+  prepareMediaJobSubmission(input: MediaJobInput, binding: MediaJobCanonicalBinding, executionBinding?: MediaExecutionBinding): Promise<MediaJobRecord> {
     return this.mutate((state, now) => {
-      const idempotencyKey = requiredText(input.idempotencyKey, 'idempotencyKey').slice(0, 240)
+      const idempotencyKey = normalizeMediaIdempotencyKey(input.idempotencyKey)
       const existing = state.jobs.find((job) => job.idempotencyKey === idempotencyKey)
       if (existing) {
         assertJobBinding(existing, input, binding)
@@ -1330,21 +1347,22 @@ export class MediaStore {
       const operation = input.operation ?? defaultMediaOperation(input.capability)
       if (!validMediaOperation(operation) || operationCapability(operation) !== input.capability) throw new Error('Media operation does not match its capability')
       const mediaProviderId = input.mediaProviderId?.trim() || undefined
-      if (mediaProviderId && !state.providers.some((provider) => provider.id === mediaProviderId && provider.enabled && provider.capabilities.includes(input.capability) && provider.operations.includes(operation))) {
-        throw new Error('Media Provider is unavailable for this capability')
-      }
+      assertMediaSubmissionReconciled(state.jobs, executionBinding?.contentDigest)
+      const selectedProfile = resolveSubmissionMediaProfile(state.providers, mediaProviderId, executionBinding?.profile, operation)
+      assertMediaSubmissionBudget(production, state.jobs, selectedProfile)
       if (mediaProviderId && mediaProviderId !== 'media-provider:mock-local' && input.inputAssetIds?.length) {
         assertMediaAssetEgressGrants(production, input.inputAssetIds, mediaProviderId, operation, now)
       }
       if (mediaProviderId && mediaProviderId !== 'media-provider:mock-local' && operation === 'speech.voice-clone') {
         assertVoiceCloneAuthorization(production, input.inputAssetIds ?? [], now)
       }
-      const id = `media-job:${sha256(idempotencyKey).slice(0, 32)}`
+      const id = mediaJobIdForKey(idempotencyKey)
       const job: MediaJobRecord = {
         schemaVersion: MEDIA_SCHEMA_VERSION,
         id,
         projectId: production.projectId,
         productionId: production.id,
+        businessLineId: newBusinessLineId(input.businessLineId, production.businessLineId ?? 'video'),
         ...(input.shotId ? { shotId: input.shotId } : {}),
         ...(input.dialogueCueId ? { dialogueCueId: input.dialogueCueId } : {}),
         goalId: requiredId(binding.goalId, 'goalId'),
@@ -1356,8 +1374,10 @@ export class MediaStore {
         requestId: `media-job:${sha256(idempotencyKey)}`,
         capability: input.capability,
         operation,
-        providerId: input.providerId?.trim() || state.providers.find((provider) => provider.id === mediaProviderId)?.providerId || 'mock-local',
+        providerId: input.providerId?.trim() || selectedProfile?.providerId || 'mock-local',
         ...(mediaProviderId ? { mediaProviderId } : {}),
+        ...(executionBinding ? { executionBinding: clone(executionBinding) } : {}),
+        agentOrigin: executionBinding?.agentOrigin, budgetReservationId: executionBinding?.budgetReservationId,
         providerMode: mediaProviderId && mediaProviderId !== 'media-provider:mock-local' ? 'remote' : 'mock',
         externalJobId: `${mediaProviderId && mediaProviderId !== 'media-provider:mock-local' ? 'remote' : 'mock'}:${sha256(idempotencyKey)}`,
         idempotencyKey,
@@ -1369,7 +1389,7 @@ export class MediaStore {
         parametersDigest: `sha256:${sha256(canonicalJson(normalizeGenerationParameters(input.parameters)))}`,
         mockScenario: normalizeMockScenario(input.mockScenario),
         cost: mediaProviderId && mediaProviderId !== 'media-provider:mock-local'
-          ? providerEstimatedCost(state.providers.find((provider) => provider.id === mediaProviderId), now)
+          ? providerEstimatedCost(selectedProfile, now)
           : localCost('mock_zero', now),
         status: 'requested',
         attempt: 1,
@@ -1513,43 +1533,6 @@ function attachOutputAsset(state: MediaDocument, job: MediaJobRecord, output: Me
   }
   production.revision += 1
   production.updatedAt = now
-}
-
-function parseVideoScript(script: string): Array<{
-  title: string
-  summary: string
-  shots: Array<{ title: string; prompt: string; durationMs: number }>
-}> {
-  const normalized = script.replaceAll('\r\n', '\n').trim()
-  const explicitScenes = normalized.split(/\n(?=(?:#{1,3}\s*)?(?:scene|场景|第\s*\d+\s*场)\b)/iu)
-    .map((part) => part.trim()).filter(Boolean)
-  const sceneTexts = (explicitScenes.length > 1 ? explicitScenes : normalized.split(/\n\s*\n+/u))
-    .map((part) => part.trim()).filter(Boolean).slice(0, 3)
-  const boundedScenes = sceneTexts.length > 0 ? sceneTexts : [normalized]
-  let remainingShots = 8
-  return boundedScenes.map((sceneText, sceneIndex) => {
-    const lines = sceneText.split('\n').map((line) => line.trim()).filter(Boolean)
-    const first = lines[0] ?? `Scene ${sceneIndex + 1}`
-    const explicitTitle = /^(?:#{1,3}\s*)?(?:scene|场景|第\s*\d+\s*场)\b[:：\s-]*(.*)$/iu.exec(first)
-    const title = (explicitTitle?.[1] || `Scene ${sceneIndex + 1}`).slice(0, 240)
-    const body = explicitTitle ? (lines.slice(1).join('\n') || explicitTitle[1] || sceneText) : lines.join('\n')
-    const shotParts = body.split(/\n(?=(?:[-*]\s*)?(?:shot|镜头|分镜|\d+[.)、])\s*)/iu)
-      .map((part) => part.replace(/^(?:[-*]\s*)?(?:shot|镜头|分镜|\d+[.)、])\s*[:：-]?\s*/iu, '').trim())
-      .filter(Boolean)
-    const candidates = (shotParts.length > 1 ? shotParts : sentenceShots(body)).slice(0, remainingShots)
-    const shots = candidates.map((prompt, shotIndex) => ({
-      title: `镜头 ${shotIndex + 1}`,
-      prompt: prompt.slice(0, 20_000),
-      durationMs: 5_000
-    }))
-    remainingShots -= shots.length
-    return { title, summary: body.slice(0, 500), shots }
-  })
-}
-
-function sentenceShots(value: string): string[] {
-  const sentences = value.split(/(?<=[。！？!?])\s*/u).map((part) => part.trim()).filter(Boolean)
-  return sentences.length > 0 ? sentences : value.trim() ? [value.trim()] : []
 }
 
 function newShot(sceneId: string, title: string, prompt: string, durationMs: number, now: number): VideoShot {
@@ -1740,6 +1723,8 @@ function mediaPreviewUrl(artifactId: string): string {
 }
 
 function assertJobBinding(job: MediaJobRecord, input: MediaJobInput, binding: MediaJobCanonicalBinding): void {
+  assertSameBusinessLine(input.businessLineId, job.businessLineId, 'video')
+  assertSameBusinessLine(binding.businessLineId, job.businessLineId, 'video')
   const parametersDigest = `sha256:${sha256(canonicalJson(normalizeGenerationParameters(input.parameters)))}`
   if (job.projectId !== input.projectId || job.productionId !== input.productionId || job.shotId !== input.shotId || job.dialogueCueId !== input.dialogueCueId ||
       job.capability !== input.capability || job.operation !== (input.operation ?? defaultMediaOperation(input.capability)) ||
@@ -1885,20 +1870,6 @@ function assertVoiceCloneAuthorization(production: VideoProduction, inputAssetId
   }
 }
 
-function normalizeMediaCost(value: unknown, fallback: 'settled' | 'unavailable', observedAt: number): MediaJobRecord['cost'] {
-  const cost = value && typeof value === 'object' ? value as Partial<MediaJobRecord['cost']> : undefined
-  if (cost?.currency === 'USD' && validMoney(cost.estimatedUsd) &&
-      (cost.actualUsd === undefined || validMoney(cost.actualUsd)) &&
-      (cost.status === 'estimated' || cost.status === 'settled' || cost.status === 'unavailable') &&
-      (cost.source === 'non_billable_local' || cost.source === 'mock_zero' || cost.source === 'catalog_estimate' || cost.source === 'provider_reported')) {
-    const receiptDigest = typeof cost.receiptDigest === 'string' && /^sha256:[a-f0-9]{64}$/.test(cost.receiptDigest) ? cost.receiptDigest : undefined
-    return { ...cost, schemaVersion: MEDIA_SCHEMA_VERSION, observedAt: Number.isFinite(cost.observedAt) ? cost.observedAt : observedAt, ...(receiptDigest ? { receiptDigest } : {}) } as MediaJobRecord['cost']
-  }
-  return fallback === 'settled' ? localCost('mock_zero', observedAt) : {
-    schemaVersion: MEDIA_SCHEMA_VERSION, currency: 'USD', estimatedUsd: 0, status: 'unavailable', source: 'catalog_estimate', billable: true, observedAt
-  }
-}
-
 function nonNegativeInteger(value: unknown): number {
   return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : 0
 }
@@ -1915,23 +1886,13 @@ function scheduleMediaReconciliation(job: MediaJobRecord, now: number): void {
   job.nextReconcileAt = now + delay
 }
 
-function localCost(source: 'non_billable_local' | 'mock_zero', observedAt: number): MediaJobRecord['cost'] {
-  return { schemaVersion: MEDIA_SCHEMA_VERSION, currency: 'USD', estimatedUsd: 0, actualUsd: 0, status: 'settled', source, billable: false, observedAt }
-}
-
-function validMoney(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1_000_000 }
 function validThreshold(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) && value >= 0.1 && value <= 1 }
 function validMediaPath(value: unknown): value is string { return typeof value === 'string' && /^\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{1,500}$/.test(value) && !value.includes('..') && !value.includes('?') && !value.includes('#') }
 function validMediaPathTemplate(value: unknown): value is string { return validMediaPath(value) && value.includes('{id}') }
-function providerEstimatedCost(provider: MediaProviderProfile | undefined, observedAt: number): MediaJobRecord['cost'] {
-  return provider?.estimatedCostUsd === undefined
-    ? { schemaVersion: MEDIA_SCHEMA_VERSION, currency: 'USD', estimatedUsd: 0, status: 'unavailable', source: 'catalog_estimate', billable: true, observedAt }
-    : { schemaVersion: MEDIA_SCHEMA_VERSION, currency: 'USD', estimatedUsd: provider.estimatedCostUsd, status: 'estimated', source: 'catalog_estimate', billable: true, observedAt }
-}
-
 const stores = new Map<string, MediaStore>()
 
 export function getMediaStore(rootDir: string): MediaStore {
+  rootDir = mediaStoreRoot(rootDir)
   const existing = stores.get(rootDir)
   if (existing) return existing
   const store = new MediaStore(rootDir)

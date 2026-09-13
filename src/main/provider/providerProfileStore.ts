@@ -21,6 +21,7 @@ import { normalizeProviderAuthMode } from './providerAuthMode'
 import { normalizeProviderAdvancedConfig, normalizeProviderAuthorization } from './providerAdvancedConfig'
 import { assertNoDuplicateProviderProfileTargets } from './providerProfile'
 import { mergeProviderPatch, resolveProviderPatchFields } from './providerUpdate'
+import { prepareProviderConnectionSet } from './providerConnectionStore'
 
 export interface ProviderProfileMutation {
   action: 'create' | 'update'
@@ -113,7 +114,7 @@ export function restoreProviderStoreBackup(providers: Provider[]): ProviderView[
 
 export function prepareProviderStoreBackupRestore(providers: Provider[]): PreparedProviderProfileStoreMutation {
   const previous = cloneProviders(loadProviderProfileStore())
-  const restored = cloneProviders(providers)
+  const restored = cloneProviders(providers).map(({ connectionIdentity: _identity, connectionAuthorizationPoolDigest: _poolDigest, ...provider }) => provider)
   assertProviderBackup(restored)
   const migrated = migrateLoadedProviders(restored).providers
   return preparedStoreMutation(previous, migrated)
@@ -163,7 +164,7 @@ function preparedStoreMutation(
   desired: Provider[]
 ): PreparedProviderProfileStoreMutation {
   const clonedBefore = cloneProviders(before)
-  const clonedDesired = cloneProviders(desired)
+  const clonedDesired = cloneProviders(prepareProviderConnectionSet(before, desired))
   return {
     before: clonedBefore,
     desired: clonedDesired,

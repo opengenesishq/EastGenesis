@@ -40,19 +40,8 @@ export async function savePreviewAnnotation(
   const input = normalizeSaveArgs(sessionOrInput, maybeInput)
   const annotation = normalizePreviewAnnotation(input.sessionId, input)
   const filePath = annotationJsonPath(resolveRootDir(rootDir), annotation.sessionId, annotation.id)
-  const content = `${JSON.stringify(storedAnnotation(annotation), null, JSON_INDENT)}\n`
-  try {
-    await writeDurableFile(filePath, content, { replace: false })
-    return annotation
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    const raw = await readFile(filePath, 'utf8')
-    const existing = parseStoredAnnotation(raw, annotation.sessionId, annotation.id).annotation
-    if (JSON.stringify(storedAnnotation(existing)) !== JSON.stringify(storedAnnotation(annotation))) {
-      throw new PreviewAnnotationValidationError(`annotation id 已存在且内容不同: ${annotation.id}`)
-    }
-    return existing
-  }
+  await atomicWriteText(filePath, `${JSON.stringify(storedAnnotation(annotation), null, JSON_INDENT)}\n`)
+  return annotation
 }
 
 export async function listPreviewAnnotations(

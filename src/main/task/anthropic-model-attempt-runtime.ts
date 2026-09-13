@@ -1,4 +1,5 @@
 import type { ModelAttemptUsage } from '../../shared/model-attempt-types'
+import type { NativeRequestBudgetInput } from '../model/native-request-budget'
 import type { TaskRunRecord } from '../../shared/types'
 import type { AnthropicMessagesResult } from '../anthropicMessagesAdapter'
 import {
@@ -34,6 +35,7 @@ export interface AnthropicModelAttemptAuth {
 }
 
 export interface AnthropicModelAttemptInput {
+  budgetScope?: NativeRequestBudgetInput
   run?: TaskRunRecord
   providerId: string
   model: string
@@ -117,6 +119,7 @@ export class AnthropicModelAttemptTracker {
     const requestId = explicitRequestId ??
       `model-request:${run.id}:${this.messageId || 'system'}:${++this.sequence}`
     return {
+      budgetScope: input.budgetScope,
       runId: run.id,
       requestId,
       stepId,

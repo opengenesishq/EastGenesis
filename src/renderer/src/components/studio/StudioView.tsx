@@ -1,9 +1,11 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, memo, useCallback, useEffect, useMemo, useState } from 'react'
 import type { Goal, ProjectSquad, ProjectWorkspace, WorkItem, WorkItemComment } from '../../../../shared/types'
-import DigitalWorkerStudio from './DigitalWorkerStudio'
+const DigitalWorkerStudio = lazy(() => import('./DigitalWorkerStudio'))
 import ProjectWorkspaceStudio, { type ProjectWorkspaceStudioContext } from './ProjectWorkspaceStudio'
+import { TEXT } from './projectWorkspaceStudioModel'
 import { useStore } from '../../store'
 import './studio-view.css'
+import { PROJECT_WORKSPACE_NAVIGATION_EVENT, takeProjectWorkspaceNavigation, type ProjectWorkspaceFocus } from './projectWorkspaceNavigation'
 
 type StudioSection = 'work' | 'team'
 
@@ -16,7 +18,9 @@ const EMPTY_CONTEXT: ProjectWorkspaceStudioContext = {
 }
 
 function StudioView({ active = true }: { active?: boolean }): React.JSX.Element {
+  const language = useStore((state) => state.settings.language)
   const initialProjectId = useStore((state) => state.preferredProjectWorkspaceId) ?? undefined
+  const [workspaceNavigation, setWorkspaceNavigation] = useState<{ projectId: string; focus: ProjectWorkspaceFocus; workItemId?: string } | null>(null)
   const newProjectRequest = useStore((state) => state.studioNewProjectNonce)
   const [section, setSection] = useState<StudioSection>('work')
   const [context, setContext] = useState<ProjectWorkspaceStudioContext>(EMPTY_CONTEXT)
@@ -28,56 +32,88 @@ function StudioView({ active = true }: { active?: boolean }): React.JSX.Element 
   useEffect(() => {
     if (!active || section !== 'work' || workspaceActivated) return
     const frameIds: number[] = []
-    const activateAfterPaint = (framesRemaining: number): void => {
-      frameIds.push(window.requestAnimationFrame(() => {
-        if (framesRemaining === 1) setWorkspaceActivated(true)
-        else activateAfterPaint(framesRemaining - 1)
-      }))
+    const activateAfterPaint = (): void => {
+      frameIds.push(window.requestAnimationFrame(() => setWorkspaceActivated(true)))
     }
     // Keep project hydration out of the shell's first interactive paint.
-    activateAfterPaint(3)
+    activateAfterPaint()
     return () => frameIds.forEach((frameId) => window.cancelAnimationFrame(frameId))
   }, [active, section, workspaceActivated])
+  useEffect(() => {
+    const onNavigation = (event: Event): void => {
+      const detail = (event as CustomEvent<{ projectId: string; focus: ProjectWorkspaceFocus }>).detail
+      if (!detail?.projectId) return
+      const next = takeProjectWorkspaceNavigation(detail.projectId)
+      if (next) {
+        setWorkspaceNavigation(next)
+        setSection('work')
+      }
+    }
+    window.addEventListener(PROJECT_WORKSPACE_NAVIGATION_EVENT, onNavigation)
+    return () => window.removeEventListener(PROJECT_WORKSPACE_NAVIGATION_EVENT, onNavigation)
+  }, [])
+  useEffect(() => {
+    if (!initialProjectId) return
+    const next = takeProjectWorkspaceNavigation(initialProjectId)
+    if (next) setWorkspaceNavigation(next)
+  }, [initialProjectId])
 
   const project = context.project
   const projects = useMemo(() => project ? [{ id: project.id, name: project.name }] : [], [project])
   return (
-    <div className="studio-view" data-studio-view>
-      <nav className="studio-section-switcher" role="group" aria-label="工作台视图">
+    <div className="studio-view" data-studio-view data-language={language}>
+      <nav
+        className="studio-section-switcher"
+        aria-label={language === 'zh' ? '工作区表面' : 'Studio surfaces'}
+        role="tablist"
+      >
         <button
           type="button"
-          aria-pressed={section === 'work'}
           className={section === 'work' ? 'active' : ''}
+          aria-selected={section === 'work'}
+          aria-pressed={section === 'work'}
+          data-studio-section-option="work"
+          role="tab"
           onClick={() => setSection('work')}
         >
-          项目与任务
+          {TEXT.workSection}
         </button>
         <button
           type="button"
-          aria-pressed={section === 'team'}
           className={section === 'team' ? 'active' : ''}
+          aria-selected={section === 'team'}
+          aria-pressed={section === 'team'}
+          data-studio-section-option="team"
+          role="tab"
           onClick={() => setSection('team')}
         >
-          数字团队
+          {TEXT.digitalTeamSection}
         </button>
       </nav>
+      <p className="studio-section-description">
+        {language === 'zh'
+          ? '普通任务直接开始。需要并行处理独立工作时，再安排数字团队。'
+          : 'Start ordinary tasks directly. Arrange a team when independent work benefits from parallel execution.'}
+      </p>
 
       <div className="studio-section" hidden={section !== 'work'} aria-hidden={section !== 'work'}>
         <ProjectWorkspaceStudio
           active={workspaceActivated}
           initialProjectId={initialProjectId}
+          requestedFocus={workspaceNavigation?.focus}
+          requestedWorkItemId={workspaceNavigation?.workItemId}
           newProjectRequest={newProjectRequest}
           onContextChange={updateContext}
         />
       </div>
       <div className="studio-section" hidden={section !== 'team'} aria-hidden={section !== 'team'}>
-        <DigitalWorkerStudio
+        {section === 'team' && <Suspense fallback={<div>加载协作配置…</div>}><DigitalWorkerStudio
           active={active && section === 'team'}
           projectId={project?.id}
           projects={projects}
           workItems={context.workItems}
           assignedBy="user"
-        />
+        /></Suspense>}
       </div>
     </div>
   )

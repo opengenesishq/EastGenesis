@@ -41,9 +41,6 @@ export interface CanonicalProducedArtifactEvidence {
   source?: WorkflowEvidenceSource
   verifier: string
   uri?: string
-  mediaType?: string
-  observedAt?: number
-  contentDigest?: string
   metadata?: Record<string, unknown>
 }
 
@@ -61,9 +58,6 @@ export interface CanonicalProducedArtifactExternalLocation {
   id: string
   kind?: Extract<WorkflowArtifactLocationKind, 'url' | 'git' | 'external' | 'preview'>
   uri: string
-  checksum?: string
-  sizeBytes?: number
-  mediaType?: string
   metadata?: Record<string, unknown>
 }
 
@@ -172,9 +166,6 @@ function projectProducedArtifactRecords(
       runId: lifecycle.runId,
       kind: input.externalLocation.kind ?? 'url',
       uri: input.externalLocation.uri,
-      checksum: input.externalLocation.checksum,
-      sizeBytes: input.externalLocation.sizeBytes,
-      mediaType: input.externalLocation.mediaType,
       availability: 'available',
       metadata: input.externalLocation.metadata,
       createdAt: observedAt,
@@ -195,8 +186,8 @@ function projectProducedArtifactRecords(
     title: input.evidence.title,
     summary: input.evidence.summary,
     uri: input.evidence.uri,
-    mediaType: input.evidence.mediaType ?? registered.artifact.mediaType,
-    contentDigest: input.evidence.contentDigest ?? evidenceContentDigest(lifecycle.digest),
+    mediaType: registered.artifact.mediaType,
+    contentDigest: evidenceContentDigest(lifecycle.digest),
     metadata: {
       producer: input.lifecycle.metadata?.producer,
       ...input.evidence.metadata
@@ -204,7 +195,7 @@ function projectProducedArtifactRecords(
   }, {
     source: input.evidence.source ?? 'runtime',
     verifier: input.evidence.verifier,
-    observedAt: input.evidence.observedAt ?? observedAt
+    observedAt
   })
   if (input.acceptance && acceptance) {
     linkWorkflowEvidence(db, {

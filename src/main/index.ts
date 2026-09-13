@@ -11,6 +11,7 @@ import {
   type MenuItemConstructorOptions
 } from 'electron'
 import { existsSync } from 'node:fs'
+import { configureGpuCompatibility } from './gpu-compatibility'
 import { join } from 'node:path'
 import { registerIpc } from './ipc'
 import { sessionManager } from './sessionManager'
@@ -47,7 +48,6 @@ import {
   startProviderProfileS3AutoSync,
   stopProviderProfileS3AutoSync
 } from './provider/providerProfileS3Sync'
-import { reconcileCcSwitchProviderImportOperations } from './provider/ccSwitchProviderImport'
 import { refreshProviderCredentialMetrics } from './provider/providerCredentialMetrics'
 import { initializeProviderGateway, stopProviderGateway } from './provider/providerGatewayService'
 import { buildRendererCrashDiagnostic } from './security/crash-diagnostic'
@@ -69,11 +69,15 @@ let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let quitting = false
 let quitCleanupStarted = false
+const REMOTE_CONTINUATION_ENABLED = process.env.CAOGEN_ENABLE_REMOTE_CONTINUATION === '1'
 let trayRunningCount: number | null = null
 let unsubscribeTraySessionEvents: (() => void) | null = null
 let shellInstalled = false
 
 registerMediaProtocolPrivileges()
+
+// Apply before app readiness starts the GPU process; normal WebGL remains accelerated.
+configureGpuCompatibility(app.commandLine)
 
 // GPU incompatibility fallback: disable hardware acceleration to avoid black screen
 if (process.argv.includes('--disable-gpu') || process.env.CAOGEN_DISABLE_GPU === '1') {
@@ -255,7 +259,7 @@ function ensureApplicationShell(): void {
 
 function installApplicationMenu(): void {
   const sessionItems: MenuItemConstructorOptions[] = Array.from({ length: 9 }, (_, index) => ({
-    label: `切换到会话 ${index + 1}`,
+    label: `切换到当前入口记录 ${index + 1}`,
     accelerator: `CommandOrControl+${index + 1}`,
     click: () => sendMenuCommand('menu:select-session', index)
   }))
@@ -290,7 +294,7 @@ function installApplicationMenu(): void {
       label: '文件',
       submenu: [
         {
-          label: '新建会话',
+          label: '新建',
           accelerator: 'CommandOrControl+N',
           click: () => sendMenuCommand('menu:new-session')
         },
@@ -311,14 +315,14 @@ function installApplicationMenu(): void {
         { role: 'selectAll' },
         { type: 'separator' },
         {
-          label: '搜索会话',
+          label: '搜索当前入口',
           accelerator: 'CommandOrControl+F',
           click: () => sendMenuCommand('menu:open-search')
         }
       ]
     },
     {
-      label: '会话',
+      label: '导航',
       submenu: [
         {
           label: '命令面板',
@@ -387,11 +391,6 @@ void app.whenReady().then(async () => {
   reconcileProviderProfileSyncAtStartup()
   startProviderProfileWebDavAutoSync()
   startProviderProfileS3AutoSync()
-  try {
-    reconcileCcSwitchProviderImportOperations()
-  } catch (error) {
-    console.error('[caogen] CC Switch Provider import recovery failed:', error)
-  }
   void refreshProviderCredentialMetrics().catch((error) => {
     console.error('[caogen] Provider credential usage refresh failed:', error)
   })
@@ -418,20 +417,19 @@ void app.whenReady().then(async () => {
   const routineRoot = join(app.getPath('userData'), 'routines')
   try { initializeRoutineSessionLifecycle(routineRoot, app.getPath('userData')) } catch (e) { console.error('[caogen] routine lifecycle init failed:', e) }
   try { await reconcileRoutineRunsAtStartup(routineRoot, app.getPath('userData')) } catch (e) { console.error('[caogen] routine reconciliation failed:', e) }
-  try {
-    await reconcileRemoteExecutions(app.getPath('userData'))
-    await executePendingRemoteCommands(app.getPath('userData'))
-  } catch (e) { console.error('[caogen] remote continuation reconciliation failed:', e) }
-  try {
-    const webhook = await startRemoteWebhookServer({
-      rootDir: app.getPath('userData'),
-      onListening: (address) => console.info(`[caogen] remote webhook listening on ${address.host}:${address.port}`)
-    })
-    if (webhook.host !== '127.0.0.1' && webhook.host !== 'localhost' && webhook.host !== '::1') {
-      console.warn('[caogen] remote webhook is bound outside loopback; use only with a trusted network boundary')
-    }
-  } catch (e) { console.error('[caogen] remote webhook server failed to start:', e) }
-  try { startRemoteContinuationReconciler(app.getPath('userData')) } catch (e) { console.error('[caogen] remote continuation reconciler failed to start:', e) }
+  if (REMOTE_CONTINUATION_ENABLED) {
+    try {
+      await reconcileRemoteExecutions(app.getPath('userData'))
+      await executePendingRemoteCommands(app.getPath('userData'))
+    } catch (e) { console.error('[caogen] remote continuation reconciliation failed:', e) }
+    try {
+      await startRemoteWebhookServer({
+        rootDir: app.getPath('userData'),
+        onListening: (address) => console.info(`[caogen] remote webhook listening on ${address.host}:${address.port}`)
+      })
+    } catch (e) { console.error('[caogen] remote webhook server failed to start:', e) }
+    try { startRemoteContinuationReconciler(app.getPath('userData')) } catch (e) { console.error('[caogen] remote continuation reconciler failed to start:', e) }
+  }
   try { startMediaReconciliationScheduler(app.getPath('userData')) } catch (e) { console.error('[caogen] media reconciliation scheduler failed to start:', e) }
   try { configureQuickbar({ getMainWindow: () => mainWindow, showMainWindow }) } catch (e) { console.error('[caogen] quickbar config failed:', e) }
   try {

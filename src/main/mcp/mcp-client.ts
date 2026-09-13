@@ -1,7 +1,4 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
 import { TextDecoder } from 'node:util'
 import {
   authorizeMcpNetworkUrl,
@@ -63,27 +60,6 @@ export interface McpCallToolResult {
   content: unknown[]
   isError?: boolean
   structuredContent?: unknown
-}
-
-export interface ClaudeDesktopMcpImportResult {
-  configPath: string
-  servers: Record<string, McpServerConfig>
-}
-
-export interface ClaudeDesktopMcpServerSummary {
-  serverId: string
-  transport: McpTransport
-  commandConfigured: boolean
-  argumentCount: number
-  environmentVariableCount: number
-  urlConfigured: boolean
-  headerCount: number
-}
-
-export interface ClaudeDesktopMcpImportSummary {
-  source: 'claude-desktop'
-  serverCount: number
-  servers: ClaudeDesktopMcpServerSummary[]
 }
 
 interface JsonRpcRequest {
@@ -167,49 +143,6 @@ export async function callMcpTool(
   } finally {
     await client.close()
   }
-}
-
-export function defaultClaudeDesktopConfigPath(): string {
-  if (process.platform === 'win32') {
-    return join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'Claude', 'claude_desktop_config.json')
-  }
-  if (process.platform === 'darwin') {
-    return join(homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
-  }
-  return join(homedir(), '.config', 'Claude', 'claude_desktop_config.json')
-}
-
-export async function loadClaudeDesktopMcpServers(
-  configPath = defaultClaudeDesktopConfigPath()
-): Promise<ClaudeDesktopMcpImportResult> {
-  const resolvedPath = resolve(configPath)
-  const raw = await readFile(resolvedPath, 'utf8')
-  const parsed = JSON.parse(raw) as unknown
-  if (!isRecord(parsed) || !isRecord(parsed.mcpServers)) throw new Error('Claude Desktop 配置缺少 mcpServers')
-
-  const servers: Record<string, McpServerConfig> = {}
-  for (const [serverId, value] of Object.entries(parsed.mcpServers)) {
-    const config = normalizeMcpServerConfig(value)
-    if (config) servers[serverId] = config
-  }
-  return { configPath: resolvedPath, servers }
-}
-
-export function summarizeClaudeDesktopMcpImport(
-  imported: ClaudeDesktopMcpImportResult
-): ClaudeDesktopMcpImportSummary {
-  const servers = Object.entries(imported.servers)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([serverId, config]) => ({
-      serverId,
-      transport: mcpTransport(config),
-      commandConfigured: typeof config.command === 'string' && config.command.length > 0,
-      argumentCount: config.args?.length ?? 0,
-      environmentVariableCount: Object.keys(config.env ?? {}).length,
-      urlConfigured: typeof config.url === 'string' && config.url.length > 0,
-      headerCount: Object.keys(config.headers ?? {}).length
-    }))
-  return { source: 'claude-desktop', serverCount: servers.length, servers }
 }
 
 export function builtinMcpServerTemplates(): Record<string, McpServerConfig> {

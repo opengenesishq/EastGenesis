@@ -22,6 +22,7 @@ import {
   prepareCanonicalSystemOperation,
   resolveCanonicalWorkspaceIdForPath
 } from './task/system-operation-context'
+import { TaskKernel } from './task/task-kernel'
 import {
   configureMigrationOperationBackupRoot,
   MIGRATION_OPERATION_BACKUP_REF
@@ -54,13 +55,15 @@ export async function executeMigrationApplyEffect(
   const workspaceId = stored.result.cwd
     ? await resolveCanonicalWorkspaceIdForPath(options.rootDir, stored.result.cwd)
     : undefined
-  const context = await prepareCanonicalSystemOperation({
+  const kernel = new TaskKernel(options.rootDir)
+  const context = await kernel.plan(await kernel.create({
     rootDir: options.rootDir,
     requestId: `migration-apply-${operationId}`,
     objective: `导入 ${selection.assetCount} 项外部 Agent 资产并生成可核验迁移报告`,
     workspaceId,
-    cwd: stored.result.cwd
-  })
+    cwd: stored.result.cwd,
+    deferExecution: true
+  }))
   const toolInput = {
     backupRef: MIGRATION_OPERATION_BACKUP_REF,
     backupId,
@@ -68,30 +71,64 @@ export async function executeMigrationApplyEffect(
     kindCounts: selection.kindCounts,
     selectionDigest: selection.selectionDigest
   }
-  const outcome = await runOperation({
-    rootDir: options.rootDir,
-    operationId,
-    kind: 'migration_apply',
-    title: '应用外部 Agent 迁移',
-    sourceSessionId: `migration:${operationId}`,
-    projectId: context.projectId,
-    workspaceId: context.workspaceId,
-    goalId: context.goalId,
-    workItemId: context.workItemId,
-    cwd: context.cwd,
-    toolName: 'migration_apply',
-    toolInput,
-    execute: (effect) => executeMigrationApply(effect, input, options.backupRoot, backupId, runApply),
-    isSuccess: (result) => result.ok,
-    resultSummary: (result) => JSON.stringify({
-      ok: result.ok,
-      status: result.status,
-      backupId: result.backupId,
-      appliedCount: result.applied.length,
-      skippedCount: result.skipped.length
+  let outcome: InteractiveOperationEffectOutcome<MigrationApplyResult>
+  try {
+    outcome = await kernel.execute(context, () => runOperation({
+      rootDir: options.rootDir,
+      operationId,
+      kind: 'migration_apply',
+      title: '应用外部 Agent 迁移',
+      sourceSessionId: `migration:${operationId}`,
+      projectId: context.projectId,
+      workspaceId: context.workspaceId,
+      goalId: context.goalId,
+      workItemId: context.workItemId,
+      cwd: context.cwd,
+      toolName: 'migration_apply',
+      toolInput,
+      execute: (effect) => executeMigrationApply(effect, input, options.backupRoot, backupId, runApply),
+      isSuccess: (result) => result.ok,
+      resultSummary: (result) => JSON.stringify({
+        ok: result.ok,
+        status: result.status,
+        backupId: result.backupId,
+        appliedCount: result.applied.length,
+        skippedCount: result.skipped.length
+      })
+    }))
+  } catch (error) {
+    // If the Effect gateway fails before it can return an outcome, the
+    // canonical operation must not remain runnable without an execution.
+    await kernel.stop(context, async () => undefined)
+    throw error
+  }
+  if (outcome.status === 'completed' && outcome.value) {
+    if (!outcome.value.ok) {
+      // A queryable Effect may be compensated after the migration callback
+      // reports a deterministic failure. The public result stays the same;
+      // the canonical operation is cancelled because no passed Evidence was
+      // produced for this non-applied outcome.
+      await kernel.stop(context, async () => undefined)
+      return outcome.value
+    }
+    // The migration Artifact producer normally settles this same canonical
+    // operation while the Effect is persisted. Calling deliver again keeps
+    // the TaskKernel boundary explicit and is idempotent for that path.
+    await kernel.deliver(context, {
+      evidenceRefs: [outcome.effectId
+        ? `evidence:migration-report:${outcome.effectId}`
+        : `evidence:migration-operation:${operationId}`],
+      verifiedBy: 'migration-operation'
     })
-  })
-  if (outcome.value) return outcome.value
+    return outcome.value
+  }
+  if (outcome.status === 'failed') {
+    // A failed outcome means the gateway has a deterministic terminal failure
+    // (as opposed to queryable migration uncertainty). Preserve the public
+    // result while cancelling the canonical Goal/WorkItem without inventing
+    // Evidence that does not exist.
+    await kernel.stop(context, async () => undefined)
+  }
   return failedMigrationApply(outcome.status === 'waiting_reconciliation'
     ? 'migration_reconciliation_required'
     : 'migration_operation_failed')

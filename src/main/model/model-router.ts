@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { getModelStat, reliabilityScore } from '../modelStats'
 import type { ProviderView, SchedulerStrategy } from '../../shared/types'
 import { getAcceptanceQualitySignal } from './acceptance-quality-signal'
+import { eligibleRouteProfiles, selectConstrainedCandidate } from './model-route-constraints'
 import {
   buildModelProfiles,
   estimateCostUsd,
@@ -21,7 +22,7 @@ export interface ManualModelOverride {
 }
 
 export interface ModelRouterBudget {
-  /** 本轮或本会话剩余预算；0/undefined 表示不限制。 */
+  /** 剩余预算；undefined 表示不限制，0 表示预算耗尽。设置层的 0 不限制不得直接传入。 */
   remainingUsd?: number
   /** true 时预算超限必须降级；false 时仅降低分数并给出原因。 */
   hardLimit?: boolean
@@ -53,6 +54,29 @@ export interface ModelRouteRequest extends TaskProfileInput {
   excludedModels?: string[]
   crossValidation?: CrossValidationRequest
   providerHealth?: Record<string, ModelRouteHealthInput>
+}
+
+/** Explicit, non-secret observations captured by main before a pure evaluation. */
+export interface ModelRouteScoringSignal {
+  providerId: string
+  model: string
+  reliability: number
+  latencyEmaMs?: number
+  acceptanceQuality?: { score: number; samples: number }
+}
+
+export interface ModelRouteSnapshotInput {
+  request: ModelRouteRequest
+  task: TaskProfile
+  profiles: ModelProfile[]
+  scoringSignals: readonly ModelRouteScoringSignal[]
+}
+
+/** Never falls back to live modelStats/acceptance reads, including missing rows. */
+export function routeModelFromSnapshot(input: ModelRouteSnapshotInput): ModelRouteDecision {
+  if (!Array.isArray(input.scoringSignals)) throw new Error('An explicit scoring snapshot is required')
+  const sourceProfiles = eligibleRouteProfiles(input.profiles, input.task, input.request)
+  return routeEligibleProfiles({ ...input, sourceProfiles })
 }
 
 export interface CrossValidationRequest {
@@ -94,56 +118,41 @@ export interface ModelRouteDecision {
 
 export function routeModel(request: ModelRouteRequest): ModelRouteDecision {
   const task = inferTaskProfile({ ...request, strategy: request.strategy })
-  const excluded = new Set(request.excludedModels ?? [])
   const profiles = request.providers.flatMap((provider) =>
     buildModelProfiles({
       providerId: provider.id,
       providerName: provider.name,
-      models: provider.models
+      models: provider.models,
+      modelProfiles: provider.advancedConfig?.modelProfiles,
+      engine: provider.engine
     })
   )
-  const viable = profiles.filter((profile) => isProfileViable(profile, task) && !excluded.has(profile.model))
-  const sourceProfiles = viable.length > 0 ? viable : profiles.filter((profile) => !excluded.has(profile.model))
-  const candidates = sourceProfiles.map((profile) => scoreCandidate(profile, task, request.providerHealth?.[profile.providerId]))
-  if (candidates.length === 0) throw new Error('没有可路由的模型候选')
+  const sourceProfiles = eligibleRouteProfiles(profiles, task, request)
+  return routeEligibleProfiles({ request, task, sourceProfiles })
+}
+
+function routeEligibleProfiles(input: {
+  request: ModelRouteRequest; task: TaskProfile; sourceProfiles: ModelProfile[]
+  scoringSignals?: readonly ModelRouteScoringSignal[]
+}): ModelRouteDecision {
+  const { request, task, sourceProfiles } = input
+  const candidates = sourceProfiles.map((profile) => scoreCandidate(profile, task,
+    request.providerHealth?.[profile.providerId], scoringSignal(profile, input.scoringSignals)))
   const rankedCandidates = rankCandidates(candidates, task.strategy)
-
-  const warnings: string[] = []
-  const manual = applyManualOverride(rankedCandidates, request.manualOverride)
-  if (manual) {
-    const overBudget = isOverBudget(manual, request.budget)
-    if (!overBudget || request.manualOverride?.allowBudgetOverflow) {
-      return buildDecision({
-        selected: manual,
-        candidates: rankedCandidates,
-        task,
-        manualOverrideApplied: true,
-        manualOverrideReason: request.manualOverride?.reason,
-        budgetDowngraded: false,
-        crossValidation: request.crossValidation,
-        warnings: overBudget ? ['手动覆盖命中预算上限，但调用方允许越过预算。'] : []
-      })
-    }
-    warnings.push('手动覆盖命中预算上限，已按硬预算尝试降级。')
-  }
-
+  const choice = selectConstrainedCandidate(rankedCandidates, request.budget, request.manualOverride)
   const primary = rankedCandidates[0]
-  const budgetSafe = chooseBudgetSafeCandidate(rankedCandidates, request.budget)
-  const selected = budgetSafe ?? primary
-  const budgetDowngraded = selected.profile.model !== primary.profile.model || selected.profile.providerId !== primary.profile.providerId
-  if (isOverBudget(selected, request.budget) && request.budget?.hardLimit) {
-    warnings.push('所有候选均超过硬预算，返回最低估算成本候选供调用方显式处理。')
-  }
-
+  const { selected } = choice
+  const budgetDowngraded = !choice.manualOverrideApplied &&
+    (selected.profile.model !== primary.profile.model || selected.profile.providerId !== primary.profile.providerId)
   return buildDecision({
     selected,
     candidates: rankedCandidates,
     task,
-    manualOverrideApplied: false,
-    manualOverrideReason: manual ? request.manualOverride?.reason : undefined,
+    manualOverrideApplied: choice.manualOverrideApplied,
+    manualOverrideReason: choice.manualOverrideApplied ? request.manualOverride?.reason : undefined,
     budgetDowngraded,
     crossValidation: request.crossValidation,
-    warnings
+    warnings: choice.warnings
   })
 }
 
@@ -190,11 +199,10 @@ export function planCrossValidation(
 function scoreCandidate(
   profile: ModelProfile,
   task: TaskProfile,
-  providerHealth?: ModelRouteHealthInput
+  providerHealth: ModelRouteHealthInput | undefined,
+  signal: ModelRouteScoringSignal
 ): ModelRouteCandidate {
-  const reliability = reliabilityScore(profile.model)
-  const stat = getModelStat(profile.model)
-  const acceptanceQuality = getAcceptanceQualitySignal(profile.providerId, profile.model)
+  const { reliability, acceptanceQuality } = signal
   const acceptanceConfidence = Math.min(1, (acceptanceQuality?.samples ?? 0) / 5)
   const estimatedCostUsd = estimateCostUsd(profile, task.expectedInputTokens, task.expectedOutputTokens)
   const capability = boundedScore(scoreProfileForTask(profile, { ...task, strategy: 'balanced' }), 0, 100)
@@ -204,7 +212,7 @@ function scoreCandidate(
     0,
     100
   )
-  const latencyEmaMs = stat?.latencyEmaMs ?? providerHealth?.latencyEmaMs
+  const latencyEmaMs = signal.latencyEmaMs ?? providerHealth?.latencyEmaMs
   const speed = speedScore(profile.latency, latencyEmaMs)
   const cost = costScore(profile.cost.tier, estimatedCostUsd)
   const health = healthScore(providerHealth)
@@ -244,18 +252,26 @@ function scoreCandidate(
   }
 }
 
-function applyManualOverride(
-  candidates: ModelRouteCandidate[],
-  override?: ManualModelOverride
-): ModelRouteCandidate | undefined {
-  if (!override?.providerId && !override?.model) return undefined
-  return candidates
-    .filter((candidate) => {
-      const providerMatches = !override.providerId || candidate.profile.providerId === override.providerId
-      const modelMatches = !override.model || candidate.profile.model === override.model
-      return providerMatches && modelMatches
-    })
-    .sort(compareCandidateIdentity)[0]
+function scoringSignal(profile: ModelProfile, snapshot?: readonly ModelRouteScoringSignal[]): ModelRouteScoringSignal {
+  if (snapshot === undefined) return {
+    providerId: profile.providerId, model: profile.model,
+    reliability: reliabilityScore(profile.model), latencyEmaMs: getModelStat(profile.model)?.latencyEmaMs,
+    acceptanceQuality: getAcceptanceQualitySignal(profile.providerId, profile.model)
+  }
+  const rows = snapshot.filter((row) => row.providerId === profile.providerId && row.model === profile.model)
+  if (rows.length !== 1) throw new Error('An exact scoring snapshot row is required for each target')
+  const row = rows[0]
+  if (!Number.isFinite(row.reliability) || row.reliability < 0 || row.reliability > 1) throw new Error('Invalid reliability snapshot')
+  assertOptionalScoringSignal(row)
+  return row
+}
+
+function assertOptionalScoringSignal(row: ModelRouteScoringSignal): void {
+  if (row.latencyEmaMs !== undefined && (!Number.isFinite(row.latencyEmaMs) || row.latencyEmaMs < 0)) throw new Error('Invalid latency snapshot')
+  const quality = row.acceptanceQuality
+  if (!quality) return
+  if (!Number.isFinite(quality.score) || quality.score < 0 || quality.score > 1) throw new Error('Invalid acceptance score snapshot')
+  if (!Number.isSafeInteger(quality.samples) || quality.samples < 0) throw new Error('Invalid acceptance sample snapshot')
 }
 
 function rankCandidates(candidates: ModelRouteCandidate[], strategy: SchedulerStrategy): ModelRouteCandidate[] {
@@ -314,33 +330,6 @@ function latencyClassRank(latency: ModelProfile['latency']): number {
   if (latency === 'fast') return 3
   if (latency === 'balanced') return 2
   return 1
-}
-
-function chooseBudgetSafeCandidate(
-  candidates: ModelRouteCandidate[],
-  budget?: ModelRouterBudget
-): ModelRouteCandidate | undefined {
-  if (!budget) return candidates[0]
-  const remainingUsd = budget.remainingUsd
-  if (!remainingUsd || remainingUsd <= 0) return candidates[0]
-  const affordable = candidates.filter((candidate) => candidate.estimatedCostUsd <= remainingUsd)
-  if (affordable.length > 0) return affordable[0]
-  if (!budget.hardLimit) return candidates[0]
-  return [...candidates].sort((a, b) => {
-    const costDelta = a.estimatedCostUsd - b.estimatedCostUsd
-    return costDelta !== 0 ? costDelta : compareCandidateIdentity(a, b)
-  })[0]
-}
-
-function isOverBudget(candidate: ModelRouteCandidate, budget?: ModelRouterBudget): boolean {
-  if (budget?.remainingUsd === undefined || budget.remainingUsd <= 0) return false
-  return candidate.estimatedCostUsd > budget.remainingUsd
-}
-
-function isProfileViable(profile: ModelProfile, task: TaskProfile): boolean {
-  if (task.requiresTools && !profile.supportsTools) return false
-  if (task.requiresVision && !profile.supportsVision) return false
-  return profile.contextWindowTokens >= task.minContextTokens
 }
 
 function buildDecision(input: {

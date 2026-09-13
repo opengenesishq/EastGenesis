@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { newBusinessLineId } from '../business-line-ownership'
 import type {
   AcceptanceResult,
   Goal,
@@ -21,7 +22,6 @@ import {
 } from '../../shared/project-workspace-types'
 import {
   clone,
-  digest,
   finiteNumber,
   normalizeAcceptanceResult,
   normalizeAcceptanceSpecs,
@@ -64,17 +64,13 @@ export class WorkItemRepository {
 
   async create(input: WorkItemInput, options?: MutationOptions | number): Promise<WorkItem> {
     return this.persistence.mutate(options, ({ state, now }) => {
+      this.persistence.assertCreateRevision(state, options)
       const projectId = requiredId(input.projectId, 'work item projectId')
       const project = activeWorkspaceFrom(state, projectId)
       assertProjectAuthorized(state, project, projectMutationActor(options), 'edit')
       const id = optionalId(input.id, 'work item id') ?? randomUUID()
+      assertUniqueWorkItem(state, id)
       const goal = resolveGoal(state, input.goalId, projectId)
-      const existing = state.workItems.find((item) => item.id === id)
-      if (existing) {
-        if (input.id !== undefined && isIdempotentWorkItemCreate(state, existing, input, projectId, goal)) return existing
-        throw new ProjectWorkspaceError('already_exists', `work item ${id} already exists with different content`)
-      }
-      this.persistence.assertCreateRevision(state, options)
       const item = buildWorkItem(state, input, id, projectId, goal, now)
       assertParentAndDependencies(state, item.id, projectId, item.parentId, item.dependencyIds)
       assertRunReferenceOwnership(state, item)
@@ -245,10 +241,19 @@ export class WorkItemRepository {
   }
 }
 
+function assertUniqueWorkItem(state: ProjectWorkspaceState, id: string): void {
+  if (state.workItems.some((item) => item.id === id)) {
+    throw new ProjectWorkspaceError('already_exists', `work item ${id} already exists`)
+  }
+}
+
 function resolveGoal(state: ProjectWorkspaceState, goalId: string | undefined, projectId: string): Goal | undefined {
   if (goalId === undefined) return undefined
   const goal = goalFrom(state, requiredId(goalId, 'work item goalId'))
   assertSameProject(goal.projectId, projectId, 'goal')
+  if (goal.status === 'completed' || goal.status === 'failed' || goal.status === 'cancelled' || goal.status === 'archived') {
+    throw new ProjectWorkspaceError('terminal', `goal ${goal.id} is terminal and cannot accept new WorkItems`)
+  }
   return goal
 }
 
@@ -271,6 +276,7 @@ function buildWorkItem(
     schemaVersion: PROJECT_WORKSPACE_SCHEMA_VERSION,
     id,
     projectId,
+    businessLineId: newBusinessLineId(input.businessLineId, input.parentId ? state.workItems.find((item) => item.id === input.parentId)?.businessLineId ?? 'studio' : undefined),
     goalId: goal?.id,
     parentId: optionalId(input.parentId, 'work item parentId'),
     type,
@@ -290,23 +296,6 @@ function buildWorkItem(
     updatedAt: timestamp(input.updatedAt, 'work item updatedAt', createdAt),
     revision: 1
   }
-}
-
-function isIdempotentWorkItemCreate(
-  state: ProjectWorkspaceState,
-  existing: WorkItem,
-  input: WorkItemInput,
-  projectId: string,
-  goal: Goal | undefined
-): boolean {
-  if (existing.revision !== 1) return false
-  const stateBeforeCreate = {
-    ...state,
-    workItems: state.workItems.filter((item) => item.id !== existing.id)
-  }
-  const expected = buildWorkItem(stateBeforeCreate, input, existing.id, projectId, goal, existing.createdAt)
-  expected.boardOrder = existing.boardOrder
-  return digest(existing) === digest(expected)
 }
 
 function nextBoardOrder(state: ProjectWorkspaceState, projectId: string): number {

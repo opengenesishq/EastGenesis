@@ -26,6 +26,7 @@ export default function ProviderGenerationProbe({ result }: { result: ProviderGe
         status: result.status ?? t('providerDiagnosticNoStatus'),
         latencyMs: result.latencyMs
       })}</p>
+      <p>{t('providerSetupProtocolScope')}</p>
       <p className="provider-generation-probe-billing">{t('providerGenerationProbeBillingNotice')}</p>
     </section>
   )

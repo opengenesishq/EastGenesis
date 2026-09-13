@@ -12,8 +12,6 @@ import {
 } from './migration-safety'
 import { storeMigrationScan, type InternalMigrationAsset, type JsonObject } from './migration-scan-store'
 import { applyMigration as applyMigrationSelection } from './migration-apply'
-import { scanCcSwitchMigrationAssets } from './migration-cc-switch'
-import { scanOpenSourceAgentAssets } from './migration-open-source-assets'
 import {
   assetId,
   buildAsset,
@@ -27,16 +25,13 @@ import {
   type MigrationDiagnostic
 } from './migration-asset-helpers'
 import {
-  addClineMcpAssets,
   addContinueMcpDirectory,
   addContinueYamlMcpAssets,
   addGeminiMcpAssets,
-  addJson5McpAssets,
   addJsonMcpAssets,
   addMcpEntry,
   addOpenCodeMcpAssets,
   addQwenMcpAssets,
-  addYamlMcpAssets,
   boundedMcpEntries
 } from './migration-mcp-assets'
 import { addSkillRoot } from './migration-skill-assets'
@@ -51,17 +46,13 @@ export function scanMigration(
 ): MigrationScan {
   const home = resolve(homeDirectory)
   const cwd = normalizeProjectDirectory(cwdInput)
-  const targetRoot = resolve(targetRootDirectory ?? join(home, '.caogen'))
   const diagnostics: MigrationDiagnostic[] = []
   const internalAssets: InternalMigrationAsset[] = []
 
   if (cwd) scanProjectSources(cwd, home, internalAssets, diagnostics)
   scanUserSources(cwd, home, internalAssets, diagnostics)
-  scanCcSwitchMigrationAssets({ home, assets: internalAssets, diagnostics })
-  scanOpenSourceAgentAssets({ cwd, home, targetRoot, assets: internalAssets, diagnostics })
   blockAmbiguousDestinations(internalAssets)
 
-  const nativeAssetCount = countNativeClaudeAssets(cwd, home)
   const scanId = randomUUID()
   const result: MigrationScan = {
     scanId,
@@ -69,8 +60,6 @@ export function scanMigration(
     mode: cwd ? 'project' : 'conversation',
     scannedAt: new Date().toISOString(),
     assets: internalAssets.map(({ asset }) => asset).sort(compareAssets),
-    claudeNative: nativeAssetCount > 0,
-    nativeAssetCount,
     diagnostics
   }
   storeMigrationScan(result, internalAssets)
@@ -113,12 +102,9 @@ function scanProjectSources(
   for (const [agent, sourcePath] of ruleFiles) {
     addRuleAsset(agent, 'project', sourcePath, cwd, cwd, home, assets, diagnostics)
   }
-  addRulePath('Cline', 'project', join(cwd, '.clinerules'), cwd, cwd, home, assets, diagnostics)
   for (const [agent, directory] of [
     ['Cursor', join(cwd, '.cursor', 'rules')],
     ['Windsurf', join(cwd, '.windsurf', 'rules')],
-    ['Cline', join(cwd, '.clinerules.d')],
-    ['Cline', join(cwd, '.cline', 'rules')],
     ['Roo Code', join(cwd, '.roo', 'rules')],
     ['GitHub Copilot', join(cwd, '.github', 'instructions')],
     ['Continue', join(cwd, '.continue', 'rules')]
@@ -133,7 +119,6 @@ function scanProjectSources(
   ] as Array<[string, string]>) {
     addJsonMcpAssets(agent, 'project', sourcePath, cwd, cwd, home, assets, diagnostics)
   }
-  addClineMcpAssets('project', join(cwd, '.cline', 'mcp.json'), cwd, cwd, home, assets, diagnostics)
   const continueProjectConfig = join(cwd, '.continuerc.json')
   addBlockedConfigAsset('Continue', 'project', continueProjectConfig, cwd, assets, diagnostics)
   addContinueMcpDirectory('project', join(cwd, '.continue', 'mcpServers'), cwd, cwd, home, assets, diagnostics)
@@ -156,14 +141,10 @@ function scanProjectSources(
 
   addBlockedConfigAsset('Aider', 'project', join(cwd, '.aider.conf.yml'), cwd, assets, diagnostics)
   addSkillRoot('Codex', 'project', join(cwd, '.codex', 'skills'), cwd, cwd, home, assets, diagnostics)
-  addSkillRoot('Cline', 'project', join(cwd, '.cline', 'skills'), cwd, cwd, home, assets, diagnostics, 'cline')
-  addSkillRoot('Cline', 'project', join(cwd, '.clinerules', 'skills'), cwd, cwd, home, assets, diagnostics, 'cline-legacy')
   addSkillRoot('Gemini CLI', 'project', join(cwd, '.gemini', 'skills'), cwd, cwd, home, assets, diagnostics, 'gemini')
   addSkillRoot('Qwen Code', 'project', join(cwd, '.qwen', 'skills'), cwd, cwd, home, assets, diagnostics, 'qwen')
   addSkillRoot('OpenCode', 'project', join(cwd, '.opencode', 'skills'), cwd, cwd, home, assets, diagnostics, 'opencode')
   addSkillRoot('OpenCode', 'project', join(cwd, '.opencode', 'skill'), cwd, cwd, home, assets, diagnostics, 'opencode-legacy')
-  addSkillRoot('OpenClaw', 'project', join(cwd, 'skills'), cwd, cwd, home, assets, diagnostics, 'openclaw')
-  addSkillRoot('OpenClaw', 'project', join(cwd, '.agents', 'skills'), cwd, cwd, home, assets, diagnostics, 'openclaw-agents')
 }
 
 function scanUserSources(
@@ -175,9 +156,6 @@ function scanUserSources(
   addRuleAsset('Codex', 'user', join(home, '.codex', 'AGENTS.md'), home, cwd, home, assets, diagnostics)
   addRuleAsset('Gemini CLI', 'user', join(home, '.gemini', 'GEMINI.md'), home, cwd, home, assets, diagnostics)
   addRuleAsset('Qwen Code', 'user', join(home, '.qwen', 'QWEN.md'), home, cwd, home, assets, diagnostics)
-  const clineRoot = join(home, '.cline')
-  addRuleDirectory('Cline', 'user', join(clineRoot, 'rules'), clineRoot, cwd, home, assets, diagnostics)
-  addRuleDirectory('Cline', 'user', join(home, 'Documents', 'Cline', 'Rules'), home, cwd, home, assets, diagnostics)
   const openCodeRoot = join(home, '.config', 'opencode')
   addRuleAsset('OpenCode', 'user', join(openCodeRoot, 'AGENTS.md'), openCodeRoot, cwd, home, assets, diagnostics)
   addBlockedConfigAsset('Aider', 'user', join(home, '.aider.conf.yml'), home, assets, diagnostics)
@@ -200,28 +178,13 @@ function scanUserSources(
     addOpenCodeMcpAssets('user', openCodeConfig, openCodeRoot, cwd, home, assets, diagnostics)
   }
   addJsonMcpAssets('Cursor', 'user', join(home, '.cursor', 'mcp.json'), home, cwd, home, assets, diagnostics)
-  addClineMcpAssets('user', join(clineRoot, 'data', 'settings', 'cline_mcp_settings.json'), clineRoot, cwd, home, assets, diagnostics)
-  addClineMcpAssets('user', join(clineRoot, 'mcp.json'), clineRoot, cwd, home, assets, diagnostics)
-  addClineMcpAssets('user', join(home, 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'settings', 'cline_mcp_settings.json'), home, cwd, home, assets, diagnostics)
   addSkillRoot('Codex', 'user', join(home, '.codex', 'skills'), home, cwd, home, assets, diagnostics)
-  addSkillRoot('Cline', 'user', join(clineRoot, 'skills'), clineRoot, cwd, home, assets, diagnostics, 'cline')
   addSkillRoot('Gemini CLI', 'user', join(geminiRoot, 'skills'), geminiRoot, cwd, home, assets, diagnostics, 'gemini')
   addSkillRoot('Qwen Code', 'user', join(home, '.qwen', 'skills'), join(home, '.qwen'), cwd, home, assets, diagnostics, 'qwen')
   addSkillRoot('OpenCode', 'user', join(openCodeRoot, 'skills'), openCodeRoot, cwd, home, assets, diagnostics, 'opencode')
   addSkillRoot('OpenCode', 'user', join(openCodeRoot, 'skill'), openCodeRoot, cwd, home, assets, diagnostics, 'opencode-legacy')
   addSkillRoot('OpenCode', 'user', join(home, '.agents', 'skills'), home, cwd, home, assets, diagnostics, 'opencode-agents')
 
-  const openClawRoot = join(home, '.openclaw')
-  const openClawConfig = join(openClawRoot, 'openclaw.json')
-  addBlockedConfigAsset('OpenClaw', 'user', openClawConfig, openClawRoot, assets, diagnostics)
-  addJson5McpAssets('OpenClaw', 'user', openClawConfig, openClawRoot, cwd, home, assets, diagnostics)
-  addSkillRoot('OpenClaw', 'user', join(openClawRoot, 'skills'), openClawRoot, cwd, home, assets, diagnostics, 'openclaw')
-
-  const hermesRoot = join(home, '.hermes')
-  const hermesConfig = join(hermesRoot, 'config.yaml')
-  addBlockedConfigAsset('Hermes Agent', 'user', hermesConfig, hermesRoot, assets, diagnostics)
-  addYamlMcpAssets('Hermes Agent', 'user', hermesConfig, hermesRoot, cwd, home, assets, diagnostics)
-  addSkillRoot('Hermes Agent', 'user', join(hermesRoot, 'skills'), hermesRoot, cwd, home, assets, diagnostics, 'hermes')
 }
 
 function addRuleDirectory(
@@ -246,29 +209,6 @@ function addRuleDirectory(
     }
   } catch (error) {
     diagnostics.push(diagnostic(error, directory))
-  }
-}
-
-function addRulePath(
-  agent: string,
-  scope: MigrationAssetScope,
-  sourcePath: string,
-  sourceRoot: string,
-  cwd: string | undefined,
-  home: string,
-  assets: InternalMigrationAsset[],
-  diagnostics: MigrationDiagnostic[]
-): void {
-  if (!existsSync(sourcePath)) return
-  try {
-    assertNoSymlinkWithin(sourceRoot, sourcePath)
-    const info = lstatSync(sourcePath)
-    if (info.isSymbolicLink()) throw new Error('migration_source_symlink')
-    if (info.isFile()) addRuleAsset(agent, scope, sourcePath, sourceRoot, cwd, home, assets, diagnostics)
-    else if (info.isDirectory()) addRuleDirectory(agent, scope, sourcePath, sourceRoot, cwd, home, assets, diagnostics)
-    else throw new Error('migration_source_not_regular')
-  } catch (error) {
-    diagnostics.push(diagnostic(error, sourcePath))
   }
 }
 
@@ -465,23 +405,6 @@ function destinationKey(internal: InternalMigrationAsset): string | undefined {
     return `${internal.asset.kind}\0${resolve(internal.targetPath)}`
   }
   return undefined
-}
-
-function countNativeClaudeAssets(cwd: string | undefined, home: string): number {
-  const candidates = [
-    ...(cwd ? [join(cwd, 'CLAUDE.md'), join(cwd, '.claude'), join(cwd, '.mcp.json')] : []),
-    join(home, '.claude', 'CLAUDE.md'),
-    join(home, '.claude', 'skills'),
-    join(home, '.claude', 'agents'),
-    join(home, '.claude', 'settings.json')
-  ]
-  return candidates.filter((path) => {
-    try {
-      return !lstatSync(path).isSymbolicLink()
-    } catch {
-      return false
-    }
-  }).length
 }
 
 function normalizeProjectDirectory(cwdInput?: string): string | undefined {

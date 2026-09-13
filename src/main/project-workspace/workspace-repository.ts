@@ -38,17 +38,11 @@ export class WorkspaceRepository {
 
   async create(input: ProjectWorkspaceInput, options?: MutationOptions | number): Promise<ProjectWorkspace> {
     return this.persistence.mutate(options, ({ state, now }) => {
-      const id = optionalId(input.id, 'workspace id') ?? randomUUID()
-      const existing = state.workspaces.find((item) => item.id === id)
-      if (existing) {
-        assertProjectAuthorized(state, existing, projectMutationActor(options), 'edit', {
-          allowDeleted: true,
-          allowInactive: true
-        })
-        if (input.id !== undefined && isIdempotentWorkspaceCreate(existing, input)) return existing
-        throw new ProjectWorkspaceError('already_exists', `workspace ${id} already exists with different content`)
-      }
       this.persistence.assertCreateRevision(state, options)
+      const id = optionalId(input.id, 'workspace id') ?? randomUUID()
+      if (state.workspaces.some((item) => item.id === id)) {
+        throw new ProjectWorkspaceError('already_exists', `workspace ${id} already exists`)
+      }
       if (state.events.some((event) =>
         event.projectId === id && event.entityType === 'workspace' &&
         event.entityId === id && event.kind === 'workspace.purged'
@@ -213,15 +207,6 @@ function buildWorkspace(input: ProjectWorkspaceInput, id: string, now: number): 
     updatedAt: timestamp(input.updatedAt, 'workspace updatedAt', createdAt),
     revision: 1
   }
-}
-
-function isIdempotentWorkspaceCreate(existing: ProjectWorkspace, input: ProjectWorkspaceInput): boolean {
-  if (existing.revision !== 1 || existing.status !== 'active') return false
-  const resources = input.resources?.map((resource, index) => ({
-    ...resource,
-    id: resource.id ?? existing.resources[index]?.id
-  }))
-  return digest(existing) === digest(buildWorkspace({ ...input, resources }, existing.id, existing.createdAt))
 }
 
 function sanitizePolicy(value: Record<string, unknown> | undefined): Record<string, unknown> | undefined {

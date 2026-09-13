@@ -49,9 +49,6 @@ export async function executeWebhookMessageEffectTarget(
   target: WebhookMessageTarget,
   input: Record<string, unknown>
 ): Promise<MessageSendExecutionResult> {
-  if (!isCurrentNotificationChannel(target.channel)) {
-    throw new Error('历史通知渠道仅供读取，禁止执行或重发')
-  }
   const message = messageInput(input)
   const connector = resolveNotificationConnector(target.connectorId, target.channel)
   assertMessageTarget(target, connector, message)
@@ -136,11 +133,7 @@ function messagePayload(channel: NotificationConnectorChannel, input: MessageInp
 }
 
 function notificationChannel(value: unknown): NotificationConnectorChannel | undefined {
-  return isCurrentNotificationChannel(value) ? value : undefined
-}
-
-function isCurrentNotificationChannel(value: unknown): value is NotificationConnectorChannel {
-  return value === 'feishu' || value === 'dingtalk'
+  return value === 'feishu' || value === 'dingtalk' ? value : undefined
 }
 
 function notificationDeliveryReceipt(

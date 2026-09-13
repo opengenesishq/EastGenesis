@@ -6,8 +6,8 @@ import type { WorkItem } from '../../shared/project-workspace-types'
 import type { TaskSnapshotRecord } from '../../shared/types'
 import { openProjectWorkspaceCommandService } from '../project-workspace/command-service'
 import { openProjectWorkspaceStore } from '../project-workspace/store'
+import { WORKFLOW_REPAIR_DEFAULT_OWNER } from './workflow-acceptance-repair-coordinator'
 
-const REPAIR_OWNER = { type: 'human' as const, id: 'local-user', displayName: 'CaoGen Repair Runtime' }
 const LEASE_DURATION_MS = 30 * 60 * 1_000
 
 function repairExecutionLeaseId(workItemId: string): string {
@@ -42,7 +42,7 @@ export async function ensureRepairWorkItemRunnable(
     const now = Date.now()
     try {
       if (!item.owner) {
-        item = await commands.updateWorkItem(item.id, { owner: REPAIR_OWNER }, { expectedRevision: item.revision })
+        item = await commands.updateWorkItem(item.id, { owner: WORKFLOW_REPAIR_DEFAULT_OWNER }, { expectedRevision: item.revision })
         continue
       }
       if (item.status === 'blocked') {
@@ -66,7 +66,7 @@ export async function ensureRepairWorkItemRunnable(
         item = await commands.acquireWorkItemLease(item.id, {
           expectedRevision: item.revision,
           leaseId: repairExecutionLeaseId(item.id),
-          ownerId: item.owner?.id ?? REPAIR_OWNER.id,
+          ownerId: item.owner?.id ?? WORKFLOW_REPAIR_DEFAULT_OWNER.id,
           durationMs: LEASE_DURATION_MS
         })
         continue

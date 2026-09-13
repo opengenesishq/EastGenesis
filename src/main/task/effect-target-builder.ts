@@ -1,3 +1,4 @@
+import { buildOfficeRevisionEffectTarget } from '../office-revision/effect'
 import { realpathSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import type { EffectTarget } from '../../shared/types'
@@ -95,6 +96,7 @@ async function buildFileEffectTarget(
   observationOptions: EffectTargetObservationOptions,
   context: EffectTargetBuilderContext
 ): Promise<EffectTarget | undefined> {
+  if (toolName === 'revise_office_artifact') return buildOfficeRevisionEffectTarget(input)
   if (isOfficeArtifactTool(toolName)) {
     return buildOfficeArtifactEffectTarget(toolName, input.toolInput, input.cwd)
   }

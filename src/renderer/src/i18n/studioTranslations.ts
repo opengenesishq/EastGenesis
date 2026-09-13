@@ -318,8 +318,8 @@ const VIDEO_STUDIO_TEXT = {
     projectPickerLabel: '选择视频归属项目',
     loadingProjects: '加载项目...',
     quickStartTitle: '从脚本开始制作',
-    quickStartDescription: '输入脚本即可开始，标题可稍后补充。素材、生成任务和成片会在同一条制作记录中持续保存。',
-    titlePlaceholder: '标题（可选）',
+    quickStartDescription: '输入标题和脚本，CaoGen 会直接创建分镜草稿；素材、生成任务和成片会在同一条制作记录中持续保存。',
+    titlePlaceholder: '标题，例如：产品宣传片',
     titleLabel: '视频标题',
     scriptPlaceholder: '粘贴脚本或描述你想生成的片子',
     scriptLabel: '视频脚本',
@@ -339,7 +339,7 @@ const VIDEO_STUDIO_TEXT = {
     productionScriptPlaceholder: '短剧本或大纲',
     productionScriptLabel: '短剧本',
     createStoryboard: '创建分镜草稿',
-    productionInputRequired: '请先填写剧本'
+    productionInputRequired: '请填写制作标题和剧本'
   },
   en: {
     studioLabel: 'Video studio',
@@ -349,8 +349,8 @@ const VIDEO_STUDIO_TEXT = {
     projectPickerLabel: 'Select the project for this video',
     loadingProjects: 'Loading projects...',
     quickStartTitle: 'Start with a script',
-    quickStartDescription: 'Paste a script to start; you can add a title later. Assets, generation jobs, and final cuts stay together in one production record.',
-    titlePlaceholder: 'Title (optional)',
+    quickStartDescription: 'Enter a title and script to create a storyboard draft. Assets, generation jobs, and final cuts stay together in one production record.',
+    titlePlaceholder: 'Title, for example: Product launch video',
     titleLabel: 'Video title',
     scriptPlaceholder: 'Paste a script or describe the video you want to make',
     scriptLabel: 'Video script',
@@ -370,7 +370,7 @@ const VIDEO_STUDIO_TEXT = {
     productionScriptPlaceholder: 'Short script or outline',
     productionScriptLabel: 'Production script',
     createStoryboard: 'Create storyboard draft',
-    productionInputRequired: 'Enter a script first'
+    productionInputRequired: 'Enter a production title and script'
   }
 } as const
 

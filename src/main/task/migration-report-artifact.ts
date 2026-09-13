@@ -3,7 +3,7 @@ import type { WorkflowProjectionSource, WorkflowRunRecord } from '../../shared/w
 import type { ArtifactLifecycleRecord } from './artifact-lifecycle-types'
 import { registerCanonicalProducedArtifact } from './artifact-production-boundary'
 import { stableValueDigest } from './tool-idempotency'
-import { settleCanonicalSystemOperation } from './system-operation-context'
+import { TaskKernel } from './task-kernel'
 
 type ConfirmedMigrationOperationEffect = EffectRecord & {
   status: 'confirmed'
@@ -78,7 +78,7 @@ export async function registerMigrationOperationArtifact(
     attachToStage: true
   }, rootDir)
   if (workflowRun.goalId) {
-    await settleCanonicalSystemOperation({
+    await new TaskKernel(rootDir).deliver({
       rootDir,
       goalId: workflowRun.goalId,
       workItemId: workflowRun.workItemId

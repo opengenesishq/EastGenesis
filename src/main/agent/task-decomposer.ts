@@ -256,6 +256,7 @@ export async function decomposeTask(
       }
     } catch (err) {
       if (isModelAttemptPersistenceFailure(err)) throw err
+      if (isRoutingBoundaryFailure(err)) throw err
       const fallback = localDecompose(request, estimate)
       return {
         ...fallback,
@@ -268,6 +269,12 @@ export async function decomposeTask(
   }
 
   return localDecompose(request, estimate)
+}
+
+function isRoutingBoundaryFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  return error.name === 'FrozenRoutingPolicyError' || /^DAG\b/i.test(error.message)
+    || /canonical Run|冻结模型|冻结 Provider|routing target|DAG protocol|local_only/i.test(error.message)
 }
 
 function isModelAttemptPersistenceFailure(error: unknown): boolean {

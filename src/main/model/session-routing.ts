@@ -12,6 +12,7 @@ import type {
   SendMessagePayload
 } from '../../shared/types'
 import { routeModel } from './model-router'
+import { ModelRouteError } from './model-route-error'
 import type { ManualModelOverride } from './model-router'
 import { inferTaskProfile, type TaskProfile } from './model-profile'
 import { driveModeLabel, driveRiskAtLeast, driveRouteTuning } from './drive'
@@ -35,7 +36,9 @@ export interface SessionRouteInput {
   driveMode?: CaoGenDriveMode
   payload: SendMessagePayload
   strategy: SchedulerStrategy
+  businessLineStrategy?: SchedulerStrategy
   sessionCostUsd: number
+  estimatedContextTokens?: number
   sessionBudgetUsd?: number
   settingsBudgetUsd: number
   monthlyBudgetRemainingUsd?: number
@@ -74,6 +77,9 @@ export type SessionRouteResult =
       switchedProvider: boolean
       decision: ModelRoutingDecisionView
       crossValidationPlan: ModelRoutePlanView
+      recoveryRuleTarget?: { providerId?: string; model?: string }
+      recoveryCatalog?: Array<{ providerId: string; model: string }>
+      recoveryTask?: Pick<TaskProfile, 'requiresTools' | 'requiresVision' | 'minContextTokens'>
     }
 
 export function resolveSessionModelRoute(input: SessionRouteInput): SessionRouteResult {
@@ -85,37 +91,37 @@ export function resolveSessionModelRoute(input: SessionRouteInput): SessionRoute
     input.routingExpertPolicy
   )
   const providers = providerSelection.providers
-  if (providers.length === 0) return { kind: 'disabled' }
+  if (providers.length === 0) throw new ModelRouteError('ROUTING_NO_CANDIDATES', '当前策略与协议下没有可用模型，请检查连接和路由设置。')
   const prompt = input.payload.text
   const drive = driveRouteTuning(input.driveMode)
   const projectDispatch = input.projectPath ? readProjectModelDispatchHintsSync(input.projectPath) : {}
-  const strategy = projectDispatch.strategy ?? (drive.mode === 'core' ? input.strategy : drive.strategy)
+  const strategy = input.businessLineStrategy ?? projectDispatch.strategy ?? (drive.mode === 'core' ? input.strategy : drive.strategy)
   const budget = budgetForRoute(input)
   const attachments = input.payload.images?.map((image) => ({ mime: image.mime }))
   const riskLevel = driveRiskAtLeast(inferRouteRisk(prompt), drive.riskFloor)
   const inferredTask = inferTaskProfile({
     prompt,
     attachments,
+    contextTokens: input.estimatedContextTokens,
     expectedOutputTokens: drive.expectedOutputTokens,
     strategy,
     riskLevel,
     requiresTools: true
   })
+  const ruleOverride = input.manualOverride ? undefined : customRoutingRuleOverride(input.modelRoutingRules, {
+    prompt, taskKinds: inferredTask.taskKinds, riskLevel: inferredTask.riskLevel, strategy: inferredTask.strategy
+  })
   const decision = routeModel({
     providers,
     prompt,
     attachments,
+    contextTokens: input.estimatedContextTokens,
     requestedTasks: drive.requestedTasks,
     expectedOutputTokens: drive.expectedOutputTokens,
     strategy,
     manualOverride:
       input.manualOverride ??
-      customRoutingRuleOverride(input.modelRoutingRules, {
-        prompt,
-        taskKinds: inferredTask.taskKinds,
-        riskLevel: inferredTask.riskLevel,
-        strategy: inferredTask.strategy
-      }) ??
+      ruleOverride ??
       projectModelRoleOverride(input, projectDispatch) ??
       modelRoleOverride(input),
     budget,
@@ -139,6 +145,9 @@ export function resolveSessionModelRoute(input: SessionRouteInput): SessionRoute
     providerName: selected.providerName,
     model: selected.model,
     switchedProvider,
+    ...(ruleOverride ? { recoveryRuleTarget: { providerId: ruleOverride.providerId, model: ruleOverride.model } } : {}),
+    recoveryCatalog: decision.candidates.map(({ profile }) => ({ providerId: profile.providerId, model: profile.model })),
+    recoveryTask: { requiresTools: decision.task.requiresTools, requiresVision: decision.task.requiresVision, minContextTokens: decision.task.minContextTokens },
     decision: buildRoutingDecisionView(
       decision,
       switchedProvider,

@@ -18,7 +18,7 @@ interface NotificationDeliveryManifest {
   schemaVersion: 1
   kind: 'notification_delivery'
   effectId: string
-  channel: NotificationDeliveryEffect['target']['channel']
+  channel: 'feishu' | 'dingtalk'
   connectorId: string
   connectorRevision: number
   endpointDigest: string
@@ -202,7 +202,7 @@ function assertExistingNotificationArtifact(record: ArtifactLifecycleRecord, run
   }
 }
 
-export function isNotificationDeliveryManifest(value: unknown): value is NotificationDeliveryManifest {
+function isNotificationDeliveryManifest(value: unknown): value is NotificationDeliveryManifest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const record = value as Record<string, unknown>
   const allowedKeys = new Set([
@@ -212,7 +212,7 @@ export function isNotificationDeliveryManifest(value: unknown): value is Notific
   ])
   return Object.keys(record).every((key) => allowedKeys.has(key)) && record.schemaVersion === 1 &&
     record.kind === 'notification_delivery' && typeof record.effectId === 'string' &&
-    isPersistedNotificationChannel(record.channel) &&
+    (record.channel === 'feishu' || record.channel === 'dingtalk') &&
     typeof record.connectorId === 'string' && record.connectorId.length > 0 &&
     Number.isSafeInteger(record.connectorRevision) && (record.connectorRevision as number) > 0 &&
     isDigest(record.endpointDigest) && isDigest(record.payloadDigest) && isDigest(record.titleDigest) &&
@@ -220,10 +220,6 @@ export function isNotificationDeliveryManifest(value: unknown): value is Notific
     (record.confirmationSource === 'runtime_receipt' || record.confirmationSource === 'human_confirmation') &&
     typeof record.confirmationVerifier === 'string' && record.confirmationVerifier.length > 0 &&
     isDigest(record.confirmationEvidenceDigest)
-}
-
-function isPersistedNotificationChannel(value: unknown): boolean {
-  return value === 'feishu' || value === 'dingtalk' || value === 'wecom'
 }
 
 function isDigest(value: unknown): value is string {
@@ -240,6 +236,5 @@ function assertEffectOwnership(run: TaskRunRecord, effect: EffectRecord): void {
 
 function notificationChannelLabel(channel: NotificationDeliveryManifest['channel']): string {
   if (channel === 'feishu') return 'Feishu'
-  if (channel === 'dingtalk') return 'DingTalk'
-  return 'Retired WeCom'
+  return 'DingTalk'
 }

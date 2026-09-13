@@ -1,16 +1,20 @@
 import { statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { newSessionMeta } from './session-meta'
-import { getCaoGenDrivePolicy, settingsForCaoGenDrive } from './model/drive'
-import { resolveSessionModelRoute } from './model/session-routing'
+import { getCaoGenDrivePolicy } from './model/drive'
+import { resolveCreationModelRoute, sessionBusinessLine } from './model/session-runtime-routing'
+import { assertBusinessLineTaskStrategy } from './business-line-execution-policy'
 import { getProject, touchProject } from './projects'
 import { getSettings } from './settings'
 import { listHistory } from './history'
-import { getProvider, listProviders, providerIsReady, resolveProviderEngine } from './providers'
+import { parseSessionConversationSource } from './session-conversation-source'
+import { getProvider, providerIsReady, resolveProviderEngine } from './providers'
 import { executeManagedWorktreeCreateEffect } from './ipc/worktree-operation-handlers'
 import { openProjectWorkspaceStore, type ProjectWorkspaceStore } from './project-workspace/store'
 import { executeInteractiveOperationEffect } from './task/operation-effect-gateway'
 import { normalizeTaskStrategy, derivePermissionModeFromStrategy, migrateLegacyPermissionMode } from './task/task-strategy'
+import { migrateLegacyEngineRecord } from './native-engine-migration'
+import { MANAGED_PERSONAL_WORKSPACE_ID } from '../shared/project-workspace-types'
 import {
   inspectManagedWorktreeIdentity,
   inspectManagedWorktreeRegistryRecord,
@@ -58,7 +62,12 @@ export function prepareSessionCreationDraft(
   const drivePolicy = getCaoGenDrivePolicy(driveMode)
   const selectedModel = sessionModel(opts, resumeHistory, settings, forking)
   const routingScope = sessionRoutingScope(opts, resumeHistory, parentMeta, selectedModel)
-  const selectedProviderId = sessionProviderId(opts, resumeHistory, settings, driveMode, forking)
+  opts.businessLineId = sessionBusinessLine({ opts, history: resumeHistory, parent: parentMeta, settings, resuming: historySource?.mode === 'resume' })
+  const requestedProviderId = forking ? initialProviderId(opts, settings) : resumeHistory?.providerId ?? initialProviderId(opts, settings)
+  const initialRoute = !resumeHistory || forking ? resolveCreationModelRoute({
+    opts: { ...opts, routingScope }, settings, driveMode, model: selectedModel, providerId: requestedProviderId
+  }) : undefined
+  const selectedProviderId = initialRoute?.providerId ?? requestedProviderId
   const provider = explicitSessionProvider(selectedProviderId, selectedModel)
   const unassigned = sessionUnassigned(opts, resumeHistory, parentMeta)
   const domainOwnership = resolveSessionDomainOwnership(opts, resumeHistory, parentMeta, unassigned)
@@ -76,6 +85,8 @@ export function prepareSessionCreationDraft(
     baseMeta.id = resumeHistory.id
     baseMeta.createdAt = resumeHistory.createdAt
   }
+  baseMeta.modelRoutingDecision = initialRoute?.decision ?? (historySource?.mode === 'resume' ? resumeHistory?.modelRoutingDecision : undefined)
+  assertBusinessLineTaskStrategy(baseMeta, baseMeta.taskStrategy)
   return { opts, baseMeta }
 }
 
@@ -122,6 +133,8 @@ function createSessionDraftMeta(input: SessionDraftMetaInput): SessionMeta {
   })
   return {
     ...meta,
+    costUsd: input.historyMode === 'resume' ? resumeHistory?.costUsd ?? meta.costUsd : meta.costUsd,
+    businessLineId: opts.businessLineId,
     workspaceId: input.workspaceId,
     goalId: input.goalId,
     workItemId: input.workItemId,
@@ -135,8 +148,14 @@ function createSessionDraftMeta(input: SessionDraftMetaInput): SessionMeta {
       ? normalizedOptionalId(opts.forkCheckpointId)
       : undefined,
     conversationForkSourceSessionId: input.historyMode === 'fork' ? resumeHistory?.id : undefined,
-    responsesContext: input.historyMode === 'resume' ? resumeHistory?.responsesContext : undefined
+    ...sessionRuntimeHistory(input.historyMode, resumeHistory)
   }
+}
+
+function sessionRuntimeHistory(mode: SessionDraftMetaInput['historyMode'], history?: HistoryEntry) {
+  return mode === 'resume'
+    ? { responsesContext: history?.responsesContext, runtimeContinuation: history?.runtimeContinuation }
+    : {}
 }
 
 function sessionPermissionMode(
@@ -251,16 +270,6 @@ function sessionModel(
   return opts.providerId === AUTO_PROVIDER_ID ? AUTO_MODEL : settings.defaultModel
 }
 
-function sessionProviderId(
-  opts: CreateSessionOptions,
-  history: HistoryEntry | undefined,
-  settings: AppSettings,
-  driveMode: CaoGenDriveMode,
-  forking = false
-): string {
-  return forking ? initialProviderId(opts, settings, driveMode) : history?.providerId ?? initialProviderId(opts, settings, driveMode)
-}
-
 function sessionUnassigned(
   opts: CreateSessionOptions,
   history?: HistoryEntry,
@@ -312,7 +321,7 @@ export function assertSessionDomainOwnership(
   if ((ownership.goalId || ownership.workItemId) && !ownership.workspaceId) {
     throw new Error('canonical Goal/WorkItem ownership requires workspaceId')
   }
-  if (claim.unassigned === true && ownership.workspaceId) {
+  if (claim.unassigned === true && ownership.workspaceId && ownership.workspaceId !== MANAGED_PERSONAL_WORKSPACE_ID) {
     throw new Error('unassigned session cannot claim canonical workspace ownership')
   }
   return ownership
@@ -489,8 +498,7 @@ export function sessionMetaForPlacement(
 
 export function sessionMetaForRecovery(meta: SessionMeta): SessionMeta {
   const ownership = assertSessionDomainOwnership(meta)
-  const legacyEngine = (meta as unknown as { engine?: string }).engine
-  const migratedMeta = legacyEngine === 'claude' ? { ...meta, engine: 'anthropic' as const } : meta
+  const migratedMeta = migrateLegacyEngineRecord(meta as SessionMeta & { engine?: string }) as SessionMeta
   return applySessionPlacement({
     ...migratedMeta,
     ...ownership,
@@ -665,20 +673,9 @@ export function assertUsableSessionCwd(rawCwd: string): string {
 function sessionConversationHistory(
   opts: CreateSessionOptions
 ): { history: HistoryEntry; mode: 'resume' | 'fork' } | undefined {
-  if (opts.resumeSdkSessionId !== undefined && opts.forkFromSdkSessionId !== undefined) {
-    throw new Error('恢复会话与分叉会话不能同时指定')
-  }
-  if (opts.forkCheckpointId !== undefined && opts.forkFromSdkSessionId === undefined) {
-    throw new Error('消息级分叉必须同时指定来源 sdkSessionId')
-  }
-  if (opts.forkCheckpointId !== undefined && !opts.forkCheckpointId.trim()) {
-    throw new Error('分叉 checkpointId 不能为空')
-  }
-  const mode = opts.forkFromSdkSessionId !== undefined ? 'fork' : 'resume'
-  const raw = mode === 'fork' ? opts.forkFromSdkSessionId : opts.resumeSdkSessionId
-  if (raw === undefined) return undefined
-  const sdkSessionId = raw.trim()
-  if (!sdkSessionId) throw new Error(`${mode === 'fork' ? '分叉来源' : '历史会话'} sdkSessionId 不能为空`)
+  const source = parseSessionConversationSource(opts)
+  if (!source) return undefined
+  const { mode, sdkSessionId } = source
   const history = listHistory().find((entry) => entry.sdkSessionId === sdkSessionId)
   if (!history) throw new Error(`未找到 sdkSessionId 对应的历史会话:${sdkSessionId}`)
   return { history, mode }
@@ -706,50 +703,9 @@ function normalizeExperienceModeOverride(
   throw new Error('experienceModeOverride must be assistant or studio')
 }
 
-function initialProviderId(
-  opts: CreateSessionOptions,
-  settings: AppSettings,
-  driveMode: CaoGenDriveMode
-): string {
+function initialProviderId(opts: CreateSessionOptions, settings: AppSettings): string {
   if (opts.providerId === undefined) return settings.defaultProviderId.trim()
-  const requested = opts.providerId.trim()
-  if (requested !== AUTO_PROVIDER_ID) return requested
-  const routeSettings = settingsForCaoGenDrive(settings, driveMode)
-  const initialRoute = resolveSessionModelRoute({
-    enabled: true,
-    currentModel: AUTO_MODEL,
-    providerId: '',
-    providers: listProviders(),
-    allowAnyEngine: true,
-    driveMode,
-    payload: { text: opts.initialPrompt?.trim() || opts.title?.trim() || '通用任务' },
-    strategy: routeSettings.schedulerStrategy,
-    sessionCostUsd: 0,
-    settingsBudgetUsd: routeSettings.budgetUsdPerSession,
-    fallbackProviderId: routeSettings.fallbackProviderId,
-    fallbackModel: routeSettings.fallbackModel,
-    lowCostProviderId: routeSettings.lowCostProviderId,
-    lowCostModel: routeSettings.lowCostModel,
-    strongReasoningProviderId: routeSettings.strongReasoningProviderId,
-    strongReasoningModel: routeSettings.strongReasoningModel,
-    reviewProviderId: routeSettings.reviewProviderId,
-    reviewModel: routeSettings.reviewModel,
-    researchProviderId: routeSettings.researchProviderId,
-    researchModel: routeSettings.researchModel,
-    planningProviderId: routeSettings.planningProviderId,
-    planningModel: routeSettings.planningModel,
-    codingProviderId: routeSettings.codingProviderId,
-    codingModel: routeSettings.codingModel,
-    testingProviderId: routeSettings.testingProviderId,
-    testingModel: routeSettings.testingModel,
-    documentationProviderId: routeSettings.documentationProviderId,
-    documentationModel: routeSettings.documentationModel,
-    modelRoutingRules: routeSettings.modelRoutingRules,
-    routingExpertPolicy: routeSettings.routingExpertPolicy,
-    projectPath: opts.cwd
-  })
-  if (initialRoute.kind !== 'routed') throw new Error('没有可用的跨厂商调度候选')
-  return initialRoute.providerId
+  return opts.providerId.trim() === AUTO_PROVIDER_ID ? '' : opts.providerId.trim()
 }
 
 function explicitSessionProvider(providerIdInput: string, model: string) {

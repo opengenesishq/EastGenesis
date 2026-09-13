@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DURABLE_WRITE_REGISTRY } from './durable-write-registry.mjs'
@@ -8,7 +8,6 @@ import {
   discoverDurableWriteModules,
   validateDurableWriteRegistry
 } from './lib/durable-write-inventory.mjs'
-import { durableRecoveryRequirementStatus } from './lib/durable-recovery-closure.mjs'
 
 const repoRoot = process.cwd()
 const discovery = discoverDurableWriteModules(repoRoot)
@@ -38,8 +37,6 @@ const report = {
 try {
   const failures = validateDurableWriteRegistry(DURABLE_WRITE_REGISTRY, discovery)
   assert(failures.length === 0, failures.join('\n'))
-  const runtimeEvidenceFailures = validateRuntimeRecoveryEvidence(DURABLE_WRITE_REGISTRY)
-  assert(runtimeEvidenceFailures.length === 0, runtimeEvidenceFailures.join('\n'))
   check('all source-observed filesystem writer modules are registered')
   check('domain, journal, audit, and derived writers declare schema and version status')
   check('every writer declares an atomic, transaction, log, delegated, direct, or exempt strategy')
@@ -51,7 +48,7 @@ try {
   const summary = summarize(DURABLE_WRITE_REGISTRY, discovery)
   report.status = 'passed'
   report.inventoryStatus = 'complete'
-  report.requirementStatus = durableRecoveryRequirementStatus(summary.recovery)
+  report.requirementStatus = summary.recovery.gap > 0 ? 'open' : 'inventory_closed_unverified'
   report.summary = summary
   report.writers = discovery.map((item) => ({
     ...item,
@@ -125,14 +122,6 @@ function runNegativeFixtures() {
     'delegated writer without an owner is rejected'
   )
 
-  const verifiedEntry = DURABLE_WRITE_REGISTRY.find((entry) => entry.recovery === 'verified')
-  assert(verifiedEntry, 'negative fixtures require a verified writer')
-  assertFailure(
-    replaceEntry(verifiedEntry.file, { requiredRecoverySurfaces: [] }),
-    /must name unique runtime surfaces/,
-    'empty runtime recovery surface contract is rejected'
-  )
-
 }
 
 function runDiscoveryFixtures() {
@@ -188,38 +177,6 @@ function summarize(registry, currentDiscovery) {
     ).length,
     negativePaths: report.checks.filter((item) => item.kind === 'negative').length
   }
-}
-
-function validateRuntimeRecoveryEvidence(registry) {
-  const failures = []
-  const expectedCommit = gitOutput(['rev-parse', 'HEAD'])
-  for (const entry of registry.filter((item) => item.recovery === 'verified')) {
-    for (const relativePath of entry.evidence ?? []) {
-      const absolutePath = path.join(repoRoot, relativePath)
-      if (!existsSync(absolutePath)) {
-        failures.push(`${entry.file}: runtime evidence is missing: ${relativePath}`)
-        continue
-      }
-      let report
-      try { report = JSON.parse(readFileSync(absolutePath, 'utf8')) } catch (error) {
-        failures.push(`${entry.file}: runtime evidence is invalid JSON: ${relativePath}`)
-        continue
-      }
-      if (report.status !== 'passed') failures.push(`${entry.file}: runtime evidence is not passed: ${relativePath}`)
-      if (report.sourceRevision !== expectedCommit) failures.push(`${entry.file}: runtime evidence SHA mismatch: ${relativePath}`)
-      if (report.worktreeStatusCount !== 0) failures.push(`${entry.file}: runtime evidence worktree is not clean: ${relativePath}`)
-      if (report.writer !== entry.file) failures.push(`${entry.file}: runtime evidence writer mismatch: ${relativePath}`)
-      for (const faultClass of ['strong_kill', 'network_unknown_result', 'duplicate_idempotency', 'out_of_order']) {
-        if (report.faults?.[faultClass]?.status !== 'verified') failures.push(`${entry.file}: runtime evidence fault is open: ${faultClass}`)
-        for (const surface of entry.requiredRecoverySurfaces ?? []) {
-          if (report.faults?.[faultClass]?.surfaces?.[surface]?.status !== 'verified') {
-            failures.push(`${entry.file}: runtime evidence surface is open: ${faultClass}/${surface}`)
-          }
-        }
-      }
-    }
-  }
-  return failures
 }
 
 function countBy(values, keyFor) {

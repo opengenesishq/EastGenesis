@@ -312,7 +312,7 @@ function trustedAndEnabled(item: PluginRegistryItem): boolean {
 function pluginRegistryItemPrompt(item: PluginRegistryItem): string {
   const labels = { plugin: '插件包', skill: 'Skill', agent: 'Agent 定义', mcp: 'MCP 服务' } as const
   const hints = {
-    plugin: '这是一个插件包容器。先查看该目录下的 .codex-plugin/plugin.json、skills/、agents/、mcp/ 等子资源,再选择最适合当前目标的能力使用。',
+    plugin: '这是一个插件包容器。先查看该目录下的 .caogen-plugin/plugin.json、skills/、agents/、mcp/ 等子资源,再选择最适合当前目标的能力使用。',
     skill: '如果需要细节,先读取该目录下的 SKILL.md,再按其中的触发条件和步骤执行。',
     agent: '如果需要细节,先读取这个 Agent 定义文件,再判断是否应该按它的角色拆分或执行任务。',
     mcp: '先判断当前会话是否已经暴露对应 MCP 工具;如果没有可调用工具,不要假装调用成功,请说明需要启用或配置该 MCP。'
@@ -337,7 +337,7 @@ function pluginRegistryAgentDispatchPrompt(item: PluginRegistryItem): string {
     `定义路径: ${item.path}`, `来源根目录: ${item.sourceRoot}`, `摘要: ${item.summary || '(无摘要)'}`,
     `当前扫描状态: ${item.enabled ? '已启用' : '未启用或不可用'}`, '', '工作要求:',
     '1. 读取并遵守该 Agent 定义文件中的角色、边界和输出格式。',
-    '2. 围绕父会话当前目标推进一个可验证的子任务;如果上下文不足,先从仓库中的 REQUIREMENTS.md、ROADMAP.md、DESIGN-V2.md 或相关源码提取事实。',
+    '2. 围绕父会话当前目标推进一个可验证的子任务;如果上下文不足,先从仓库中的 STATUS.md、docs/PRODUCT-REQUIREMENTS.md、docs/PRODUCT-TECHNICAL-REQUIREMENTS.md 或相关源码提取事实。',
     '3. 不要假装具备定义文件没有提供的工具或权限;遇到缺口要明确说明。',
     '4. 产出应包含你检查过的证据、做出的修改或建议、以及可运行的验证命令。'
   ].join('\n')

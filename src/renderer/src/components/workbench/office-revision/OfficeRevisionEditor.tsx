@@ -1,0 +1,53 @@
+import { useState } from 'react'
+import type { OfficeArtifactSnapshot, OfficeCellSnapshot, OfficeParagraphSnapshot, OfficeRevisionOperation } from '../../../../../shared/office-revision-types'
+import { cellRevision, paragraphRevision } from './office-revision-model'
+
+export default function OfficeRevisionEditor({ snapshot, busy, onChange, onPreview }: {
+  snapshot: OfficeArtifactSnapshot; busy: boolean; onChange(): void; onPreview(operation: OfficeRevisionOperation): Promise<void>
+}): React.JSX.Element {
+  const [paragraphId, setParagraphId] = useState(snapshot.paragraphs[0]?.id ?? '')
+  const [cellKey, setCellKey] = useState(snapshot.cells[0] ? keyForCell(snapshot.cells[0]) : '')
+  const paragraph = snapshot.paragraphs.find((item) => item.id === paragraphId)
+  const cell = snapshot.cells.find((item) => keyForCell(item) === cellKey)
+  const select = (change: () => void): void => { change(); onChange() }
+  return <div className="office-revision-editor">
+    {snapshot.artifact.kind === 'document' ? <>
+      <label>段落<select value={paragraphId} disabled={busy} onChange={(event) => select(() => setParagraphId(event.target.value))} data-office-paragraph-select>{snapshot.paragraphs.map((item) => <option key={item.id} value={item.id}>{officeParagraphLabel(item)} · {item.editable ? '可修改' : '只读'} · {item.text.slice(0, 48)}</option>)}</select></label>
+      {paragraph && <div><pre>{paragraph.text}</pre>{!paragraph.editable && <p>{paragraph.reason ?? '此段包含复杂结构，仅可预览。'}</p>}
+        <ReplacementEditor key={paragraph.id} initial={paragraph.text} editable={paragraph.editable && snapshot.editability.editable && snapshot.artifact.latest} busy={busy} onChange={onChange} onPreview={(text) => onPreview(paragraphRevision(snapshot, paragraph.id, text))} />
+      </div>}
+    </> : <>
+      <label>工作表与单元格<select value={cellKey} disabled={busy} onChange={(event) => select(() => setCellKey(event.target.value))} data-office-cell-select>{snapshot.cells.map((item) => <option key={keyForCell(item)} value={keyForCell(item)}>{officeCellLabel(snapshot, item)} · {item.editable ? '可修改' : '只读'}</option>)}</select></label>
+      {cell && <CellEditor key={cellKey} snapshot={snapshot} cell={cell} busy={busy} onChange={onChange} onPreview={onPreview} />}
+    </>}
+  </div>
+}
+
+function keyForCell(cell: OfficeCellSnapshot): string { return `${cell.sheetId}\0${cell.address}` }
+export function officeParagraphLabel(paragraph: OfficeParagraphSnapshot): string { return `第 ${paragraph.index + 1} 段` }
+export function officeCellLabel(snapshot: OfficeArtifactSnapshot, cell: OfficeCellSnapshot): string { return `${snapshot.sheets.find((sheet) => sheet.id === cell.sheetId)?.name ?? '工作表'} · ${cell.address} 单元格` }
+
+function ReplacementEditor({ initial, editable, busy, forceChanged = false, onChange, onPreview }: {
+  initial: string; editable: boolean; busy: boolean; forceChanged?: boolean; onChange(): void; onPreview(text: string): Promise<void>
+}): React.JSX.Element {
+  const [text, setText] = useState(initial)
+  const [error, setError] = useState('')
+  const preview = async (): Promise<void> => {
+    try { setError(''); await onPreview(text) } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+  }
+  return <div><label>替换为<textarea rows={4} value={text} disabled={!editable || busy} data-office-replacement onChange={(event) => { setText(event.target.value); onChange() }} /></label>
+    <button type="button" className="btn btn-secondary btn-sm" data-office-preview-revision disabled={!editable || busy || (!forceChanged && text === initial)} onClick={() => void preview()}>预览修改</button>
+    {error && <p role="alert">{error}</p>}
+  </div>
+}
+
+function CellEditor({ snapshot, cell, busy, onChange, onPreview }: {
+  snapshot: OfficeArtifactSnapshot; cell: OfficeCellSnapshot; busy: boolean; onChange(): void; onPreview(operation: OfficeRevisionOperation): Promise<void>
+}): React.JSX.Element {
+  const [type, setType] = useState(cell.type === 'blank' ? 'blank' : cell.type)
+  const current = cell.formula ? `公式：=${cell.formula}\n上次保存的计算结果：${cell.cachedValue ?? '暂无'}` : String(cell.value ?? '')
+  return <div><pre>{current}</pre>{cell.formula ? <p>公式只能预览。修改输入后，请在 Excel 中重新计算；当前显示的结果可能尚未更新。</p> : !cell.editable && <p>{cell.reason ?? '此单元格包含复杂内容，仅可预览。'}</p>}
+    <label>数据类型<select value={type} disabled={!cell.editable || busy} data-office-cell-type onChange={(event) => { setType(event.target.value); onChange() }}><option value="string">文本</option><option value="number">数字</option><option value="boolean">逻辑值（true 或 false）</option><option value="blank">空白</option>{type === 'formula' && <option value="formula">公式（只读）</option>}{type === 'unsupported' && <option value="unsupported">特殊内容（只读）</option>}</select></label>
+    <ReplacementEditor key={type} forceChanged={type !== cell.type} initial={String(cell.value ?? '')} editable={cell.editable && snapshot.editability.editable && snapshot.artifact.latest} busy={busy} onChange={onChange} onPreview={(text) => onPreview(cellRevision(snapshot, cell, type, text))} />
+  </div>
+}

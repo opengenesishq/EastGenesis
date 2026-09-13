@@ -41,7 +41,6 @@ const BACKUP_VERSION = 1
 const BACKUP_ID = /^[0-9TZ-]{19,40}-[0-9a-f-]{36}$/i
 const IMPORTED_KEY_LABEL = 'Codex import'
 const OFFICIAL_API_BASE = 'https://api.openai.com/v1'
-const CODEX_OAUTH_BASE = 'https://chatgpt.com/backend-api/codex'
 
 interface ParsedCodexConfig {
   input: ProviderInput
@@ -215,7 +214,7 @@ export function rollbackProviderNativeImportBackup(backupId: string): ProviderNa
 }
 
 function parseCodexNativeConfig(): ParsedCodexConfig {
-  const source = process.env.CODEX_HOME?.trim() ? 'CODEX_HOME' : 'user-profile'
+  const source = process.env.CODEX_HOME?.trim() ? 'environment-override' : 'user-profile'
   const root = resolve(process.env.CODEX_HOME?.trim() || join(app.getPath('home'), '.codex'))
   const configPath = join(root, 'config.toml')
   const authPath = join(root, 'auth.json')
@@ -250,9 +249,9 @@ function parseCodexNativeConfig(): ParsedCodexConfig {
   const token = authCredential ?? inlineCredential ?? environmentCredential
   const credentialKind: ProviderNativeCredentialKind = authCredential || inlineCredential
     ? 'api-key'
-    : environmentCredential ? 'environment' : hasOAuthMaterial(auth) ? 'oauth' : 'none'
+    : environmentCredential ? 'environment' : 'none'
   const rawBaseUrl = stringValue(active.base_url) ?? stringValue(config.base_url)
-    ?? (credentialKind === 'oauth' ? CODEX_OAUTH_BASE : OFFICIAL_API_BASE)
+    ?? OFFICIAL_API_BASE
   const baseUrl = normalizeBaseUrl(rawBaseUrl, 'openai', protocol)
   const runtime = codexRuntime(config)
   const providerName = stringValue(active.name) ?? (providerKey ? `Codex ${providerKey}` : 'Codex')
@@ -264,8 +263,7 @@ function parseCodexNativeConfig(): ParsedCodexConfig {
     ]).has(key))
     .sort()
   const warnings: ProviderNativeImportWarning[] = []
-  if (credentialKind === 'oauth') warnings.push('oauth_reconnect')
-  if (!token && credentialKind !== 'oauth') warnings.push('credential_missing')
+  if (!token) warnings.push('credential_missing')
   if (ignoredSections.length > 0) warnings.push('ignored_sections')
   const advancedConfig: ProviderAdvancedConfig | undefined = runtime
     ? { schemaVersion: 1, runtime, metadata: { importedFrom: 'codex-native' } }
@@ -279,10 +277,7 @@ function parseCodexNativeConfig(): ParsedCodexConfig {
       openaiProtocol: protocol,
       authMode: 'api-key',
       credentialHeaderNames: ['authorization'],
-      advancedConfig,
-      ...(credentialKind === 'oauth'
-        ? { authorization: { schemaVersion: 1, method: 'device-code', status: 'unconfigured', provider: 'codex-oauth' } }
-        : {})
+      advancedConfig
     },
     credentialKind,
     credentialImportable: Boolean(token),
@@ -542,12 +537,6 @@ function wireProtocol(value: string | undefined): 'responses' | 'chat' {
 function runtimeSummary(runtime: ProviderRuntimeConfig | undefined): string {
   const values = Object.entries(runtime ?? {}).filter(([, value]) => value !== undefined)
   return values.length ? values.map(([key, value]) => `${key}=${String(value)}`).join(', ') : '-'
-}
-
-function hasOAuthMaterial(auth: Record<string, unknown>): boolean {
-  const tokens = record(auth.tokens)
-  return Boolean(tokens && (stringValue(tokens.refresh_token) || stringValue(tokens.access_token) || stringValue(tokens.id_token)))
-    || ['chatgpt', 'oauth'].includes(stringValue(auth.auth_mode)?.toLowerCase() ?? '')
 }
 
 function safeEnvironmentKey(value: string | undefined): string | undefined {

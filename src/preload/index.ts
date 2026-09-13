@@ -4,7 +4,6 @@ import type {
   AppSettings,
   CheckpointRestoreMode,
   CreateRoutineInput,
-  CreateSessionOptions,
   DispatchSubagentsInput,
   LayeredMemorySearchInput,
   LayeredMemoryUpdateInput,
@@ -48,11 +47,12 @@ import { taskPlanApi } from './task-plan'
 import { migrationApi } from './migration'
 import { studioResultApi } from './studio-result'
 import { mediaApi } from './media'
-import { sessionQueryApi } from './session-query'
+import { sessionEntrypointApi } from './session-entrypoints'
+import { assistantSearchApi } from './assistant-search'
 
 const api: AgentDeskApi = {
-  listSessions: () => ipcRenderer.invoke('sessions:list'),
-  ...sessionQueryApi,
+  ...sessionEntrypointApi,
+  ...assistantSearchApi,
   listPendingPermissions: (sessionId: string) =>
     ipcRenderer.invoke('sessions:pendingPermissions', sessionId),
   getTranscript: (sessionId: string) => ipcRenderer.invoke('sessions:transcript', sessionId),
@@ -66,7 +66,6 @@ const api: AgentDeskApi = {
     mode: CheckpointRestoreMode,
     dryRun: boolean
   ) => ipcRenderer.invoke('sessions:restoreCheckpoint', sessionId, messageId, mode, dryRun),
-  createSession: (opts: CreateSessionOptions) => ipcRenderer.invoke('sessions:create', opts),
   decomposeTask: (parentSessionId: string, input: TaskDecomposeInput) =>
     ipcRenderer.invoke('sessions:decomposeTask', parentSessionId, input),
   dispatchSubagents: (parentSessionId: string, input: DispatchSubagentsInput) =>
@@ -135,8 +134,11 @@ const api: AgentDeskApi = {
     ipcRenderer.invoke('history:setPinned', id, pinned),
   renameHistory: (id: string, title: string) => ipcRenderer.invoke('history:rename', id, title),
   deleteHistory: (id: string) => ipcRenderer.invoke('history:delete', id),
-  getSettings: () => ipcRenderer.invoke('settings:get'),
-  updateSettings: (patch: Partial<AppSettings>) => ipcRenderer.invoke('settings:update', patch),
+  getSettings: () => ipcRenderer.invoke('settings-domain:get'),
+  updateSettings: (patch: Partial<AppSettings>) => ipcRenderer.invoke('settings-domain:update', patch),
+  getRoutingRuleSet: () => ipcRenderer.invoke('settings-domain:routing:get'),
+  previewRoutingRuleSet: (input) => ipcRenderer.invoke('settings-domain:routing:preview', input),
+  saveRoutingRuleSet: (input) => ipcRenderer.invoke('settings-domain:routing:save', input),
   listGuiAutomationGrants: () => invokeMain('permissions:grants:list', 'gui'),
   revokeGuiAutomationGrant: (grantId) => invokeMain('permissions:grants:revoke', 'gui', grantId),
   revokeAllGuiAutomationGrants: () => invokeMain('permissions:grants:revoke', 'gui'),
@@ -270,22 +272,6 @@ const api: AgentDeskApi = {
     invokeMain('appFeatures:invoke', 'provider-profile', 'native-backups'),
   rollbackProviderNativeImportBackup: (backupId) =>
     invokeMain('appFeatures:invoke', 'provider-profile', 'native-rollback', backupId),
-  previewCcSwitchProviderImport: () =>
-    invokeMain('appFeatures:invoke', 'provider-profile', 'cc-switch-preview'),
-  applyCcSwitchProviderImport: (previewId, decisions) =>
-    invokeMain('appFeatures:invoke', 'provider-profile', 'cc-switch-apply', previewId, decisions),
-  listCcSwitchProviderImportBackups: () =>
-    invokeMain('appFeatures:invoke', 'provider-profile', 'cc-switch-backups'),
-  rollbackCcSwitchProviderImportBackup: (backupId) =>
-    invokeMain('appFeatures:invoke', 'provider-profile', 'cc-switch-rollback', backupId),
-  previewCodexNativeConfig: () =>
-    invokeMain('appFeatures:invoke', 'provider-profile', 'native-config-preview'),
-  applyCodexNativeConfig: (previewId, editedText) =>
-    invokeMain('appFeatures:invoke', 'provider-profile', 'native-config-apply', previewId, editedText),
-  listCodexNativeConfigBackups: () =>
-    invokeMain('appFeatures:invoke', 'provider-profile', 'native-config-backups'),
-  rollbackCodexNativeConfigBackup: (backupId) =>
-    invokeMain('appFeatures:invoke', 'provider-profile', 'native-config-rollback', backupId),
   listEngines: () => ipcRenderer.invoke('engines:list'),
   scanPluginRegistry: (sessionId?: string, options?: PluginRegistryScanOptions) =>
     ipcRenderer.invoke('plugins:scan', sessionId, options),
@@ -304,7 +290,7 @@ const api: AgentDeskApi = {
   uninstallPlugin: (targetPath: string) => ipcRenderer.invoke('plugins:uninstall', targetPath),
   listRoutines: () => ipcRenderer.invoke('routines:list'),
   createRoutine: (input: CreateRoutineInput) => ipcRenderer.invoke('routines:create', input),
-  deleteRoutine: (id: string, expectedRevision?: number) => ipcRenderer.invoke('routines:delete', id, expectedRevision),
+  deleteRoutine: (id: string) => ipcRenderer.invoke('routines:delete', id),
   updateRoutine: (id: string, patch: UpdateRoutineInput) =>
     ipcRenderer.invoke('routines:update', id, patch),
   markRoutineRun: (id: string, options?: MarkRunOptions) =>
@@ -451,7 +437,7 @@ const api: AgentDeskApi = {
   exportLayeredMemories: () => ipcRenderer.invoke('memory:layeredExport'),
   updateLayeredMemory: (entryId: string, input: LayeredMemoryUpdateInput) =>
     ipcRenderer.invoke('memory:layeredUpdate', entryId, input),
-  deleteLayeredMemory: (entryId: string, revision?: number) => ipcRenderer.invoke('memory:layeredDelete', entryId, revision),
+  deleteLayeredMemory: (entryId: string) => ipcRenderer.invoke('memory:layeredDelete', entryId),
   pickDirectory: () => ipcRenderer.invoke('dialog:pickDirectory'),
   pathForFile: (file: File) => webUtils.getPathForFile(file),
   quickbarGetState: () => ipcRenderer.invoke('quickbar:getState'),

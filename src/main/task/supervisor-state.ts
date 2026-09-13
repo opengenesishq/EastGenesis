@@ -3,11 +3,11 @@ import {
   mkdir,
   open,
   readFile,
+  rename,
   stat,
   unlink
 } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { writeDurableFile } from '../durable-file'
 import type {
   SupervisorApprovalInput,
   SupervisorEvent,
@@ -22,6 +22,7 @@ import type {
   SupervisorRunRecord,
   SupervisorRunUsage,
   SupervisorRunStatus,
+  SupervisorWorkItemLeaseBinding,
   SupervisorStateDocument
 } from '../../shared/supervisor-types'
 import { SUPERVISOR_SCHEMA_VERSION } from '../../shared/supervisor-types'
@@ -142,6 +143,7 @@ export class SupervisorStateStore {
     const id = input.id === undefined ? randomUUID() : requiredId(input.id, 'run id')
     const maxRetries = normalizeMaxRetries(input.maxRetries)
     const budget = normalizeGoalBudget(input.budget)
+    const workItemLease = normalizeWorkItemLeaseBinding(input.workItemLease)
     const accountingBase = normalizeAccountingBase(input.accountingBase)
     return this.mutate(options, (document, now) => {
       assertStoreRevision(document, options)
@@ -163,6 +165,7 @@ export class SupervisorStateStore {
         retryCount: 0,
         maxRetries,
         ...(budget ? { budget } : {}),
+        ...(workItemLease ? { workItemLease } : {}),
         ...(accountingBase ? { accountingBase } : {}),
         usage: emptyRunUsage(),
         createdAt,
@@ -217,11 +220,7 @@ export class SupervisorStateStore {
       const run = findRun(document, id)
       if (document.events.some((event) => event.runId === id &&
           event.payload.sourceEventId === sourceEventId)) return unchangedMutation(clone(run))
-      if (observedAt < run.updatedAt) {
-        appendEvent(document, run, 'run.observed', options.actorId ?? 'session-runtime', observedAt,
-          { sourceEventId, taskRunStatus: input.taskRunStatus, observationOnly: true, outOfOrder: true, ignored: true })
-        return clone(run) // Audit the delayed observation without regressing canonical state.
-      }
+
       const nextUsage = usageFromObservation(run, observedUsage, observedCostUsd, input.turnCompleted === true)
       const nextStatus = observedSupervisorStatus(run, input.taskRunStatus)
       const usageChanged = !sameRunUsage(run.usage, nextUsage)
@@ -817,6 +816,21 @@ function normalizeGoalBudget(value: GoalBudget | undefined): GoalBudget | undefi
   return Object.keys(budget).length > 0 ? budget : undefined
 }
 
+function normalizeWorkItemLeaseBinding(
+  value: SupervisorWorkItemLeaseBinding | undefined
+): SupervisorWorkItemLeaseBinding | undefined {
+  if (value === undefined) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new SupervisorStateError('invalid_input', 'WorkItem lease binding must be an object')
+  }
+  const id = requiredText(value.id, 'WorkItem lease id')
+  const ownerId = requiredText(value.ownerId, 'WorkItem lease ownerId')
+  if (!Number.isSafeInteger(value.fencingToken) || value.fencingToken < 1) {
+    throw new SupervisorStateError('invalid_input', 'WorkItem lease fencingToken must be a positive integer')
+  }
+  return { id, ownerId, fencingToken: value.fencingToken }
+}
+
 function normalizeAccountingBase(
   value: SupervisorRunAccountingBase | undefined
 ): SupervisorRunAccountingBase | undefined {
@@ -1094,6 +1108,7 @@ function assertRunCoreShape(run: Partial<SupervisorRunRecord>): void {
 function assertRunAccountingShape(run: Partial<SupervisorRunRecord>): void {
   try {
     if (run.budget !== undefined && normalizeGoalBudget(run.budget) === undefined) invalidRunShape(run)
+    if (run.workItemLease !== undefined) normalizeWorkItemLeaseBinding(run.workItemLease)
     if (run.accountingBase !== undefined) normalizeAccountingBase(run.accountingBase)
     if (run.usage !== undefined) {
       normalizeUsageTotals(run.usage, 'run usage')
@@ -1188,7 +1203,25 @@ function processIsAlive(pid: number): boolean {
     return (error as NodeJS.ErrnoException).code !== 'ESRCH'
   }
 }
+
 async function writeDocument(filePath: string, document: SupervisorStateDocument): Promise<void> {
-  await writeDurableFile(filePath, `${JSON.stringify(document, null, 2)}\n`)
+  await mkdir(dirname(filePath), { recursive: true })
+  const temporary = `${filePath}.${process.pid}.${randomUUID()}.tmp`
+  const handle = await open(temporary, 'wx', 0o600)
+  try {
+    await handle.writeFile(`${JSON.stringify(document, null, 2)}\n`, 'utf8')
+    await handle.sync()
+  } finally {
+    await handle.close().catch(() => undefined)
+  }
+  try {
+    await rename(temporary, filePath)
+  } catch (error) {
+    await unlink(temporary).catch(() => undefined)
+    throw error
+  }
 }
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}

@@ -1,4 +1,5 @@
 import type { TaskRunRecord } from '../../shared/types'
+import { assertFrozenRoutingWrite } from './frozen-routing-policy'
 import type {
   WorkflowAcceptanceInput,
   WorkflowAcceptanceRecord,
@@ -51,7 +52,9 @@ import {
   findWorkflowRun,
   findWorkflowWorkItem,
   assertWorkflowEventReferences,
+  assertWorkflowEventReferencesWithIndex,
   readAcceptances,
+  readAndVerifyEventAppendState,
   readAndVerifyEvents,
   readArtifacts,
   readEvidenceLinks,
@@ -66,7 +69,8 @@ import {
   selectWorkflowGoals,
   selectWorkflowLedger,
   selectWorkflowRuns,
-  selectWorkflowWorkItems
+  selectWorkflowWorkItems,
+  type WorkflowEventAppendState
 } from './workflow-ledger-query'
 import {
   assertAcceptanceCanProject,
@@ -145,6 +149,15 @@ export function projectGoal(
   input: WorkflowGoalProjectionInput,
   options: WorkflowProjectionWriteOptions = {}
 ): boolean {
+  return projectGoalWithEventState(db, input, options)
+}
+
+function projectGoalWithEventState(
+  db: WorkflowLedgerDatabase,
+  input: WorkflowGoalProjectionInput,
+  options: WorkflowProjectionWriteOptions,
+  eventState?: WorkflowEventAppendState
+): boolean {
   const goal = normalizeGoalInput(input)
   const existing = findWorkflowGoal(db, goal.id)
   if (existing) {
@@ -164,7 +177,8 @@ export function projectGoal(
     void gate.audit
   }
   insertGoal(db, goal)
-  appendWorkflowEvent(db, {
+  if (eventState) eventState.references.goals.set(goal.id, goal)
+  appendWorkflowEventWithState(db, {
     eventId: `workflow:goal:${goal.id}:revision:${goal.revision}`,
     streamId: `goal:${goal.id}`,
     entityType: 'goal',
@@ -172,7 +186,7 @@ export function projectGoal(
     kind: existing ? 'goal.updated' : 'goal.created',
     payload: { ...goal },
     occurredAt: goal.updatedAt
-  }, { projectId: goal.projectId, goalId: goal.id })
+  }, { projectId: goal.projectId, goalId: goal.id }, eventState)
   return true
 }
 
@@ -180,6 +194,15 @@ export function projectWorkItem(
   db: WorkflowLedgerDatabase,
   input: WorkflowWorkItemProjectionInput,
   options: WorkflowProjectionWriteOptions = {}
+): boolean {
+  return projectWorkItemWithEventState(db, input, options)
+}
+
+function projectWorkItemWithEventState(
+  db: WorkflowLedgerDatabase,
+  input: WorkflowWorkItemProjectionInput,
+  options: WorkflowProjectionWriteOptions,
+  eventState?: WorkflowEventAppendState
 ): boolean {
   const workItem = normalizeWorkItemInput(input)
   assertWorkItemReferences(db, workItem)
@@ -210,7 +233,8 @@ export function projectWorkItem(
     void gate.audit
   }
   insertWorkItem(db, workItem)
-  appendWorkflowEvent(db, {
+  if (eventState) eventState.references.workItems.set(workItem.id, workItem)
+  appendWorkflowEventWithState(db, {
     eventId: `workflow:work-item:${workItem.id}:revision:${workItem.revision}`,
     streamId: `work-item:${workItem.id}`,
     entityType: 'work_item',
@@ -218,8 +242,42 @@ export function projectWorkItem(
     kind: existing ? 'work_item.updated' : 'work_item.created',
     payload: { ...workItem },
     occurredAt: workItem.updatedAt
-  }, { projectId: workItem.projectId, goalId: workItem.goalId, workItemId: workItem.id })
+  }, { projectId: workItem.projectId, goalId: workItem.goalId, workItemId: workItem.id }, eventState)
   return true
+}
+
+export interface WorkflowProjectionBatchInput {
+  goals: readonly WorkflowGoalProjectionInput[]
+  workItems: readonly WorkflowWorkItemProjectionInput[]
+}
+
+/**
+ * Project a prepared migration batch without re-reading the full event chain
+ * for every row. The caller must still run verifyWorkflowLedger before bytes
+ * can be persisted.
+ */
+export function projectWorkflowProjectionBatch(
+  db: WorkflowLedgerDatabase,
+  input: WorkflowProjectionBatchInput,
+  options: WorkflowProjectionWriteOptions = {}
+): { goals: number; workItems: number } {
+  const eventState = readAndVerifyEventAppendState(db, {
+    requireTaskEvidenceCoverage: false,
+    requireProjectionBinding: false
+  })
+  let goals = 0
+  let workItems = 0
+  for (const goal of input.goals) {
+    if (projectGoalWithEventState(db, goal, options, eventState)) goals += 1
+  }
+  for (const workItem of input.workItems) {
+    if (projectWorkItemWithEventState(db, workItem, options, eventState)) workItems += 1
+  }
+  readAndVerifyEvents(db, {
+    requireTaskEvidenceCoverage: false,
+    requireProjectionBinding: false
+  })
+  return { goals, workItems }
 }
 
 export function projectTaskRun(
@@ -227,8 +285,9 @@ export function projectTaskRun(
   run: TaskRunRecord,
   context: WorkflowProjectionContext = {}
 ): boolean {
-  const plan = planTaskRunProjection(db, run, context)
   const currentRun = findWorkflowRun(db, run.id)
+  assertFrozenRoutingWrite(currentRun?.taskRun, run)
+  const plan = planTaskRunProjection(db, run, context)
   const workflowRun = buildWorkflowRun(
     db, run, plan.workItemId, plan.projectId, plan.goalId, currentRun
   )
@@ -360,6 +419,21 @@ export function appendWorkflowEvent(
     sessionId?: string
   } = {}
 ): WorkflowEventRecord {
+  return appendWorkflowEventWithState(db, input, scope)
+}
+
+function appendWorkflowEventWithState(
+  db: WorkflowLedgerDatabase,
+  input: WorkflowEventInput,
+  scope: {
+    projectId?: string
+    goalId?: string
+    workItemId?: string
+    runId?: string
+    sessionId?: string
+  },
+  eventState?: WorkflowEventAppendState
+): WorkflowEventRecord {
   const normalized = normalizeEventInput(input)
   const scoped = {
     ...normalized,
@@ -368,10 +442,11 @@ export function appendWorkflowEvent(
   // Validate the existing chain and its historical references before handling
   // idempotency. Returning a dangling event would otherwise make corruption
   // reachable through an apparently harmless retry.
-  const events = readAndVerifyEvents(db, {
+  const state = eventState ?? readAndVerifyEventAppendState(db, {
     requireTaskEvidenceCoverage: false,
     requireProjectionBinding: false
   })
+  const events = state.events
   const existing = findEventById(db, normalized.eventId)
   if (existing) {
     if (input.seq !== undefined && input.seq !== existing.seq) {
@@ -399,8 +474,10 @@ export function appendWorkflowEvent(
     ...recordWithoutDigest,
     digest: digest(recordWithoutDigest)
   }
-  assertWorkflowEventReferences(db, record)
+  if (eventState) assertWorkflowEventReferencesWithIndex(db, record, state.references)
+  else assertWorkflowEventReferences(db, record)
   insertEvent(db, record)
+  events.push(record)
   return record
 }
 

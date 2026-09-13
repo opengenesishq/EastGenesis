@@ -63,3 +63,21 @@ export async function openProjectDetails(page) {
   }
   await page.waitForSelector('[data-project-lifecycle]', { visible: true, timeout: 10_000 })
 }
+
+export async function clickStudioActionWithRetry(page, action, resultSelector) {
+  await page.waitForFunction((actionName) => {
+    const button = document.querySelector(`[data-studio-action="${actionName}"]`)
+    if (!(button instanceof HTMLButtonElement) || button.disabled) return false
+    const rect = button.getBoundingClientRect()
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+    return rect.width > 0 && rect.height > 0 && (hit === button || (hit !== null && button.contains(hit)))
+  }, { timeout: 5_000 }, action)
+  await page.click(`[data-studio-action="${action}"]`)
+  if (await page.$(resultSelector)) return
+  // A renderer layout commit can replace the button between mouse down/up; retry once after a fresh hit check.
+  await page.waitForFunction((actionName) => {
+    const button = document.querySelector(`[data-studio-action="${actionName}"]`)
+    return button instanceof HTMLButtonElement && !button.disabled
+  }, { timeout: 2_000 }, action)
+  await page.click(`[data-studio-action="${action}"]`)
+}

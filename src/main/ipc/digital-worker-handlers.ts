@@ -9,7 +9,8 @@ import {
   openAssignmentOwnerCoordinator,
   retryAssignmentOwnerReadiness,
   startAssignmentOwnerReadiness,
-  withAssignmentOwnerReadiness,
+  withAssignmentOwnerReadAccess,
+  withAssignmentOwnerWriteAccess,
   type AssignmentListFilter,
   type AuditListFilter,
   type LeaseHeartbeatInput,
@@ -49,6 +50,7 @@ import {
   verifyDigitalWorkerMutation
 } from './digital-worker-project-mutation'
 import { DIGITAL_WORKER_FEATURE_HANDLERS } from './digital-worker-feature-handlers'
+import { assertActiveProject, assertProjectWorkItem } from './digital-worker-project-boundary'
 
 const ROLE_TEMPLATE_SOURCES = new Set<RoleTemplateSource>(['builtin', 'user', 'imported', 'system'])
 const WORKER_STATUSES = new Set<DigitalWorkerStatus>(['proposed', 'active', 'paused', 'retired'])
@@ -236,6 +238,12 @@ const ASSIGNMENT_ACTIONS = new Set<DigitalWorkerAction>([
   'reassignDigitalWorkerAssignment',
   'coordinateDigitalWorkerAssignmentOwner'
 ])
+const ASSIGNMENT_MUTATION_ACTIONS = new Set<DigitalWorkerAction>([
+  'createDigitalWorkerAssignment',
+  'releaseDigitalWorkerAssignment',
+  'reassignDigitalWorkerAssignment',
+  'coordinateDigitalWorkerAssignmentOwner'
+])
 /** A single action gateway keeps the Electron bridge bounded without weakening validation. */
 export function registerDigitalWorkerIpc(): void {
   startAssignmentOwnerReadiness(app.getPath('userData'))
@@ -254,87 +262,74 @@ async function dispatchDigitalWorkerAction(rawRequest: unknown): Promise<unknown
     : requiredRecord(request.payload, `${action} payload`)
   const rootDir = app.getPath('userData')
   const beforeProjectIds = digitalWorkerMutationProjectIds(action, payload, rootDir)
-  try {
-    const invoke = async () => {
-      await assertProjectWorkspaceBoundary(action, payload)
-      return await DIGITAL_WORKER_ACTION_HANDLERS[action](digitalWorkerStore(), payload)
+  const invoke = async () => {
+    try {
+      await assertProjectWorkspaceBoundary(action, payload, rootDir)
+      const result = await DIGITAL_WORKER_ACTION_HANDLERS[action](digitalWorkerStore(), payload)
+      if (ASSIGNMENT_MUTATION_ACTIONS.has(action) && isProjectOwnedDigitalWorkerMutation(action)) {
+        await verifyDigitalWorkerMutation(rootDir, beforeProjectIds, result)
+      }
+      return result
+    } catch (error) {
+      if (ASSIGNMENT_MUTATION_ACTIONS.has(action) && isRecoveryFailure(error)) {
+        failAssignmentOwnerReadiness(rootDir, error)
+      }
+      throw error
     }
-    const result = ASSIGNMENT_ACTIONS.has(action)
-      ? await withAssignmentOwnerReadiness(rootDir, invoke)
-      : await invoke()
-    if (isProjectOwnedDigitalWorkerMutation(action)) {
-      await verifyDigitalWorkerMutation(rootDir, beforeProjectIds, result)
-    }
-    return result
-  } catch (error) {
-    if (ASSIGNMENT_ACTIONS.has(action) && isRecoveryFailure(error)) {
-      failAssignmentOwnerReadiness(rootDir, error)
-    }
-    throw error
   }
+  const result = ASSIGNMENT_MUTATION_ACTIONS.has(action)
+    ? await withAssignmentOwnerWriteAccess(rootDir, invoke)
+    : ASSIGNMENT_ACTIONS.has(action)
+      ? await withAssignmentOwnerReadAccess(rootDir, invoke)
+      : await invoke()
+  if (!ASSIGNMENT_MUTATION_ACTIONS.has(action) && isProjectOwnedDigitalWorkerMutation(action)) {
+    await verifyDigitalWorkerMutation(rootDir, beforeProjectIds, result)
+  }
+  return result
 }
 
 async function assertProjectWorkspaceBoundary(
   action: DigitalWorkerAction,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  rootDir: string
 ): Promise<void> {
   if (action === 'createDigitalWorker') {
     const input = normalizeDigitalWorkerInput(payload.input)
-    await assertActiveProject(input.projectId)
+    await assertActiveProject(rootDir, input.projectId)
     return
   }
   if (action === 'refreshDigitalWorkerPerformance') {
     const worker = await digitalWorkerStore().getDigitalWorker(requiredId(payload.id, 'DigitalWorker id'))
     if (!worker) throw new Error('DigitalWorker not found')
-    await assertActiveProject(worker.projectId)
+    await assertActiveProject(rootDir, worker.projectId)
     return
   }
   if (action === 'createDigitalWorkerAssignment') {
     const input = normalizeAssignmentInput(payload.input)
-    await assertProjectWorkItem(input.projectId, input.workItemId)
+    await assertProjectWorkItem(rootDir, input.projectId, input.workItemId)
     return
   }
   if (action === 'reassignDigitalWorkerAssignment') {
     const input = normalizeReassignInput(payload.input)
-    await assertProjectWorkItem(input.nextInput.projectId, input.nextInput.workItemId)
+    await assertProjectWorkItem(rootDir, input.nextInput.projectId, input.nextInput.workItemId)
     return
   }
   if (action === 'acquireDigitalWorkerLease') {
     const input = normalizeAcquireLeaseInput(payload.input)
-    await assertProjectWorkItem(input.projectId, input.workItemId)
+    await assertProjectWorkItem(rootDir, input.projectId, input.workItemId)
     return
   }
   if (action === 'deleteDigitalWorker') {
     const workerId = requiredId(payload.id, 'DigitalWorker id')
     const worker = await digitalWorkerStore().getDigitalWorker(workerId)
     if (!worker) return
-    const workspace = await openProjectWorkspaceStore(app.getPath('userData'))
+    const workspace = await openProjectWorkspaceStore(rootDir)
     const squads = await workspace.listSquads(worker.projectId, { includeArchived: true, includeDeleted: true })
     const squad = squads.find((candidate) => candidate.members.some((member) =>
       member.type === 'digital_worker' && member.id === workerId))
     if (squad) {
       throw new Error(`DigitalWorker ${workerId} is still referenced by Squad ${squad.id}`)
     }
-  }
-}
-
-async function assertActiveProject(projectId: string): Promise<void> {
-  const store = await openProjectWorkspaceStore(app.getPath('userData'))
-  const project = await store.getWorkspace(projectId)
-  if (!project || project.status !== 'active') {
-    throw new Error(`DigitalWorker project is not active: ${projectId}`)
-  }
-}
-
-async function assertProjectWorkItem(projectId: string, workItemId: string): Promise<void> {
-  const store = await openProjectWorkspaceStore(app.getPath('userData'))
-  const [project, workItem] = await Promise.all([
-    store.getWorkspace(projectId),
-    store.getWorkItem(workItemId)
-  ])
-  if (!project || project.status !== 'active') throw new Error(`Assignment project is not active: ${projectId}`)
-  if (!workItem || workItem.projectId !== projectId) {
-    throw new Error(`Assignment WorkItem does not belong to project: ${workItemId}`)
   }
 }
 

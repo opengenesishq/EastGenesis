@@ -74,13 +74,15 @@ export default function ProviderEditorEntry(props: Props): React.JSX.Element {
 
 function NewProviderEditor({ onClose }: Pick<Props, 'onClose'>): React.JSX.Element {
   const [advanced, setAdvanced] = useState(false)
+  const [savedProvider, setSavedProvider] = useState<ProviderView | null>(null)
   return advanced
-    ? <ProviderEditor provider={null} onClose={onClose} />
+    ? <ProviderEditor provider={savedProvider} onClose={onClose} />
     : (
         <ProviderQuickSetup
           onAdvanced={() => setAdvanced(true)}
           onCancel={() => onClose({ reason: 'cancelled' })}
           onSaved={(provider) => onClose({ reason: 'saved', provider })}
+          onEditSaved={(provider) => { setSavedProvider(provider); setAdvanced(true) }}
         />
       )
 }

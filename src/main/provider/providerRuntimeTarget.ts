@@ -14,6 +14,9 @@ export interface ProviderRuntimeTarget {
   endpointId?: string
   appBindingId?: string
   accountId?: string
+  region?: string
+  domain?: string
+  permissionTags?: string[]
 }
 
 /** Resolve the effective OpenAI wire protocol without exposing or mutating Provider configuration. */
@@ -47,7 +50,13 @@ export function resolveProviderRuntimeTarget(
     protocol: endpoint?.protocol ?? provider.openaiProtocol,
     endpointId: endpoint?.id,
     appBindingId: bindingMatch?.id,
-    accountId: bindingMatch?.binding.accountId
+    accountId: bindingMatch?.binding.accountId,
+    // Keep optional routing metadata absent when it was not configured. This
+    // preserves the legacy runtime-target shape while exposing metadata for
+    // endpoints that opt into region/domain/permission policy checks.
+    ...(endpoint?.region ? { region: endpoint.region } : {}),
+    ...(endpoint?.domain ? { domain: endpoint.domain } : {}),
+    ...(endpoint?.permissionTags?.length ? { permissionTags: [...endpoint.permissionTags] } : {})
   }
 }
 

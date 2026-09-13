@@ -10,10 +10,12 @@ import type {
   RoleTemplateInput
 } from '../../../../shared/types'
 import type { DigitalWorkerStudioWorkItem } from './digital-worker-studio-model'
+import HireWorkerPolicyFields from './HireWorkerPolicyFields'
 import {
   WATERCOLOR_ROLE_OPTIONS,
   splitList,
   suggestedWatercolorRole,
+  studioLocalized,
   workerAllowedDataClasses,
   workerAllowedResourceIds,
   workerDeniedDataClasses,
@@ -65,49 +67,49 @@ export function RoleTemplateForm({ busy, onCancel, onSubmit }: RoleTemplateFormP
     >
       <div className="dws-editor-heading">
         <div>
-          <h3 id={titleId}>新建岗位</h3>
-          <span>只需填写岗位名称和主要职责</span>
+          <h3 id={titleId}>{studioLocalized('新建岗位', 'New role')}</h3>
+          <span>{studioLocalized('只需填写岗位名称和主要职责', 'Only the role name and primary responsibility are required')}</span>
         </div>
-        <button type="button" className="dws-button dws-button-quiet" onClick={onCancel} disabled={busy}>取消</button>
+        <button type="button" className="dws-button dws-button-quiet" onClick={onCancel} disabled={busy}>{studioLocalized('取消', 'Cancel')}</button>
       </div>
       <div className="dws-form-grid">
         <label className="dws-field">
-          <span>岗位名称</span>
+          <span>{studioLocalized('岗位名称', 'Role name')}</span>
           <input ref={nameRef} value={name} onChange={(event) => setName(event.target.value)} required maxLength={80} />
         </label>
         <label className="dws-field dws-field-wide">
-          <span>主要职责</span>
+          <span>{studioLocalized('主要职责', 'Primary responsibility')}</span>
           <textarea
             value={purpose}
             onChange={(event) => setPurpose(event.target.value)}
             required
             rows={2}
             maxLength={240}
-            placeholder="例如：整理资料并输出可交付的项目报告"
+            placeholder={studioLocalized('例如：整理资料并输出可交付的项目报告', 'For example: Organize source material and deliver a project report')}
           />
         </label>
         <details className="dws-advanced dws-field-wide">
-          <summary>高级设置</summary>
-          <p>补充执行说明和能力标签，不填写也能创建</p>
+          <summary>{studioLocalized('高级设置', 'Advanced settings')}</summary>
+          <p>{studioLocalized('补充执行说明和能力标签，不填写也能创建', 'Add execution instructions and capability labels when needed')}</p>
           <div className="dws-form-grid">
             <label className="dws-field dws-field-wide">
-              <span>详细执行说明</span>
+              <span>{studioLocalized('详细执行说明', 'Detailed execution instructions')}</span>
               <textarea value={instructions} onChange={(event) => setInstructions(event.target.value)} rows={3} maxLength={4000} />
             </label>
             <label className="dws-field">
-              <span>能力标签</span>
-              <input value={capabilities} onChange={(event) => setCapabilities(event.target.value)} placeholder="研究, 写作, 审核" />
+              <span>{studioLocalized('能力标签', 'Capability labels')}</span>
+              <input value={capabilities} onChange={(event) => setCapabilities(event.target.value)} placeholder={studioLocalized('研究, 写作, 审核', 'research, writing, review')} />
             </label>
             <label className="dws-field">
-              <span>技能标签</span>
-              <input value={skills} onChange={(event) => setSkills(event.target.value)} placeholder="资料检索, 文档整理" />
+              <span>{studioLocalized('技能标签', 'Skill labels')}</span>
+              <input value={skills} onChange={(event) => setSkills(event.target.value)} placeholder={studioLocalized('资料检索, 文档整理', 'source research, document organization')} />
             </label>
           </div>
         </details>
       </div>
       <div className="dws-editor-actions">
         <button type="submit" className="dws-button dws-button-primary" disabled={busy || !name.trim() || !purpose.trim()}>
-          {busy ? '创建中...' : '创建岗位'}
+          {busy ? studioLocalized('创建中...', 'Creating...') : studioLocalized('创建岗位', 'Create role')}
         </button>
       </div>
     </form>
@@ -147,14 +149,14 @@ function HireWorkerIdentityFields(props: HireWorkerIdentityFieldsProps): React.J
   return (
     <>
       <label className="dws-field">
-        <span>岗位</span>
+        <span>{studioLocalized('岗位', 'Role')}</span>
         <select value={roleId} onChange={(event) => onRoleIdChange(event.target.value)} required>
-          <option value="" disabled>选择岗位</option>
+          <option value="" disabled>{studioLocalized('选择岗位', 'Select a role')}</option>
           {roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
         </select>
       </label>
       <label className="dws-field">
-        <span>员工名称</span>
+        <span>{studioLocalized('员工名称', 'Worker name')}</span>
         <input
           ref={nameRef}
           value={displayName}
@@ -201,10 +203,10 @@ function HireWorkerDataScopeFields(props: HireWorkerDataScopeFieldsProps): React
   } = props
   return (
     <fieldset className="dws-fieldset dws-field-wide">
-      <legend>数据范围</legend>
+      <legend>{studioLocalized('数据范围', 'Data scope')}</legend>
       <div className="dws-form-grid dws-nested-grid">
         <label className="dws-field">
-          <span>允许的数据类</span>
+          <span>{studioLocalized('允许的数据类', 'Allowed data classes')}</span>
           <input
             value={allowedDataClasses}
             onChange={(event) => setAllowedDataClasses(event.target.value)}
@@ -212,7 +214,7 @@ function HireWorkerDataScopeFields(props: HireWorkerDataScopeFieldsProps): React
           />
         </label>
         <label className="dws-field">
-          <span>禁止的数据类</span>
+          <span>{studioLocalized('禁止的数据类', 'Denied data classes')}</span>
           <input
             value={deniedDataClasses}
             onChange={(event) => setDeniedDataClasses(event.target.value)}
@@ -220,7 +222,7 @@ function HireWorkerDataScopeFields(props: HireWorkerDataScopeFieldsProps): React
           />
         </label>
         <label className="dws-field dws-field-wide">
-          <span>允许的 Resource ID</span>
+          <span>{studioLocalized('允许的 Resource ID', 'Allowed Resource IDs')}</span>
           <input
             value={allowedResourceIds}
             onChange={(event) => setAllowedResourceIds(event.target.value)}
@@ -233,110 +235,10 @@ function HireWorkerDataScopeFields(props: HireWorkerDataScopeFieldsProps): React
             checked={requireExplicitScope}
             onChange={(event) => setRequireExplicitScope(event.target.checked)}
           />
-          <span>分配 WorkItem 时必须声明数据类</span>
+          <span>{studioLocalized('分配 WorkItem 时必须声明数据类', 'Require a data class when assigning work items')}</span>
         </label>
       </div>
     </fieldset>
-  )
-}
-
-interface HireWorkerPolicyFieldsProps {
-  monthlyBudget: string
-  concurrency: string
-  minimumEvidenceCount: string
-  requireUserApproval: boolean
-  escalationTarget: string
-  escalateAfterFailures: string
-  setMonthlyBudget: Dispatch<SetStateAction<string>>
-  setConcurrency: Dispatch<SetStateAction<string>>
-  setMinimumEvidenceCount: Dispatch<SetStateAction<string>>
-  setRequireUserApproval: Dispatch<SetStateAction<boolean>>
-  setEscalationTarget: Dispatch<SetStateAction<string>>
-  setEscalateAfterFailures: Dispatch<SetStateAction<string>>
-}
-
-function HireWorkerPolicyFields(props: HireWorkerPolicyFieldsProps): React.JSX.Element {
-  const {
-    monthlyBudget,
-    concurrency,
-    minimumEvidenceCount,
-    requireUserApproval,
-    escalationTarget,
-    escalateAfterFailures,
-    setMonthlyBudget,
-    setConcurrency,
-    setMinimumEvidenceCount,
-    setRequireUserApproval,
-    setEscalationTarget,
-    setEscalateAfterFailures
-  } = props
-  return (
-    <>
-      <label className="dws-field">
-        <span>月度预算 (USD)</span>
-        <input
-          type="number"
-          min="0"
-          step="0.01"
-          value={monthlyBudget}
-          onChange={(event) => setMonthlyBudget(event.target.value)}
-          placeholder="不设限"
-        />
-      </label>
-      <label className="dws-field">
-        <span>最大并发</span>
-        <input
-          type="number"
-          min="1"
-          max="32"
-          step="1"
-          value={concurrency}
-          onChange={(event) => setConcurrency(event.target.value)}
-          required
-        />
-      </label>
-      <label className="dws-field">
-        <span>最少 Evidence 数</span>
-        <input
-          type="number"
-          min="0"
-          max="10000"
-          step="1"
-          value={minimumEvidenceCount}
-          onChange={(event) => setMinimumEvidenceCount(event.target.value)}
-          required
-        />
-      </label>
-      <label className="dws-check">
-        <input
-          type="checkbox"
-          checked={requireUserApproval}
-          onChange={(event) => setRequireUserApproval(event.target.checked)}
-        />
-        <span>验收需用户确认</span>
-      </label>
-      <label className="dws-field">
-        <span>升级目标</span>
-        <input
-          value={escalationTarget}
-          onChange={(event) => setEscalationTarget(event.target.value)}
-          required
-          maxLength={120}
-        />
-      </label>
-      <label className="dws-field">
-        <span>连续失败后升级</span>
-        <input
-          type="number"
-          min="1"
-          max="10000"
-          step="1"
-          value={escalateAfterFailures}
-          onChange={(event) => setEscalateAfterFailures(event.target.value)}
-          required
-        />
-      </label>
-    </>
   )
 }
 
@@ -475,10 +377,10 @@ export function HireWorkerForm(props: HireWorkerFormProps): React.JSX.Element {
     >
       <div className="dws-editor-heading">
         <div>
-          <h3 id={titleId}>招聘数字员工</h3>
-          <span>岗位职责和安全策略已经自动配置，可直接招聘</span>
+          <h3 id={titleId}>{studioLocalized('招聘数字员工', 'Hire digital worker')}</h3>
+          <span>{studioLocalized('岗位职责和安全策略已经自动配置，可直接招聘', 'Responsibilities and security policies are preconfigured')}</span>
         </div>
-        <button type="button" className="dws-button dws-button-quiet" onClick={onCancel} disabled={busy}>取消</button>
+        <button type="button" className="dws-button dws-button-quiet" onClick={onCancel} disabled={busy}>{studioLocalized('取消', 'Cancel')}</button>
       </div>
       <div className="dws-form-grid">
         <HireWorkerIdentityFields
@@ -489,21 +391,21 @@ export function HireWorkerForm(props: HireWorkerFormProps): React.JSX.Element {
           onRoleIdChange={selectRole}
         />
         <details className="dws-advanced dws-field-wide">
-          <summary>高级设置</summary>
-          <p>需要特殊规则时再修改；默认值适合大多数任务</p>
+          <summary>{studioLocalized('高级设置', 'Advanced settings')}</summary>
+          <p>{studioLocalized('需要特殊规则时再修改；默认值适合大多数任务', 'Change these only when special rules are required; the defaults suit most tasks')}</p>
           <div className="dws-form-grid">
             <label className="dws-field dws-field-wide">
-              <span>自定义职责</span>
+              <span>{studioLocalized('自定义职责', 'Custom responsibilities')}</span>
               <textarea
                 value={responsibilities}
                 onChange={(event) => setResponsibilities(event.target.value)}
                 rows={2}
-                placeholder="默认继承岗位职责"
+                placeholder={studioLocalized('默认继承岗位职责', 'Inherits role responsibilities by default')}
                 maxLength={2000}
               />
             </label>
             <label className="dws-field">
-              <span>水墨岗位形象</span>
+              <span>{studioLocalized('水墨岗位形象', 'Office role appearance')}</span>
               <select
                 value={watercolorRole}
                 onChange={(event) => setWatercolorRole(event.target.value as WatercolorCharacterRole)}
@@ -516,7 +418,7 @@ export function HireWorkerForm(props: HireWorkerFormProps): React.JSX.Element {
             </label>
             <label className="dws-check">
               <input type="checkbox" checked={activate} onChange={(event) => setActivate(event.target.checked)} />
-              <span>入职后立即启用</span>
+              <span>{studioLocalized('入职后立即启用', 'Activate immediately after hiring')}</span>
             </label>
             <PermissionFields permissions={permissions} setPermissions={setPermissions} />
             <HireWorkerDataScopeFields
@@ -552,7 +454,7 @@ export function HireWorkerForm(props: HireWorkerFormProps): React.JSX.Element {
           className="dws-button dws-button-primary"
           disabled={busy || !displayName.trim() || !roleId || !projectId}
         >
-          {busy ? '招聘中...' : '确认招聘'}
+          {busy ? studioLocalized('招聘中...', 'Hiring...') : studioLocalized('确认招聘', 'Confirm hire')}
         </button>
       </div>
     </form>
@@ -586,15 +488,15 @@ interface PermissionFieldsProps {
 
 function PermissionFields({ permissions, setPermissions }: PermissionFieldsProps): React.JSX.Element {
   const options = [
-    ['workspaceRead', '读取工作区'],
-    ['workspaceWrite', '修改工作区'],
-    ['terminal', '终端操作'],
-    ['browser', '浏览器操作'],
-    ['network', '网络访问']
+    ['workspaceRead', studioLocalized('读取工作区', 'Read workspace')],
+    ['workspaceWrite', studioLocalized('修改工作区', 'Modify workspace')],
+    ['terminal', studioLocalized('终端操作', 'Terminal access')],
+    ['browser', studioLocalized('浏览器操作', 'Browser access')],
+    ['network', studioLocalized('网络访问', 'Network access')]
   ] as const
   return (
     <fieldset className="dws-fieldset dws-field-wide">
-      <legend>工具权限</legend>
+      <legend>{studioLocalized('工具权限', 'Tool permissions')}</legend>
       <div className="dws-check-grid">
         {options.map(([key, label]) => (
           <label key={key} className="dws-check">
@@ -650,13 +552,13 @@ function AssignmentScopeFields(props: AssignmentScopeFieldsProps): React.JSX.Ele
   return (
     <>
       <label className="dws-field dws-field-wide">
-        <span>数据类</span>
+        <span>{studioLocalized('数据类', 'Data classes')}</span>
         <input
           value={dataClass}
           onChange={(event) => setDataClass(event.target.value)}
           required={scopeRequired}
           list={`${titleId}-data-classes`}
-          placeholder={scopeRequired ? '必须匹配员工策略' : '可选'}
+          placeholder={scopeRequired ? studioLocalized('必须匹配员工策略', 'Must match worker policy') : studioLocalized('可选', 'Optional')}
         />
         <datalist id={`${titleId}-data-classes`}>
           {allowedDataClasses.map((entry) => <option key={entry} value={entry} />)}
@@ -668,7 +570,7 @@ function AssignmentScopeFields(props: AssignmentScopeFieldsProps): React.JSX.Ele
           value={resourceIds}
           onChange={(event) => setResourceIds(event.target.value)}
           required={allowedResources.length > 0}
-          placeholder={allowedResources.length > 0 ? '必须匹配员工策略' : '多个值用逗号或换行分隔'}
+          placeholder={allowedResources.length > 0 ? studioLocalized('必须匹配员工策略', 'Must match worker policy') : studioLocalized('多个值用逗号或换行分隔', 'Separate multiple values with commas or line breaks')}
         />
       </label>
     </>
@@ -722,7 +624,7 @@ function AssignmentFields(props: AssignmentFieldsProps): React.JSX.Element {
         </select>
       </label>
       <label className="dws-field">
-        <span>数字员工</span>
+        <span>{studioLocalized('数字员工', 'Digital worker')}</span>
         <select value={workerId} onChange={(event) => setWorkerId(event.target.value)} data-dws-field="worker">
           {activeWorkers.map((worker) => <option key={worker.id} value={worker.id}>{worker.displayName}</option>)}
         </select>
@@ -736,12 +638,12 @@ function AssignmentFields(props: AssignmentFieldsProps): React.JSX.Element {
         setResourceIds={setResourceIds}
       />
       <label className="dws-field dws-field-wide">
-        <span>分配原因</span>
+        <span>{studioLocalized('分配原因', 'Assignment reason')}</span>
         <input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={240} />
       </label>
       {currentAssignment && (
         <div className="dws-current-assignment dws-field-wide" role="status">
-          {workItemTitle(currentAssignment.workItemId, workItems)} 当前已有负责人，提交后将保留历史并完成改派。
+          {studioLocalized(`${workItemTitle(currentAssignment.workItemId, workItems)} 当前已有负责人，提交后将保留历史并完成改派。`, `${workItemTitle(currentAssignment.workItemId, workItems)} already has an owner. Submitting will preserve the history and transfer ownership.`)}
         </div>
       )}
     </div>
@@ -780,12 +682,12 @@ export function AssignmentForm(props: AssignmentFormProps): React.JSX.Element {
       }}
     >
       <div className="dws-editor-heading">
-        <h3 id={titleId}>分配 WorkItem</h3>
-        <button type="button" className="dws-button dws-button-quiet" onClick={onCancel} disabled={busy}>取消</button>
+        <h3 id={titleId}>{studioLocalized('分配 WorkItem', 'Assign work item')}</h3>
+        <button type="button" className="dws-button dws-button-quiet" onClick={onCancel} disabled={busy}>{studioLocalized('取消', 'Cancel')}</button>
       </div>
       {workItems.length === 0 || activeWorkers.length === 0 ? (
         <div className="dws-inline-empty" role="status">
-          {workItems.length === 0 ? '当前项目暂无 WorkItem。' : '当前项目暂无工作中的数字员工。'}
+          {workItems.length === 0 ? studioLocalized('当前项目暂无 WorkItem。', 'This project has no work items.') : studioLocalized('当前项目暂无工作中的数字员工。', 'This project has no active digital workers.')}
         </div>
       ) : (
         <AssignmentFields
@@ -811,7 +713,7 @@ export function AssignmentForm(props: AssignmentFormProps): React.JSX.Element {
           className="dws-button dws-button-primary"
           disabled={busy || !workItemId || !workerId || unchanged}
         >
-          {busy ? '分配中...' : unchanged ? '已分配' : '确认分配'}
+          {busy ? studioLocalized('分配中...', 'Assigning...') : unchanged ? studioLocalized('已分配', 'Assigned') : studioLocalized('确认分配', 'Confirm assignment')}
         </button>
       </div>
     </form>

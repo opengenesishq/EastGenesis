@@ -39,7 +39,7 @@ async function run() {
       schemaVersion: 1,
       method: 'device-code',
       status: 'authorized',
-      provider: 'codex-oauth',
+      provider: 'xai-oauth',
       accountId: 'account-alpha-primary',
       accountLabel: 'Primary account',
       accountRoutingMode: 'preferred'
@@ -171,13 +171,13 @@ function installDashboardFixtures(alpha, beta, attempts) {
   }))
   ipcMain._invokeHandlers.set('providers:authorization:accounts', async (_event, providerId) => providerId === alpha.id ? [
     {
-      id: 'account-alpha-primary', providerId, service: 'codex-oauth', label: 'Primary account',
+      id: 'account-alpha-primary', providerId, service: 'xai-oauth', label: 'Primary account',
       authenticatedAt: Date.now() - 60_000, updatedAt: Date.now(), bound: true, requiresReauth: false, credentialStorage: 'encrypted',
       policy: authorizationPolicies.get('account-alpha-primary'), routingState: 'selected', routingReason: '首选模式使用绑定授权账号',
       quota: quotaFixture(providerId, 'account-alpha-primary', 23)
     },
     {
-      id: 'account-alpha-secondary', providerId, service: 'codex-oauth', label: 'Secondary account',
+      id: 'account-alpha-secondary', providerId, service: 'xai-oauth', label: 'Secondary account',
       authenticatedAt: Date.now() - 120_000, updatedAt: Date.now() - 60_000, bound: false, requiresReauth: false, credentialStorage: 'encrypted',
       policy: authorizationPolicies.get('account-alpha-secondary'), routingState: 'available', routingReason: '可用于自动路由',
       quota: quotaFixture(providerId, 'account-alpha-secondary', 48)

@@ -6,7 +6,6 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
-  readdirSync,
   renameSync,
   unlinkSync,
   writeSync
@@ -349,7 +348,6 @@ function upgradeLegacyAuditEvent(
 
 function writeJournal(filePath: string, document: AssignmentOwnerJournalDocument): void {
   mkdirSync(dirname(filePath), { recursive: true })
-  cleanupJournalTemps(filePath)
   const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`
   let descriptor: number | undefined
   try {
@@ -370,44 +368,13 @@ function writeJournal(filePath: string, document: AssignmentOwnerJournalDocument
   }
 }
 
-function cleanupJournalTemps(filePath: string): void {
-  const directory = dirname(filePath)
-  const prefix = `${JOURNAL_FILE_NAME}.`
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.startsWith(prefix) || !entry.name.endsWith('.tmp')) continue
-    const match = /^assignment-owner-coordinator\.json\.(\d+)\.[0-9a-f-]+\.tmp$/.exec(entry.name)
-    if (!match || processIsAlive(Number.parseInt(match[1], 10))) continue
-    try { unlinkSync(join(directory, entry.name)) } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
-  }
-}
-
-function processIsAlive(pid: number): boolean {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
-  }
-}
-
 function syncDirectory(directory: string): void {
-  let descriptor: number | undefined
   try {
-    descriptor = openSync(directory, 'r')
-    fsyncSync(descriptor)
-  } catch (error) {
-    if (process.platform !== 'win32' || !isWindowsDirectoryFsyncUnsupported(error)) throw error
-  } finally {
-    if (descriptor !== undefined) closeSync(descriptor)
+    const descriptor = openSync(directory, 'r')
+    try { fsyncSync(descriptor) } finally { closeSync(descriptor) }
+  } catch {
+    // Some filesystems do not permit directory fsync.
   }
-}
-
-function isWindowsDirectoryFsyncUnsupported(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException)?.code
-  return code === 'EPERM' || code === 'EACCES' || code === 'EINVAL' || code === 'ENOTSUP'
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

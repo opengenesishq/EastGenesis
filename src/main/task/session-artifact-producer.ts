@@ -127,7 +127,7 @@ async function registerOne(
     kind: input.kind
   }, roots)
   const version = existing?.version ?? (previous?.version ?? 0) + 1
-  const supersedesId = existing?.supersedesId ?? (previous ? previous.artifactId : undefined)
+  const supersedesId = existing ? existing.supersedesId : previous?.artifactId
   const observedAt = existing?.createdAt ?? input.createdAt ?? Date.now()
   const registered = await registerCanonicalProducedArtifact({
     lifecycle: {

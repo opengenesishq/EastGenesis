@@ -17,19 +17,17 @@ export function sessionExperienceMode(meta: SessionOwnership): 'assistant' | 'st
 export function sessionProjectionPatch(currentNonce: number, meta: SessionOwnership): {
   experienceMode: 'assistant' | 'studio'
   studioSessionNavigationNonce: number
-  preferredProjectWorkspaceId?: string
 } {
   const experienceMode = sessionExperienceMode(meta)
-  const workspaceId = meta.workspaceId?.trim()
   return {
     experienceMode,
-    studioSessionNavigationNonce: nextStudioSessionNonce(currentNonce, experienceMode),
-    ...(workspaceId ? { preferredProjectWorkspaceId: workspaceId } : {})
+    studioSessionNavigationNonce: nextStudioSessionNonce(currentNonce, experienceMode)
   }
 }
 
 export function historyResumeOptions(entry: HistoryEntry): CreateSessionOptions {
   return {
+    businessLineId: entry.businessLineId,
     cwd: entry.cwd,
     projectId: entry.projectId,
     workspaceId: entry.workspaceId,

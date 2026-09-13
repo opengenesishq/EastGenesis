@@ -1,19 +1,23 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   closeSync,
   constants,
+  existsSync,
   fstatSync,
+  fsyncSync,
+  linkSync,
   lstatSync,
   openSync,
   readSync,
   realpathSync,
   statSync,
+  unlinkSync,
+  writeFileSync,
   type Stats
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { EffectTarget, FileSystemIdentity } from '../../shared/types'
-import { writeDurableFileSync } from '../durable-file'
 import { patchSha256 } from '../worktreeMerge'
 
 export type CodeForgePatchEffectTarget = Extract<EffectTarget, { kind: 'code_forge_patch' }>
@@ -167,12 +171,26 @@ export function publishCodeForgePatchArtifact(
   if (patchSha256(patchText) !== target.patchSha256 || Buffer.byteLength(patchText, 'utf8') !== target.patchBytes) {
     throw new Error('待写入 Code Forge patch 与冻结摘要或大小不匹配')
   }
+  const temporary = path.join(target.artifactRoot, `.caogen-code-forge-${process.pid}-${randomUUID()}.tmp`)
+  let descriptor: number | undefined
   try {
-    writeDurableFileSync(target.artifactPath, patchText, { replace: false })
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    descriptor = openSync(temporary, 'wx', 0o600)
+    writeFileSync(descriptor, patchText, 'utf8')
+    fsyncSync(descriptor)
+    closeSync(descriptor)
+    descriptor = undefined
+    assertPublishedContent(temporary, target)
+    try {
+      linkSync(temporary, target.artifactPath)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      assertPublishedContent(target.artifactPath, target)
+    }
+    fsyncDirectory(target.artifactRoot)
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor)
+    if (existsSync(temporary)) unlinkSync(temporary)
   }
-  assertPublishedContent(target.artifactPath, target)
 }
 
 function assertPublishedContent(filePath: string, target: CodeForgePatchEffectTarget): void {
@@ -200,4 +218,17 @@ function fileSystemIdentity(filePath: string): FileSystemIdentity {
 
 function sameIdentity(left: FileSystemIdentity, right: FileSystemIdentity): boolean {
   return left.device === right.device && left.inode === right.inode
+}
+
+function fsyncDirectory(directory: string): void {
+  try {
+    const descriptor = openSync(directory, 'r')
+    try {
+      fsyncSync(descriptor)
+    } finally {
+      closeSync(descriptor)
+    }
+  } catch {
+    // Some platforms do not support directory fsync; the file is durable before publication.
+  }
 }

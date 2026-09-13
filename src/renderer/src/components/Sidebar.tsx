@@ -1,3 +1,5 @@
+import SidebarTaskList from './SidebarTaskList'
+import { taskEntryCount } from './task-entry-groups'
 import { memo, useMemo, useRef, useState } from 'react'
 import type * as React from 'react'
 import { Ellipsis, Plus, Search } from 'lucide-react'
@@ -5,6 +7,9 @@ import { useStore } from '../store'
 import { useT } from '../i18n'
 import { basename, formatCost, formatTime } from '../format'
 import { APP_ICON_URL, APP_NAME } from '../brand'
+import { resolveBusinessLineId, resolveSelectedBusinessLine } from '../../../shared/business-line-types'
+import { belongsToBusinessLine, businessLineConversationEntries, builtinLineValue } from './business-lines/business-line-sidebar'
+import { requestBusinessLineTaskNavigation } from './business-lines/businessLineTaskNavigation'
 import type {
   HistoryEntry,
   SessionStatus,
@@ -22,8 +27,8 @@ import { DisclosureChevron } from './DisclosureChevron'
 import SidebarVideoSections from './SidebarVideoSections'
 import SidebarPrimaryAction from './SidebarPrimaryAction'
 import SidebarFooter from './SidebarFooter'
-import AppModeSwitcher from './AppModeSwitcher'
 import { sidebarSearchKey, sidebarVisibleCount, splitAssistantEntries } from './sidebar-mode-projection'
+import { cancelOfficeIdlePrewarm } from './office/loadOffice'
 import { restoreComposerFocus, SidebarPanelIcon } from './SidebarControls'
 import {
   buildSidebarProjectGroups,
@@ -41,6 +46,7 @@ const STATUS_LABEL_KEY: Record<SessionStatus, string> = {
 }
 
 const SIDEBAR_COLLAPSED_WIDTH = 56
+const TASK_LABEL = { zh: '任务', en: 'Tasks' }
 
 interface EditingTarget { kind: SidebarEntry['kind']; id: string }
 
@@ -143,7 +149,7 @@ function Sidebar({
   const setView = useStore((s) => s.setView)
   const showNewSession = useStore((s) => s.showNewSession)
   const showTaskRecovery = useStore((s) => s.showTaskRecovery)
-  const settings = useStore((s) => s.settings)
+  const settings = useStore((s) => s.settings), selectedLine = resolveSelectedBusinessLine(settings)
   const layout = settings.layout
   const updateSettings = useStore((s) => s.updateSettings)
   const [editing, setEditing] = useState<EditingTarget | null>(null)
@@ -214,7 +220,7 @@ function Sidebar({
     workflowAttentionWorkItems.length + workflowAttentionSupervisorRuns.length + pendingPermissionCount
   const activeEntries: ActiveSidebarEntry[] = order.flatMap((id) => {
     const session = sessions[id]
-    if (!session) return []
+    if (!belongsToBusinessLine(session?.meta, selectedLine.id)) return []
     const historyEntry =
       historyByActiveId.get(id) ??
       (session.meta.sdkSessionId ? historyByActiveId.get(session.meta.sdkSessionId) : undefined)
@@ -229,7 +235,7 @@ function Sidebar({
   })
 
   const historyEntries = history.filter(
-    (entry) => !openSessionIds.has(entry.id) && !openSdkIds.has(entry.sdkSessionId)
+    (entry) => resolveBusinessLineId(entry) === selectedLine.id && !openSessionIds.has(entry.id) && !openSdkIds.has(entry.sdkSessionId)
   )
   const visibleHistoryEntries = historyEntries
     .map((entry) => ({ kind: 'history' as const, id: entry.id, history: entry }))
@@ -247,7 +253,7 @@ function Sidebar({
 
   const { projectGroups, archivedProjectGroups, unassigned, showUnassigned } = groupedEntries
   const { archived: archivedHistory, pinned: pinnedEntries, sessions: assistantSessionEntries } =
-    splitAssistantEntries(unassigned.entries)
+    splitAssistantEntries(businessLineConversationEntries(selectedLine, [...activeEntries, ...visibleHistoryEntries]))
 
   const startRename = (entry: SidebarEntry): void => {
     setEditing({ kind: entry.kind, id: entry.id })
@@ -508,7 +514,7 @@ function Sidebar({
           >
             <DisclosureChevron expanded={!collapsed} className="sidebar-group-caret" />
             <span className="sidebar-group-title">{group.label}</span>
-            <span className="sidebar-group-count">{group.entries.length}</span>
+            <span className="sidebar-group-count">{taskEntryCount(group.entries)}</span>
           </button>
           {allowNewSession && (
             <button
@@ -537,7 +543,7 @@ function Sidebar({
             </button>
           )}
         </div>
-        {!collapsed && group.entries.map(renderSidebarEntry)}
+        {!collapsed && <SidebarTaskList entries={group.entries} activeId={activeId} renderEntry={renderSidebarEntry} />}
         {!collapsed && group.entries.length === 0 && (
           <div className="sidebar-empty sidebar-group-empty">{t('noSessions')}</div>
         )}
@@ -569,8 +575,8 @@ function Sidebar({
   }
 
   const totalVisible = sidebarVisibleCount(experienceMode,
-    [pinnedEntries.length, assistantSessionEntries.length, archivedHistory.length],
-    [...projectGroups, ...archivedProjectGroups].map((group) => group.entries.length))
+    [taskEntryCount(pinnedEntries), taskEntryCount(assistantSessionEntries), archivedHistory.length],
+    [...projectGroups, ...archivedProjectGroups].map((group) => taskEntryCount(group.entries)))
   const archiveExpanded = archiveOpen || query.trim().length > 0
   const contentSearchActive = query.trim().length >= 2
   const searchPlaceholder = t(sidebarSearchKey(experienceMode))
@@ -614,13 +620,11 @@ function Sidebar({
         </button>
       </div>
 
-      <AppModeSwitcher language={language} mode={experienceMode} onChange={onExperienceModeChange} />
-
       <nav className="sidebar-primary-nav" aria-label={t('primaryNavigation')}>
         <SidebarPrimaryAction
           mode={experienceMode}
           newSessionActive={showNewSession}
-          onNewSession={() => setShowNewSession(true)}
+          onNewSession={() => { setShowNewSession(true); requestBusinessLineTaskNavigation(selectedLine.id) }}
           onNewProject={openNewProjectWorkspace}
           onNewVideo={() => { onExperienceModeChange('video'); window.dispatchEvent(new Event('caogen:video-new')) }}
         />
@@ -656,14 +660,14 @@ function Sidebar({
         <When values={[isAssistant, pinnedEntries.length > 0]}>
           <section className="sidebar-section">
             <div className="sidebar-section-title">{t('pinned')}</div>
-            {pinnedEntries.map(renderSidebarEntry)}
+            <SidebarTaskList entries={pinnedEntries} activeId={activeId} renderEntry={renderSidebarEntry} />
           </section>
         </When>
 
         {isAssistant ? (
           <section className="sidebar-section sidebar-conversations-section" data-sidebar-assistant-sessions>
-            <div className="sidebar-section-title">{t('sessions')}</div>
-            {assistantSessionEntries.map(renderSidebarEntry)}
+            <div className="sidebar-section-title">{TASK_LABEL[language]}</div>
+            <SidebarTaskList entries={assistantSessionEntries} activeId={activeId} renderEntry={renderSidebarEntry} />
             {assistantSessionEntries.length === 0 && <div className="sidebar-empty">{t('noSessions')}</div>}
           </section>
         ) : isProject ? (
@@ -739,10 +743,13 @@ function Sidebar({
 
       <SidebarFooter
         language={language}
-        recommendation={experienceRecommendation}
+        mode={experienceMode}
+        recommendation={builtinLineValue(selectedLine, experienceRecommendation)}
         settings={settings}
+        onExperienceModeChange={onExperienceModeChange}
         onOpenControlRoom={() => {
           setShowTaskRecovery(false)
+          cancelOfficeIdlePrewarm()
           setView('office')
         }}
         onOpenSettings={() => setShowSettings(true)}

@@ -6,6 +6,7 @@ import { cpus, freemem, platform, release, tmpdir, totalmem } from 'node:os'
 import path from 'node:path'
 import net from 'node:net'
 import { createRequire } from 'node:module'
+import { openControlRoom } from './lib/open-control-room.mjs'
 
 const repoRoot = process.cwd()
 const require = createRequire(path.join(repoRoot, 'package.json'))
@@ -162,12 +163,7 @@ function prepareFixture() {
 }
 
 function verifySourceContract() {
-  // The interactive 3D Canvas lives behind the lazy OfficeRuntime boundary;
-  // OfficeView owns only the lightweight cold-boot preview.
-  const officeView = [
-    readSource('src/renderer/src/components/office/OfficeView.tsx'),
-    readSource('src/renderer/src/components/office/OfficeRuntime.tsx')
-  ].join('\n')
+  const officeView = readSource('src/renderer/src/components/office/OfficeView.tsx')
   const quality = readSource('src/renderer/src/components/office/kit/OfficeRenderQuality.tsx')
   const contract = {
     frameloopNever: /frameloop=["']never["']/.test(officeView),
@@ -203,8 +199,7 @@ async function createRuntimeFixture(targetPage) {
 }
 
 async function openOffice(targetPage) {
-  await targetPage.waitForSelector('[data-sidebar-action="control-room"]', { visible: true, timeout: 10_000 })
-  await targetPage.click('[data-sidebar-action="control-room"]')
+  await openControlRoom(targetPage)
   await targetPage.waitForSelector('.office-canvas-wrap', { visible: true, timeout: 20_000 })
   await targetPage.waitForFunction(
     () => typeof window.__caogenOfficePerformance?.snapshot === 'function' &&

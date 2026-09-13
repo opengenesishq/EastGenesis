@@ -16,6 +16,7 @@ import { assertNativeRuntimeAdapterDeclaration } from './native-runtime-contract
 import { bindEngineToNativeRuntime } from './native-runtime-engine'
 import { assertNativeProtocolAdapter } from './protocol-adapters/shared'
 import type { NativeProtocolAdapter } from './protocol-adapters/types'
+import { restoreRuntimeContinuation } from './session-runtime-continuation-store'
 
 /**
  * M6 · EngineAdapter:桌面会话与底层 Agent 引擎之间的契约。
@@ -54,6 +55,8 @@ export interface Engine {
    * SessionManager 必须等待该屏障，才能把会话视为已停止并启动效果对账。
    */
   dispose(): Promise<void>
+  /** Retire an idle protocol instance without emitting a false Session-closed event. */
+  retireForContinuation?(): Promise<void>
 }
 
 export type EngineEmit = (event: AgentEvent, seq: number, identity?: AgentEventIdentity) => void
@@ -128,6 +131,11 @@ export function createEngine(
   resumeSdkSessionId?: string,
   initialEventSeq = 0
 ): Engine {
+  if (resumeSdkSessionId) {
+    meta.sdkSessionId ??= resumeSdkSessionId
+    restoreRuntimeContinuation(meta)
+    kind = meta.engine
+  }
   if (!kind) throw new Error('请选择 Agent 引擎')
   const factory = registry.get(kind)
   if (!factory) throw new Error(`Agent 引擎未注册:${kind}`)

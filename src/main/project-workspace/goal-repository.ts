@@ -17,7 +17,6 @@ import {
 } from '../../shared/project-workspace-types'
 import {
   clone,
-  digest,
   flattenContract,
   normalizeAcceptanceResult,
   normalizeContract,
@@ -50,16 +49,14 @@ export class GoalRepository {
 
   async create(input: GoalInput, options?: MutationOptions | number): Promise<Goal> {
     return this.persistence.mutate(options, ({ state, now }) => {
+      this.persistence.assertCreateRevision(state, options)
       const projectId = requiredId(input.projectId, 'goal projectId')
       const project = activeWorkspaceFrom(state, projectId)
       assertProjectAuthorized(state, project, projectMutationActor(options), 'edit')
       const id = optionalId(input.id, 'goal id') ?? randomUUID()
-      const existing = state.goals.find((goal) => goal.id === id)
-      if (existing) {
-        if (input.id !== undefined && isIdempotentGoalCreate(existing, input, projectId)) return existing
-        throw new ProjectWorkspaceError('already_exists', `goal ${id} already exists with different content`)
+      if (state.goals.some((goal) => goal.id === id)) {
+        throw new ProjectWorkspaceError('already_exists', `goal ${id} already exists`)
       }
-      this.persistence.assertCreateRevision(state, options)
       const goal = buildGoal(input, id, projectId, now)
       state.goals.push(goal)
       appendEvent(state, projectId, 'goal', id, 'goal.created', 1, goal as unknown as Record<string, unknown>, now)
@@ -90,6 +87,9 @@ export class GoalRepository {
       assertProjectAuthorized(state, project, projectMutationActor(options), capability)
       this.persistence.assertEntityRevision(goal.revision, options, 'goal')
       if (goal.status === 'archived') throw new ProjectWorkspaceError('archived', `goal ${id} is archived`)
+      if (isTerminalGoal(goal.status)) {
+        throw new ProjectWorkspaceError('terminal', `goal ${id} is terminal`)
+      }
       applyGoalPatch(goal, patch, now)
       appendEvent(state, goal.projectId, 'goal', goal.id, 'goal.updated', goal.revision, patch as unknown as Record<string, unknown>, now)
       propagateGoalContract(state, goal, now)
@@ -107,7 +107,7 @@ export class GoalRepository {
       const project = assertProject(state, goal.projectId)
       assertProjectAuthorized(state, project, projectMutationActor(options), 'edit')
       this.persistence.assertEntityRevision(goal.revision, options, 'goal')
-      validateGoalTransition(goal, status)
+      validateGoalTransition(state, goal, status)
       if (goal.status === status) return goal
       goal.status = status
       goal.updatedAt = now
@@ -193,11 +193,6 @@ function buildGoal(input: GoalInput, id: string, projectId: string, now: number)
   }
 }
 
-function isIdempotentGoalCreate(existing: Goal, input: GoalInput, projectId: string): boolean {
-  return existing.revision === 1 &&
-    digest(existing) === digest(buildGoal(input, existing.id, projectId, existing.createdAt))
-}
-
 function goalContractInput(input: GoalInput): GoalContractInput {
   if (input.contract) return { ...input.contract, objective: input.contract.objective ?? input.objective ?? '' }
   return goalContractFallback(input) as GoalContractInput
@@ -257,7 +252,7 @@ function propagateGoalContract(state: ProjectWorkspaceState, goal: Goal, now: nu
   }
 }
 
-function validateGoalTransition(goal: Goal, status: GoalStatus): void {
+function validateGoalTransition(state: ProjectWorkspaceState, goal: Goal, status: GoalStatus): void {
   if (!isGoalStatus(status)) throw new ProjectWorkspaceError('invalid_input', `goal status ${String(status)} is invalid`)
   if (goal.status === status) return
   if (!GOAL_TRANSITIONS[goal.status].has(status)) {
@@ -265,6 +260,18 @@ function validateGoalTransition(goal: Goal, status: GoalStatus): void {
   }
   if (status === 'completed' && !isAcceptanceSatisfied(goal.acceptanceResult)) {
     throw new ProjectWorkspaceError('acceptance_required', `goal ${goal.id} needs passed or waived Acceptance before completion`)
+  }
+  if (status === 'completed') {
+    const incomplete = state.workItems
+      .filter((item) => item.goalId === goal.id && item.status !== 'done')
+      .map((item) => ({ id: item.id, status: item.status }))
+    if (incomplete.length > 0) {
+      throw new ProjectWorkspaceError(
+        'work_items_incomplete',
+        `goal ${goal.id} cannot complete while child WorkItems are unsettled`,
+        { goalId: goal.id, workItems: incomplete }
+      )
+    }
   }
 }
 

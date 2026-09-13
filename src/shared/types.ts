@@ -1,3 +1,10 @@
+import type { TaskRunRecord } from './task-runtime-types'
+import type { ProviderConnectionBinding } from './provider-connection-identity'
+export type * from './task-runtime-types'
+import type { OfficeRevisionApi } from './office-revision-types'
+import type { SendMessagePayload } from './message-payload-types'
+export type { SendMessagePayload } from './message-payload-types'
+export type * from './office-revision-types'
 /** 主进程、预加载与渲染进程共享的编译期类型。 */
 import type { EffectRecord, EffectStatus, InteractiveOperationKind, InteractiveOperationSource, MigrationImportOperationResult, TaskRunOperationMetadata } from './effect-types'
 import type { TaskDagAutoMergeView, TaskDagFinalizationRecord, TaskDagFinalizationResolution, TaskDagFinalizationView } from './task-dag-finalization-types'
@@ -5,6 +12,8 @@ import type { DigitalWorkerApi, DigitalWorkerBinding } from './digital-worker-ty
 import type { ModelAttemptRecoveryApi } from './model-attempt-types'
 import type { WorkflowLedgerApi } from './workflow-types'
 import type { ProjectWorkspaceApi } from './project-workspace-types'
+import type { BusinessLineBinding, BusinessLineSettings } from './business-line-types'
+import type { SessionRuntimeRoutingBinding } from './session-runtime-continuation-types'
 import type { ProjectPortfolioApi } from './project-portfolio-types'
 import type { RemoteApi } from './remote-types'
 import type { OutboundContextManifest } from './project-workspace-types'
@@ -22,8 +31,10 @@ import type { ProjectDataLifecycleApi } from './data-lifecycle-types'
 import type { PluginInstallResult, PluginUninstallResult } from './plugin-types'
 import type { TerminalEffectApi } from './terminal-operation-types'
 import type { BrowserNavigationEffectApi, BrowserViewState } from './browser-operation-types'
-import type { MediaApi } from './media-types'
-import type { SessionQueryInput, SessionQueryPage } from './session-query-types'
+import type { MediaApi, ProviderMediaPricing } from './media-types'
+import type { SessionEntrypointApi } from './session-entrypoint-types'
+import type { AssistantSearchApi } from './assistant-search-types'
+export type * from './assistant-search-types'
 import type { NotificationConnectorInput, NotificationConnectorView } from './notification-connector-types'
 import type { ProviderApiKeyInput, ProviderApiKeyUpdateInput, ProviderCredentialPolicy, ProviderCredentialRoutingMode } from './provider-credential-routing-types'
 import type { ProviderAuthorization } from './provider-authorization-types'
@@ -52,10 +63,10 @@ export type * from './project-debug-types'
 export type * from './project-refactor-types'
 export type * from './provider-native-import-types'
 export type * from './provider-credential-routing-types'
-export type * from './codex-native-config-types'
 export type * from './task-plan-types'
 export type * from './migration-types'
 export type * from './studio-result-types'
+export type * from './personal-task-types'
 export type * from './data-lifecycle-types'
 export type * from './notification-connector-types'
 export type * from './project-aggregate-types'
@@ -149,6 +160,12 @@ export interface RoutingExpertPolicy {
   allowedProviderIds: string[]
   /** local_only is the hard no-egress mode for model requests. */
   locality: RoutingLocalityPolicy
+  /** Optional hard boundary for endpoint geography. Empty means any region. */
+  allowedRegions?: string[]
+  /** Optional hard boundary for endpoint host/domain. Empty means any domain. */
+  allowedDomains?: string[]
+  /** Permission/capability labels an endpoint must explicitly advertise. */
+  requiredPermissions?: string[]
 }
 export type ModelRoutingTaskKind =
   | 'chat'
@@ -437,16 +454,31 @@ export interface ProviderModelProfile {
   displayName?: string
   aliases?: string[]
   pricing?: ProviderModelPricing
+  mediaPricing?: ProviderMediaPricing
   contextWindow?: number
   capabilities?: string[]
+  /** Main-owned evidence from a bounded generation probe; declarations remain separate. */
+  verification?: ProviderModelVerification
 }
 
+export interface ProviderModelVerification {
+  generation: 'passed' | 'failed'
+  outcome: ProviderGenerationProbeOutcome
+  protocol: ProviderDiagnosticGenerationProtocol
+  verifiedAt: number
+  /** Absent on legacy HTTP-status-only observations. */
+  responseValidation?: 'protocol-json-v1'
+}
 export interface ProviderEndpointProfile {
   id: string
   url: string
   priority?: number
   enabled?: boolean
   protocol?: OpenAIProtocol
+  /** Non-secret routing metadata used by hard policy checks. */
+  region?: string
+  domain?: string
+  permissionTags?: string[]
 }
 
 export interface ProviderAppBinding {
@@ -530,7 +562,7 @@ export interface ResponsesConversationContext {
   updatedAt: number
 }
 
-export interface SessionMeta {
+export interface SessionMeta extends BusinessLineBinding, SessionRuntimeRoutingBinding {
   id: string
   title: string
   cwd: string
@@ -620,8 +652,7 @@ export interface SessionMeta {
   createdAt: number
   lastError?: string
 }
-
-export interface HistoryEntry {
+export interface HistoryEntry extends BusinessLineBinding, SessionRuntimeRoutingBinding, Pick<SessionMeta, 'budgetUsd'> {
   id: string
   title: string
   cwd: string
@@ -672,8 +703,7 @@ export interface HistoryEntry {
   /** 置顶:排在最前 */
   pinned?: boolean
 }
-
-export interface CreateSessionOptions {
+export interface CreateSessionOptions extends BusinessLineBinding {
   cwd: string
   /** 旧目录型 Project 身份；新工作流归属使用 workspaceId。 */
   projectId?: string
@@ -965,131 +995,6 @@ export interface TaskSnapshotReplayCandidate {
 
 export type TaskSnapshotSubtaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'closed'
 
-export type TaskRunStatus =
-  | 'queued'
-  | 'planning'
-  | 'executing'
-  | 'waiting_approval'
-  | 'waiting_reconciliation'
-  | 'verifying'
-  | 'recovering'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-
-export type TaskStepStatus = TaskRunStatus
-
-export type TaskRunContinuation =
-  | {
-      schemaVersion: 1
-      kind: 'conversation_fork'
-      sourceSessionId: string
-      sourceRunId: string
-      sourceSdkSessionId: string
-      sourceCheckpointId?: string
-    }
-  | {
-      schemaVersion: 1
-      kind: 'work_item_transfer'
-      requestId: string
-      assignmentId: string
-      sourceSessionId?: string
-      sourceRunId?: string
-    }
-
-export interface TaskStepRecord {
-  id: string
-  runId: string
-  sessionId: string
-  sequence: number
-  status: TaskStepStatus
-  createdAt: number
-  updatedAt: number
-  startedAt?: number
-  finishedAt?: number
-  messageId?: string
-  requestText?: string
-  pendingPermissionRequestId?: string
-  createdEventId?: string
-  lastEventId?: string
-  lastEventSeq?: number
-  lastEventKind?: AgentEvent['kind']
-  error?: string
-}
-
-export type ToolExecutionStatus =
-  | 'requested'
-  | 'running'
-  | 'waiting_approval'
-  | 'approved'
-  | 'succeeded'
-  | 'failed'
-  | 'cancelled'
-  | 'superseded'
-  | 'unknown_outcome'
-
-export interface ToolExecutionRecord {
-  id: string
-  runId: string
-  stepId?: string
-  sessionId: string
-  toolUseId: string
-  toolName: string
-  status: ToolExecutionStatus
-  requestId?: string
-  permissionDecision?: 'allow' | 'deny'
-  inputDigest?: string
-  outputDigest?: string
-  idempotencyKey?: string
-  effectId?: string
-  effectKey?: string
-  effectStatus?: EffectStatus
-  duplicateOfExecutionId?: string
-  supersededByExecutionId?: string
-  requestedEventId?: string
-  approvalRequestedEventId?: string
-  approvalResolvedEventId?: string
-  /** tool-start 表示模型已提出调用,不等于副作用已开始。 */
-  toolStartEventId?: string
-  resultEventId?: string
-  lastEventId?: string
-  lastEventSeq?: number
-  createdAt: number
-  updatedAt: number
-  startedAt?: number
-  finishedAt?: number
-  error?: string
-}
-
-export interface TaskRunRecord {
-  schemaVersion: 1
-  id: string
-  sessionId: string
-  taskId: string
-  digitalWorkerBinding?: DigitalWorkerBinding
-  status: TaskRunStatus
-  revision: number
-  attempt: number
-  recoveryCount: number
-  createdAt: number
-  updatedAt: number
-  startedAt?: number
-  finishedAt?: number
-  messageId?: string
-  pendingPermissionRequestId?: string
-  lastAppliedEventId?: string
-  lastAppliedEventSeq?: number
-  recentEventIds?: string[]
-  lastEventKind?: AgentEvent['kind']
-  error?: string
-  /** 新会话的逻辑前驱；Run/Session 身份保持独立，业务 WorkItem 继续承接。 */
-  continuation?: TaskRunContinuation
-  operation?: TaskRunOperationMetadata
-  steps?: TaskStepRecord[]
-  toolExecutions?: ToolExecutionRecord[]
-  effects?: EffectRecord[]
-}
-
 export interface TaskSnapshotSubtaskState {
   taskId?: string
   role?: string
@@ -1216,7 +1121,7 @@ export interface ReadProjectMemoryResult {
 export type MemoryLayer = 'working' | 'project' | 'user'
 
 export interface LayeredMemoryEntry {
-  id: string; revision: number
+  id: string
   layer: MemoryLayer
   projectHash?: string
   title: string
@@ -1231,7 +1136,7 @@ export interface LayeredMemoryEntry {
 }
 
 export interface LayeredMemoryWriteInput {
-  id?: string; layer: MemoryLayer
+  layer: MemoryLayer
   projectRoot?: string
   title: string
   body: string
@@ -1240,7 +1145,7 @@ export interface LayeredMemoryWriteInput {
 }
 
 export interface LayeredMemoryUpdateInput {
-  expectedRevision?: number; title?: string
+  title?: string
   body?: string
   tags?: string[]
   archivedAt?: string | null
@@ -1280,10 +1185,11 @@ export type OfficeSpaceTheme = 'control-room' | 'creative-studio' | 'quiet-libra
 export type OfficeOutfitPalette = 'role-default' | 'graphite' | 'teal' | 'rose'
 export type OfficeHairStyle = 'role-default' | 'short' | 'long' | 'tied'
 export type OfficeTeamLayout = 'grid' | 'team-photo'
-
 export interface OfficeSettings {
   /** 3D 控制室画质;auto 仅持久化请求档位,实际档位由运行时测量决定。 */
   qualityMode: OfficeQualityMode
+  /** 高清像素独立于阴影/特效；adaptive 明确允许以分辨率换取速度。 */
+  resolutionMode?: 'sharp' | 'adaptive'
   /** 显示桌上厂商工牌 */
   showBadges: boolean
   /** 控制室动效强度倍率(0.2 静态 ~ 1.2 活跃) */
@@ -1319,7 +1225,7 @@ export interface LayoutSettings {
   chatDensity: ChatDensity
 }
 
-export interface AppSettings {
+export interface AppSettings extends BusinessLineSettings {
   /** CaoGen Drive 默认档位;新会话默认继承此档位。 */
   driveMode: CaoGenDriveMode
   /** 新任务默认策略;单个 Session 可以显式覆盖且不改写该偏好。 */
@@ -1422,7 +1328,7 @@ export interface AppSettings {
   layout: LayoutSettings
 }
 
-export interface Provider {
+export interface Provider extends ProviderConnectionBinding {
   id: string
   name: string
   /** 空字符串 = 该 Provider 使用引擎/本机默认端点;不会作为新会话隐式默认。 */
@@ -1578,14 +1484,6 @@ export interface ImageOcrResult {
 export interface SaveImageAttachmentBytesInput {
   data: string | ArrayBuffer
   mime?: string
-}
-
-export interface SendMessagePayload {
-  text: string
-  images?: ImageAttachmentView[]
-  documents?: DocumentAttachmentView[]
-  /** Internal callers may supply a stable id for crash-safe outbox delivery. */
-  messageId?: string
 }
 
 export type QuickbarTargetMode = 'current' | 'new'
@@ -1820,6 +1718,7 @@ export type ProviderGenerationProbeOutcome =
   | 'network'
   | 'not_found'
   | 'invalid_request'
+  | 'invalid_response'
 
 export interface ProviderGenerationProbeResult {
   ok: boolean
@@ -1833,6 +1732,7 @@ export interface ProviderGenerationProbeResult {
   outcome: ProviderGenerationProbeOutcome
   status?: number
   latencyMs: number
+  responseValidation?: 'protocol-json-v1'
   /** The probe intentionally requests at most one output token and may be billable. */
   billableRequest: true
 }
@@ -2068,7 +1968,7 @@ export interface RoutineNotificationOptions {
 }
 
 export interface Routine extends Record<string, unknown> {
-  id: string; revision: number
+  id: string
   name: string
   prompt: string
   content?: string
@@ -2116,7 +2016,7 @@ export type CreateRoutineInput = {
 } & Record<string, unknown>
 
 export type UpdateRoutineInput = {
-  expectedRevision?: number; name?: string
+  name?: string
   prompt?: string
   content?: string
   projectId?: string | null
@@ -2307,8 +2207,12 @@ export type WorktreePatchResult =
       path?: string
       patchText?: string
       bytes?: number
+      sha256?: string
+      workflowArtifactId?: string
+      workflowEvidenceId?: string
+      workflowAcceptanceId?: string
     }
-  | { ok: false; error: string }
+  | { ok: false; error: string; savedPatch?: { path: string; bytes: number } }
 
 export type WorktreeApplyCheckResult =
   | { ok: true; canApply: true }
@@ -2591,9 +2495,7 @@ export type MenuCommand =
   | { type: 'select-session'; index: number }
 
 /** 通过 contextBridge 暴露给渲染进程的 API */
-export interface AgentDeskApi extends WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, RemoteApi, MediaApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi {
-  listSessions(): Promise<SessionMeta[]>
-  querySessions(input?: SessionQueryInput): Promise<SessionQueryPage>
+export interface AgentDeskApi extends WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, RemoteApi, MediaApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi {
   listPendingPermissions(sessionId: string): Promise<PermissionRequestInfo[]>
   getTranscript(sessionId: string): Promise<TranscriptEntry[]>
   suggestFiles(sessionId: string, query: string): Promise<string[]>
@@ -2618,7 +2520,6 @@ export interface AgentDeskApi extends WorkflowLedgerApi, ProjectWorkspaceApi, Pr
     resolution: TaskDagFinalizationResolution
   ): Promise<TaskDagFinalizationRecord>
   deleteTaskSnapshot(snapshotId: string): Promise<boolean>
-  createSession(opts: CreateSessionOptions): Promise<SessionMeta>
   decomposeTask(parentSessionId: string, input: TaskDecomposeInput): Promise<TaskDecomposeResult>
   dispatchSubagents(
     parentSessionId: string,
@@ -2658,6 +2559,9 @@ export interface AgentDeskApi extends WorkflowLedgerApi, ProjectWorkspaceApi, Pr
   deleteHistory(id: string): Promise<void>
   getSettings(): Promise<AppSettings>
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>
+  getRoutingRuleSet(): Promise<import('./routing-policy-types').RoutingRuleReadResult>
+  previewRoutingRuleSet(input: import('./routing-policy-types').RoutingRulePreviewInput): Promise<import('./routing-policy-types').RoutingRulePreviewResult>
+  saveRoutingRuleSet(input: import('./routing-policy-types').RoutingRuleSaveInput): Promise<import('./routing-policy-types').RoutingRuleSaveResult>
   listGuiAutomationGrants(): Promise<GuiAutomationGrantView[]>
   revokeGuiAutomationGrant(grantId: string): Promise<boolean>
   revokeAllGuiAutomationGrants(): Promise<number>
@@ -2719,7 +2623,7 @@ export interface AgentDeskApi extends WorkflowLedgerApi, ProjectWorkspaceApi, Pr
   uninstallPlugin(targetPath: string): Promise<PluginUninstallResult>
   listRoutines(): Promise<Routine[]>
   createRoutine(input: CreateRoutineInput): Promise<Routine>
-  deleteRoutine(id: string, expectedRevision?: number): Promise<boolean>
+  deleteRoutine(id: string): Promise<boolean>
   updateRoutine(id: string, patch: UpdateRoutineInput): Promise<Routine | null>
   markRoutineRun(id: string, options?: MarkRunOptions): Promise<Routine | null>
   runRoutineNow(id: string): Promise<RoutineRunRecord | null>
@@ -2796,7 +2700,7 @@ export interface AgentDeskApi extends WorkflowLedgerApi, ProjectWorkspaceApi, Pr
   archiveLayeredMemories(olderThanDays?: number): Promise<number>
   exportLayeredMemories(): Promise<string>
   updateLayeredMemory(entryId: string, input: LayeredMemoryUpdateInput): Promise<LayeredMemoryEntry | null>
-  deleteLayeredMemory(entryId: string, expectedRevision?: number): Promise<boolean>
+  deleteLayeredMemory(entryId: string): Promise<boolean>
   pickDirectory(): Promise<string | null>
   pathForFile(file: File): string
   quickbarGetState(): Promise<QuickbarState>

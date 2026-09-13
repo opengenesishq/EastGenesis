@@ -5,7 +5,8 @@ import type {
   ProjectResource,
   ProjectWorkspace
 } from '../../shared/project-workspace-types'
-import { createProjectConnectorReadResult, projectConnectorResource } from './connector-resource'
+import { connectorSupportsRead, createProjectConnectorReadResult, projectConnectorResource } from './connector-resource'
+import { assertProjectConnectorReadEgressAllowed } from './resource-context'
 import { getProvider, issueProviderCredentialLease } from '../providers'
 import { issueProviderAuthorizationAccountLease } from '../provider/providerAuthorizationService'
 import { providerCredentialHeaders } from '../provider/providerCredentialHeaders'
@@ -17,6 +18,8 @@ const CONNECTOR_TIMEOUT_MS = 15_000
 
 export interface ProjectConnectorReadAdapterOptions {
   fetchImpl?: typeof fetch
+  /** Deterministic DNS resolver for loopback/synthetic connector tests. */
+  lookupImpl?: typeof lookup
   signal?: AbortSignal
   /** Used by deterministic refresh/search calls that are not attached to a Session. */
   operationId?: string
@@ -33,6 +36,13 @@ export async function readProjectConnector(
   options: ProjectConnectorReadAdapterOptions = {}
 ): Promise<ConnectorReadResult<string>> {
   const resource = projectConnectorResource(workspace, resourceId)
+  // Connector reads are an external effect themselves. Enforce the resource
+  // egress boundary here as well as in lifecycle orchestration so direct
+  // refresh, search, recovery, and adapter callers cannot bypass deny/S3.
+  assertProjectConnectorReadEgressAllowed(resource)
+  if (!connectorSupportsRead(resource)) {
+    throw new Error('Connector is not authorized for read operations')
+  }
   const credential = resource.connector?.authorization.credentialRef
     ? await connectorCredential(workspace, resource, options)
     : undefined
@@ -269,7 +279,7 @@ async function boundedRequest(
   credential: ConnectorCredential | undefined,
   request: Pick<RequestInit, 'method' | 'body'>
 ): Promise<BoundedConnectorResponse> {
-  await assertPublicEndpoint(endpoint)
+  await assertPublicEndpoint(endpoint, options.lookupImpl)
   if (options.signal?.aborted) throw new Error('Connector read was cancelled')
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), CONNECTOR_TIMEOUT_MS)
@@ -410,12 +420,12 @@ function publicHttpsUrl(value: string): URL {
   return url
 }
 
-async function assertPublicEndpoint(url: URL): Promise<void> {
+async function assertPublicEndpoint(url: URL, lookupImpl: typeof lookup = lookup): Promise<void> {
   const host = url.hostname.toLowerCase()
   if (!host || host === 'localhost' || host.endsWith('.localhost') || isPrivateAddress(host)) {
     throw new Error('Connector endpoint must use a public host')
   }
-  const addresses = await lookup(host, { all: true, verbatim: true })
+  const addresses = await lookupImpl(host, { all: true, verbatim: true })
   if (addresses.length === 0 || addresses.some(({ address }) => isPrivateAddress(address))) {
     throw new Error('Connector endpoint resolved to a private address')
   }

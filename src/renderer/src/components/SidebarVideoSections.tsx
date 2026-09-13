@@ -4,6 +4,7 @@ import { Film, LoaderCircle, Plus } from 'lucide-react'
 import type { MediaStudioSnapshot } from '../../../shared/media-types'
 import type { ProjectWorkspace } from '../../../shared/project-workspace-types'
 import { useT } from '../i18n'
+import { businessLineVideoSnapshot } from './studio/businessLineVideoSnapshot'
 
 interface Props {
   active: boolean
@@ -21,19 +22,12 @@ export default function SidebarVideoSections({ active, query, projects, onNewVid
   useEffect(() => {
     if (!active) return
     let cancelled = false
-    const refresh = (): void => {
-      setLoading(true)
-      void window.agentDesk.getMediaStudio()
-        .then((next) => { if (!cancelled) setSnapshot(next) })
-        .catch(() => { if (!cancelled) setSnapshot(null) })
-        .finally(() => { if (!cancelled) setLoading(false) })
-    }
-    refresh()
-    window.addEventListener('caogen:video-updated', refresh)
-    return () => {
-      cancelled = true
-      window.removeEventListener('caogen:video-updated', refresh)
-    }
+    setLoading(true)
+    void window.agentDesk.getMediaStudio()
+      .then((next) => { if (!cancelled) setSnapshot(businessLineVideoSnapshot(next)) })
+      .catch(() => { if (!cancelled) setSnapshot(null) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [active])
 
   const productions = useMemo(() => {

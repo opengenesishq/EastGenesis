@@ -17,6 +17,7 @@ import {
   type GitIndexEffectIpcChannel
 } from '../git/git-index-effect'
 import { sessionManager } from '../sessionManager'
+import { projectTestCommitReadiness } from '../projectTestReviewGate'
 import {
   executeInteractiveOperationEffect,
   type InteractiveOperationEffectOutcome
@@ -75,6 +76,8 @@ export async function executeInteractiveOperationEffectGitCommit(
   const context = rendererOperationContext(id)
   if (!context) return { ok: false, error: '会话不存在' }
   const safeMessage = typeof message === 'string' ? message : ''
+  const review = await projectTestCommitReadiness(context.cwd, id)
+  if (!review.ok) return review
   const outcome = await runOperation({
     kind: 'git_commit',
     rootDir,
@@ -83,7 +86,7 @@ export async function executeInteractiveOperationEffectGitCommit(
     ...rendererOperationOwnership(context),
     cwd: context.cwd,
     toolName: 'git_commit',
-    toolInput: { message: safeMessage },
+    toolInput: { message: safeMessage, projectTestRunId: review.runId },
     execute: (effect) => {
       if (effect.target.kind !== 'git_commit') throw new Error('Git commit EffectTarget 类型不匹配')
       return safeGitCommit(context.cwd, safeMessage)

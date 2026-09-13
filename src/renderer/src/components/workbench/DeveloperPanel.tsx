@@ -1,26 +1,21 @@
 import { Bug, FilePenLine, FileText, FlaskConical } from 'lucide-react'
-import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useT } from '../../i18n'
-import FilePanel from './FilePanel'
-import TestPanel from './TestPanel'
-import DebugPanel from './DebugPanel'
-import RefactorPanel from './RefactorPanel'
+
+const FilePanel = lazy(() => import('./FilePanel'))
+const TestPanel = lazy(() => import('./TestPanel'))
+const DebugPanel = lazy(() => import('./DebugPanel'))
+const RefactorPanel = lazy(() => import('./RefactorPanel'))
 
 type DeveloperView = 'files' | 'tests' | 'debug' | 'refactor'
 const DEVELOPER_VIEWS: DeveloperView[] = ['files', 'tests', 'debug', 'refactor']
 
-export default function DeveloperPanel({ developerView = 'files' }: { developerView?: DeveloperView }): React.JSX.Element {
+export default function DeveloperPanel(): React.JSX.Element {
   const t = useT()
-  const [view, setView] = useState<DeveloperView>(developerView)
+  const [view, setView] = useState<DeveloperView>('files')
   const [testsVisited, setTestsVisited] = useState(false)
   const [debugVisited, setDebugVisited] = useState(false)
   const [refactorVisited, setRefactorVisited] = useState(false)
-  useEffect(() => {
-    if (developerView === 'tests') setTestsVisited(true)
-    if (developerView === 'debug') setDebugVisited(true)
-    if (developerView === 'refactor') setRefactorVisited(true)
-    setView(developerView)
-  }, [developerView])
   const selectView = (next: DeveloperView): void => {
     if (next === 'tests') setTestsVisited(true)
     if (next === 'debug') setDebugVisited(true)
@@ -44,21 +39,29 @@ export default function DeveloperPanel({ developerView = 'files' }: { developerV
         </DeveloperTab>
       </div>
       <div className="developer-panel-view" style={{ display: view === 'files' ? 'flex' : 'none' }} aria-hidden={view !== 'files'}>
-        <FilePanel />
+        <Suspense fallback={<div className="workspace-diff-empty">{t('loadingDiff')}</div>}>
+          <FilePanel />
+        </Suspense>
       </div>
       {testsVisited && (
         <div className="developer-panel-view" style={{ display: view === 'tests' ? 'flex' : 'none' }} aria-hidden={view !== 'tests'}>
-          <TestPanel />
+          <Suspense fallback={<div className="workspace-diff-empty">{t('loadingDiff')}</div>}>
+            <TestPanel />
+          </Suspense>
         </div>
       )}
       {debugVisited && (
         <div className="developer-panel-view" style={{ display: view === 'debug' ? 'flex' : 'none' }} aria-hidden={view !== 'debug'}>
-          <DebugPanel />
+          <Suspense fallback={<div className="workspace-diff-empty">{t('loadingDiff')}</div>}>
+            <DebugPanel />
+          </Suspense>
         </div>
       )}
       {refactorVisited && (
         <div className="developer-panel-view" style={{ display: view === 'refactor' ? 'flex' : 'none' }} aria-hidden={view !== 'refactor'}>
-          <RefactorPanel />
+          <Suspense fallback={<div className="workspace-diff-empty">{t('loadingDiff')}</div>}>
+            <RefactorPanel />
+          </Suspense>
         </div>
       )}
     </div>

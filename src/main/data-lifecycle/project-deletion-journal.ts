@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import type { DataPurgeTarget, DataRetentionSubject } from '../../shared/data-lifecycle-types'
 import { acquireFileLock, enqueueMutation, releaseFileLock } from '../digital-worker/persistence'
@@ -21,8 +21,6 @@ export const PROJECT_DELETION_PHASES = [
   'proof_written',
   'completed'
 ] as const
-
-const PROJECT_DELETION_JOURNAL_FILE_NAME = 'project-deletion-journal.json'
 
 export type ProjectDeletionPhase = typeof PROJECT_DELETION_PHASES[number]
 
@@ -95,7 +93,6 @@ export class ProjectDeletionJournal {
       const existing = document.entries.find((entry) => entry.operationId === operationId)
       if (existing) {
         if (existing.projectId !== projectId) throw new Error('project deletion operation identity conflicts with its Project')
-        assertReplayIdentity(existing, input)
         return existing
       }
       const pending = document.entries.find((entry) => entry.projectId === projectId && entry.phase !== 'completed')
@@ -143,12 +140,6 @@ export class ProjectDeletionJournal {
       const currentIndex = PROJECT_DELETION_PHASES.indexOf(entry.phase)
       if (targetIndex < currentIndex) return entry
       if (targetIndex > currentIndex + 1) throw new Error(`project deletion phase cannot skip ${entry.phase} -> ${phase}`)
-      if (targetIndex === currentIndex) {
-        const differs = Object.entries(patch).some(([key, value]) =>
-          !Object.is(entry[key as keyof ProjectDeletionJournalEntry], value))
-        if (differs) throw new Error(`project deletion phase ${phase} already has a different receipt`)
-        return entry
-      }
       entry.phase = phase
       entry.updatedAt = Date.now()
       Object.assign(entry, patch)
@@ -160,13 +151,10 @@ export class ProjectDeletionJournal {
   private async mutate<T>(operation: (document: JournalDocument) => T): Promise<T> {
     return withDataLifecycleMutation(this.userDataRoot, () => enqueueMutation(this.filePath, async () => {
       mkdirSync(dirname(this.filePath), { recursive: true, mode: 0o700 })
-      cleanupJournalTemps(this.filePath)
       const lock = acquireFileLock(this.lockPath)
       try {
         const document = readDocument(this.filePath)
-        const before = JSON.stringify(document)
         const result = operation(document)
-        if (JSON.stringify(document) === before) return clone(result)
         document.revision += 1
         writeDocument(this.filePath, document)
         return clone(result)
@@ -175,27 +163,6 @@ export class ProjectDeletionJournal {
       }
     }))
   }
-}
-
-function assertReplayIdentity(
-  existing: ProjectDeletionJournalEntry,
-  input: ProjectDeletionJournalBeginInput
-): void {
-  const conflicts = [
-    existing.expectedWorkspaceRevision !== input.expectedWorkspaceRevision,
-    JSON.stringify(existing.sessionIds) !== JSON.stringify(normalizedIds(input.sessionIds)),
-    JSON.stringify(existing.sdkSessionIds) !== JSON.stringify(normalizedIds(input.sdkSessionIds)),
-    JSON.stringify(existing.artifactBlobDigests) !== JSON.stringify(normalizedDigests(input.artifactBlobDigests)),
-    JSON.stringify(existing.effectArtifactRefs ?? []) !==
-      JSON.stringify(normalizedEffectArtifactRefs(input.effectArtifactRefs ?? [])),
-    input.retentionTargets !== undefined && JSON.stringify(existing.retentionTargets ?? []) !==
-      JSON.stringify(normalizeDataPurgeTargets(input.retentionTargets)),
-    input.legalHoldSubjects !== undefined && JSON.stringify(existing.legalHoldSubjects ?? []) !==
-      JSON.stringify(normalizeDataRetentionSubjects(input.legalHoldSubjects)),
-    input.externalResources !== undefined && JSON.stringify(existing.externalResources ?? []) !==
-      JSON.stringify(normalizedExternalResources(input.externalResources))
-  ]
-  if (conflicts.some(Boolean)) throw new Error('project deletion operation identity conflicts with its frozen deletion scope')
 }
 
 function readDocument(file: string): JournalDocument {
@@ -208,7 +175,6 @@ function readDocument(file: string): JournalDocument {
 function writeDocument(file: string, document: JournalDocument): void {
   const directory = dirname(file)
   mkdirSync(directory, { recursive: true, mode: 0o700 })
-  cleanupJournalTemps(file)
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`
   let descriptor: number | undefined
   try {
@@ -218,52 +184,15 @@ function writeDocument(file: string, document: JournalDocument): void {
     closeSync(descriptor)
     descriptor = undefined
     renameSync(temporary, file)
-    syncDirectory(directory)
+    if (process.platform !== 'win32') {
+      const directoryHandle = openSync(directory, 'r')
+      try { fsyncSync(directoryHandle) } finally { closeSync(directoryHandle) }
+    }
   } catch (error) {
     if (descriptor !== undefined) closeSync(descriptor)
     rmSync(temporary, { force: true })
     throw error
   }
-}
-
-function cleanupJournalTemps(file: string): void {
-  const directory = dirname(file)
-  const prefix = `${PROJECT_DELETION_JOURNAL_FILE_NAME}.`
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.startsWith(prefix) || !entry.name.endsWith('.tmp')) continue
-    const match = /^project-deletion-journal\.json\.(\d+)\.[0-9a-f-]+\.tmp$/.exec(entry.name)
-    if (!match || processIsAlive(Number.parseInt(match[1], 10))) continue
-    try { unlinkSync(join(directory, entry.name)) } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
-  }
-}
-
-function processIsAlive(pid: number): boolean {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
-  }
-}
-
-function syncDirectory(directory: string): void {
-  let descriptor: number | undefined
-  try {
-    descriptor = openSync(directory, 'r')
-    fsyncSync(descriptor)
-  } catch (error) {
-    if (process.platform !== 'win32' || !isWindowsDirectoryFsyncUnsupported(error)) throw error
-  } finally {
-    if (descriptor !== undefined) closeSync(descriptor)
-  }
-}
-
-function isWindowsDirectoryFsyncUnsupported(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException)?.code
-  return code === 'EPERM' || code === 'EACCES' || code === 'EINVAL' || code === 'ENOTSUP'
 }
 
 function assertDocument(value: unknown): asserts value is JournalDocument {

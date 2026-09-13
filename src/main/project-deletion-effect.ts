@@ -13,10 +13,8 @@ import {
   executeInteractiveOperationEffect,
   type InteractiveOperationEffectOutcome
 } from './task/operation-effect-gateway'
-import {
-  prepareCanonicalSystemOperation,
-  settleCanonicalSystemOperation
-} from './task/system-operation-context'
+import { TaskKernel } from './task/task-kernel'
+import type { CanonicalSystemOperationContext } from './task/system-operation-context'
 import { stableValueDigest } from './task/tool-idempotency'
 import type { ProjectPermanentDeletionEffectTarget } from './project-deletion-effect-target'
 
@@ -37,47 +35,66 @@ export async function executeProjectPermanentDeletionEffect(
     mutationOptions
   )
   const deletionOperationId = pending?.operationId ?? operationId
-  const context = await prepareCanonicalSystemOperation({
+  const kernel = new TaskKernel(rootDir)
+  const context = await kernel.plan(await kernel.create({
     rootDir,
     requestId: `project-delete-${operationId}`,
-    objective: '永久删除 Project 并生成可核验、可恢复的删除证明'
-  })
+    objective: '永久删除 Project 并生成可核验、可恢复的删除证明',
+    deferExecution: true
+  }))
   const target = deletionTarget(context, operationId, deletionOperationId, id, expectedWorkspaceRevision)
-  const outcome = await runOperation({
-    rootDir,
-    operationId,
-    kind: 'project_delete',
-    title: '永久删除 Project',
-    sourceSessionId: `project-delete:${operationId}`,
-    projectId: context.projectId,
-    workspaceId: context.workspaceId,
-    goalId: context.goalId,
-    workItemId: context.workItemId,
-    cwd: context.cwd,
-    toolName: 'project_permanent_deletion',
-    toolInput: target,
-    execute: async (effect) => {
-      const result = await purgeProjectPermanently(id, rootDir, mutationOptions, {
-        operationId: deletionOperationId
+  let outcome: InteractiveOperationEffectOutcome<ProjectDeletionResult>
+  try {
+    outcome = await kernel.execute(context, () => runOperation({
+      rootDir,
+      operationId,
+      kind: 'project_delete',
+      title: '永久删除 Project',
+      sourceSessionId: `project-delete:${operationId}`,
+      projectId: context.projectId,
+      workspaceId: context.workspaceId,
+      goalId: context.goalId,
+      workItemId: context.workItemId,
+      cwd: context.cwd,
+      toolName: 'project_permanent_deletion',
+      toolInput: target,
+      execute: async (effect) => {
+        const result = await purgeProjectPermanently(id, rootDir, mutationOptions, {
+          operationId: deletionOperationId
+        })
+        await registerProjectPermanentDeletionReport(effect, result, rootDir)
+        return result
+      },
+      isSuccess: () => true,
+      resultSummary: (result) => JSON.stringify({
+        deletedProjectIdDigest: stableValueDigest(result.projectId),
+        exportDigest: result.exportDigest,
+        proofDigest: result.proofDigest,
+        operationId: result.operationId
       })
-      await registerProjectPermanentDeletionReport(effect, result, rootDir)
-      return result
-    },
-    isSuccess: () => true,
-    resultSummary: (result) => JSON.stringify({
-      deletedProjectIdDigest: stableValueDigest(result.projectId),
-      exportDigest: result.exportDigest,
-      proofDigest: result.proofDigest,
-      operationId: result.operationId
+    }))
+  } catch (error) {
+    // If admission or the Effect gateway fails before returning an outcome,
+    // leave no runnable canonical operation behind.
+    await kernel.stop(context, async () => undefined)
+    throw error
+  }
+  if (outcome.status === 'completed' && outcome.value) {
+    await kernel.deliver(context, {
+      evidenceRefs: [target.evidenceId],
+      verifiedBy: 'project-permanent-deletion'
     })
-  })
-  const result = requireCompletedDeletion(outcome)
-  await settleCanonicalSystemOperation(context, {
-    status: 'passed',
-    evidenceRefs: [target.evidenceId],
-    verifiedBy: 'project-permanent-deletion'
-  })
-  return result
+    return outcome.value
+  }
+  if (outcome.status === 'failed') {
+    // A deterministic terminal failure has no deletion proof to accept.
+    await kernel.stop(context, async () => undefined)
+  }
+  if (outcome.status === 'waiting_reconciliation') {
+    throw new Error(`Project deletion is waiting for reconciliation:${outcome.snapshotId}`)
+  }
+  if (outcome.status === 'failed') throw new Error(outcome.error)
+  throw new Error('Project deletion result is missing')
 }
 
 export async function resumeProjectPermanentDeletionEffects(
@@ -186,7 +203,7 @@ async function registerProjectPermanentDeletionReport(
 }
 
 function deletionTarget(
-  context: Awaited<ReturnType<typeof prepareCanonicalSystemOperation>>,
+  context: CanonicalSystemOperationContext,
   operationId: string,
   deletionOperationId: string,
   deletedProjectId: string,

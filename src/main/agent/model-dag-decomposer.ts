@@ -4,6 +4,7 @@ import {
   providerAuthMode,
   providerCredentialHeaders
 } from '../providers'
+import { resolveProviderRuntimeTarget } from '../provider/providerRuntimeTarget'
 import { getSettings } from '../settings'
 import type { OpenAIProtocol, TaskDagRole, TaskDecomposeInput } from '../../shared/types'
 import type { ModelDagDecomposer, ModelDagPayload, ModelDagTaskPayload } from './task-decomposer'
@@ -16,7 +17,6 @@ import {
 } from '../task/model-attempt-runtime'
 
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com'
-const DEFAULT_REASONING_MODEL = 'gpt-4.1'
 const MODEL_TIMEOUT_MS = 45_000
 
 interface ProviderModelConfig {
@@ -81,19 +81,19 @@ function protocolFor(baseUrl: string, protocol: OpenAIProtocol | undefined): Ope
   }
 }
 
-function selectReasoningModel(models: string[], override: string | undefined): string {
-  const requested = override?.trim()
-  if (requested) return requested
-  const reasoner = models.find((model) => /reason|thinking|o3|o4|gpt-5/i.test(model))
-  return reasoner ?? models[0] ?? process.env.OPENAI_MODEL ?? DEFAULT_REASONING_MODEL
-}
-
 function configFromInput(input: TaskDecomposeInput): ProviderModelConfig {
   const settings = getSettings()
+  const requestedModel = input.model?.trim()
+  if (!requestedModel || requestedModel === 'auto') {
+    throw new Error('DAG 拆解需要 canonical Run 提供具体冻结模型，禁止自动回退到 Provider 首个模型。')
+  }
   const providerId = input.providerId?.trim() || settings.defaultProviderId
   const provider = providerId ? getProvider(providerId) : undefined
-  const protocol = protocolFor(provider?.baseUrl ?? process.env.OPENAI_BASE_URL ?? DEFAULT_OPENAI_BASE_URL, provider?.openaiProtocol)
-  const rawBaseUrl = (provider?.baseUrl || process.env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE_URL).replace(/\/+$/, '')
+  const runtimeTarget = provider
+    ? resolveProviderRuntimeTarget(provider, { appId: 'caogen', model: requestedModel })
+    : undefined
+  const protocol = runtimeTarget?.protocol ?? protocolFor(runtimeTarget?.baseUrl ?? provider?.baseUrl ?? process.env.OPENAI_BASE_URL ?? DEFAULT_OPENAI_BASE_URL, provider?.openaiProtocol)
+  const rawBaseUrl = (runtimeTarget?.baseUrl || provider?.baseUrl || process.env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE_URL).replace(/\/+$/, '')
   const baseUrl = protocol === 'chat' ? rawBaseUrl.replace(/\/anthropic$/, '') : rawBaseUrl
   const token = provider ? decryptProviderToken(provider) : process.env.OPENAI_API_KEY || ''
   if (!token && providerAuthMode(provider) !== 'none') {
@@ -107,7 +107,7 @@ function configFromInput(input: TaskDecomposeInput): ProviderModelConfig {
       ...parseHeaders(provider?.customHeaders),
       ...providerCredentialHeaders(provider, token)
     },
-    model: selectReasoningModel(provider?.models ?? [], input.model || settings.defaultModel),
+    model: runtimeTarget?.model || requestedModel,
     protocol
   }
 }

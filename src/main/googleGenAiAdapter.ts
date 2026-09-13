@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { NativeProviderHttpError } from './model/native-http-refusal'
 import type {
   AnthropicMessagesContentBlock,
   AnthropicMessagesMessage,
@@ -31,10 +32,10 @@ export interface GoogleGenerateContentRequest extends Record<string, unknown> {
   tools?: Array<{ functionDeclarations: Array<Record<string, unknown>> }>
 }
 
-export class GoogleGenAiHttpError extends Error {
+export class GoogleGenAiHttpError extends NativeProviderHttpError {
   readonly name = 'GoogleGenAiHttpError'
   constructor(readonly status: number, message: string) {
-    super(`Google Generative Language returned ${status}: ${message}`)
+    super(status, `Google Generative Language returned ${status}: ${message}`)
   }
 }
 

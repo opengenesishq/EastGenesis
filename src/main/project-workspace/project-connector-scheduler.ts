@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 import type { ConnectorResourceLifecycle } from '../../shared/project-workspace-types'
 import { mutateProjectConnector } from './project-connector-lifecycle'
 import { openProjectWorkspaceStore } from './store'
+import { projectResourceEgressPolicy } from './resource-context'
 
 const SWEEP_INTERVAL_MS = 30_000
 
@@ -23,6 +24,11 @@ export function startProjectConnectorAutoRefreshScheduler(rootDir: string): void
 export function stopProjectConnectorAutoRefreshScheduler(): void {
   if (scheduler?.timer) clearTimeout(scheduler.timer)
   scheduler = undefined
+}
+
+/** Deterministic scheduler sweep used by runtime smoke tests and recovery tooling. */
+export async function runProjectConnectorAutoRefreshSweep(rootDir: string): Promise<void> {
+  await refreshDueConnectors(requiredRoot(rootDir))
 }
 
 function schedule(delay: number): void {
@@ -63,7 +69,7 @@ async function refreshDueConnectors(rootDir: string): Promise<void> {
       const lifecycle = currentResource?.connector?.lifecycle
       if (!currentWorkspace || !currentResource || !lifecycle) continue
       const autoRefresh = lifecycle.autoRefresh
-      if (!isDue(autoRefresh, now) || lifecycle.enabled === false || currentResource.connector?.authorization.status !== 'active') continue
+      if (!isDue(autoRefresh, now) || lifecycle.enabled === false || currentResource.connector?.authorization.status !== 'active' || projectResourceEgressPolicy(currentResource) === 'deny') continue
       if (lifecycle.refresh.status === 'requested' || lifecycle.refresh.status === 'running') continue
       try {
         await mutateProjectConnector(rootDir, currentWorkspace.id, currentResource.id, { kind: 'request_refresh' }, { expectedRevision: currentWorkspace.revision })

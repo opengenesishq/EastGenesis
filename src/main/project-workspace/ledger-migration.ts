@@ -1,3 +1,4 @@
+import { lstat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import {
   readTaskSnapshotDatabase,
@@ -25,13 +26,13 @@ import { canonicalJson } from '../task/workflow-ledger-codec'
 import {
   listMigrationJournals,
   readFileIfExists,
+  readRegularFile,
   sha256,
   writeDurableFile
 } from '../task/workflow-ledger-migration-storage'
 import {
   appendWorkflowEvent,
-  projectGoal,
-  projectWorkItem,
+  projectWorkflowProjectionBatch,
   verifyWorkflowLedger,
   type WorkflowLedgerDatabase
 } from '../task/workflow-ledger-store'
@@ -136,6 +137,24 @@ export async function ensureProjectWorkspaceLedgerProjectionForScopedRead(
   rootDir?: string
 ): Promise<ProjectWorkspaceLedgerMigrationResult> {
   return migrateProjectWorkspaceToWorkflowLedgerWithValidation(workspaceId, rootDir, {}, 'workspace')
+}
+
+/** Recover only an already-verified bridge before a canonical read. */
+export async function preflightProjectWorkspaceLedgerBridgeForCanonicalRead(
+  workspaceId: string,
+  rootDir?: string
+): Promise<boolean> {
+  const id = requiredId(workspaceId, 'workspace id')
+  const root = resolve(resolveProjectWorkspaceRoot(rootDir))
+  const databasePath = taskSnapshotsDbFile(root)
+  return withTaskSnapshotDatabaseMutationBarrier(root, async () => {
+    const journals = await readBridgeJournalState(databasePath, id)
+    await assertCommittedBridgeTargetPresent(databasePath, journals.committed)
+    const bridge = singleInProgressBridge(journals.inProgress, id)
+    if (!bridge || bridge.prepared.journal.state !== 'migrated_verified') return false
+    const targetBytes = await readRequiredTarget(databasePath)
+    return resumeVerifiedBridgeCandidate(databasePath, bridge, targetBytes, {}, true)
+  })
 }
 
 export async function commitProjectWorkspaceStateToWorkflowLedger(
@@ -299,16 +318,18 @@ function applyProjection(
   goalWrites: ReadonlySet<string>,
   workItemWrites: ReadonlySet<string>
 ): void {
+  const goals = []
   for (const goal of projection.goals) {
     if (!goalWrites.has(goal.source.id)) continue
     if (goal.source.status === 'archived' && goal.source.archivedFromStatus === 'completed') {
       assertWorkflowAcceptanceGate(db, { kind: 'goal', record: goal.record })
     }
-    projectGoal(db, goal.input, { enforceTransition: false })
+    goals.push(goal.input)
   }
-  for (const item of parentFirst(projection.workItems)) {
-    if (workItemWrites.has(item.source.id)) projectWorkItem(db, item.input, { enforceTransition: false })
-  }
+  const workItems = parentFirst(projection.workItems)
+    .filter((item) => workItemWrites.has(item.source.id))
+    .map((item) => item.input)
+  projectWorkflowProjectionBatch(db, { goals, workItems }, { enforceTransition: false })
 }
 
 function assertTerminalProjectionAcceptance(db: WorkflowLedgerDatabase, projection: ProjectionBundle): void {
@@ -469,8 +490,16 @@ async function assertCommittedBridgeTargetPresent(
   committed: readonly BridgeJournal[]
 ): Promise<void> {
   if (committed.length === 0) return
-  if (!(await readFileIfExists(databasePath))) {
-    throw migrationError('COMMITTED_TARGET_MISSING', 'Committed ProjectWorkspace Ledger target is missing')
+  try {
+    const info = await lstat(databasePath)
+    if (!info.isFile() || info.isSymbolicLink()) {
+      throw migrationError('COMMITTED_TARGET_INVALID', 'Committed ProjectWorkspace Ledger target is not a regular file')
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw migrationError('COMMITTED_TARGET_MISSING', 'Committed ProjectWorkspace Ledger target is missing')
+    }
+    throw error
   }
 }
 
@@ -479,18 +508,43 @@ async function resumeRenamedBridgeCandidate(
   workspaceId: string,
   targetBytes: Uint8Array,
   options: ProjectWorkspaceLedgerMigrationOptions
-): Promise<void> {
+): Promise<boolean> {
   const { inProgress } = await readBridgeJournalState(databasePath, workspaceId)
+  const bridge = singleInProgressBridge(inProgress, workspaceId)
+  if (!bridge || bridge.prepared.journal.state !== 'migrated_verified') return false
+  return resumeVerifiedBridgeCandidate(databasePath, bridge, targetBytes, options, false)
+}
+
+function singleInProgressBridge(
+  inProgress: readonly BridgeJournal[],
+  workspaceId: string
+): BridgeJournal | undefined {
   if (inProgress.length > 1) {
     throw migrationError('MIGRATION_JOURNAL_CONFLICT', `Workspace ${workspaceId} has multiple in-progress Ledger migrations`)
   }
-  const bridge = inProgress[0]
-  if (!bridge || bridge.prepared.journal.state !== 'migrated_verified') return
+  return inProgress[0]
+}
+
+async function resumeVerifiedBridgeCandidate(
+  databasePath: string,
+  bridge: BridgeJournal,
+  targetBytes: Uint8Array,
+  options: ProjectWorkspaceLedgerMigrationOptions,
+  installCandidate: boolean
+): Promise<boolean> {
   const journal = await readWorkflowLedgerCanonicalMigrationJournal(bridge.prepared.journalPath)
-  if (!journal.migrated || !journal.readiness || sha256(targetBytes) !== journal.migrated.sha256) return
+  if (journal.state !== 'migrated_verified') return false
+  if (!journal.candidate || !journal.migrated || !journal.readiness) {
+    throw migrationError('MIGRATION_JOURNAL_INVALID', 'Verified ProjectWorkspace migration is missing candidate evidence')
+  }
+  const targetIsCandidate = sha256(targetBytes) === journal.migrated.sha256
+  if (!targetIsCandidate && !installCandidate) return false
+  const candidateBytes = targetIsCandidate
+    ? targetBytes
+    : await readRegularFile(journal.candidate.path, 'verified ProjectWorkspace migration candidate')
   const committed = await persistPreparedWorkflowLedgerMigration(
     { ...bridge.prepared, journal },
-    targetBytes,
+    candidateBytes,
     journal.readiness,
     { now: options.now, readMode: 'legacy' }
   )
@@ -499,6 +553,7 @@ async function resumeRenamedBridgeCandidate(
     report: committed.journal.readiness ?? journal.readiness,
     migration: committed
   })
+  return true
 }
 
 function migrationResult(

@@ -17,6 +17,8 @@ __pycache__/
 
 # 本地 3D 资产预览/重复工作图,不进入发布源码。
 scripts/_render-official-g1-rev1-preview.py
+docs/visual-references/reference-office-robot-model-sheet-v2.png
+docs/visual-references/reference-office-robot-model-sheet-v3.png
 
 # 本地凭据与签名材料,绝不入库
 .caogen-private/
@@ -51,19 +53,6 @@ electron.vite.config.*.mjs
 /outputs/
 /tmp/
 /nul
-/docs/
-
-# Internal product requirements, status ledgers, and design plans stay private.
-/DESIGN-V2.md
-/REQUIREMENTS.md
-/ROADMAP.md
-/STATUS.md
-/UI-REFACTOR-PLAN.md
-/UX-UPGRADE-PLAN.md
-/caogen-website-optimization-plan.md
-/caogen-website-optimization-report.md
-/overview.md
-/ui-hifi/PRODUCT-SUITE-COVERAGE.md
 /.workbuddy-ai/
 .claude/launch.json
 

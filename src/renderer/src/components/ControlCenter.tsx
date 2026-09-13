@@ -3,11 +3,17 @@ import {
   modelOptionsForProvider,
   STRATEGY_OPTIONS
 } from '../store'
-import { buildControlCenterView, type ControlCenterStatus } from '../controlCenter'
+import {
+  buildControlCenterView,
+  type ControlCenterStatus,
+  type ControlCenterView
+} from '../controlCenter'
 import { formatCost } from '../format'
+import { translate, type TParams } from '../i18n'
 import { AUTO_MODEL } from '../../../shared/types'
 import type {
   AppSettings,
+  AppLanguage,
   CaoGenDriveMode,
   EngineInfo,
   HistoryEntry,
@@ -39,8 +45,25 @@ interface Props {
   onEditProvider: (provider: ProviderView) => void
 }
 
-function healthTime(timestamp: number): string {
-  return new Date(timestamp).toLocaleString(undefined, {
+type Translate = (key: string, params?: TParams) => string
+
+const DRIVE_OPTION_LABEL_KEYS: Record<CaoGenDriveMode, string> = {
+  spark: 'controlCenterDriveSpark',
+  core: 'controlCenterDriveCore',
+  forge: 'controlCenterDriveForge',
+  command: 'controlCenterDriveCommand',
+  genesis: 'controlCenterDriveGenesis'
+}
+
+const STRATEGY_OPTION_LABEL_KEYS: Record<SchedulerStrategy, string> = {
+  balanced: 'controlCenterStrategyBalanced',
+  speed: 'controlCenterStrategySpeed',
+  quality: 'controlCenterStrategyQuality',
+  cost: 'controlCenterStrategyCost'
+}
+
+function healthTime(timestamp: number, language: AppLanguage): string {
+  return new Date(timestamp).toLocaleString(language === 'zh' ? 'zh-CN' : 'en-US', {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -66,6 +89,7 @@ export default function ControlCenter({
   onAddProvider,
   onEditProvider
 }: Props): React.JSX.Element {
+  const t: Translate = (key, params) => translate(settings.language, key, params)
   const view = buildControlCenterView({
     settings,
     providers,
@@ -88,55 +112,39 @@ export default function ControlCenter({
     <div className="control-center">
       <div className="control-center-head">
         <div>
-          <h3 className="settings-h3">Control Center</h3>
-          <p className="settings-hint">Drive / Provider / Model / Budget / MCP / Agent engines</p>
+          <h3 className="settings-h3">{t('controlCenterTitle')}</h3>
+          <p className="settings-hint">{t('controlCenterSubtitle')}</p>
         </div>
         <div className="control-center-actions">
           <button className="btn btn-ghost btn-sm" disabled={loading} onClick={onRefresh}>
-            {loading ? '刷新中...' : '刷新'}
+            {loading ? t('controlCenterRefreshing') : t('controlCenterRefresh')}
           </button>
           <button
             className="btn btn-ghost btn-sm"
             disabled={mcpProbing || mcpItems.length === 0}
             onClick={() => onProbeMcp(mcpItems)}
           >
-            {mcpProbing ? '探测中...' : '探测 MCP'}
+            {mcpProbing ? t('controlCenterProbingMcp') : t('controlCenterProbeMcp')}
           </button>
         </div>
       </div>
 
       {error && <div className="notice notice-error">{error}</div>}
 
-      <div className="control-summary-grid">
-        <SummaryCard title="Drive" status="available" value={view.route.driveLabel} detail={view.policy.summary} />
-        <SummaryCard
-          title="Routing"
-          status={settings.smartModelRoutingEnabled ? view.route.providerStatus : 'disabled'}
-          value={view.route.routeLabel}
-          detail={`${view.route.providerLabel} · ${view.route.modelLabel} · ${view.route.strategyLabel}`}
-        />
-        <SummaryCard
-          title="Budget"
-          status={view.budget.status}
-          value={`${formatCost(view.budget.report.monthlySpentUsd)} / ${view.budget.report.monthlyLimitUsd > 0 ? formatCost(view.budget.report.monthlyLimitUsd) : '∞'}`}
-          detail={`${view.budget.report.monthKey} · ${view.budget.report.monthlyRemainingUsd === undefined ? 'unlimited' : `${formatCost(view.budget.report.monthlyRemainingUsd)} remaining`}`}
-        />
-        <SummaryCard
-          title="Tools"
-          status={view.mcp.status}
-          value={view.mcp.label}
-          detail={`${view.engines.filter((engine) => engine.status === 'available').length}/${view.engines.length} Agent engines ready`}
-        />
-      </div>
+      <ControlSummaryGrid
+        settings={settings}
+        view={view}
+        t={t}
+      />
 
       <section className="control-section">
         <div className="settings-section-head">
-          <h3 className="settings-h3">Drive 与路由</h3>
+          <h3 className="settings-h3">{t('controlCenterDriveAndRouting')}</h3>
           <StatusPill status={settings.smartModelRoutingEnabled ? 'available' : 'disabled'} label={view.route.routeLabel} />
         </div>
         <div className="control-form-grid">
           <label className="field-label">
-            CaoGen Drive
+            {t('controlCenterDrive')}
             <select
               className="select select-block"
               value={settings.driveMode}
@@ -144,13 +152,13 @@ export default function ControlCenter({
             >
               {DRIVE_MODE_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.label}
+                  {t(DRIVE_OPTION_LABEL_KEYS[option.value])}
                 </option>
               ))}
             </select>
           </label>
           <label className="field-label">
-            Provider 偏好
+            {t('controlCenterProviderPreference')}
             <select
               className="select select-block"
               value={settings.defaultProviderId}
@@ -159,7 +167,7 @@ export default function ControlCenter({
                 onSettingsPatch({ defaultProviderId, defaultModel: defaultProviderId ? AUTO_MODEL : '' })
               }}
             >
-              <option value="">不设置 Provider 偏好</option>
+              <option value="">{t('controlCenterNoProviderPreference')}</option>
               {providers.map((provider) => (
                 <option key={provider.id} value={provider.id}>
                   {provider.name}
@@ -168,17 +176,17 @@ export default function ControlCenter({
             </select>
           </label>
           <label className="field-label">
-            模型偏好
+            {t('controlCenterModelPreference')}
             <select
               className="select select-block"
               value={settings.defaultModel}
               onChange={(event) => onSettingsPatch({ defaultModel: event.target.value })}
             >
-              <option value="">不设置模型偏好</option>
+              <option value="">{t('controlCenterNoModelPreference')}</option>
               {modelOptionsForProvider(
                 providers,
                 settings.defaultProviderId,
-                '🧭 自动调度',
+                t('controlCenterAutomaticRouting'),
                 settings.defaultModel
               ).map((option) => (
                 <option key={option.value} value={option.value}>
@@ -188,7 +196,7 @@ export default function ControlCenter({
             </select>
           </label>
           <label className="field-label">
-            调度策略
+            {t('controlCenterSchedulingStrategy')}
             <select
               className="select select-block"
               value={settings.schedulerStrategy}
@@ -196,7 +204,7 @@ export default function ControlCenter({
             >
               {STRATEGY_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.label}
+                  {t(STRATEGY_OPTION_LABEL_KEYS[option.value])}
                 </option>
               ))}
             </select>
@@ -209,7 +217,7 @@ export default function ControlCenter({
               checked={settings.smartModelRoutingEnabled}
               onChange={(event) => onSettingsPatch({ smartModelRoutingEnabled: event.target.checked })}
             />
-            智能路由
+            {t('controlCenterSmartRouting')}
           </label>
           <label className="settings-check">
             <input
@@ -218,7 +226,7 @@ export default function ControlCenter({
               disabled={!settings.smartModelRoutingEnabled}
               onChange={(event) => onSettingsPatch({ modelCrossValidationAutoRunEnabled: event.target.checked })}
             />
-            自动复核
+            {t('controlCenterAutomaticReview')}
           </label>
           <label className="settings-check">
             <input
@@ -226,12 +234,12 @@ export default function ControlCenter({
               checked={settings.failoverEnabled}
               onChange={(event) => onSettingsPatch({ failoverEnabled: event.target.checked })}
             />
-            故障切换
+            {t('controlCenterFailover')}
           </label>
         </div>
         <div className="control-route-note">
           <span>{view.policy.toolPolicySummary}</span>
-          <span>validation={view.policy.validationDepth}</span>
+          <span>{t('controlCenterValidation')}={view.policy.validationDepthLabel}</span>
           <span>{view.route.crossValidationLabel}</span>
           <span>{view.route.customRulesLabel}</span>
         </div>
@@ -241,7 +249,7 @@ export default function ControlCenter({
               <span>
                 {role.label}: {role.providerLabel} / {role.modelLabel}
               </span>
-              <StatusPill status={role.status} label={statusLabel(role.status)} />
+              <StatusPill status={role.status} label={statusLabel(role.status, t)} />
             </div>
           ))}
         </div>
@@ -249,48 +257,65 @@ export default function ControlCenter({
 
       <section className="control-section">
         <div className="settings-section-head">
-          <h3 className="settings-h3">预算</h3>
+          <h3 className="settings-h3">{t('controlCenterBudget')}</h3>
           <StatusPill
             status={view.budget.status}
-            label={budgetExceeded ? 'over budget' : view.budget.status === 'unknown' ? 'unlimited' : 'configured'}
+            label={budgetExceeded
+              ? t('controlCenterBudgetOver')
+              : view.budget.status === 'unknown'
+                ? t('controlCenterUnlimited')
+                : t('controlCenterBudgetConfigured')}
           />
         </div>
         <div className="control-form-grid">
           <label className="field-label">
-            单会话预算上限 ($)
+            {t('controlCenterSessionBudgetLimit')}
             <input
               className="input input-block"
               type="number"
               min="0"
               step="0.01"
               value={settings.budgetUsdPerSession || ''}
-              placeholder="0 = 不限制"
+              placeholder={t('controlCenterZeroUnlimited')}
               onChange={(event) => setBudget('budgetUsdPerSession', event.target.value)}
             />
           </label>
           <label className="field-label">
-            月度预算上限 ($)
+            {t('controlCenterMonthlyBudgetLimit')}
             <input
               className="input input-block"
               type="number"
               min="0"
               step="0.01"
               value={settings.budgetUsdPerMonth || ''}
-              placeholder="0 = 不限制"
+              placeholder={t('controlCenterZeroUnlimited')}
               onChange={(event) => setBudget('budgetUsdPerMonth', event.target.value)}
             />
           </label>
         </div>
         <div className="control-budget-stats">
-          <span>本月已用 {formatCost(view.budget.report.monthlySpentUsd)}</span>
           <span>
-            剩余{' '}
-            {view.budget.report.monthlyRemainingUsd === undefined
-              ? '不限制'
-              : formatCost(view.budget.report.monthlyRemainingUsd)}
+            {t('controlCenterSpentThisMonth', {
+              amount: formatCost(view.budget.report.monthlySpentUsd)
+            })}
           </span>
-          <span>活跃会话 {formatCost(view.budget.report.activeCostUsd)}</span>
-          <span>历史会话 {formatCost(view.budget.report.historicalCostUsd)}</span>
+          <span>
+            {view.budget.report.monthlyRemainingUsd === undefined
+              ? t('controlCenterRemaining', { amount: t('controlCenterUnlimited') })
+              : t('controlCenterRemaining', {
+                  amount: formatCost(view.budget.report.monthlyRemainingUsd)
+                })}
+          </span>
+          <span>
+            {t('controlCenterActiveSessionsCost', {
+              amount: formatCost(view.budget.report.activeCostUsd)
+            })}
+          </span>
+          <span>
+            {t('controlCenterHistoricalSessionsCost', {
+              amount: formatCost(view.budget.report.historicalCostUsd)
+            })}
+          </span>
         </div>
         {view.budget.report.monthlyRatio !== undefined && (
           <div
@@ -300,60 +325,28 @@ export default function ControlCenter({
             <span style={{ width: `${Math.max(2, view.budget.report.monthlyRatio * 100)}%` }} />
           </div>
         )}
-        <div className="control-budget-report-grid">
-          <div>
-            <div className="control-subhead">Provider 本月成本</div>
-            <div className="control-budget-list">
-              {view.budget.report.providers.map((provider) => (
-                <div key={provider.providerId} className="control-budget-row">
-                  <span>
-                    <strong>{provider.providerName}</strong>
-                    <small>
-                      {provider.sessionCount} sessions · {provider.activeSessions} active
-                      {provider.currentSessionLimitUsd
-                        ? ` · ${formatCost(provider.currentSessionLimitUsd)}/session cap`
-                        : ''}
-                    </small>
-                  </span>
-                  <strong>{formatCost(provider.spentUsd)}</strong>
-                </div>
-              ))}
-              {view.budget.report.providers.length === 0 && <div className="provider-empty">本月暂无成本记录</div>}
-            </div>
-          </div>
-          <div>
-            <div className="control-subhead">最高成本会话</div>
-            <div className="control-budget-list">
-              {view.budget.report.topSessions.map((session) => (
-                <div key={`${session.active ? 'active' : 'history'}:${session.id}`} className="control-budget-row">
-                  <span>
-                    <strong>{session.title}</strong>
-                    <small>
-                      {session.providerName} / {session.model}
-                      {session.active ? ' · active' : ' · history'}
-                      {session.sessionLimitUsd ? ` · ${formatCost(session.sessionLimitUsd)} cap` : ''}
-                    </small>
-                  </span>
-                  <strong className={session.overBudget ? 'control-budget-over' : ''}>{formatCost(session.costUsd)}</strong>
-                </div>
-              ))}
-              {view.budget.report.topSessions.length === 0 && <div className="provider-empty">本月暂无会话成本</div>}
-            </div>
-          </div>
-        </div>
+        <BudgetReportLists report={view.budget.report} t={t} />
       </section>
 
       <section className="control-section">
         <div className="settings-section-head">
-          <h3 className="settings-h3">Provider 与 Key</h3>
+          <h3 className="settings-h3">{t('controlCenterProvidersAndKeys')}</h3>
           <button className="btn btn-ghost btn-sm" onClick={onAddProvider}>
-            添加 Provider
+            {t('controlCenterAddProvider')}
           </button>
         </div>
         <div className="control-provider-stats">
-          <span>{view.providerSummary.totalKeys} keys / {view.providerSummary.configuredKeys} providers</span>
-          <span>{view.providerSummary.healthy}/{view.providerSummary.total} healthy</span>
-          <span>{view.providerSummary.missingKeys} missing key</span>
+          <span>
+            {t('controlCenterKeyCount', { count: view.providerSummary.totalKeys })} /{' '}
+            {t('controlCenterProviderCount', { count: view.providerSummary.configuredKeys })}
+          </span>
+          <span>
+            {t('controlCenterHealthyCount', {
+              healthy: view.providerSummary.healthy,
+              total: view.providerSummary.total
+            })}
+          </span>
+          <span>{t('controlCenterMissingKeyCount', { count: view.providerSummary.missingKeys })}</span>
         </div>
         <div className="provider-list">
           {view.providers.map((provider) => {
@@ -363,11 +356,14 @@ export default function ControlCenter({
                 <div className="provider-row-body">
                   <div className="provider-row-name">
                     {provider.name}
-                    {provider.selected && <StatusPill status="available" label="default" />}
+                    {provider.selected && (
+                      <StatusPill status="available" label={t('controlCenterDefault')} />
+                    )}
                     <StatusPill status={provider.status} label={provider.tokenLabel} />
                   </div>
                   <div className="provider-row-sub">
-                    {provider.endpoint} · {provider.modelCount} models · {provider.healthLabel}
+                    {provider.endpoint} · {t('controlCenterModelCount', { count: provider.modelCount })} ·{' '}
+                    {provider.healthLabel}
                   </div>
                   <div className="control-provider-health-meta">
                     <span>{provider.successRateLabel}</span>
@@ -376,13 +372,19 @@ export default function ControlCenter({
                   <div className="control-row-detail">{provider.detail}</div>
                   {provider.recentFailures.length > 0 && (
                     <details className="control-provider-failures">
-                      <summary>最近失败 {provider.recentFailures.length}</summary>
+                      <summary>
+                        {t('controlCenterRecentFailures', { count: provider.recentFailures.length })}
+                      </summary>
                       <div className="control-provider-failure-list">
                         {provider.recentFailures.map((failure, index) => (
                           <div key={`${failure.at}:${failure.label}:${index}`} className="control-provider-failure-row">
-                            <span>{healthTime(failure.at)}</span>
+                            <span>{healthTime(failure.at, settings.language)}</span>
                             <strong>{failure.label}</strong>
-                            <span>{failure.switchable ? '可自动切换' : '需原地处理'}</span>
+                            <span>
+                              {failure.switchable
+                                ? t('controlCenterCanFailover')
+                                : t('controlCenterNeedsLocalAction')}
+                            </span>
                             <code>{failure.message}</code>
                           </div>
                         ))}
@@ -393,7 +395,7 @@ export default function ControlCenter({
                 <div className="provider-row-actions">
                   {rawProvider && (
                     <button className="btn btn-ghost btn-sm" onClick={() => onEditProvider(rawProvider)}>
-                      编辑
+                      {t('controlCenterEdit')}
                     </button>
                   )}
                 </div>
@@ -405,14 +407,14 @@ export default function ControlCenter({
 
       <section className="control-section">
         <div className="settings-section-head">
-          <h3 className="settings-h3">MCP / Agent 引擎</h3>
+          <h3 className="settings-h3">{t('controlCenterMcpAndAgentEngines')}</h3>
           <StatusPill status={view.mcp.status} label={view.mcp.label} />
         </div>
         <div className="control-tool-grid">
           <div>
             <div className="control-subhead">MCP</div>
             {view.mcp.items.length === 0 ? (
-              <div className="provider-empty">未发现 MCP 声明</div>
+              <div className="provider-empty">{t('controlCenterNoMcpDeclarations')}</div>
             ) : (
               <div className="control-mini-list">
                 {view.mcp.items.map((item) => (
@@ -425,7 +427,7 @@ export default function ControlCenter({
             )}
           </div>
           <div>
-            <div className="control-subhead">Agent engines</div>
+            <div className="control-subhead">{t('controlCenterAgentEngines')}</div>
             <div className="control-mini-list">
               {view.engines.map((engine) => (
                 <div key={engine.kind} className="control-mini-row">
@@ -433,14 +435,16 @@ export default function ControlCenter({
                   <StatusPill status={engine.status} label={engine.statusLabel} />
                 </div>
               ))}
-              {view.engines.length === 0 && <div className="provider-empty">未注册本地引擎</div>}
+              {view.engines.length === 0 && (
+                <div className="provider-empty">{t('controlCenterNoLocalEngines')}</div>
+              )}
             </div>
           </div>
         </div>
       </section>
 
       <section className="control-section">
-        <h3 className="settings-h3">边界</h3>
+        <h3 className="settings-h3">{t('controlCenterBoundaries')}</h3>
         <div className="control-capability-list">
           {view.capabilities.map((capability) => (
             <div key={capability.title} className="control-capability-row">
@@ -448,7 +452,7 @@ export default function ControlCenter({
                 <div className="control-capability-title">{capability.title}</div>
                 <div className="control-row-detail">{capability.detail}</div>
               </div>
-              <StatusPill status={capability.status} label={statusLabel(capability.status)} />
+              <StatusPill status={capability.status} label={statusLabel(capability.status, t)} />
             </div>
           ))}
         </div>
@@ -457,22 +461,141 @@ export default function ControlCenter({
   )
 }
 
+function ControlSummaryGrid({
+  settings,
+  view,
+  t
+}: {
+  settings: AppSettings
+  view: ControlCenterView
+  t: Translate
+}): React.JSX.Element {
+  const routingStatus = settings.smartModelRoutingEnabled ? view.route.providerStatus : 'disabled'
+  const remaining = view.budget.report.monthlyRemainingUsd
+  return (
+    <div className="control-summary-grid">
+      <SummaryCard
+        title={t('controlCenterSummaryDrive')}
+        status="available"
+        statusText={statusLabel('available', t)}
+        value={view.route.driveLabel}
+        detail={view.policy.summary}
+      />
+      <SummaryCard
+        title={t('controlCenterSummaryRouting')}
+        status={routingStatus}
+        statusText={statusLabel(routingStatus, t)}
+        value={view.route.routeLabel}
+        detail={`${view.route.providerLabel} · ${view.route.modelLabel} · ${view.route.strategyLabel}`}
+      />
+      <SummaryCard
+        title={t('controlCenterSummaryBudget')}
+        status={view.budget.status}
+        statusText={statusLabel(view.budget.status, t)}
+        value={`${formatCost(view.budget.report.monthlySpentUsd)} / ${view.budget.report.monthlyLimitUsd > 0 ? formatCost(view.budget.report.monthlyLimitUsd) : '∞'}`}
+        detail={`${view.budget.report.monthKey} · ${remaining === undefined
+          ? t('controlCenterUnlimited')
+          : t('controlCenterRemaining', { amount: formatCost(remaining) })}`}
+      />
+      <SummaryCard
+        title={t('controlCenterSummaryTools')}
+        status={view.mcp.status}
+        statusText={statusLabel(view.mcp.status, t)}
+        value={view.mcp.label}
+        detail={t('controlCenterAgentEnginesReady', {
+          ready: view.engines.filter((engine) => engine.status === 'available').length,
+          total: view.engines.length
+        })}
+      />
+    </div>
+  )
+}
+
+function BudgetReportLists({
+  report,
+  t
+}: {
+  report: ControlCenterView['budget']['report']
+  t: Translate
+}): React.JSX.Element {
+  return (
+    <div className="control-budget-report-grid">
+      <div>
+        <div className="control-subhead">{t('controlCenterProviderMonthlyCost')}</div>
+        <div className="control-budget-list">
+          {report.providers.map((provider) => (
+            <div key={provider.providerId} className="control-budget-row">
+              <span>
+                <strong>{provider.providerName}</strong>
+                <small>
+                  {t('controlCenterSessionCount', { count: provider.sessionCount })} ·{' '}
+                  {t('controlCenterActiveCount', { count: provider.activeSessions })}
+                  {provider.currentSessionLimitUsd
+                    ? ` · ${t('controlCenterSessionCap', {
+                        amount: formatCost(provider.currentSessionLimitUsd)
+                      })}`
+                    : ''}
+                </small>
+              </span>
+              <strong>{formatCost(provider.spentUsd)}</strong>
+            </div>
+          ))}
+          {report.providers.length === 0 && (
+            <div className="provider-empty">{t('controlCenterNoMonthlyCost')}</div>
+          )}
+        </div>
+      </div>
+      <div>
+        <div className="control-subhead">{t('controlCenterTopCostSessions')}</div>
+        <div className="control-budget-list">
+          {report.topSessions.map((session) => (
+            <div key={`${session.active ? 'active' : 'history'}:${session.id}`} className="control-budget-row">
+              <span>
+                <strong>{session.title}</strong>
+                <small>
+                  {session.providerName} / {session.model}
+                  {session.active
+                    ? ` · ${t('controlCenterSessionActive')}`
+                    : ` · ${t('controlCenterSessionHistory')}`}
+                  {session.sessionLimitUsd
+                    ? ` · ${t('controlCenterCap', {
+                        amount: formatCost(session.sessionLimitUsd)
+                      })}`
+                    : ''}
+                </small>
+              </span>
+              <strong className={session.overBudget ? 'control-budget-over' : ''}>
+                {formatCost(session.costUsd)}
+              </strong>
+            </div>
+          ))}
+          {report.topSessions.length === 0 && (
+            <div className="provider-empty">{t('controlCenterNoMonthlySessionCost')}</div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function SummaryCard({
   title,
   value,
   detail,
-  status
+  status,
+  statusText
 }: {
   title: string
   value: string
   detail: string
   status: ControlCenterStatus
+  statusText: string
 }): React.JSX.Element {
   return (
     <div className="control-summary-card">
       <div className="control-summary-top">
         <span>{title}</span>
-        <StatusPill status={status} label={statusLabel(status)} />
+        <StatusPill status={status} label={statusText} />
       </div>
       <div className="control-summary-value">{value}</div>
       <div className="control-summary-detail">{detail}</div>
@@ -484,10 +607,10 @@ function StatusPill({ status, label }: { status: ControlCenterStatus; label: str
   return <span className={`control-pill control-pill-${status}`}>{label}</span>
 }
 
-function statusLabel(status: ControlCenterStatus): string {
-  if (status === 'available') return 'available'
-  if (status === 'needs-config') return 'needs config'
-  if (status === 'external-required') return 'external credential'
-  if (status === 'disabled') return 'disabled'
-  return 'unknown'
+function statusLabel(status: ControlCenterStatus, t: Translate): string {
+  if (status === 'available') return t('controlCenterStatusAvailable')
+  if (status === 'needs-config') return t('controlCenterStatusNeedsConfig')
+  if (status === 'external-required') return t('controlCenterStatusExternalRequired')
+  if (status === 'disabled') return t('controlCenterStatusDisabled')
+  return t('controlCenterStatusUnknown')
 }

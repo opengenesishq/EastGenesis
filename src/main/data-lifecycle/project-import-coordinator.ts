@@ -9,6 +9,7 @@ import {
   type ProjectWorkspaceState
 } from '../../shared/project-workspace-types'
 import { DigitalWorkerStore } from '../digital-worker/domain-store'
+import { withAssignmentOwnerWriteAccess } from '../assignment-owner-coordinator/readiness'
 import { mutateLearningState, readLearningState } from '../learning/learning-store'
 import {
   createProductionProjectAggregateService
@@ -55,6 +56,47 @@ export interface PreparedProjectAggregateImport {
   execute(options?: ProjectImportOptions): Promise<ProjectImportResult>
 }
 
+export interface ProjectImportRecoveryFailure {
+  operationId: string
+  projectId: string
+  error: string
+}
+
+export interface ProjectImportRecoveryResult {
+  recovered: ProjectImportResult[]
+  failures: ProjectImportRecoveryFailure[]
+}
+
+export class ProjectImportRecoveryPendingError extends Error {
+  readonly code = 'PROJECT_IMPORT_RECOVERY_PENDING'
+  readonly failures: ProjectImportRecoveryFailure[]
+
+  constructor(failures: readonly ProjectImportRecoveryFailure[]) {
+    super(`${failures.length} Project import operation(s) remain unresolved`)
+    this.name = 'ProjectImportRecoveryPendingError'
+    this.failures = structuredClone([...failures])
+  }
+}
+
+const projectImportRecoveryFlights = new Map<string, Promise<ProjectImportRecoveryResult>>()
+
+export function startProjectImportRecoveryReadiness(userDataRoot: string): Promise<ProjectImportRecoveryResult> {
+  const root = requiredRoot(userDataRoot)
+  const existing = projectImportRecoveryFlights.get(root)
+  if (existing) return existing
+
+  const flight = withAssignmentOwnerWriteAccess(root, async () => {
+    const result = await recoverPendingProjectImportsInWriterSlot(root)
+    if (result.failures.length > 0) throw new ProjectImportRecoveryPendingError(result.failures)
+    return result
+  })
+  projectImportRecoveryFlights.set(root, flight)
+  void flight.catch(() => {
+    if (projectImportRecoveryFlights.get(root) === flight) projectImportRecoveryFlights.delete(root)
+  })
+  return flight
+}
+
 export async function importProjectAggregate(
   rawBundle: unknown,
   userDataRoot: string,
@@ -94,13 +136,14 @@ export async function prepareProjectAggregateImport(
   }
 }
 
-export async function recoverPendingProjectImports(userDataRoot: string): Promise<{
-  recovered: ProjectImportResult[]
-  failures: Array<{ operationId: string; projectId: string; error: string }>
-}> {
+export async function recoverPendingProjectImports(userDataRoot: string): Promise<ProjectImportRecoveryResult> {
   const root = requiredRoot(userDataRoot)
+  return withAssignmentOwnerWriteAccess(root, () => recoverPendingProjectImportsInWriterSlot(root))
+}
+
+async function recoverPendingProjectImportsInWriterSlot(root: string): Promise<ProjectImportRecoveryResult> {
   const recovered: ProjectImportResult[] = []
-  const failures: Array<{ operationId: string; projectId: string; error: string }> = []
+  const failures: ProjectImportRecoveryFailure[] = []
   for (const entry of new ProjectImportJournal(root).listPending()) {
     try {
       recovered.push(await resumeProjectImport(root, entry))

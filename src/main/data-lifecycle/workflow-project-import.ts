@@ -4,8 +4,10 @@ import type {
 } from '../../shared/project-aggregate-types'
 import type {
   WorkflowEventRecord,
+  WorkflowGoalRecord,
   WorkflowEvidenceInput,
-  WorkflowEvidenceRecord
+  WorkflowEvidenceRecord,
+  WorkflowWorkItemRecord
 } from '../../shared/workflow-types'
 import { buildProjectWorkspaceProjection, parentFirst } from '../project-workspace/ledger-migration-source'
 import {
@@ -103,10 +105,17 @@ function importIntoDatabase(
     goals: aggregate.goals,
     workItems: aggregate.workItems
   })
+  // A TaskRun projection may advance the Workflow Goal/WorkItem revision after
+  // the last ProjectWorkspace JSON write. The exported audit chain is the
+  // verified source for that projection; seed the Workflow tables from its
+  // latest entity event while preserving the Workspace aggregate unchanged.
+  const sourceEvents = workflowEventsFromAudit(aggregate.audit)
   assertNoWorkflowConflicts(db, aggregate, projection)
 
-  for (const goal of projection.goals) insertGoal(db, goal.record)
-  for (const item of parentFirst(projection.workItems)) insertWorkItem(db, item.record)
+  for (const goal of projection.goals) insertGoal(db, workflowGoalRecordForImport(goal.record, sourceEvents))
+  for (const item of parentFirst(projection.workItems)) {
+    insertWorkItem(db, workflowWorkItemRecordForImport(item.record, sourceEvents))
+  }
   for (const run of aggregate.workflow.runs) {
     insertRun(db, run)
     db.run(
@@ -144,7 +153,6 @@ function importIntoDatabase(
 
   const taskEvidenceById = new Map(taskEvidence.map((record) => [record.evidenceId, record]))
   const workflowEvidenceById = new Map(workflowEvidence.map((record) => [record.evidenceId, record]))
-  const sourceEvents = workflowEventsFromAudit(aggregate.audit)
   for (const event of sourceEvents) {
     const payload = reboundEvidencePayload(event, taskEvidenceById, workflowEvidenceById)
     appendWorkflowEvent(db, {
@@ -192,6 +200,34 @@ function importIntoDatabase(
   }
 }
 
+function workflowGoalRecordForImport(
+  fallback: WorkflowGoalRecord,
+  events: readonly WorkflowEventRecord[]
+): WorkflowGoalRecord {
+  const event = latestProjectionEvent(events, 'goal', fallback.id)
+  return event ? structuredClone(event.payload) as unknown as WorkflowGoalRecord : fallback
+}
+
+function workflowWorkItemRecordForImport(
+  fallback: WorkflowWorkItemRecord,
+  events: readonly WorkflowEventRecord[]
+): WorkflowWorkItemRecord {
+  const event = latestProjectionEvent(events, 'work_item', fallback.id)
+  return event ? structuredClone(event.payload) as unknown as WorkflowWorkItemRecord : fallback
+}
+
+function latestProjectionEvent(
+  events: readonly WorkflowEventRecord[],
+  entityType: 'goal' | 'work_item',
+  entityId: string
+): WorkflowEventRecord | undefined {
+  return events
+    .filter((event) => event.entityType === entityType && event.entityId === entityId &&
+      (event.kind === `${entityType}.created` || event.kind === `${entityType}.updated`))
+    .sort((left, right) => left.seq - right.seq)
+    .at(-1)
+}
+
 async function workflowProjectImportAlreadyApplied(
   aggregate: ProjectAggregateSnapshot,
   rootDir: string
@@ -210,9 +246,10 @@ async function workflowProjectImportAlreadyApplied(
     goals: aggregate.goals,
     workItems: aggregate.workItems
   })
+  const sourceEvents = workflowEventsFromAudit(aggregate.audit)
   const expected = {
-    goals: projection.goals.map((item) => item.record).sort(byId),
-    workItems: projection.workItems.map((item) => item.record).sort(byId),
+    goals: projection.goals.map((item) => workflowGoalRecordForImport(item.record, sourceEvents)).sort(byId),
+    workItems: projection.workItems.map((item) => workflowWorkItemRecordForImport(item.record, sourceEvents)).sort(byId),
     runs: aggregate.workflow.runs.map(({ taskRun, ...record }) => ({
       ...record,
       taskRunDigest: workflowDigest(taskRun)
@@ -224,7 +261,7 @@ async function workflowProjectImportAlreadyApplied(
     artifactLocations: aggregate.workflow.artifactLocations.slice().sort(byId),
     taskEvidence: aggregate.workflow.taskEvidence.map(stripChain).sort(byEvidenceId),
     workflowEvidence: aggregate.workflow.workflowEvidence.map(stripChain).sort(byEvidenceId),
-    events: workflowEventsFromAudit(aggregate.audit).map(normalizeEventChain).sort(byEventId)
+    events: sourceEvents.map(normalizeEventChain).sort(byEventId)
   }
   const actual = {
     goals: target.ledger.goals.items.slice().sort(byId),

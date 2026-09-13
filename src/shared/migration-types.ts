@@ -41,8 +41,6 @@ export interface MigrationScan {
   mode: 'project' | 'conversation'
   scannedAt: string
   assets: MigrationAsset[]
-  claudeNative: boolean
-  nativeAssetCount: number
   diagnostics: Array<{ code: string; message: string; path?: string }>
 }
 

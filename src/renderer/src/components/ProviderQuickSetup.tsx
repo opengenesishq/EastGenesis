@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AUTO_MODEL } from '../../../shared/types'
 import type {
   LocalComputeActivationOptions,
   LocalComputeActivationResult,
@@ -16,8 +15,9 @@ import type {
 import { useT } from '../i18n'
 import { PROVIDER_PRESETS, useStore } from '../store'
 import ProviderConnectionDiagnostic from './ProviderConnectionDiagnostic'
-import ProviderQuickPresetPicker from './ProviderQuickPresetPicker'
+import ProviderPresetCatalog from './ProviderPresetCatalog'
 import ProviderGenerationProbe from './ProviderGenerationProbe'
+import ProviderSetupReceipt, { useProviderSetupCompletion } from './ProviderSetupReceipt'
 
 const QUICK_API_PRESETS = PROVIDER_PRESETS.filter((item) => item.key !== 'custom' && item.key !== 'local-openai')
 
@@ -25,6 +25,7 @@ interface ProviderQuickSetupProps {
   onAdvanced: () => void
   onCancel: () => void
   onSaved: (provider: ProviderView) => void
+  onEditSaved: (provider: ProviderView) => void
 }
 
 function providerQuickLocalErrorKey(reason: LocalComputeUnavailableReason | null | undefined):
@@ -80,15 +81,6 @@ async function activateQuickLocalCompute(
   } catch {
     return { provider: null, reason: null }
   }
-}
-
-function dispatchQuickLocalOutcome(
-  outcome: QuickLocalOutcome,
-  onSaved: (provider: ProviderView) => void,
-  onUnavailable: (reason: LocalComputeUnavailableReason | null) => void
-): void {
-  if (outcome.provider) onSaved(outcome.provider)
-  else onUnavailable(outcome.reason)
 }
 
 function ProviderQuickAccountOptions({ oauthFlow, oauthBusy, busy, localBusy, onConnectOAuth, onConnectLocal }: {
@@ -193,23 +185,26 @@ function ProviderConnectionDetails({
   </details>
 }
 
-function ProviderQuickSteps(): React.JSX.Element {
+function ProviderQuickProtocol({ preset }: { preset: (typeof QUICK_API_PRESETS)[number] }): React.JSX.Element {
   const t = useT()
   return (
-    <ol className="provider-quick-steps" aria-label={t('providerQuickStepsLabel')}>
-      <li><strong>1</strong><span>{t('providerQuickStepTemplate')}</span></li>
-      <li><strong>2</strong><span>{t('providerQuickStepCredential')}</span></li>
-      <li><strong>3</strong><span>{t('providerQuickStepVerify')}</span></li>
-    </ol>
+        <div className="provider-quick-protocol">
+          <span>{preset.engine === 'anthropic'
+            ? t('providerEngineAnthropic')
+            : preset.engine === 'gemini' ? t('providerEngineGemini') : t('providerEngineOpenAI')}</span>
+          {preset.engine === 'openai' && (
+            <span>{preset.openaiProtocol === 'chat' ? t('openaiProtocolChat') : t('openaiProtocolResponses')}</span>
+          )}
+        </div>
   )
 }
 
-export default function ProviderQuickSetup({ onAdvanced, onCancel, onSaved }: ProviderQuickSetupProps): React.JSX.Element {
+export default function ProviderQuickSetup({ onAdvanced, onCancel, onSaved, onEditSaved }: ProviderQuickSetupProps): React.JSX.Element {
   const t = useT()
   const setupRef = useRef<HTMLElement>(null)
   const createProvider = useStore((state) => state.createProvider)
   const activateLocalCompute = useStore((state) => state.activateLocalCompute)
-  const updateSettings = useStore((state) => state.updateSettings)
+  const { saved, complete } = useProviderSetupCompletion()
   const [token, setToken] = useState('')
   const [presetKey, setPresetKey] = useState('caogen-relay')
   const preset = useMemo(
@@ -257,12 +252,7 @@ export default function ProviderQuickSetup({ onAdvanced, onCancel, onSaved }: Pr
             return
           }
           setOauthFlow(null)
-          await updateSettings({
-            defaultProviderId: result.provider.id,
-            defaultModel: AUTO_MODEL,
-            smartModelRoutingEnabled: true
-          })
-          onSaved(result.provider)
+          await complete(result.provider, 'account')
         } catch (cause) {
           if (cancelled) return
           setOauthFlow(null)
@@ -275,7 +265,7 @@ export default function ProviderQuickSetup({ onAdvanced, onCancel, onSaved }: Pr
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [nextPollAt, oauthFlow, onSaved, updateSettings])
+  }, [nextPollAt, oauthFlow, complete])
 
   const connectOAuth = async (service: ProviderAuthorizationService): Promise<void> => {
     setOauthBusy(true)
@@ -298,13 +288,14 @@ export default function ProviderQuickSetup({ onAdvanced, onCancel, onSaved }: Pr
     try {
       const outcome = await activateQuickLocalCompute(activateLocalCompute)
       setLocalReason(outcome.reason)
-      dispatchQuickLocalOutcome(outcome, onSaved, (reason) => setError(t(providerQuickLocalErrorKey(reason))))
+      if (outcome.provider) await complete(outcome.provider, 'local')
+      else setError(t(providerQuickLocalErrorKey(outcome.reason)))
     } finally {
       setLocalBusy(false)
     }
   }
 
-  const saveProvider = async (models: string[], nextToken: string): Promise<void> => {
+  const saveProvider = async (models: string[], nextToken: string, source: 'discovered' | 'manual'): Promise<void> => {
     if (!preset) throw new Error(t('providerQuickUnavailable'))
     const created = await createProvider({
       name: name.trim() || preset.label,
@@ -315,12 +306,7 @@ export default function ProviderQuickSetup({ onAdvanced, onCancel, onSaved }: Pr
       token: nextToken,
       tokenLabel: t('providerQuickKeyLabel')
     })
-    await updateSettings({
-      defaultProviderId: created.id,
-      defaultModel: AUTO_MODEL,
-      smartModelRoutingEnabled: true
-    })
-    onSaved(created)
+    await complete(created, source)
   }
 
   const connect = async (): Promise<void> => {
@@ -356,7 +342,7 @@ export default function ProviderQuickSetup({ onAdvanced, onCancel, onSaved }: Pr
         else setError(t('providerQuickUnavailable'))
         return
       }
-      await saveProvider(discovery.models, nextToken)
+      await saveProvider(discovery.models, nextToken, 'discovered')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -403,7 +389,7 @@ export default function ProviderQuickSetup({ onAdvanced, onCancel, onSaved }: Pr
     setBusy(true)
     setError('')
     try {
-      await saveProvider([...new Set(models)], token.trim())
+      await saveProvider([...new Set(models)], token.trim(), 'manual')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -441,6 +427,8 @@ export default function ProviderQuickSetup({ onAdvanced, onCancel, onSaved }: Pr
     void connect()
   }
 
+  if (saved) return <ProviderSetupReceipt {...saved} onDone={onSaved} onEdit={onEditSaved} />
+
   return (
     <section ref={setupRef} className="provider-editor" aria-label={t('providerQuickTitle')} data-provider-quick-setup>
       <header className="provider-editor-header">
@@ -448,18 +436,11 @@ export default function ProviderQuickSetup({ onAdvanced, onCancel, onSaved }: Pr
         <h2 className="provider-editor-title">{t('providerQuickTitle')}</h2>
       </header>
       <div className="provider-quick-setup">
-        <ProviderQuickSteps />
         <ProviderQuickAccountOptions oauthFlow={oauthFlow} oauthBusy={oauthBusy} busy={busy} localBusy={localBusy} onConnectOAuth={connectOAuth} onConnectLocal={connectLocal} />
         <div className="provider-quick-divider"><span>{t('providerQuickOrKey')}</span></div>
-        <ProviderQuickPresetPicker preset={preset} presets={QUICK_API_PRESETS} onSelect={(next) => selectPreset(next)} />
-        <div className="provider-quick-protocol">
-          <span>{preset?.engine === 'anthropic'
-            ? t('providerEngineAnthropic')
-            : preset?.engine === 'gemini' ? t('providerEngineGemini') : t('providerEngineOpenAI')}</span>
-          {preset?.engine === 'openai' && (
-            <span>{preset.openaiProtocol === 'chat' ? t('openaiProtocolChat') : t('openaiProtocolResponses')}</span>
-          )}
-        </div>
+        <label className="field-label">{t('providerQuickTemplateLabel')}</label>
+        <ProviderPresetCatalog compact presets={QUICK_API_PRESETS} onSelect={(next) => selectPreset(next.key)} />
+        <ProviderQuickProtocol preset={preset} />
         <label className="field-label" htmlFor="provider-quick-key">{t('apiKeyLabel')}</label>
         <input
           id="provider-quick-key"
@@ -510,7 +491,7 @@ export default function ProviderQuickSetup({ onAdvanced, onCancel, onSaved }: Pr
         >
           {t('providerQuickAdvanced')}
         </button>
-        <button className="btn btn-primary" disabled={busy || localBusy || oauthBusy || Boolean(oauthFlow)} onClick={() => void connect()}>
+        <button className="btn btn-primary" data-provider-quick-action="save" disabled={busy || localBusy || oauthBusy || Boolean(oauthFlow)} onClick={() => void connect()}>
           {busy ? t('providerQuickConnecting') : t('providerQuickConnect')}
         </button>
       </div>

@@ -2,9 +2,8 @@ import type { ProviderProfileImportAction } from './provider-profile-types'
 import type { ProviderRuntimeConfig, ProviderView } from './types'
 
 export type ProviderNativeClient = 'codex'
-export type ProviderNativeCredentialKind = 'api-key' | 'oauth' | 'environment' | 'none'
+export type ProviderNativeCredentialKind = 'api-key' | 'environment' | 'none'
 export type ProviderNativeImportWarning =
-  | 'oauth_reconnect'
   | 'credential_missing'
   | 'ignored_sections'
   | 'existing_credential_preserved'
@@ -18,7 +17,7 @@ export interface ProviderNativeImportDiff {
 export interface ProviderNativeImportPreview {
   previewId: string
   client: ProviderNativeClient
-  source: 'CODEX_HOME' | 'user-profile'
+  source: 'environment-override' | 'user-profile'
   configPresent: boolean
   authPresent: boolean
   providerName: string

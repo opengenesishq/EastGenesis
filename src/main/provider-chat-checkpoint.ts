@@ -31,7 +31,15 @@ export function restoreProviderChatCheckpoint(
     return unavailable(mode, checkpointId, '该 Provider 只支持安全恢复聊天，不支持文件回退')
   }
   const entries = transcript.readAll()
-  const plan = transcript.planRestore(checkpointId)
+  // Checkpoints emitted by current native providers use a `chat:` namespace.
+  // Older transcripts (and imported transcripts from another provider) stored
+  // the user message id directly. Resolve that legacy form before planning so
+  // a provider switch does not make an otherwise safe checkpoint unreachable.
+  const requestedId = checkpointId.trim()
+  const canonicalId = requestedId.startsWith('chat:')
+    ? requestedId
+    : providerChatCheckpointId(requestedId)
+  const plan = transcript.planRestore(canonicalId)
   if (!plan.ok) {
     return {
       ...unavailable(mode, checkpointId, plan.reason ?? '找不到聊天检查点'),
@@ -55,7 +63,7 @@ export function restoreProviderChatCheckpoint(
       chatRemovedEntries: plan.removedEntries
     }
   }
-  const restored = transcript.restore(checkpointId)
+  const restored = transcript.restore(canonicalId)
   if (!restored.plan.ok) {
     return {
       ...unavailable(mode, checkpointId, restored.plan.reason ?? '聊天恢复失败'),

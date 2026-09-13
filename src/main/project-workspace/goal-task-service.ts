@@ -1,11 +1,15 @@
 import { createHash } from 'node:crypto'
+import { assertSameBusinessLine, newBusinessLineId, storedBusinessLineId } from '../business-line-ownership'
+import { assertActiveBusinessLine } from '../business-line-registry-reader'
 import type {
   Goal,
   ProjectGoalTaskInput,
   ProjectGoalTaskResult,
   ProjectWorkspace,
+  GoalStatus,
   WorkItem,
-  WorkItemOwner
+  WorkItemOwner,
+  WorkItemStatus
 } from '../../shared/project-workspace-types'
 import { createProjectWorkspaceReadService } from './canonical-read-service'
 import { openProjectWorkspaceCommandService } from './command-service'
@@ -16,6 +20,8 @@ const TERMINAL_WORK_ITEM_STATUSES = new Set(['done', 'failed', 'cancelled'])
 
 export interface ProjectGoalTaskCreationOptions {
   workItemOwner?: WorkItemOwner
+  goalStatus?: GoalStatus
+  workItemStatus?: WorkItemStatus
 }
 
 export async function createProjectGoalTask(
@@ -34,6 +40,10 @@ export async function createProjectGoalTask(
   const recovered = Boolean(goal || workItem)
   if (goal) assertMatchingGoal(goal, input)
   if (workItem) assertMatchingWorkItem(workItem, input, ids.goalId, options.workItemOwner)
+  if (!workItem) {
+    input.businessLineId = newBusinessLineId(input.businessLineId)
+    assertActiveBusinessLine(input.businessLineId, rootDir)
+  }
 
   const commands = await openProjectWorkspaceCommandService(rootDir)
   if (!goal) {
@@ -43,7 +53,7 @@ export async function createProjectGoalTask(
         projectId: input.projectId,
         title: taskTitle(input.objective),
         objective: input.objective,
-        status: 'running',
+        status: options.goalStatus ?? 'running',
         successCriteria: ['目标完成并有可核验的结果'],
         acceptance: [{ id: `${ids.goalId}-result`, criterion: '目标完成并有可核验的结果', required: true }]
       }),
@@ -57,10 +67,11 @@ export async function createProjectGoalTask(
         id: ids.workItemId,
         projectId: input.projectId,
         goalId: goal!.id,
+        businessLineId: input.businessLineId,
         title: taskTitle(input.objective),
         description: input.objective,
         type: 'custom',
-        status: 'ready',
+        status: options.workItemStatus ?? 'ready',
         owner: options.workItemOwner,
         acceptanceSpec: [{
           id: `${ids.workItemId}-result`,
@@ -88,7 +99,7 @@ function normalizeInput(input: ProjectGoalTaskInput): ProjectGoalTaskInput {
   const requestId = requiredText(input.requestId, 'requestId', 200)
   const projectId = requiredText(input.projectId, 'projectId', 200)
   const objective = requiredText(input.objective, 'objective', 20_000)
-  return { requestId, projectId, objective }
+  return { requestId, projectId, objective, businessLineId: storedBusinessLineId(input.businessLineId) }
 }
 
 function requiredText(value: unknown, label: string, maxLength: number): string {
@@ -125,6 +136,7 @@ function assertMatchingWorkItem(
   goalId: string,
   expectedOwner?: WorkItemOwner
 ): void {
+  assertSameBusinessLine(input.businessLineId, workItem.businessLineId)
   if (workItem.projectId !== input.projectId || workItem.goalId !== goalId ||
       workItem.description !== input.objective || workItem.title !== taskTitle(input.objective)) {
     throw new Error(`goal task request conflicts with existing WorkItem:${workItem.id}`)

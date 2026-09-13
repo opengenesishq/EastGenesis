@@ -60,6 +60,7 @@ const EDITED_DRAFT = {
 
 const state = {
   projectId: '',
+  baselineGoalCount: 0,
   goalId: '',
   originalAcceptanceIds: [],
   editedContract: null,
@@ -113,8 +114,12 @@ try {
 
   await runElectronPhase('studio-create-edit-archive', async (page) => {
     await check('Studio creates an isolated ProjectWorkspace for Goal contract acceptance', async () => {
-      await page.waitForSelector('.pws-project-empty', { visible: true, timeout: 30_000 })
-      await page.click('[data-studio-action="create-project-empty"]')
+      await waitForValue(async () => page.evaluate(() => {
+        const button = document.querySelector('[data-studio-action="create-project-empty"], [data-studio-action="create-project"]')
+        if (!(button instanceof HTMLButtonElement) || button.disabled) return false
+        button.click()
+        return true
+      }), Boolean, 30_000, 'waiting for an available Studio create-project action')
       await page.waitForSelector('[data-studio-form="project"]', { visible: true, timeout: 10_000 })
       await replaceValue(page, '[data-studio-form="project"] [name="projectName"]', PROJECT_NAME)
       await page.select('[data-studio-form="project"] [name="projectKind"]', 'software')
@@ -127,12 +132,15 @@ try {
       )
       state.projectId = project.id
       assert(project.status === 'active', `Studio-created project status mismatch: ${project.status}`)
+      const templateGoals = await canonicalGoals(page, state.projectId, true)
+      assert(templateGoals.length === 1, `software Project template Goal baseline mismatch: ${templateGoals.length}`)
+      state.baselineGoalCount = templateGoals.length
       await page.waitForSelector('[data-goal-action="create"]', { visible: true, timeout: 15_000 })
     })
 
     await check('native HTML required validation blocks an invalid Goal without any canonical write', async () => {
       const before = await canonicalGoals(page, state.projectId, true)
-      assert(before.length === 0, `isolated project unexpectedly started with ${before.length} Goals`)
+      assert(before.length === state.baselineGoalCount, `template Goal baseline drifted to ${before.length}`)
       await page.click('[data-goal-action="create"]')
       const form = '[data-studio-form="goal"]'
       await page.waitForSelector(form, { visible: true, timeout: 10_000 })
@@ -193,7 +201,7 @@ try {
         zeroTokens: await window.agentDesk.getProjectGoal(zeroTokensId)
       }), { negativeId, zeroRunsId, zeroTokensId })
       assert(!missing.negative && !missing.zeroRuns && !missing.zeroTokens, 'rejected Goal input left a canonical record')
-      assert((await canonicalGoals(page, state.projectId, true)).length === 0, 'rejected Goal input changed canonical Goal count')
+      assert((await canonicalGoals(page, state.projectId, true)).length === state.baselineGoalCount, 'rejected Goal input changed canonical Goal count')
     })
 
     await check('Studio persists the complete Goal contract through preload and main', async () => {

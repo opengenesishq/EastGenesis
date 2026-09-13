@@ -1,3 +1,4 @@
+import { normalizeProviderMediaPricing } from '../media/media-pricing'
 import type {
   ProviderAdvancedConfig,
   ProviderAuthorization,
@@ -28,6 +29,7 @@ const REQUEST_PROTECTED_BODY_FIELDS = new Set([
 export function normalizeProviderAuthorization(value: unknown): ProviderAuthorization | undefined {
   if (value === undefined || value === null) return undefined
   if (!isRecord(value)) throw new Error('Provider authorization must be an object')
+  if (value.provider !== undefined && value.provider !== 'xai-oauth') return undefined
   const method = oneOf(value.method, ['api-key', 'oauth', 'device-code', 'none'] as const, 'authorization method')
   const status = oneOf(value.status, ['unconfigured', 'authorized', 'expired', 'revoked', 'error'] as const, 'authorization status')
   const result: ProviderAuthorization = {
@@ -36,7 +38,7 @@ export function normalizeProviderAuthorization(value: unknown): ProviderAuthoriz
     status,
     provider: value.provider === undefined
       ? undefined
-      : oneOf(value.provider, ['codex-oauth', 'github-copilot', 'xai-oauth'] as const, 'authorization provider'),
+      : oneOf(value.provider, ['xai-oauth'] as const, 'authorization provider'),
     accountId: optionalId(value.accountId, 'authorization account id'),
     accountLabel: optionalText(value.accountLabel, 160, 'authorization account label'),
     expiresAt: optionalTimestamp(value.expiresAt, 'authorization expiry'),
@@ -57,12 +59,18 @@ export function normalizeProviderAdvancedConfig(value: unknown): ProviderAdvance
     const id = requiredId(item.id, `endpoint ${index + 1} id`)
     const url = normalizeEndpointUrl(item.url, `endpoint ${id} URL`)
     const protocol = item.protocol === undefined ? undefined : oneOf(item.protocol, ['responses', 'chat'] as const, `endpoint ${id} protocol`)
+    const region = optionalText(item.region, 128, `endpoint ${id} region`)
+    const domain = optionalText(item.domain, 253, `endpoint ${id} domain`)
+    const permissionTags = optionalArray(item.permissionTags, `endpoint ${id} permission tags`, 32)?.map((tag, tagIndex) => {
+      if (typeof tag !== 'string') throw new Error(`endpoint ${id} permission tag ${tagIndex + 1} must be text`)
+      return tag.trim().toLowerCase()
+    }).filter(Boolean)
     return stripUndefined({
       id,
       url,
       priority: optionalInteger(item.priority, `endpoint ${id} priority`),
       enabled: item.enabled === undefined ? true : booleanValue(item.enabled, `endpoint ${id} enabled`),
-      protocol
+      protocol, region, domain, permissionTags
     })
   })
   const modelProfiles = optionalArray(value.modelProfiles, 'modelProfiles', MAX_MODELS)?.map((item, index) => normalizeModelProfile(item, index))
@@ -490,14 +498,30 @@ function normalizeModelProfile(value: unknown, index: number): ProviderModelProf
   const aliases = optionalStringArray(value.aliases, `model profile ${model} aliases`, 16, 240)
   const capabilities = optionalStringArray(value.capabilities, `model profile ${model} capabilities`, 32, 80)
   const pricing = value.pricing === undefined ? undefined : normalizePricing(value.pricing, model)
+  const verification = normalizeModelVerification(value.verification, model)
   return stripUndefined({
     model,
     displayName: optionalText(value.displayName, 240, `model profile ${model} display name`),
     aliases,
     pricing,
+    mediaPricing: normalizeProviderMediaPricing(value.mediaPricing),
     contextWindow: optionalInteger(value.contextWindow, `model profile ${model} context window`, 1),
-    capabilities
+    capabilities,
+    verification
   })
+}
+
+function normalizeModelVerification(value: unknown, model: string): ProviderModelProfile['verification'] {
+  if (value === undefined) return undefined
+  if (!isRecord(value)) throw new Error(`Verification for model ${model} must be an object`)
+  const generation = oneOf(value.generation, ['passed', 'failed'] as const, `verification generation for ${model}`)
+  const outcome = oneOf(value.outcome, ['success', 'auth', 'rate_limit', 'server', 'network', 'not_found', 'invalid_request', 'invalid_response'] as const, `verification outcome for ${model}`)
+  const protocol = oneOf(value.protocol, ['openai-responses', 'openai-chat-completions', 'anthropic-messages', 'google-generative-language'] as const, `verification protocol for ${model}`)
+  const verifiedAt = optionalTimestamp(value.verifiedAt, `verification timestamp for ${model}`)
+  if (verifiedAt === undefined) throw new Error(`Verification timestamp for model ${model} is required`)
+  const responseValidation = value.responseValidation === undefined ? undefined
+    : oneOf(value.responseValidation, ['protocol-json-v1'] as const, `verification response validation for ${model}`)
+  return { generation, outcome, protocol, verifiedAt, ...(responseValidation ? { responseValidation } : {}) }
 }
 
 function normalizePricing(value: unknown, model: string): ProviderModelPricing {

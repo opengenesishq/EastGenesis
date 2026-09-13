@@ -69,21 +69,6 @@ export function addGeminiMcpAssets(
   addStructuredMcpAssets('Gemini CLI', scope, sourcePath, sourceRoot, cwd, home, assets, diagnostics, readMcpServerMap)
 }
 
-export function addClineMcpAssets(
-  scope: MigrationAssetScope,
-  sourcePath: string,
-  sourceRoot: string,
-  cwd: string | undefined,
-  home: string,
-  assets: InternalMigrationAsset[],
-  diagnostics: MigrationDiagnostic[]
-): void {
-  addStructuredMcpAssets('Cline', scope, sourcePath, sourceRoot, cwd, home, assets, diagnostics, (text) => {
-    const servers = readMcpServerMap(text)
-    return servers ? normalizeMcpServerMap(servers, 'cline') : undefined
-  })
-}
-
 export function addContinueYamlMcpAssets(
   scope: MigrationAssetScope,
   sourcePath: string,
@@ -134,32 +119,6 @@ export function addOpenCodeMcpAssets(
     if (!isObject(parsed.mcp)) throw new Error('migration_mcp_servers_invalid')
     return normalizeOpenCodeMcpServers(parsed.mcp)
   })
-}
-
-export function addJson5McpAssets(
-  agent: string,
-  scope: MigrationAssetScope,
-  sourcePath: string,
-  sourceRoot: string,
-  cwd: string | undefined,
-  home: string,
-  assets: InternalMigrationAsset[],
-  diagnostics: MigrationDiagnostic[]
-): void {
-  addStructuredMcpAssets(agent, scope, sourcePath, sourceRoot, cwd, home, assets, diagnostics, readNestedJson5Servers)
-}
-
-export function addYamlMcpAssets(
-  agent: string,
-  scope: MigrationAssetScope,
-  sourcePath: string,
-  sourceRoot: string,
-  cwd: string | undefined,
-  home: string,
-  assets: InternalMigrationAsset[],
-  diagnostics: MigrationDiagnostic[]
-): void {
-  addStructuredMcpAssets(agent, scope, sourcePath, sourceRoot, cwd, home, assets, diagnostics, readSnakeCaseYamlServers)
 }
 
 export function boundedMcpEntries(servers: JsonObject): Array<[string, unknown]> {
@@ -289,24 +248,6 @@ function readContinueYamlServers(text: string): JsonObject | undefined {
   return normalizeNamedMcpServers(parsed.mcpServers)
 }
 
-function readNestedJson5Servers(text: string): JsonObject | undefined {
-  const parsed = parseJson5(text) as unknown
-  if (!isObject(parsed)) throw new Error('migration_mcp_root_invalid')
-  if (parsed.mcp === undefined) return undefined
-  if (!isObject(parsed.mcp)) throw new Error('migration_mcp_root_invalid')
-  if (parsed.mcp.servers === undefined) return undefined
-  if (!isObject(parsed.mcp.servers)) throw new Error('migration_mcp_servers_invalid')
-  return parsed.mcp.servers
-}
-
-function readSnakeCaseYamlServers(text: string): JsonObject | undefined {
-  const parsed = parseYaml(text, { schema: JSON_SCHEMA, json: true }) as unknown
-  if (!isObject(parsed)) throw new Error('migration_mcp_root_invalid')
-  if (parsed.mcp_servers === undefined) return undefined
-  if (!isObject(parsed.mcp_servers)) throw new Error('migration_mcp_servers_invalid')
-  return parsed.mcp_servers
-}
-
 function normalizeNamedMcpServers(value: unknown): JsonObject {
   if (!Array.isArray(value)) throw new Error('migration_mcp_servers_invalid')
   if (value.length > MAX_MCP_SERVERS) throw new Error('migration_mcp_server_limit')
@@ -324,7 +265,7 @@ function normalizeNamedMcpServers(value: unknown): JsonObject {
   return result
 }
 
-function normalizeMcpServerMap(servers: JsonObject, dialect: 'cline' | 'continue'): JsonObject {
+function normalizeMcpServerMap(servers: JsonObject, dialect: 'continue'): JsonObject {
   const result = Object.create(null) as JsonObject
   for (const [name, value] of boundedMcpEntries(servers)) {
     result[name] = isObject(value) ? normalizeMcpServer(value, dialect) : value
@@ -332,9 +273,8 @@ function normalizeMcpServerMap(servers: JsonObject, dialect: 'cline' | 'continue
   return result
 }
 
-function normalizeMcpServer(server: JsonObject, dialect: 'cline' | 'continue'): JsonObject {
+function normalizeMcpServer(server: JsonObject, dialect: 'continue'): JsonObject {
   const normalized: JsonObject = { ...server }
-  if (dialect === 'cline' && server.type === 'streamableHttp') normalized.type = 'http'
   if (dialect === 'continue' && server.type === 'streamable-http') normalized.type = 'http'
   return normalized
 }

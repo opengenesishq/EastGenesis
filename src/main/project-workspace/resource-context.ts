@@ -20,13 +20,10 @@ const MAX_PROMPT_CHARS = 48_000
 const KNOWLEDGE_DIRECTORIES = ['docs', 'knowledge', 'notes', 'references', 'resources'] as const
 const ROOT_SOURCE_NAMES = [
   'AGENTS.md',
-  'CLAUDE.md',
   'caogen.md',
   '.caogen.md',
   'README.md',
-  'README.en.md',
-  'REQUIREMENTS.md',
-  'ROADMAP.md',
+  'README.zh.md',
   'STATUS.md'
 ] as const
 
@@ -422,6 +419,17 @@ export function projectResourceEgressPolicy(resource: ProjectResource): ProjectR
   if (projectResourceDataClass(resource) === 'S3') return 'deny'
   const value = resource.egressPolicy
   return value === 'local_only' || value === 'deny' ? value : 'allow'
+}
+
+/**
+ * Guard the connector read boundary before any credential lease, DNS lookup,
+ * or network request. Keep this check in the resource policy module so direct
+ * adapter calls and lifecycle orchestration use the same S3/deny rule.
+ */
+export function assertProjectConnectorReadEgressAllowed(resource: ProjectResource): void {
+  if (projectResourceEgressPolicy(resource) === 'deny') {
+    throw new Error('Project connector read is blocked by the resource egress policy.')
+  }
 }
 
 export function projectResourcePolicyDigest(workspace: ProjectWorkspace): string {

@@ -41,34 +41,29 @@ function verifyPrimaryMigration({ migration, tmpRoot, migrationHome, backupRoot,
 
   const rolledBack = migration.rollbackMigration(applied.backupId, backupRoot)
   assert(rolledBack.ok, `回滚失败:${rolledBack.errorCode}`)
-  assert(!fs.existsSync(path.join(project, 'CLAUDE.md')), '回滚未移除新建 CLAUDE.md')
-  assert(!fs.existsSync(path.join(project, '.mcp.json')), '回滚未移除新建 .mcp.json')
-  assert(!fs.existsSync(path.join(project, '.claude', 'skills', 'reviewer')), '回滚未移除新建 Skill')
+  assert(!fs.existsSync(path.join(project, 'caogen.md')), '回滚未移除新建 caogen.md')
+  assert(!fs.existsSync(path.join(project, '.caogen', 'mcp', 'mcp.json')), '回滚未移除新建 CaoGen MCP 配置')
+  assert(!fs.existsSync(path.join(project, '.caogen', 'skills', 'reviewer')), '回滚未移除新建 CaoGen Skill')
 }
 
 function verifyExtendedSources({ migration, tmpRoot, migrationHome, backupRoot, assert }) {
   const project = path.join(tmpRoot, 'migproj2')
   fs.mkdirSync(path.join(project, '.roo', 'rules'), { recursive: true })
   fs.mkdirSync(path.join(project, '.continue', 'rules'), { recursive: true })
-  fs.mkdirSync(path.join(project, '.cline'), { recursive: true })
   fs.writeFileSync(path.join(project, '.roorules'), 'roo 单文件规则')
   fs.writeFileSync(path.join(project, '.roo', 'rules', 'a.md'), 'roo 目录规则')
   fs.writeFileSync(path.join(project, '.continue', 'rules', 'c.md'), 'continue 规则')
   fs.writeFileSync(path.join(project, 'CONVENTIONS.md'), 'aider 约定')
-  fs.writeFileSync(path.join(project, '.cline', 'mcp.json'), JSON.stringify({ mcpServers: { db: { command: 'node' } } }))
 
   const scan = migration.scanMigration(project, migrationHome)
   const agents = new Set(scan.assets.map((asset) => asset.agent))
   assert(agents.has('Roo Code'), 'Roo Code 未扫描到')
   assert(agents.has('Continue'), 'Continue 未扫描到')
   assert(agents.has('Aider'), 'Aider CONVENTIONS.md 未扫描到')
-  assert(scan.assets.some((asset) => asset.agent === 'Cline' && asset.kind === 'mcp'), 'Cline MCP 未扫描到')
   const applied = migration.applyMigration(projectDecisions(scan), { backupRoot })
   assert(applied.ok, `扩展来源导入失败:${applied.errorCode}`)
-  const rules = fs.readFileSync(path.join(project, 'CLAUDE.md'), 'utf8')
+  const rules = fs.readFileSync(path.join(project, 'caogen.md'), 'utf8')
   assert(rules.includes('roo 单文件规则') && rules.includes('continue 规则') && rules.includes('aider 约定'), '新来源注入失败')
-  const mcp = JSON.parse(fs.readFileSync(path.join(project, '.mcp.json'), 'utf8'))
-  assert(mcp.mcpServers.db, 'Cline MCP 合并失败')
 }
 
 function verifySymlinkRejection({ migration, tmpRoot, migrationHome, assert }) {
@@ -93,7 +88,7 @@ function verifySourceChangeRejection({ migration, tmpRoot, migrationHome, backup
     decisions: [{ assetId: asset.id, action: 'import' }]
   }, { backupRoot })
   assert(!applied.ok && applied.errorCode === 'migration_source_changed', 'TOCTOU 未 fail-closed')
-  assert(!fs.existsSync(path.join(project, 'CLAUDE.md')), 'TOCTOU 失败后仍写入目标')
+  assert(!fs.existsSync(path.join(project, 'caogen.md')), 'TOCTOU 失败后仍写入目标')
 }
 
 function verifyTargetSymlinkRejection({ migration, tmpRoot, migrationHome, backupRoot, assert }) {
@@ -102,7 +97,7 @@ function verifyTargetSymlinkRejection({ migration, tmpRoot, migrationHome, backu
   fs.mkdirSync(path.join(project, '.codex', 'skills', 'fixture'), { recursive: true })
   fs.mkdirSync(outside, { recursive: true })
   fs.writeFileSync(path.join(project, '.codex', 'skills', 'fixture', 'SKILL.md'), '# Fixture')
-  fs.symlinkSync(outside, path.join(project, '.claude'))
+  fs.symlinkSync(outside, path.join(project, '.caogen'))
   const scan = migration.scanMigration(project, migrationHome)
   const asset = scan.assets.find((candidate) => candidate.kind === 'skill' && candidate.scope === 'project')
   assert(asset, '目标符号链接 fixture 未扫描到')
@@ -122,22 +117,22 @@ function verifyBatchRollback({ migration, tmpRoot, migrationHome, backupRoot, as
   const scan = migration.scanMigration(project, migrationHome)
   const applied = migration.applyMigration(projectDecisions(scan), { backupRoot, faultAfterWrites: 1 })
   assert(!applied.ok, '故障注入应失败')
-  assert(!fs.existsSync(path.join(project, 'CLAUDE.md')), '批量失败未恢复 CLAUDE.md')
-  assert(!fs.existsSync(path.join(project, '.mcp.json')), '批量失败未恢复 .mcp.json')
+  assert(!fs.existsSync(path.join(project, 'caogen.md')), '批量失败未恢复 caogen.md')
+  assert(!fs.existsSync(path.join(project, '.caogen', 'mcp', 'mcp.json')), '批量失败未恢复 CaoGen MCP 配置')
 }
 
 function verifyPrimaryTargets(project, assert) {
-  const rules = fs.readFileSync(path.join(project, 'CLAUDE.md'), 'utf8')
-  assert(rules.includes('use pnpm') && rules.includes('caogen:migration-begin'), 'CLAUDE.md 注入失败')
-  const mcp = JSON.parse(fs.readFileSync(path.join(project, '.mcp.json'), 'utf8'))
-  assert(mcp.mcpServers.figma, '.mcp.json 合并失败')
+  const rules = fs.readFileSync(path.join(project, 'caogen.md'), 'utf8')
+  assert(rules.includes('use pnpm') && rules.includes('caogen:migration-begin'), 'caogen.md 注入失败')
+  const mcp = JSON.parse(fs.readFileSync(path.join(project, '.caogen', 'mcp', 'mcp.json'), 'utf8'))
+  assert(mcp.mcpServers.figma, 'CaoGen MCP 配置合并失败')
   assert(!mcp.mcpServers.figma.env && !mcp.mcpServers.figma.headers, 'MCP 凭据字段被写入目标')
   assert(!JSON.stringify(mcp).includes(secretCanary()), 'MCP 参数泄漏凭据')
   assert(!JSON.stringify(mcp).includes(separatedCredentialCanary()), 'MCP 分离参数泄漏凭据')
   assert(!mcp.mcpServers.figma.args.includes('--access-token'), 'MCP 凭据参数名被保留')
   assert(!mcp.mcpServers.figma.args.includes('-H'), 'MCP Header 参数名被保留')
   assert(mcp.mcpServers.remote.url === 'https://mcp.invalid/path', 'MCP URL userinfo/query/fragment 未剥离')
-  assert(fs.existsSync(path.join(project, '.claude', 'skills', 'reviewer', 'SKILL.md')), 'Skill 未导入')
+  assert(fs.existsSync(path.join(project, '.caogen', 'skills', 'reviewer', 'SKILL.md')), 'Skill 未导入 CaoGen 目录')
 }
 
 function verifyConflicts(scan, assert) {

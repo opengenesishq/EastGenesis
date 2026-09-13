@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect } from 'react'
+import { deriveTaskProjection } from './experience/task-projection'
 import type { ExperienceMode } from '../store/experience-mode'
 import { useStore } from '../store'
 import Sidebar from './Sidebar'
@@ -6,7 +7,6 @@ import WelcomeView from './WelcomeView'
 import WorkbenchRoot from './workbench/WorkbenchRoot'
 import { ExperienceProjectionProvider } from './experience/ExperienceProjection'
 import { useFirstTaskOnboardingLifecycle } from './experience/first-task-onboarding'
-import { sessionExperienceMode } from '../store/session-experience'
 import StudioProjectionTabs, {
   STUDIO_PROJECTION_PANEL_IDS,
   STUDIO_PROJECTION_TAB_IDS,
@@ -14,6 +14,8 @@ import StudioProjectionTabs, {
 } from './experience/StudioProjectionTabs'
 import { loadStudioView } from './studio/loadStudioView'
 import { loadVideoStudioView } from './studio/loadVideoStudioView'
+import { resolveSelectedBusinessLine } from '../../../shared/business-line-types'
+import BusinessLineWorkbench from './business-lines/BusinessLineWorkbench'
 
 const StudioView = lazy(loadStudioView)
 const VideoStudioView = lazy(loadVideoStudioView)
@@ -120,43 +122,6 @@ function VideoSurface({ hidden }: { hidden: boolean }): React.JSX.Element {
   )
 }
 
-function deriveProjectionState({
-  activeSession,
-  hasActive,
-  newSessionProjectId,
-  showNewSession,
-  welcomeProjectChoice
-}: {
-  activeSession?: {
-    workspaceId?: string
-    projectId?: string
-    goalId?: string
-    workItemId?: string
-    experienceModeOverride?: 'assistant' | 'studio'
-  }
-  hasActive: boolean
-  newSessionProjectId: string | null
-  showNewSession: boolean
-  welcomeProjectChoice: string | null
-}): {
-  hasAssistantSession: boolean
-  hasProjectSession: boolean
-  hasProjectTask: boolean
-} {
-  const activeSessionIsStudio = Boolean(
-    hasActive && activeSession && sessionExperienceMode(activeSession) === 'studio'
-  )
-  const hasProjectTask = activeSessionIsStudio && !showNewSession
-  const hasPersistedProjectDraft = !hasActive && Boolean(
-    welcomeProjectChoice && welcomeProjectChoice !== '__unassigned__' && welcomeProjectChoice !== '__new_project__'
-  )
-  return {
-    hasProjectTask,
-    hasProjectSession: hasProjectTask || Boolean(showNewSession && newSessionProjectId) || hasPersistedProjectDraft,
-    hasAssistantSession: hasActive && !activeSessionIsStudio && !showNewSession
-  }
-}
-
 function useStudioSurface(
   workspaceNonce: number,
   sessionNonce: number,
@@ -194,7 +159,9 @@ export default function AppListView({
   const newSessionProjectId = useStore((state) => state.newSessionProjectId)
   const welcomeProjectChoice = useStore((state) => state.welcomeDraft.projectChoice)
   const activeSession = useStore((state) => activeId ? state.sessions[activeId]?.meta : undefined)
-  const projection = deriveProjectionState({
+  const settings = useStore((state) => state.settings)
+  const selectedLine = resolveSelectedBusinessLine(settings)
+  const projection = deriveTaskProjection({
     activeSession, hasActive, newSessionProjectId, showNewSession, welcomeProjectChoice
   })
   const [studioSurface, setStudioSurface] = useStudioSurface(
@@ -208,6 +175,10 @@ export default function AppListView({
   const workspaceHidden = experienceMode !== 'studio' || studioSurface !== 'workspace'
   const resultHidden = experienceMode !== 'studio' || studioSurface !== 'result'
   const videoHidden = experienceMode !== 'video'
+  if (selectedLine.origin === 'custom') return <>
+    <Sidebar experienceMode="assistant" language={language} onExperienceModeChange={onExperienceModeChange} />
+    <main className="main"><BusinessLineWorkbench key={selectedLine.id} line={selectedLine} /></main>
+  </>
   return (
     <>
       <Sidebar
@@ -217,14 +188,17 @@ export default function AppListView({
       />
       <ExperienceProjectionProvider mode={sessionProjection}>
         <main className="main">
-          <StudioProjectionTabs
-            hasResult={projection.hasProjectTask}
-            hasSession={projection.hasProjectSession}
-            hidden={experienceMode !== 'studio'}
-            language={language}
-            surface={studioSurface}
-            onChange={setStudioSurface}
-          />
+          {studioVisited && (
+            <StudioProjectionTabs
+              hasResult={projection.hasProjectTask}
+              hasSession={projection.hasProjectSession}
+              hidden={experienceMode !== 'studio'}
+              language={language}
+              surface={studioSurface}
+              onChange={setStudioSurface}
+            />
+          )}
+          <TaskWorkspaceNavigation mode={experienceMode} surface={studioSurface} language={language} onChange={setStudioSurface} />
           <div
             className="experience-pane"
             data-experience-mode={experienceMode}
@@ -251,4 +225,14 @@ export default function AppListView({
       </ExperienceProjectionProvider>
     </>
   )
+}
+
+function TaskWorkspaceNavigation({ mode, surface, language, onChange }: {
+  mode: ExperienceMode; surface: StudioProjectionSurface; language: 'zh' | 'en'; onChange(surface: StudioProjectionSurface): void
+}): React.JSX.Element | null {
+  if (mode !== 'studio' || surface === 'workspace') return null
+  return <div className="task-workspace-navigation">
+    <button type="button" className="btn btn-secondary btn-sm" onClick={() => onChange('workspace')}>{language === 'zh' ? '返回项目' : 'Back to projects'}</button>
+    {surface === 'result' && <button type="button" className="btn btn-secondary btn-sm" onClick={() => onChange('session')}>{language === 'zh' ? '继续任务' : 'Continue task'}</button>}
+  </div>
 }

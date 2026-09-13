@@ -131,10 +131,18 @@ export function buildProjectWorkspaceMigrationSourceFromState(
     bytes,
     sha256: sha256(bytes),
     state,
-    aggregate: validationMode === 'global'
-      ? validateGlobalState(state, workspaceId)
-      : validateWorkspaceState(state, workspaceId)
+    aggregate: buildProjectWorkspaceAggregateFromState(state, workspaceId, validationMode)
   }
+}
+
+export function buildProjectWorkspaceAggregateFromState(
+  state: ProjectWorkspaceState,
+  workspaceId: string,
+  validationMode: ProjectWorkspaceSourceValidationMode = 'global'
+): WorkspaceAggregate {
+  return validationMode === 'global'
+    ? validateGlobalState(state, workspaceId)
+    : validateWorkspaceState(state, workspaceId)
 }
 
 export function buildProjectWorkspaceProjection(aggregate: WorkspaceAggregate): ProjectionBundle {
@@ -174,6 +182,7 @@ export function buildProjectWorkspaceProjection(aggregate: WorkspaceAggregate): 
       projectId: source.projectId,
       goalId: source.goalId,
       parentId: source.parentId,
+      businessLineId: source.businessLineId,
       type: source.type,
       title: source.title,
       description: source.description,
@@ -345,13 +354,15 @@ function projectEntities<T extends { id: string; projectId: string }>(
   label: string
 ): T[] {
   const selected = items.filter((item) => item?.projectId === workspaceId)
-  const ids = new Set<string>()
-  for (const item of selected) {
+  const idCounts = new Map<string, number>()
+  for (const item of items) {
     if (!isId(item?.id)) throw migrationError('SOURCE_INVALID', `${label} id is invalid`)
-    if (ids.has(item.id) || items.filter((candidate) => candidate?.id === item.id).length > 1) {
+    idCounts.set(item.id, (idCounts.get(item.id) ?? 0) + 1)
+  }
+  for (const item of selected) {
+    if ((idCounts.get(item.id) ?? 0) > 1) {
       throw migrationError('DUPLICATE_ID', `duplicate ${label} id ${item.id}`)
     }
-    ids.add(item.id)
   }
   return selected
 }

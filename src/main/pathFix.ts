@@ -7,7 +7,7 @@ import { join, delimiter } from 'node:path'
  *
  * 根因:macOS(及部分 Linux 桌面)从 Finder/Dock 启动的 GUI 应用 **不继承**
  * 登录 shell 的 PATH,只拿到极简的 `/usr/bin:/bin:/usr/sbin:/sbin`。而用户装的
- * CLI(codex/gemini,以及 nvm/homebrew/npm-global 的 node 工具)多在
+ * CLI（以及 nvm/homebrew/npm-global 的 node 工具）多在
  * `~/.local/bin`、`/usr/local/bin`、`/opt/homebrew/bin`、`~/.npm-global/bin` 等。
  * 结果:终端启动能探测到 CLI,Dock 启动却报"未安装"——典型只在真实用户环境复现的坑。
  *

@@ -8,14 +8,12 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
-  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
-  unlinkSync,
   writeFileSync
 } from 'node:fs'
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { ProjectAggregateObjectCounts } from '../../shared/project-aggregate-types'
 import type { ProjectResource, ProjectResourceKind } from '../../shared/project-workspace-types'
 import type {
@@ -86,22 +84,6 @@ export interface ProjectDeletionProofReceipt {
   createdAt: number
 }
 
-interface ProjectDeletionProofWriteInput {
-  operationId: string
-  projectId: string
-  expectedWorkspaceRevision: number
-  backupPath: string
-  backupDigest: string
-  exportDigest: string
-  sessionIds: readonly string[]
-  sdkSessionIds: readonly string[]
-  artifactBlobDigests: readonly string[]
-  effectArtifactRefs: readonly string[]
-  authorizedPurge: WorkflowLedgerAuthorizedPurgeRecord
-  residuals: Readonly<Record<string, number>>
-  externalResourcesBefore: readonly ProjectDeletionExternalResourceBoundary[]
-}
-
 export class ProjectDeletionProofStore {
   readonly rootDir: string
   private readonly userDataRoot: string
@@ -111,16 +93,25 @@ export class ProjectDeletionProofStore {
     this.rootDir = join(this.userDataRoot, 'private', 'project-deletion-proofs')
   }
 
-  write(input: ProjectDeletionProofWriteInput): ProjectDeletionProofReceipt {
+  write(input: {
+    operationId: string
+    projectId: string
+    expectedWorkspaceRevision: number
+    backupPath: string
+    backupDigest: string
+    exportDigest: string
+    sessionIds: readonly string[]
+    sdkSessionIds: readonly string[]
+    artifactBlobDigests: readonly string[]
+    effectArtifactRefs: readonly string[]
+    authorizedPurge: WorkflowLedgerAuthorizedPurgeRecord
+    residuals: Readonly<Record<string, number>>
+    externalResourcesBefore: readonly ProjectDeletionExternalResourceBoundary[]
+  }): ProjectDeletionProofReceipt {
     const operationId = requiredId(input.operationId, 'operationId')
     const projectId = requiredId(input.projectId, 'projectId')
     const file = this.pathFor(operationId, projectId)
-    assertAuthorizedPurgeInput(input.authorizedPurge, operationId, projectId)
-    if (existsSync(file)) {
-      const existing = this.read(file, operationId, projectId)
-      assertExistingProofMatchesInput(existing, input)
-      return { path: resolve(file), proofDigest: existing.proofDigest, createdAt: existing.createdAt }
-    }
+    if (existsSync(file)) return this.verify(file, operationId, projectId)
     const backup = new ProjectDeletionBackupStore(this.userDataRoot)
       .read(input.backupPath, operationId, projectId)
     if (backup.backupDigest !== input.backupDigest || backup.aggregateExport.exportDigest !== input.exportDigest) {
@@ -248,15 +239,6 @@ function assertProof(value: unknown, operationId: string, projectId: string): as
   }
   const { proofDigest, ...body } = proof as ProjectDeletionProof
   if (projectAggregateDigest(body) !== proofDigest) throw new Error('project deletion proof digest mismatch')
-  assertAuthorizedPurgeInput({
-    schemaVersion: 1,
-    seq: proof.authorizedPurge.seq,
-    operationId: proof.operationId,
-    projectId: proof.projectId,
-    removed: proof.authorizedPurge.removed,
-    prevDigest: '0'.repeat(64),
-    digest: proof.authorizedPurge.recordDigest
-  }, proof.operationId, proof.projectId)
   assertZeroResiduals(normalizedResiduals(proof.residuals ?? {}))
   normalizedIds(proof.scope.sessionIds ?? [], 'sessionId')
   normalizedIds(proof.scope.sdkSessionIds ?? [], 'sdkSessionId')
@@ -341,52 +323,6 @@ function normalizedEffectArtifactRefs(values: readonly string[]): string[] {
   return [...new Set(values)].sort()
 }
 
-function assertAuthorizedPurgeInput(
-  value: WorkflowLedgerAuthorizedPurgeRecord,
-  operationId: string,
-  projectId: string
-): void {
-  if (!value || value.operationId !== operationId || value.projectId !== projectId ||
-      !Number.isSafeInteger(value.seq) || value.seq < 1 || !isDigest(value.digest) ||
-      !value.removed || typeof value.removed !== 'object' || Array.isArray(value.removed)) {
-    throw new Error('project deletion proof authorized purge is invalid')
-  }
-  const counts = value.removed as unknown as Record<string, unknown>
-  for (const key of ['taskRuns', 'workflowRuns', 'workflowEvents', 'taskEvidence']) {
-    if (!Number.isSafeInteger(counts[key]) || Number(counts[key]) < 0) {
-      throw new Error('project deletion proof authorized purge counts are invalid')
-    }
-  }
-}
-
-function assertExistingProofMatchesInput(
-  proof: ProjectDeletionProof,
-  input: ProjectDeletionProofWriteInput
-): void {
-  if (proof.backup.path !== resolve(input.backupPath) ||
-      proof.backup.backupDigest !== input.backupDigest ||
-      proof.backup.exportDigest !== input.exportDigest ||
-      proof.expectedWorkspaceRevision !== input.expectedWorkspaceRevision ||
-      projectAggregateCanonicalJson(proof.scope.sessionIds) !==
-        projectAggregateCanonicalJson(normalizedIds(input.sessionIds, 'sessionId')) ||
-      projectAggregateCanonicalJson(proof.scope.sdkSessionIds) !==
-        projectAggregateCanonicalJson(normalizedIds(input.sdkSessionIds, 'sdkSessionId')) ||
-      projectAggregateCanonicalJson(proof.scope.artifactBlobDigests) !==
-        projectAggregateCanonicalJson(normalizedDigests(input.artifactBlobDigests)) ||
-      projectAggregateCanonicalJson(proof.scope.effectArtifactRefs ?? []) !==
-        projectAggregateCanonicalJson(normalizedEffectArtifactRefs(input.effectArtifactRefs)) ||
-      proof.authorizedPurge.seq !== input.authorizedPurge.seq ||
-      proof.authorizedPurge.recordDigest !== input.authorizedPurge.digest ||
-      projectAggregateCanonicalJson(proof.authorizedPurge.removed) !==
-        projectAggregateCanonicalJson(input.authorizedPurge.removed) ||
-      projectAggregateCanonicalJson(proof.residuals) !==
-        projectAggregateCanonicalJson(normalizedResiduals(input.residuals)) ||
-      projectAggregateCanonicalJson(proof.externalResources.before) !==
-        projectAggregateCanonicalJson(normalizedExternalBoundaries(input.externalResourcesBefore))) {
-    throw new Error('project deletion proof identity conflicts with its frozen deletion facts')
-  }
-}
-
 function isExternalState(value: unknown): value is ProjectDeletionExternalResourceState {
   return value === 'not_local' || value === 'missing' || value === 'file' || value === 'directory' ||
     value === 'symlink' || value === 'other'
@@ -415,7 +351,6 @@ function atomicPrivateWrite(file: string, content: string): void {
   const directory = dirname(file)
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   if (process.platform !== 'win32') chmodSync(directory, 0o700)
-  cleanupProofTemps(file)
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`
   let descriptor: number | undefined
   try {
@@ -435,47 +370,7 @@ function atomicPrivateWrite(file: string, content: string): void {
 }
 
 function syncDirectory(directory: string): void {
-  let descriptor: number | undefined
-  try {
-    descriptor = openSync(directory, 'r')
-    fsyncSync(descriptor)
-  } catch (error) {
-    if (process.platform !== 'win32' || !isWindowsDirectoryFsyncUnsupported(error)) throw error
-  } finally {
-    if (descriptor !== undefined) closeSync(descriptor)
-  }
-}
-
-function cleanupProofTemps(file: string): void {
-  const directory = dirname(file)
-  const base = basename(file)
-  const prefix = `${base}.`
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.startsWith(prefix) || !entry.name.endsWith('.tmp')) continue
-    const match = new RegExp(`^${escapeRegExp(base)}\\.(\\d+)\\.[0-9a-f-]+\\.tmp$`).exec(entry.name)
-    const pid = match ? Number.parseInt(match[1], 10) : undefined
-    if (pid === undefined || processIsAlive(pid)) continue
-    try { unlinkSync(join(directory, entry.name)) } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
-  }
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')
-}
-
-function processIsAlive(pid: number): boolean {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
-  }
-}
-
-function isWindowsDirectoryFsyncUnsupported(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException)?.code
-  return code === 'EPERM' || code === 'EACCES' || code === 'EINVAL' || code === 'ENOTSUP'
+  if (process.platform === 'win32') return
+  const descriptor = openSync(directory, 'r')
+  try { fsyncSync(descriptor) } finally { closeSync(descriptor) }
 }

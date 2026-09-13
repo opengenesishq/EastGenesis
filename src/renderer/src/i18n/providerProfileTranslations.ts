@@ -222,6 +222,7 @@ export const PROVIDER_PROFILE_TRANSLATIONS = {
   providerNativeCodexScan: { zh: '\u626b\u63cf Codex \u914d\u7f6e', en: 'Scan Codex config' },
   providerNativeCodexPreviewTitle: { zh: 'Codex \u539f\u751f\u914d\u7f6e\u5bfc\u5165', en: 'Import native Codex configuration' },
   providerNativeCodexUserProfile: { zh: '\u7528\u6237\u914d\u7f6e\u76ee\u5f55', en: 'User profile' },
+  providerNativeEnvironmentOverride: { zh: '\u73af\u5883\u8986\u76d6\u76ee\u5f55', en: 'Environment override' },
   providerNativeCodexSource: {
     zh: '\u6765\u6e90\uff1a{source} \u00b7 \u914d\u7f6e\uff1a{config} \u00b7 \u6388\u6743\uff1a{auth}',
     en: 'Source: {source} \u00b7 Config: {config} \u00b7 Auth: {auth}'
@@ -246,7 +247,6 @@ export const PROVIDER_PROFILE_TRANSLATIONS = {
   providerNativeCodexRollbackConfirm: { zh: '\u56de\u6eda {name} \u7684 Codex \u5bfc\u5165\uff1f', en: 'Roll back the Codex import for {name}?' },
   providerNativeCodexRolledBack: { zh: '\u5df2\u56de\u6eda {name} \u7684 Codex \u5bfc\u5165\u3002', en: 'Rolled back the Codex import for {name}.' },
   'providerNativeCredential_api-key': { zh: 'API Key', en: 'API key' },
-  providerNativeCredential_oauth: { zh: 'OAuth \u767b\u5f55', en: 'OAuth login' },
   providerNativeCredential_environment: { zh: '\u73af\u5883\u53d8\u91cf', en: 'Environment variable' },
   providerNativeCredential_none: { zh: '\u672a\u53d1\u73b0', en: 'Not found' },
   providerNativeCredentialImportable: { zh: '\u53ef\u5b89\u5168\u5bfc\u5165', en: 'available for secure import' },
@@ -256,13 +256,9 @@ export const PROVIDER_PROFILE_TRANSLATIONS = {
   providerNativeField_protocol: { zh: '\u534f\u8bae', en: 'Protocol' },
   providerNativeField_runtime: { zh: '\u8fd0\u884c\u53c2\u6570', en: 'Runtime options' },
   providerNativeField_credential: { zh: '\u51ed\u636e', en: 'Credential' },
-  providerNativeWarning_oauth_reconnect: {
-    zh: '\u5df2\u68c0\u6d4b\u5230 ChatGPT OAuth \u767b\u5f55\uff1b\u4e0d\u4f1a\u590d\u5236\u767b\u5f55\u6750\u6599\uff0c\u8bf7\u5728 CaoGen \u4e2d\u91cd\u65b0\u6388\u6743\u3002',
-    en: 'ChatGPT OAuth login was detected. Login material will not be copied; reconnect through CaoGen authorization.'
-  },
   providerNativeWarning_credential_missing: {
-    zh: '\u672a\u53d1\u73b0\u53ef\u5bfc\u5165\u7684 Codex \u51ed\u636e\uff1b\u5bfc\u5165\u540e\u9700\u8981\u5355\u72ec\u6388\u6743\u3002',
-    en: 'No importable Codex credential was found. Authorize the Provider after import.'
+    zh: '\u672a\u53d1\u73b0\u53ef\u5bfc\u5165\u7684 API Key\uff1b\u5bfc\u5165\u540e\u9700\u8981\u5355\u72ec\u914d\u7f6e\u5bc6\u94a5\u3002',
+    en: 'No importable API key was found. Configure a key separately after import.'
   },
   providerNativeWarning_ignored_sections: {
     zh: '\u5df2\u5217\u51fa\u975e Provider \u7684 Codex \u914d\u7f6e\uff0cCaoGen \u4e0d\u4f1a\u81ea\u52a8\u5e94\u7528\u5b83\u4eec\u3002',
@@ -271,42 +267,5 @@ export const PROVIDER_PROFILE_TRANSLATIONS = {
   providerNativeWarning_existing_credential_preserved: {
     zh: '\u5c06\u4fdd\u7559 CaoGen \u4e2d\u7684\u73b0\u6709\u51ed\u636e\uff0c\u4e0d\u4f1a\u7528 Codex \u51ed\u636e\u8986\u76d6\u3002',
     en: 'Existing CaoGen credentials will be preserved and will not be replaced by the Codex credential.'
-  },
-  codexNativeConfigTitle: { zh: 'Codex \u539f\u751f\u914d\u7f6e', en: 'Native Codex configuration' },
-  codexNativeConfigFile: { zh: 'config.toml \u5b8c\u6574\u7f16\u8f91', en: 'Full config.toml editor' },
-  codexNativeConfigAuthManaged: { zh: '\u7531\u6388\u6743\u9762\u677f\u7ba1\u7406', en: 'managed in Authorization' },
-  codexNativeConfigOpen: { zh: '\u6253\u5f00\u914d\u7f6e\u5de5\u4f5c\u53f0', en: 'Open configuration workspace' },
-  codexNativeConfigOpening: { zh: '\u6b63\u5728\u8bfb\u53d6...', en: 'Opening...' },
-  codexNativeConfigSource: { zh: '\u6765\u6e90', en: 'Source' },
-  codexNativeConfigProviders: { zh: 'Provider', en: 'Providers' },
-  codexNativeConfigProjects: { zh: '\u9879\u76ee', en: 'Projects' },
-  codexNativeConfigFeatures: { zh: '\u529f\u80fd\u5f00\u5173', en: 'Features' },
-  codexNativeConfigPlugins: { zh: '\u63d2\u4ef6', en: 'Plugins' },
-  codexNativeConfigFind: { zh: '\u67e5\u627e\u914d\u7f6e', en: 'Find in configuration' },
-  codexNativeConfigFindPlaceholder: { zh: '\u67e5\u627e...', en: 'Find...' },
-  codexNativeConfigPreviousMatch: { zh: '\u4e0a\u4e00\u4e2a\u5339\u914d', en: 'Previous match' },
-  codexNativeConfigNextMatch: { zh: '\u4e0b\u4e00\u4e2a\u5339\u914d', en: 'Next match' },
-  codexNativeConfigMatchCount: { zh: '{current}/{total}', en: '{current}/{total}' },
-  codexNativeConfigNoMatches: { zh: '\u65e0\u5339\u914d', en: 'No matches' },
-  codexNativeConfigLineStatus: { zh: '{lines} \u884c', en: '{lines} lines' },
-  codexNativeConfigProtected: {
-    zh: '\u5df2\u9501\u5b9a {n} \u4e2a\u654f\u611f\u503c\uff1b\u5360\u4f4d\u7b26\u4e0d\u53ef\u5220\u9664\u3001\u79fb\u52a8\u6216\u6539\u5199\u3002',
-    en: '{n} sensitive values are locked. Their placeholders cannot be deleted, moved, or changed.'
-  },
-  codexNativeConfigNormalized: {
-    zh: '\u4fdd\u5b58\u65f6 TOML \u683c\u5f0f\u4f1a\u89c4\u8303\u5316\u3002',
-    en: 'TOML formatting will be normalized when saved.'
-  },
-  codexNativeConfigUnsaved: { zh: '\u6709\u672a\u4fdd\u5b58\u4fee\u6539', en: 'Unsaved changes' },
-  codexNativeConfigCurrent: { zh: '\u5df2\u4e0e\u78c1\u76d8\u540c\u6b65', en: 'Synced with disk' },
-  codexNativeConfigReload: { zh: '\u91cd\u65b0\u8bfb\u53d6', en: 'Reload' },
-  codexNativeConfigSaving: { zh: '\u6b63\u5728\u4fdd\u5b58...', en: 'Saving...' },
-  codexNativeConfigSaved: { zh: 'Codex \u914d\u7f6e\u5df2\u4fdd\u5b58\u3002', en: 'Codex configuration saved.' },
-  codexNativeConfigBackups: { zh: '\u6700\u8fd1\u914d\u7f6e\u5907\u4efd', en: 'Recent configuration backups' },
-  codexNativeConfigRollbackConfirm: {
-    zh: '\u56de\u6eda\u5230 {time} \u7684 Codex \u914d\u7f6e\uff1f\u5982\u679c\u6587\u4ef6\u5df2\u5728\u5916\u90e8\u4fee\u6539\uff0c\u64cd\u4f5c\u4f1a\u88ab\u62d2\u7edd\u3002',
-    en: 'Roll back to the Codex configuration from {time}? The operation is refused if the file changed externally.'
-  },
-  codexNativeConfigRolledBack: { zh: 'Codex \u914d\u7f6e\u5df2\u56de\u6eda\u3002', en: 'Codex configuration rolled back.' },
-  codexNativeConfigDiscardConfirm: { zh: '\u653e\u5f03\u672a\u4fdd\u5b58\u7684 Codex \u914d\u7f6e\u4fee\u6539\uff1f', en: 'Discard unsaved Codex configuration changes?' }
+  }
 }

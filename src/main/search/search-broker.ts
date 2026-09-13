@@ -1,711 +1,345 @@
 import { createHash } from 'node:crypto'
-import { isIP } from 'node:net'
-import { lookup } from 'node:dns/promises'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { writeDurableFileSync } from '../durable-file'
+import type {
+  AssistantSearchAdapterKind,
+  AssistantSearchAttempt,
+  AssistantSearchAttemptStatus,
+  AssistantSearchCitation,
+  AssistantSearchFailureCode,
+  AssistantSearchRequest
+} from '../../shared/assistant-search-types'
 
-/** The two search implementations that are part of the 1.0 contract. */
-export type SearchBrokerMode = 'model_native' | 'byok_search_adapter'
+export type SearchAdapterKind = AssistantSearchAdapterKind
+export type SearchAttemptStatus = AssistantSearchAttemptStatus
+export type SearchFailureCode = AssistantSearchFailureCode
+export type SearchRequest = AssistantSearchRequest
+export type SearchCitation = AssistantSearchCitation
 
-/** A failed search is never represented as a successful, source-backed answer. */
-export type SearchBrokerFailureState =
-  | 'no_results'
-  | 'timeout'
-  | 'no_credentials'
-  | 'egress_denied'
-  | 'provider_failure'
-  | 'unknown_result'
-
-export interface SearchBrokerRequest {
-  query: string
-  mode: SearchBrokerMode
-  /** An explicit operation identity enables replay after a process restart. */
-  operationId?: string
-  /** Alias accepted by callers that use request rather than operation terminology. */
-  requestId?: string
-  /** Assistant first-task calls may omit both fields. */
-  projectId?: string
-  goalId?: string
-  workItemId?: string
-  runId?: string
-  artifactId?: string
-  limit?: number
-  signal?: AbortSignal
+export interface SearchAdapterResult {
+  citations: Array<Omit<SearchCitation, 'evidenceId' | 'artifactId'>>
+  routeReason?: string
 }
 
-export interface SearchProviderRequest {
-  query: string
-  mode: SearchBrokerMode
-  operationId: string
-  projectId?: string
-  goalId?: string
-  workItemId?: string
-  runId?: string
-  limit: number
-  signal?: AbortSignal
+export interface SearchAdapter {
+  id: string
+  kind: SearchAdapterKind
+  available(request: SearchRequest): { ok: true } | { ok: false; reason: SearchFailureCode | string }
+  search(request: SearchRequest): Promise<SearchAdapterResult>
 }
 
-/**
- * The Broker never treats a URL or summary returned by a model as evidence by
- * itself. Each candidate is fetched again through the Broker's bounded URL
- * policy before it becomes a citation.
- */
-export interface SearchProviderCandidate {
-  url: string
-  title?: string
-  /** Provider snippets are advisory only and are not used as citation content. */
-  summary?: string
-}
+export type SearchAttempt = AssistantSearchAttempt
 
-export interface SearchProviderResponse {
-  status?: 'success' | SearchBrokerFailureState
-  results?: readonly SearchProviderCandidate[]
-  message?: string
-}
-
-export interface SearchProviderAdapter {
-  /** A missing or unavailable BYOK adapter yields `no_credentials`. */
-  available?: boolean | (() => boolean | Promise<boolean>)
-  search(input: SearchProviderRequest): Promise<SearchProviderResponse>
-}
-
-export interface SearchBrokerCitation {
-  url: string
-  fetchedAt: number
-  summary: string
-  /** Bare lowercase SHA-256 of the bytes fetched from `url`. */
-  contentSha256: string
-  /** Stable human-readable citation derived from the fetched URL and digest. */
-  citation: string
-  /** Null is explicit for the Assistant first-task/no-Project path. */
-  projectId: string | null
-  goalId: string | null
-  workItemId: string | null
-  runId: string | null
-  evidenceId: string
-}
-
-export interface SearchBrokerEvidenceRecord {
-  evidenceId: string
-  projectId?: string
-  goalId?: string
-  workItemId?: string
-  runId?: string
-  artifactId?: string
-  kind: 'research_source'
-  title: string
-  summary: string
-  uri: string
-  mediaType: string
-  verifier: 'caogen-search-broker'
-  observedAt: number
-  contentDigest: string
-  metadata: {
-    mode: SearchBrokerMode
-    fetchedAt: number
-    contentSha256: string
-    citation: string
-  }
-}
-
-export interface SearchBrokerIdempotencyStore {
-  get(operationId: string): Promise<SearchBrokerResult | undefined> | SearchBrokerResult | undefined
-  put(operationId: string, result: SearchBrokerResult): Promise<void> | void
-}
+export type SearchAdapterFactory = (
+  request: SearchRequest
+) => SearchAdapter | SearchAdapter[] | undefined | Promise<SearchAdapter | SearchAdapter[] | undefined>
 
 export interface SearchBrokerOptions {
-  modelNative?: SearchProviderAdapter
-  byokSearchAdapter?: SearchProviderAdapter
-  fetchImpl?: typeof fetch
-  /** Injected wall clock for deterministic tests and replay audits. */
+  rootDir: string
+  adapters: SearchAdapter[]
+  /** Maximum time an adapter may run before the attempt is failed closed. */
+  adapterTimeoutMs?: number
+  /** Optional main-owned factory for resolving configured native/BYOK adapters per request. */
+  adapterFactory?: SearchAdapterFactory
+  /** Main-owned canonical scope check; renderer claims are never trusted. */
+  validateScope?: (request: SearchRequest) => Promise<void> | void
   now?: () => number
-  clock?: { now(): number }
-  /** Injected stable IDs; default IDs are content-addressed and replay-safe. */
-  idFactory?: (kind: 'operation' | 'evidence', input: string) => string
-  /** Tests and local policy callers may supply a DNS/public-address checker. */
-  publicEndpointChecker?: (url: URL) => Promise<void> | void
+  /** Main-process Evidence sink. It may reject a citation; the attempt then fails closed. */
+  recordEvidence?: (input: {
+    evidenceId: string
+    projectId?: string
+    goalId?: string
+    workItemId?: string
+    runId?: string
+    artifactId?: string
+    url: string
+    fetchedAt: number
+    summary: string
+    contentDigest: string
+    queryDigest: string
+  }) => Promise<void>
   /**
-   * Optional canonical Evidence batch writer. It runs only after every source
-   * candidate has been fetched and verified, so callers can commit the batch
-   * transactionally without exposing Evidence for a failed search.
+   * Main-process batch Evidence sink. Search results are verified in memory
+   * first and handed to this sink as one batch so a multi-citation result
+   * cannot leave a partially published Evidence set behind. When omitted the
+   * broker falls back to the legacy per-citation sink above.
    */
-  evidenceWriter?: (records: readonly SearchBrokerEvidenceRecord[]) => Promise<void> | void
-  /** An injected store is the only persistence mechanism used by this module. */
-  idempotencyStore?: SearchBrokerIdempotencyStore
-  timeoutMs?: number
-  maxResponseBytes?: number
+  recordEvidenceBatch?: (inputs: readonly SearchEvidenceInput[]) => Promise<void>
 }
 
-export interface SearchBrokerSuccess {
-  ok: true
-  status: 'success'
-  mode: SearchBrokerMode
-  operationId: string
-  projectId: string | null
-  goalId: string | null
-  workItemId: string | null
-  runId: string | null
+export interface SearchEvidenceInput {
+  evidenceId: string
+  projectId?: string
+  goalId?: string
+  workItemId?: string
+  runId?: string
   artifactId?: string
-  /** Every item has the complete SEARCH-001 evidence field set. */
-  results: readonly SearchBrokerCitation[]
-  citations: readonly SearchBrokerCitation[]
-  /** Convenience aliases for the first result used by simple Assistant views. */
   url: string
   fetchedAt: number
   summary: string
-  contentSha256: string
-  citation: string
-  evidenceId: string
-  idempotentReplay: boolean
+  contentDigest: string
+  queryDigest: string
 }
-
-export interface SearchBrokerFailure {
-  ok: false
-  status: SearchBrokerFailureState
-  mode: SearchBrokerMode
-  operationId: string
-  projectId: string | null
-  goalId: string | null
-  workItemId: string | null
-  runId: string | null
-  artifactId?: string
-  results: readonly []
-  citations: readonly []
-  message: string
-  idempotentReplay: boolean
-}
-
-export type SearchBrokerResult = SearchBrokerSuccess | SearchBrokerFailure
-
-interface FetchMaterial {
-  bytes: Uint8Array
-  text: string
-}
-
-interface SearchBrokerDependencies {
-  fetchImpl: typeof fetch
-  now: () => number
-  idFactory: (kind: 'operation' | 'evidence', input: string) => string
-  publicEndpointChecker: (url: URL) => Promise<void>
-  timeoutMs: number
-  maxResponseBytes: number
-}
-
-const DEFAULT_TIMEOUT_MS = 15_000
-const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024
-const DEFAULT_LIMIT = 5
-const MAX_LIMIT = 20
-const MAX_QUERY_CHARS = 512
-const MAX_SUMMARY_CHARS = 320
 
 /**
- * CaoGen-owned, provider-neutral web-search boundary. It deliberately does
- * not import Project/session stores: callers bind the returned evidence to
- * their canonical ledger through `evidenceWriter` when that context exists.
+ * Main-process sink for the canonical Evidence ledger. Projectless Assistant
+ * searches are attributed to the hidden managed personal Workspace, so the
+ * user can start searching before creating a visible Project.
+ */
+export function createSearchEvidenceSink(rootDir: string): NonNullable<SearchBrokerOptions['recordEvidence']> {
+  const batchSink = createSearchEvidenceBatchSink(rootDir)
+  return async (input) => batchSink([input])
+}
+
+/**
+ * Default main-process sink for Search Broker results. All citations for one
+ * adapter response are appended inside the shared Workflow Ledger mutation
+ * transaction, so a failed citation cannot leave a partially committed set.
+ */
+export function createSearchEvidenceBatchSink(rootDir: string): NonNullable<SearchBrokerOptions['recordEvidenceBatch']> {
+  return async (inputs) => {
+    if (inputs.length === 0) return
+    const [{ recordWorkflowEvidence }, { mutateTaskSnapshotDatabase }, { ensureManagedPersonalWorkspace, MANAGED_PERSONAL_WORKSPACE_ID }] = await Promise.all([
+      import('../task/workflow-ledger-api.js'),
+      import('../task/task-snapshot.js'),
+      import('../project-workspace/managed-personal-workspace.js')
+    ])
+    await ensureManagedPersonalWorkspace(rootDir)
+    await mutateTaskSnapshotDatabase(rootDir, (db) => {
+      for (const input of inputs) {
+        const projectId = input.projectId ?? MANAGED_PERSONAL_WORKSPACE_ID
+        recordWorkflowEvidence(db, {
+          evidenceId: input.evidenceId,
+          projectId,
+          ...(input.goalId ? { goalId: input.goalId } : {}),
+          ...(input.workItemId ? { workItemId: input.workItemId } : {}),
+          ...(input.runId ? { runId: input.runId } : {}),
+          ...(input.artifactId ? { artifactId: input.artifactId } : {}),
+          kind: 'research_source',
+          title: `Search source: ${input.url}`,
+          summary: input.summary,
+          uri: input.url,
+          mediaType: 'text/plain',
+          // Workflow Ledger stores the canonical digest as bare lowercase
+          // SHA-256; SearchCitation keeps the public `sha256:` label.
+          contentDigest: input.contentDigest.slice(7),
+          metadata: {
+            queryDigest: input.queryDigest,
+            fetchedAt: input.fetchedAt,
+            broker: FORMAT
+          }
+        }, { source: 'runtime', verifier: 'search-broker', observedAt: input.fetchedAt })
+      }
+    })
+  }
+}
+
+const FORMAT = 'caogen.search-broker.v1'
+const MAX_QUERY_CHARS = 512
+const MAX_SUMMARY_CHARS = 1_024
+
+/**
+ * CaoGen-owned search contract. Adapters only provide bounded citations; routing,
+ * idempotency, durable attempt state and Evidence identity remain in CaoGen.
  */
 export class SearchBroker {
-  private readonly options: SearchBrokerOptions
-  private readonly dependencies: SearchBrokerDependencies
-  private readonly ephemeralStore = new Map<string, SearchBrokerResult>()
-  /**
-   * Collapse concurrent retries for one operation identity. A durable store
-   * protects the result after a restart, but without this in-flight guard two
-   * callers in the same process could still fetch and publish the same source
-   * twice before either one reached the store.
-   */
-  private readonly inFlight = new Map<string, Promise<SearchBrokerResult>>()
+  private readonly attemptsPath: string
+  private readonly now: () => number
+  private readonly adapters: SearchAdapter[]
+  private readonly adapterTimeoutMs: number
+  private readonly adapterFactory?: SearchAdapterFactory
+  private readonly recordEvidence?: SearchBrokerOptions['recordEvidence']
+  private readonly recordEvidenceBatch?: SearchBrokerOptions['recordEvidenceBatch']
+  private readonly validateScope?: SearchBrokerOptions['validateScope']
+  private readonly inFlight = new Map<string, Promise<SearchAttempt>>()
 
-  constructor(options: SearchBrokerOptions = {}) {
-    this.options = options
-    this.dependencies = {
-      fetchImpl: options.fetchImpl ?? fetch,
-      now: options.clock?.now.bind(options.clock) ?? options.now ?? Date.now,
-      idFactory: options.idFactory ?? defaultIdFactory,
-      publicEndpointChecker: async (url: URL): Promise<void> => {
-        if (options.publicEndpointChecker) {
-          await options.publicEndpointChecker(url)
-          return
-        }
-        await assertPublicEndpoint(url)
-      },
-      timeoutMs: finitePositive(options.timeoutMs, DEFAULT_TIMEOUT_MS),
-      maxResponseBytes: finitePositive(options.maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES)
-    }
+  constructor(options: SearchBrokerOptions) {
+    if (!options.rootDir.trim()) throw new Error('Search Broker rootDir is required')
+    this.attemptsPath = join(options.rootDir, 'search-broker', 'attempts.json')
+    this.now = options.now ?? Date.now
+    this.adapters = options.adapters.slice()
+    this.adapterTimeoutMs = normalizeAdapterTimeout(options.adapterTimeoutMs)
+    this.adapterFactory = options.adapterFactory
+    this.recordEvidence = options.recordEvidence
+    this.recordEvidenceBatch = options.recordEvidenceBatch
+    this.validateScope = options.validateScope
   }
 
-  async search(input: SearchBrokerRequest): Promise<SearchBrokerResult> {
-    if (!isSearchMode(input.mode)) return invalidModeFailure(input, this.dependencies.idFactory)
-    const mode = input.mode
-    const query = normalizeQuery(input.query)
-    const projectId = optionalText(input.projectId)
-    const goalId = optionalText(input.goalId)
-    const workItemId = optionalText(input.workItemId)
-    const runId = optionalText(input.runId)
-    const artifactId = optionalText(input.artifactId)
-    const limit = normalizeLimit(input.limit)
-    const operationId = this.operationId(input, query, mode, projectId, runId)
-    const store = this.options.idempotencyStore
-    const replay = store
-      ? await store.get(operationId)
-      : this.ephemeralStore.get(operationId)
-    if (replay) return withReplayFlag(replay)
+  async search(request: SearchRequest): Promise<SearchAttempt> {
+    const normalized = normalizeRequest(request)
+    const key = idempotencyKey(normalized)
+    const existing = this.readAttempts().find((attempt) => attempt.idempotencyKey === key)
+    if (existing && existing.status !== 'running') return existing
+    const active = this.inFlight.get(key)
+    if (active) return active
+    // A running receipt with no in-process owner means the previous process
+    // stopped after durable reservation. Do not replay an external request;
+    // preserve an explicit unknown outcome for reconciliation.
+    if (existing?.status === 'running') {
+      return this.finish(existing, {
+        status: 'failed',
+        failureCode: 'unknown',
+        failureMessage: 'Previous Search attempt was interrupted; adapter was not replayed'
+      })
+    }
+    const pending = this.run(normalized, key)
+    this.inFlight.set(key, pending)
+    try { return await pending } finally { this.inFlight.delete(key) }
+  }
 
-    const concurrent = this.inFlight.get(operationId)
-    if (concurrent) return withReplayFlag(await concurrent)
+  private async run(normalized: SearchRequest, key: string): Promise<SearchAttempt> {
 
-    const execution = this.executeAndPersist({
-      query,
-      mode,
-      operationId,
-      projectId,
-      goalId,
-      workItemId,
-      runId,
-      artifactId,
-      limit,
-      signal: input.signal
-    })
-    this.inFlight.set(operationId, execution)
+    const startedAt = this.now()
+    const running: SearchAttempt = {
+      schemaVersion: 1,
+      attemptId: `search:${key}`,
+      idempotencyKey: key,
+      requestId: normalized.requestId,
+      queryDigest: digest(normalized.query),
+      ...(normalized.projectId ? { projectId: normalized.projectId } : {}),
+      ...(normalized.goalId ? { goalId: normalized.goalId } : {}),
+      ...(normalized.workItemId ? { workItemId: normalized.workItemId } : {}),
+      ...(normalized.runId ? { runId: normalized.runId } : {}),
+      ...(normalized.artifactId ? { artifactId: normalized.artifactId } : {}),
+      status: 'running', citations: [], evidenceIds: [], startedAt
+    }
+    this.upsert(running)
+
+    if (normalized.egress === 'deny') return this.finish(running, { status: 'failed', failureCode: 'egress_denied', failureMessage: 'Search egress denied by policy' })
+    if (this.validateScope) {
+      try { await this.validateScope(normalized) } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return this.finish(running, { status: 'failed', failureCode: 'scope_denied', failureMessage: message.slice(0, 512) })
+      }
+    }
+    let adapters = this.adapters
+    if (this.adapterFactory) {
+      try {
+        const configured = await this.adapterFactory(normalized)
+        adapters = configured === undefined ? [] : Array.isArray(configured) ? configured : [configured]
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return this.finish(running, { status: 'failed', failureCode: 'provider_failed', failureMessage: message.slice(0, 512) })
+      }
+    }
+    let selected: SearchAdapter | undefined
     try {
-      return await execution
-    } finally {
-      if (this.inFlight.get(operationId) === execution) this.inFlight.delete(operationId)
+      selected = adapters.find((adapter) => isSearchAdapter(adapter) && adapter.available(normalized).ok)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return this.finish(running, { status: 'failed', failureCode: 'provider_failed', failureMessage: message.slice(0, 512) })
+    }
+    if (!selected) return this.finish(running, { status: 'failed', failureCode: this.inferNoAdapterFailure(normalized), failureMessage: 'No eligible Search Adapter is available' })
+
+    running.adapterId = selected.id
+    running.adapterKind = selected.kind
+    running.routeReason = `selected:${selected.kind}:${selected.id}`
+    this.upsert(running)
+    try {
+      const result = await withTimeout(selected.search(normalized), this.adapterTimeoutMs)
+      if (!Array.isArray(result.citations)) throw new Error('Search Adapter returned invalid citations')
+      if (result.citations.length === 0) return this.finish(running, { status: 'failed', failureCode: 'no_results', failureMessage: 'Search returned no results' })
+      if (!this.recordEvidence && !this.recordEvidenceBatch) return this.finish(running, { status: 'failed', failureCode: 'invalid_result', failureMessage: 'Search Evidence sink is unavailable' })
+      const citations: SearchCitation[] = []
+      const evidenceInputs: SearchEvidenceInput[] = []
+      for (const [index, citation] of result.citations.slice(0, 20).entries()) {
+        const normalizedCitation = normalizeCitation(citation)
+        const evidenceId = `search-evidence:${key}:${index}:${normalizedCitation.contentDigest.slice(7, 23)}`
+        evidenceInputs.push({ evidenceId, ...(normalized.projectId ? { projectId: normalized.projectId } : {}), ...(normalized.goalId ? { goalId: normalized.goalId } : {}), ...(normalized.workItemId ? { workItemId: normalized.workItemId } : {}), ...(normalized.runId ? { runId: normalized.runId } : {}), ...(normalized.artifactId ? { artifactId: normalized.artifactId } : {}), url: normalizedCitation.url, fetchedAt: normalizedCitation.fetchedAt, summary: normalizedCitation.summary, contentDigest: normalizedCitation.contentDigest, queryDigest: running.queryDigest })
+        citations.push({ ...normalizedCitation, evidenceId, ...(normalized.artifactId ? { artifactId: normalized.artifactId } : {}) })
+      }
+      if (this.recordEvidenceBatch) await this.recordEvidenceBatch(evidenceInputs)
+      else for (const input of evidenceInputs) await this.recordEvidence!(input)
+      return this.finish(running, { status: 'succeeded', citations, evidenceIds: citations.map((citation) => citation.evidenceId), ...(result.routeReason ? { routeReason: result.routeReason } : {}) })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const failureCode: SearchFailureCode = /timeout|timed out/i.test(message) ? 'timeout' : 'provider_failed'
+      return this.finish(running, { status: 'failed', failureCode, failureMessage: message.slice(0, 512) })
     }
   }
 
-  /** Alias for orchestration callers that use execute terminology. */
-  execute(input: SearchBrokerRequest): Promise<SearchBrokerResult> {
-    return this.search(input)
+  getAttempt(idempotency: string): SearchAttempt | undefined {
+    return this.readAttempts().find((attempt) => attempt.idempotencyKey === idempotency)
   }
 
-  private async executeAndPersist(
-    input: SearchProviderRequest & { artifactId?: string }
-  ): Promise<SearchBrokerResult> {
-    const result = await this.executeSearch(input)
-    const store = this.options.idempotencyStore
-    if (store) await store.put(input.operationId, result)
-    else this.ephemeralStore.set(input.operationId, result)
+  readAttempts(): SearchAttempt[] {
+    try {
+      const value = JSON.parse(readFileSync(this.attemptsPath, 'utf8')) as { format?: unknown; attempts?: unknown }
+      if (value.format !== FORMAT || !Array.isArray(value.attempts)) return []
+      return value.attempts.filter(isAttempt)
+    } catch { return [] }
+  }
+
+  private finish(base: SearchAttempt, patch: Partial<SearchAttempt>): SearchAttempt {
+    const result = { ...base, ...patch, completedAt: this.now() } as SearchAttempt
+    this.upsert(result)
     return result
   }
 
-  private async executeSearch(input: SearchProviderRequest & { artifactId?: string }): Promise<SearchBrokerResult> {
-    if (!input.query) {
-      return failure('unknown_result', input, 'Search query is empty; no source-backed result was produced.')
-    }
-    if (input.signal?.aborted) {
-      return failure('timeout', input, 'Search timed out before it started.')
-    }
-
-    const adapter = input.mode === 'model_native' ? this.options.modelNative : this.options.byokSearchAdapter
-    if (!adapter) {
-      return failure(
-        input.mode === 'byok_search_adapter' ? 'no_credentials' : 'provider_failure',
-        input,
-        input.mode === 'byok_search_adapter'
-          ? 'No BYOK search credentials are configured.'
-          : 'The model-native search provider is unavailable.'
-      )
-    }
-    if (input.mode === 'byok_search_adapter' && !(await adapterAvailable(adapter))) {
-      return failure('no_credentials', input, 'No BYOK search credentials are configured.')
-    }
-
-    let response: SearchProviderResponse
-    try {
-      response = await withTimeout(
-        adapter.search(input),
-        this.dependencies.timeoutMs,
-        input.signal
-      )
-    } catch (error) {
-      return failure(classifyError(error), input, failureMessage(classifyError(error)))
-    }
-    if (!response || typeof response !== 'object') {
-      return failure('unknown_result', input, 'The search provider returned an unknown result.')
-    }
-    const providerState = response.status
-    if (providerState !== undefined && providerState !== 'success') return providerFailure(providerState, input, response.message)
-    if (!response || !Array.isArray(response.results)) {
-      return failure('unknown_result', input, 'The search provider returned an unknown result.')
-    }
-    if (response.results.length === 0) {
-      return failure('no_results', input, 'The search provider returned no results.')
-    }
-
-    const citations: SearchBrokerCitation[] = []
-    const evidenceRecords: SearchBrokerEvidenceRecord[] = []
-    for (const candidate of response.results.slice(0, input.limit)) {
-      if (!candidate || typeof candidate.url !== 'string' || !candidate.url.trim()) {
-        return failure('unknown_result', input, 'The search provider returned an unverified result.')
-      }
-      let url: URL
-      try {
-        url = publicHttpsUrl(candidate.url)
-        await this.dependencies.publicEndpointChecker(url)
-      } catch {
-        return failure('egress_denied', input, 'The search result URL is not an allowed public HTTPS endpoint.')
-      }
-
-      let material: FetchMaterial
-      try {
-        material = await this.fetchMaterial(url, input.signal)
-      } catch (error) {
-        const state = classifyError(error)
-        return failure(state, input, failureMessage(state))
-      }
-      const fetchedAt = this.dependencies.now()
-      const contentSha256 = createHash('sha256').update(material.bytes).digest('hex')
-      const summary = materialSummary(material.text)
-      if (!summary) {
-        return failure('unknown_result', input, 'The fetched search source was empty or undecodable.')
-      }
-      const evidenceId = this.dependencies.idFactory(
-        'evidence',
-        `${input.operationId}\0${url.toString()}\0${contentSha256}`
-      )
-      const citation = `[${url.toString()}] (sha256:${contentSha256})`
-      const item: SearchBrokerCitation = {
-        url: url.toString(),
-        fetchedAt,
-        summary,
-        contentSha256,
-        citation,
-        projectId: input.projectId ?? null,
-        goalId: input.goalId ?? null,
-        workItemId: input.workItemId ?? null,
-        runId: input.runId ?? null,
-        evidenceId
-      }
-      evidenceRecords.push({
-        evidenceId,
-        ...(input.projectId ? { projectId: input.projectId } : {}),
-        ...(input.goalId ? { goalId: input.goalId } : {}),
-        ...(input.workItemId ? { workItemId: input.workItemId } : {}),
-        ...(input.runId ? { runId: input.runId } : {}),
-        ...(input.artifactId ? { artifactId: input.artifactId } : {}),
-        kind: 'research_source',
-        title: `Web search source: ${url.hostname}`,
-        summary,
-        uri: item.url,
-        mediaType: 'text/plain',
-        verifier: 'caogen-search-broker',
-        observedAt: fetchedAt,
-        // Workflow Evidence stores the canonical digest as bare lowercase SHA-256;
-        // the human-facing citation retains the `sha256:` label.
-        contentDigest: contentSha256,
-        metadata: {
-          mode: input.mode,
-          fetchedAt,
-          contentSha256,
-          citation
-        }
-      })
-      citations.push(item)
-    }
-
-    const first = citations[0]
-    if (!first) return failure('no_results', input, 'The search provider returned no results.')
-    if (this.options.evidenceWriter) {
-      try {
-        await this.options.evidenceWriter(evidenceRecords)
-      } catch {
-        return failure('provider_failure', input, 'Search evidence could not be recorded.')
-      }
-    }
-    return {
-      ok: true,
-      status: 'success',
-      mode: input.mode,
-      operationId: input.operationId,
-      projectId: input.projectId ?? null,
-      goalId: input.goalId ?? null,
-      workItemId: input.workItemId ?? null,
-      runId: input.runId ?? null,
-      ...(input.artifactId ? { artifactId: input.artifactId } : {}),
-      results: citations,
-      citations,
-      url: first.url,
-      fetchedAt: first.fetchedAt,
-      summary: first.summary,
-      contentSha256: first.contentSha256,
-      citation: first.citation,
-      evidenceId: first.evidenceId,
-      idempotentReplay: false
-    }
+  private inferNoAdapterFailure(request: SearchRequest): SearchFailureCode {
+    return request.egress === 'deny' ? 'egress_denied' : 'no_credentials'
   }
 
-  private operationId(
-    input: SearchBrokerRequest,
-    query: string,
-    mode: SearchBrokerMode,
-    projectId?: string,
-    runId?: string
-  ): string {
-    const explicit = optionalText(input.operationId) ?? optionalText(input.requestId)
-    if (explicit) return explicit
-    return this.dependencies.idFactory(
-      'operation',
-      `${mode}\0${query}\0${projectId ?? ''}\0${runId ?? ''}`
-    )
-  }
-
-  private async fetchMaterial(url: URL, signal?: AbortSignal): Promise<FetchMaterial> {
-    const response = await withTimeout(
-      this.dependencies.fetchImpl(url, {
-        method: 'GET',
-        redirect: 'manual',
-        signal
-      }),
-      this.dependencies.timeoutMs,
-      signal
-    )
-    if (response.status >= 300 && response.status < 400) {
-      throw new SearchBrokerError('egress_denied', 'Search redirects are not accepted.')
-    }
-    if (!response.ok) {
-      throw new SearchBrokerError('provider_failure', `Search source returned HTTP ${response.status}.`)
-    }
-    const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
-    if (contentType && !contentType.includes('text/') && !contentType.includes('json')) {
-      throw new SearchBrokerError('provider_failure', 'Search source is not text or JSON.')
-    }
-    const contentLength = response.headers.get('content-length')
-    if (contentLength && Number(contentLength) > this.dependencies.maxResponseBytes) {
-      throw new SearchBrokerError('provider_failure', 'Search source exceeds the 1 MiB limit.')
-    }
-    const bytes = await readBoundedResponse(response, this.dependencies.maxResponseBytes)
-    return { bytes, text: Buffer.from(bytes).toString('utf8') }
+  private upsert(attempt: SearchAttempt): void {
+    const attempts = this.readAttempts().filter((candidate) => candidate.idempotencyKey !== attempt.idempotencyKey)
+    attempts.push(attempt)
+    writeDurableFileSync(this.attemptsPath, JSON.stringify({ format: FORMAT, attempts: attempts.slice(-200) }, null, 2) + '\n', { mode: 0o600 })
   }
 }
 
-export function createSearchBroker(options: SearchBrokerOptions = {}): SearchBroker {
-  return new SearchBroker(options)
+function normalizeRequest(request: SearchRequest): SearchRequest {
+  if (!request || typeof request !== 'object') throw new Error('Search request is required')
+  const requestId = text(request.requestId, 'requestId')
+  const query = text(request.query, 'query')
+  if (query.length > MAX_QUERY_CHARS) throw new Error('Search query exceeds 512 characters')
+  if (request.egress !== undefined && request.egress !== 'allow' && request.egress !== 'deny') throw new Error('Search egress policy is invalid')
+  return { requestId, query, ...(request.projectId ? { projectId: text(request.projectId, 'projectId') } : {}), ...(request.goalId ? { goalId: text(request.goalId, 'goalId') } : {}), ...(request.workItemId ? { workItemId: text(request.workItemId, 'workItemId') } : {}), ...(request.runId ? { runId: text(request.runId, 'runId') } : {}), ...(request.artifactId ? { artifactId: text(request.artifactId, 'artifactId') } : {}), ...(request.egress ? { egress: request.egress } : {}) }
 }
 
-class SearchBrokerError extends Error {
-  constructor(readonly state: SearchBrokerFailureState, message: string) {
-    super(message)
-    this.name = 'SearchBrokerError'
+function normalizeCitation(citation: Omit<SearchCitation, 'evidenceId' | 'artifactId'>): Omit<SearchCitation, 'evidenceId' | 'artifactId'> {
+  const url = text(citation.url, 'citation url')
+  if (!/^https?:\/\//i.test(url) && !/^synthetic:\/\//i.test(url)) throw new Error('Search citation URL is invalid')
+  if (/^https?:\/\//i.test(url)) {
+    const parsed = new URL(url)
+    if (parsed.username || parsed.password || parsed.port && parsed.port !== '443') throw new Error('Search citation URL contains forbidden credentials or port')
+    if (parsed.protocol !== 'https:' || parsed.port && parsed.port !== '443') throw new Error('Search citation URL must use public HTTPS')
+    if (/^(localhost|127\.|0\.0\.0\.0|::1|\[::1\])$/i.test(parsed.hostname)) throw new Error('Search citation URL points to a private host')
   }
+  const summary = text(citation.summary, 'citation summary').slice(0, MAX_SUMMARY_CHARS)
+  if (typeof citation.contentDigest !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(citation.contentDigest)) throw new Error('Search citation contentDigest must be a SHA-256 digest')
+  const contentDigest = citation.contentDigest
+  if (!Number.isFinite(citation.fetchedAt) || citation.fetchedAt <= 0) throw new Error('Search citation fetchedAt is invalid')
+  return { url, fetchedAt: Math.floor(citation.fetchedAt), summary, contentDigest }
 }
 
-function failure(
-  status: SearchBrokerFailureState,
-  input: SearchProviderRequest & { artifactId?: string },
-  message: string
-): SearchBrokerFailure {
-  return {
-    ok: false,
-    status,
-    mode: input.mode,
-    operationId: input.operationId,
-    projectId: input.projectId ?? null,
-    goalId: input.goalId ?? null,
-    workItemId: input.workItemId ?? null,
-    runId: input.runId ?? null,
-    ...(input.artifactId ? { artifactId: input.artifactId } : {}),
-    results: [],
-    citations: [],
-    message,
-    idempotentReplay: false
-  }
+function idempotencyKey(request: SearchRequest): string {
+  return digest([request.requestId, request.query, request.projectId ?? '', request.goalId ?? '', request.workItemId ?? '', request.runId ?? '', request.artifactId ?? ''].join('\0')).slice(7)
 }
 
-function withReplayFlag(result: SearchBrokerResult): SearchBrokerResult {
-  return { ...result, idempotentReplay: true }
+function digest(value: string): string { return `sha256:${createHash('sha256').update(value).digest('hex')}` }
+function normalizeAdapterTimeout(value: number | undefined): number {
+  if (value === undefined) return 30_000
+  if (!Number.isFinite(value) || value < 1 || value > 300_000) throw new Error('Search adapter timeout must be between 1 and 300000 milliseconds')
+  return Math.floor(value)
 }
-
-function isFailureState(value: unknown): value is SearchBrokerFailureState {
-  return value === 'no_results' || value === 'timeout' || value === 'no_credentials' ||
-    value === 'egress_denied' || value === 'provider_failure' || value === 'unknown_result'
-}
-
-function providerFailure(
-  providerState: unknown,
-  input: SearchProviderRequest & { artifactId?: string },
-  message: unknown
-): SearchBrokerFailure {
-  const status = isFailureState(providerState) ? providerState : 'unknown_result'
-  return failure(status, input, typeof message === 'string' ? message : failureMessage(status))
-}
-
-function isSearchMode(value: unknown): value is SearchBrokerMode {
-  return value === 'model_native' || value === 'byok_search_adapter'
-}
-
-function invalidModeFailure(
-  input: SearchBrokerRequest,
-  idFactory: (kind: 'operation' | 'evidence', input: string) => string
-): SearchBrokerFailure {
-  const operationId = optionalText(input.operationId) ?? optionalText(input.requestId) ??
-    idFactory('operation', `invalid-mode\0${String(input.mode)}`)
-  return {
-    ok: false,
-    status: 'unknown_result',
-    // The result contract only permits the two known modes. Keep a valid
-    // sentinel here while the explicit failure message identifies the bad
-    // runtime value and guarantees that no adapter was called.
-    mode: 'model_native',
-    operationId,
-    projectId: optionalText(input.projectId) ?? null,
-    goalId: optionalText(input.goalId) ?? null,
-    workItemId: optionalText(input.workItemId) ?? null,
-    runId: optionalText(input.runId) ?? null,
-    ...(optionalText(input.artifactId) ? { artifactId: optionalText(input.artifactId) } : {}),
-    results: [],
-    citations: [],
-    message: 'Search mode must be model_native or byok_search_adapter.',
-    idempotentReplay: false
-  }
-}
-
-async function adapterAvailable(adapter: SearchProviderAdapter): Promise<boolean> {
-  if (typeof adapter.available === 'function') return Boolean(await adapter.available())
-  return adapter.available !== false
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, signal?: AbortSignal): Promise<T> {
-  if (signal?.aborted) throw new SearchBrokerError('timeout', 'Search timed out.')
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
-  let abort: (() => void) | undefined
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new SearchBrokerError('timeout', 'Search timed out.')), timeoutMs)
-    if (signal) {
-      abort = () => reject(new SearchBrokerError('timeout', 'Search timed out.'))
-      signal.addEventListener('abort', abort, { once: true })
-    }
-  })
   try {
-    return await Promise.race([promise, timeout])
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Search adapter timed out after ${timeoutMs}ms`)), timeoutMs)
+      })
+    ])
   } finally {
     if (timer) clearTimeout(timer)
-    if (signal && abort) signal.removeEventListener('abort', abort)
   }
 }
-
-async function readBoundedResponse(response: Response, maxBytes: number): Promise<Uint8Array> {
-  if (!response.body) {
-    const bytes = new Uint8Array(await response.arrayBuffer())
-    if (bytes.byteLength > maxBytes) throw new SearchBrokerError('provider_failure', 'Search source exceeds the 1 MiB limit.')
-    return bytes
-  }
-  const reader = response.body.getReader()
-  const chunks: Uint8Array[] = []
-  let bytesRead = 0
-  try {
-    while (true) {
-      const next = await reader.read()
-      if (next.done) break
-      bytesRead += next.value.byteLength
-      if (bytesRead > maxBytes) throw new SearchBrokerError('provider_failure', 'Search source exceeds the 1 MiB limit.')
-      chunks.push(next.value)
-    }
-  } finally {
-    reader.releaseLock()
-  }
-  const joined = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)))
-  return new Uint8Array(joined)
-}
-
-function normalizeQuery(value: string): string {
-  const query = typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : ''
-  return query.slice(0, MAX_QUERY_CHARS)
-}
-
-function normalizeLimit(value: number | undefined): number {
-  if (value === undefined) return DEFAULT_LIMIT
-  if (!Number.isFinite(value) || value < 1) return 1
-  return Math.min(MAX_LIMIT, Math.floor(value))
-}
-
-function optionalText(value: string | undefined): string | undefined {
-  const normalized = typeof value === 'string' ? value.trim() : ''
-  return normalized || undefined
-}
-
-function finitePositive(value: number | undefined, fallback: number): number {
-  return value !== undefined && Number.isFinite(value) && value > 0 ? value : fallback
-}
-
-function materialSummary(text: string): string {
-  const normalized = text
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-  return normalized.slice(0, MAX_SUMMARY_CHARS)
-}
-
-function defaultIdFactory(kind: 'operation' | 'evidence', input: string): string {
-  const digest = createHash('sha256').update(input).digest('hex').slice(0, 32)
-  return `search-${kind}:${digest}`
-}
-
-function classifyError(error: unknown): SearchBrokerFailureState {
-  if (error instanceof SearchBrokerError) return error.state
-  if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) return 'timeout'
-  return 'provider_failure'
-}
-
-function failureMessage(status: SearchBrokerFailureState): string {
-  switch (status) {
-    case 'no_results': return 'The search provider returned no results.'
-    case 'timeout': return 'Search timed out.'
-    case 'no_credentials': return 'No BYOK search credentials are configured.'
-    case 'egress_denied': return 'Search egress was denied by the public HTTPS policy.'
-    case 'provider_failure': return 'The search provider failed before a verified result was produced.'
-    case 'unknown_result': return 'The search provider returned an unknown result.'
-  }
-}
-
-function publicHttpsUrl(value: string): URL {
-  let url: URL
-  try {
-    url = new URL(value)
-  } catch {
-    throw new SearchBrokerError('egress_denied', 'Search URL is invalid.')
-  }
-  if (url.protocol !== 'https:' || url.username || url.password || url.port) {
-    throw new SearchBrokerError('egress_denied', 'Search URL must be credential-free HTTPS on port 443.')
-  }
-  for (const [name, queryValue] of url.searchParams.entries()) {
-    if (/(?:api[_-]?key|auth(?:orization)?|bearer|credential|password|secret|token|signature)/i.test(name) ||
-        /(?:secret|token|password|api[_-]?key)=/i.test(`${name}=${queryValue}`)) {
-      throw new SearchBrokerError('egress_denied', 'Search URL cannot carry credentials in the query.')
-    }
-  }
-  url.hash = ''
-  return url
-}
-
-async function assertPublicEndpoint(url: URL): Promise<void> {
-  const host = url.hostname.toLowerCase()
-  if (!host || host === 'localhost' || host.endsWith('.localhost') || isPrivateAddress(host)) {
-    throw new SearchBrokerError('egress_denied', 'Search endpoint must use a public host.')
-  }
-  const addresses = await lookup(host, { all: true, verbatim: true })
-  if (addresses.length === 0 || addresses.some(({ address }) => isPrivateAddress(address))) {
-    throw new SearchBrokerError('egress_denied', 'Search endpoint resolved to a private address.')
-  }
-}
-
-function isPrivateAddress(value: string): boolean {
-  const normalized = value.toLowerCase().replace(/^\[|\]$/g, '')
-  if (!isIP(normalized)) return false
-  if (normalized.includes(':')) {
-    return normalized === '::1' || normalized === '::' || normalized.startsWith('fc') ||
-      normalized.startsWith('fd') || normalized.startsWith('fe8') || normalized.startsWith('fe9') ||
-      normalized.startsWith('fea') || normalized.startsWith('feb') || normalized.startsWith('::ffff:127.')
-  }
-  const octets = normalized.split('.').map(Number)
-  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) return true
-  return octets[0] === 0 || octets[0] === 10 || octets[0] === 127 ||
-    (octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127) ||
-    (octets[0] === 169 && octets[1] === 254) ||
-    (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
-    (octets[0] === 192 && octets[1] === 0 && octets[2] === 0) ||
-    (octets[0] === 192 && octets[1] === 168) ||
-    (octets[0] === 198 && octets[1] >= 18 && octets[1] <= 19) ||
-    (octets[0] === 198 && octets[1] === 51 && octets[2] === 100) ||
-    (octets[0] === 203 && octets[1] === 0 && octets[2] === 113) ||
-    octets[0] >= 224
+function text(value: unknown, label: string): string { if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} is required`); return value.trim() }
+function isAttempt(value: unknown): value is SearchAttempt { return Boolean(value && typeof value === 'object' && (value as SearchAttempt).schemaVersion === 1 && typeof (value as SearchAttempt).idempotencyKey === 'string' && ['running', 'succeeded', 'failed'].includes((value as SearchAttempt).status)) }
+function isSearchAdapter(value: unknown): value is SearchAdapter {
+  return Boolean(value && typeof value === 'object' && typeof (value as SearchAdapter).id === 'string' &&
+    ((value as SearchAdapter).kind === 'native' || (value as SearchAdapter).kind === 'byok') &&
+    typeof (value as SearchAdapter).available === 'function' && typeof (value as SearchAdapter).search === 'function')
 }

@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { TaskPlanStateView } from '../../../../shared/types'
 import { useT } from '../../i18n'
 import { useStore } from '../../store'
 import TaskPlanEditor from './TaskPlanEditor'
 import { DisclosureChevron } from '../DisclosureChevron'
+import { TASK_PLAN_NAVIGATION_EVENT, takeTaskPlanNavigation } from './task-plan-navigation'
 import {
   emptyPlanForm,
   planFormFromVersion,
@@ -32,6 +33,9 @@ export default function TaskPlanWorkbench({
   const revoke = useStore((store) => store.revokeTaskPlanApproval)
   const execution = useStore((store) => store.sessions[sessionId]?.taskDagExecution)
   const [expanded, setExpanded] = useState(strategy === 'plan')
+  const [navigationSessionId, setNavigationSessionId] = useState<string | null>(null)
+  const navigationOpened = navigationSessionId === sessionId
+  const workbenchRef = useRef<HTMLElement>(null)
   const [loadedVersionId, setLoadedVersionId] = useState<string>()
   const [form, setForm] = useState(emptyPlanForm)
   const current = state?.currentVersion
@@ -45,12 +49,29 @@ export default function TaskPlanWorkbench({
   }, [strategy])
 
   useEffect(() => {
+    const openRequestedPlan = (): void => {
+      if (!takeTaskPlanNavigation(sessionId)) return
+      setNavigationSessionId(sessionId)
+      setExpanded(true)
+    }
+    openRequestedPlan()
+    window.addEventListener(TASK_PLAN_NAVIGATION_EVENT, openRequestedPlan)
+    return () => window.removeEventListener(TASK_PLAN_NAVIGATION_EVENT, openRequestedPlan)
+  }, [sessionId])
+
+  useEffect(() => {
+    if (!navigationOpened) return
+    workbenchRef.current?.focus()
+    workbenchRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [navigationOpened])
+
+  useEffect(() => {
     if (current?.id === loadedVersionId) return
     setForm(current ? planFormFromVersion(current) : emptyPlanForm())
     setLoadedVersionId(current?.id)
   }, [current, loadedVersionId])
 
-  if (strategy !== 'plan' && !current) return null
+  if (strategy !== 'plan' && !current && !navigationOpened) return null
 
   const save = async (): Promise<void> => {
     const plan = await createVersion(sessionId, taskPlanDraftFromForm(form))
@@ -71,7 +92,8 @@ export default function TaskPlanWorkbench({
   }
 
   return (
-    <section className="task-plan-workbench no-drag" data-task-plan-status={state?.approvalStatus ?? 'not_created'}>
+    <section ref={workbenchRef} className="task-plan-workbench no-drag" tabIndex={-1}
+      data-task-plan-session={sessionId} data-task-plan-status={state?.approvalStatus ?? 'not_created'}>
       <TaskPlanSummary
         t={t}
         state={state}

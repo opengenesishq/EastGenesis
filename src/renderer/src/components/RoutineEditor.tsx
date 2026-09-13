@@ -132,7 +132,7 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
       const normalizedBudget = Number.isFinite(budget) && budget > 0 ? budget : 0
       if (isEdit && routine) {
         await window.agentDesk.updateRoutine(routine.id, {
-          expectedRevision: routine.revision, name: name.trim(),
+          name: name.trim(),
           prompt: prompt.trim(),
           projectId: projectId || null,
           goalTemplateId: goalTemplateId || null,

@@ -219,7 +219,7 @@ function validateDistinctness(metrics) {
 
 function verifyProductionAccessibilityCues() {
   const rig = source('src/renderer/src/components/office/kit/WatercolorCharacterRig.tsx')
-  const office = source('src/renderer/src/components/office/OfficeRuntime.tsx')
+  const office = source('src/renderer/src/components/office/OfficeView.tsx')
   assert.match(rig, /prefers-reduced-motion:\s*reduce/u)
   assert.match(rig, /watercolorState:\s*state/u)
   assert.match(rig, /<spriteMaterial/u)

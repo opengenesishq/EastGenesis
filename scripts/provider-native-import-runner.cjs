@@ -22,7 +22,8 @@ async function run() {
   require(outMain)
   await waitFor(() => ipcMain._invokeHandlers?.has('appFeatures:invoke'), 10_000)
   const win = await openProviderSettings()
-  await verifyNativeConfigWorkspace(win)
+  check('Provider settings does not expose a Codex config.toml editor',
+    !(await rendererValue(win, `Boolean(document.querySelector('[data-codex-native-config-workspace]'))`)))
   const clicked = await rendererValue(win, `(() => {
     const button = document.querySelector('[data-provider-native-scan]');
     button?.click();
@@ -77,7 +78,7 @@ async function run() {
   check('renderer body remains free of credential material after apply',
     !(await rendererValue(win, `document.body.innerText.includes(${JSON.stringify(secret)})`)))
 
-  win.setSize(700, 850)
+  win.setSize(960, 850)
   await rendererValue(win, `document.querySelector('[data-provider-native-scan]')?.click()`)
   await waitForRenderer(win, `Boolean(document.querySelector('[data-provider-native-preview]'))`)
   await settleRenderer(win)
@@ -85,15 +86,18 @@ async function run() {
     const panel = document.querySelector('[data-provider-native-preview]');
     const rect = panel.getBoundingClientRect();
     return {
+      width: innerWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+      panelWidth: rect.width,
       columns: getComputedStyle(panel.querySelector('.provider-native-summary')).gridTemplateColumns.split(' ').length,
       insideViewport: rect.left >= 0 && rect.right <= innerWidth + 1,
       bodyOverflow: document.documentElement.scrollWidth <= innerWidth + 1,
       hasSecret: document.body.innerText.includes(${JSON.stringify(secret)})
     };
   })()`)
-  check('compact preview uses the responsive two-column fact layout', compact.columns === 2, JSON.stringify(compact))
-  check('compact preview has no horizontal overflow or credential exposure', compact.insideViewport && compact.bodyOverflow && !compact.hasSecret)
-  await capture(win, 'codex-native-import-preview-compact.png')
+  check('minimum desktop preview retains the four-column fact layout', compact.width >= 960 && compact.columns === 4, JSON.stringify(compact))
+  check('minimum desktop preview has no horizontal overflow or credential exposure', compact.insideViewport && compact.bodyOverflow && !compact.hasSecret)
+  await capture(win, 'codex-native-import-preview-minimum-desktop.png')
 
   await invokeProfile('native-rollback', backups[0].id)
   const rolledBack = await invoke('providers:list')
@@ -106,10 +110,8 @@ async function run() {
     pass: checks.length,
     total: checks.length,
     screenshots: [
-      path.join(screenshotDir, 'codex-native-config-workspace.png'),
-      path.join(screenshotDir, 'codex-native-config-workspace-compact.png'),
       path.join(screenshotDir, 'codex-native-import-preview.png'),
-      path.join(screenshotDir, 'codex-native-import-preview-compact.png')
+      path.join(screenshotDir, 'codex-native-import-preview-minimum-desktop.png')
     ],
     checks
   }
@@ -117,108 +119,6 @@ async function run() {
   if (raw.includes(secret)) throw new Error('native import E2E report contains credential material')
   fs.writeFileSync(statePath, raw)
   app.exit(0)
-}
-
-async function verifyNativeConfigWorkspace(win) {
-  const configPath = path.join(requiredEnv('CODEX_HOME'), 'config.toml')
-  const originalSource = fs.readFileSync(configPath, 'utf8')
-  const unsignedMacRuntime = process.platform === 'darwin'
-  const opened = await rendererValue(win, `(() => {
-    const button = document.querySelector('[data-codex-native-config-open]');
-    button?.click();
-    return Boolean(button);
-  })()`)
-  check('full Codex config workspace is visible in Provider settings', opened)
-  await waitForRenderer(win, `Boolean(document.querySelector('[data-codex-native-config-editor]'))`)
-  const editor = await rendererValue(win, `(() => {
-    const root = document.querySelector('[data-codex-native-config-workspace]');
-    const textarea = root.querySelector('[data-codex-native-config-editor]');
-    return {
-      text: root.innerText,
-      value: textarea.value,
-      metrics: [...root.querySelectorAll('.codex-native-config-meta strong')].map((item) => item.textContent.trim()),
-      hasSecret: document.body.innerText.includes(${JSON.stringify(secret)}),
-      placeholderCount: (textarea.value.match(/__CAOGEN_PROTECTED_VALUE_/g) || []).length,
-      lineNumbers: root.querySelector('.codex-native-config-gutter')?.textContent.trim().split(/\\s+/).length,
-      hasSearch: Boolean(root.querySelector('.codex-native-config-search input'))
-    };
-  })()`)
-  check('config workspace summarizes Provider, MCP, project, feature, and plugin sections',
-    editor.metrics.join(',') === 'CODEX_HOME,1,0,0,1,0', JSON.stringify(editor.metrics))
-  check('config workspace masks credential values and explains normalization',
-    !editor.hasSecret
-      && editor.placeholderCount === 1
-      && editor.text.includes('1 个敏感值')
-      && editor.text.includes('TOML 格式会规范化'))
-  check('config workspace exposes synchronized line numbers and configuration search',
-    editor.hasSearch && editor.lineNumbers === editor.value.split('\n').length,
-    JSON.stringify({ lineNumbers: editor.lineNumbers }))
-
-  const changed = await rendererValue(win, `(() => {
-    const textarea = document.querySelector('[data-codex-native-config-editor]');
-    const next = 'sandbox_mode = "read-only"\\n' + textarea.value;
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, next);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    return textarea.value.startsWith('sandbox_mode = "read-only"');
-  })()`)
-  check('raw config editor accepts arbitrary non-secret TOML fields', changed)
-  await waitForRenderer(win, `!document.querySelector('[data-codex-native-config-save]')?.disabled`)
-  await rendererValue(win, `document.querySelector('[data-codex-native-config-save]')?.click()`)
-  let backups = []
-  if (unsignedMacRuntime) {
-    await waitForRenderer(win, `document.querySelector('.codex-native-config-notice.notice-error')?.innerText.includes('System credential encryption is unavailable')`)
-    check('unsigned macOS config editing fails closed without changing config bytes',
-      fs.readFileSync(configPath, 'utf8') === originalSource)
-    backups = await invokeProfile('native-config-backups')
-    check('failed-closed config editing creates no rollback artifact', backups.length === 0)
-  } else {
-    await waitForRenderer(win, `document.body.innerText.includes('Codex 配置已保存')`)
-    const savedSource = fs.readFileSync(configPath, 'utf8')
-    check('config workspace writes the edited field and restores the protected value in main',
-      savedSource.includes('sandbox_mode = "read-only"') && savedSource.includes(secret))
-    backups = await invokeProfile('native-config-backups')
-    check('config workspace creates a rollback backup', backups.length === 1 && backups[0].configPresent === true)
-    const backupRoot = path.join(userDataDir, 'codex-native-config-backups')
-    const backupRaw = fs.readdirSync(backupRoot).map((name) => fs.readFileSync(path.join(backupRoot, name), 'utf8')).join('\n')
-    check('config workspace backup is encrypted and contains no plaintext config credential',
-      backupRaw.includes('"encryptedSource": "enc:') && !backupRaw.includes(secret))
-  }
-  check('config workspace keeps the credential out of the DOM after save',
-    !(await rendererValue(win, `document.body.innerText.includes(${JSON.stringify(secret)})`)))
-  await capture(win, 'codex-native-config-workspace.png')
-
-  win.setSize(700, 850)
-  await settleRenderer(win)
-  const compact = await rendererValue(win, `(() => {
-    const root = document.querySelector('[data-codex-native-config-workspace]');
-    const textarea = root.querySelector('[data-codex-native-config-editor]');
-    const rect = root.getBoundingClientRect();
-    return {
-      width: innerWidth,
-      columns: getComputedStyle(root.querySelector('.codex-native-config-meta')).gridTemplateColumns.split(' ').length,
-      contained: rect.left >= 0 && rect.right <= innerWidth + 1,
-      editorFit: textarea.scrollWidth <= textarea.clientWidth + 1 || textarea.scrollWidth > textarea.clientWidth,
-      documentOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
-    };
-  })()`)
-  check('config workspace remains contained at 700px with a three-column summary',
-    compact.width <= 700 && compact.columns === 3 && compact.contained && !compact.documentOverflow,
-    JSON.stringify(compact))
-  await capture(win, 'codex-native-config-workspace-compact.png')
-  win.setSize(1200, 900)
-
-  if (backups.length > 0) {
-    await invokeProfile('native-config-rollback', backups[0].id)
-    check('config workspace rollback restores exact original config bytes', fs.readFileSync(configPath, 'utf8') === originalSource)
-  } else {
-    await rendererValue(win, `(() => {
-      const textarea = document.querySelector('[data-codex-native-config-editor]');
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, ${JSON.stringify(editor.value)});
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    })()`)
-  }
-  await rendererValue(win, `document.querySelector('[data-codex-native-config-workspace] .codex-native-config-head .btn-icon-sm')?.click()`)
-  await waitForRenderer(win, `!document.querySelector('[data-codex-native-config-editor]')`)
 }
 
 function invokeProfile(action, ...args) {

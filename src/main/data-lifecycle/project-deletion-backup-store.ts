@@ -8,14 +8,12 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
-  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
-  unlinkSync,
   writeFileSync
 } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import type { ProjectAggregateExportBundle, ProjectAggregateExportResult } from '../../shared/project-aggregate-types'
 import {
   assertNoCredentialMaterial,
@@ -50,14 +48,8 @@ export class ProjectDeletionBackupStore {
 
   write(operationId: string, projectId: string, aggregate: ProjectAggregateExportResult): ProjectDeletionBackupReceipt {
     const file = this.pathFor(operationId, projectId)
+    if (existsSync(file)) return this.verify(file, operationId, projectId)
     assertAggregateExport(aggregate, projectId)
-    if (existsSync(file)) {
-      const existing = this.verify(file, operationId, projectId)
-      if (existing.exportDigest !== aggregate.exportDigest) {
-        throw new Error('project deletion backup identity conflicts with its frozen aggregate export')
-      }
-      return existing
-    }
     const body = {
       schemaVersion: 1 as const,
       format: BACKUP_FORMAT,
@@ -136,7 +128,6 @@ function atomicPrivateWrite(file: string, content: string): void {
   const directory = dirname(file)
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   if (process.platform !== 'win32') chmodSync(directory, 0o700)
-  cleanupBackupTemps(file)
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`
   let descriptor: number | undefined
   try {
@@ -156,49 +147,9 @@ function atomicPrivateWrite(file: string, content: string): void {
 }
 
 function syncDirectory(directory: string): void {
-  let descriptor: number | undefined
-  try {
-    descriptor = openSync(directory, 'r')
-    fsyncSync(descriptor)
-  } catch (error) {
-    if (process.platform !== 'win32' || !isWindowsDirectoryFsyncUnsupported(error)) throw error
-  } finally {
-    if (descriptor !== undefined) closeSync(descriptor)
-  }
-}
-
-function cleanupBackupTemps(file: string): void {
-  const directory = dirname(file)
-  const base = basename(file)
-  const prefix = `${base}.`
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.startsWith(prefix) || !entry.name.endsWith('.tmp')) continue
-    const match = new RegExp(`^${escapeRegExp(base)}\\.(\\d+)\\.[0-9a-f-]+\\.tmp$`).exec(entry.name)
-    const pid = match ? Number.parseInt(match[1], 10) : undefined
-    if (pid === undefined || processIsAlive(pid)) continue
-    try { unlinkSync(join(directory, entry.name)) } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
-  }
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-function processIsAlive(pid: number): boolean {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
-  }
-}
-
-function isWindowsDirectoryFsyncUnsupported(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException)?.code
-  return code === 'EPERM' || code === 'EACCES' || code === 'EINVAL' || code === 'ENOTSUP'
+  if (process.platform === 'win32') return
+  const descriptor = openSync(directory, 'r')
+  try { fsyncSync(descriptor) } finally { closeSync(descriptor) }
 }
 
 function requiredRoot(value: string): string {

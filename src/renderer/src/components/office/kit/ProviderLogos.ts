@@ -12,8 +12,6 @@ import geminiLogoUrl from '../../../assets/provider-logos/gemini-color.svg?url'
 import geminiTextLogoUrl from '../../../assets/provider-logos/gemini-text.svg?url'
 import grokLogoUrl from '../../../assets/provider-logos/grok.svg?url'
 import grokTextLogoUrl from '../../../assets/provider-logos/grok-text.svg?url'
-import hunyuanLogoUrl from '../../../assets/provider-logos/hunyuan-color.svg?url'
-import hunyuanTextLogoUrl from '../../../assets/provider-logos/hunyuan-text.svg?url'
 import kimiLogoUrl from '../../../assets/provider-logos/kimi-color.svg?url'
 import kimiTextLogoUrl from '../../../assets/provider-logos/kimi-text.svg?url'
 import metaLogoUrl from '../../../assets/provider-logos/meta-color.svg?url'
@@ -81,7 +79,6 @@ const LOGOS: ProviderLogoSpec[] = [
   { key: 'moonshot', label: 'Kimi', wordmark: 'KIMI', shortMark: 'KM', brandColor: '#5fe6d4', plateColor: '#0d2421', textColor: '#ddfbf7', cn: true, known: true, assetUrl: kimiLogoUrl, assetSource: 'lobehub-icons-static-svg' },
   { key: 'minimax', label: 'MiniMax', wordmark: 'MINIMAX', shortMark: 'MM', brandColor: '#ff7db0', plateColor: '#2b1020', textColor: '#ffe3ef', cn: true, known: true, assetUrl: minimaxLogoUrl, assetSource: 'lobehub-icons-static-svg' },
   { key: 'spark', label: 'iFlytek Spark', wordmark: 'SPARK', shortMark: 'XF', brandColor: '#ff6b5f', plateColor: '#2a1210', textColor: '#ffe1de', cn: true, known: true, assetUrl: sparkLogoUrl, assetSource: 'lobehub-icons-static-svg' },
-  { key: 'hunyuan', label: 'Hunyuan', wordmark: 'HUNYUAN', shortMark: 'HY', brandColor: '#48d1ff', plateColor: '#0c202b', textColor: '#ddf6ff', cn: true, known: true, assetUrl: hunyuanLogoUrl, assetSource: 'lobehub-icons-static-svg' },
   { key: 'yi', label: '01.AI Yi', wordmark: 'YI', shortMark: 'YI', brandColor: '#9de36b', plateColor: '#142411', textColor: '#ecffdf', cn: true, known: true, assetUrl: yiLogoUrl, assetSource: 'lobehub-icons-static-svg' },
   { key: 'baichuan', label: 'Baichuan', wordmark: 'BAICHUAN', shortMark: 'BC', brandColor: '#6fd6ff', plateColor: '#102330', textColor: '#dff6ff', cn: true, known: true, assetUrl: baichuanLogoUrl, assetSource: 'lobehub-icons-static-svg' },
   { key: 'sensenova', label: 'SenseNova', wordmark: 'SENSE', shortMark: 'SN', brandColor: '#ffcf5a', plateColor: '#2b220d', textColor: '#fff3cc', cn: true, known: true, assetUrl: sensenovaLogoUrl, assetSource: 'lobehub-icons-static-svg' },
@@ -96,7 +93,6 @@ const WORDMARK_ASSETS: Record<string, string> = {
   deepseek: deepseekTextLogoUrl,
   doubao: doubaoTextLogoUrl,
   google: geminiTextLogoUrl,
-  hunyuan: hunyuanTextLogoUrl,
   local: ollamaTextLogoUrl,
   meta: metaTextLogoUrl,
   minimax: minimaxTextLogoUrl,
@@ -125,7 +121,6 @@ const RULES: Array<{ match: RegExp; key: string }> = [
   { match: /baidu|ernie|文心|千帆|qianfan/i, key: 'baidu' },
   { match: /minimax|abab/i, key: 'minimax' },
   { match: /iflytek|xunfei|spark|星火|讯飞/i, key: 'spark' },
-  { match: /hunyuan|混元|tencent|腾讯/i, key: 'hunyuan' },
   { match: /01\.?ai|零一|yi-|yi_|yi\b|零一万物/i, key: 'yi' },
   { match: /baichuan|百川/i, key: 'baichuan' },
   { match: /sensenova|sensechat|sensetime|商汤|日日新/i, key: 'sensenova' },

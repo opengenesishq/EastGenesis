@@ -17,18 +17,6 @@ import {
   previewCodexNativeProviderImport,
   rollbackProviderNativeImportBackup
 } from '../provider/providerNativeConfigImport'
-import {
-  applyCcSwitchProviderImport,
-  listCcSwitchProviderImportBackups,
-  previewCcSwitchProviderImport,
-  rollbackCcSwitchProviderImportBackup
-} from '../provider/ccSwitchProviderImport'
-import {
-  applyCodexNativeConfig,
-  listCodexNativeConfigBackups,
-  previewCodexNativeConfig,
-  rollbackCodexNativeConfigBackup
-} from '../provider/codexNativeConfigService'
 import { executeProviderProfileOperationDelivery } from '../provider/provider-profile-operation-delivery'
 import { assertTrustedWorkflowLedgerSender } from './workflow-ledger-handlers'
 
@@ -43,14 +31,6 @@ type ProviderProfileAction =
   | 'rollback'
   | 'native-codex-preview'
   | 'native-codex-apply'
-  | 'cc-switch-preview'
-  | 'cc-switch-apply'
-  | 'cc-switch-backups'
-  | 'cc-switch-rollback'
-  | 'native-config-preview'
-  | 'native-config-apply'
-  | 'native-config-backups'
-  | 'native-config-rollback'
   | 'native-backups'
   | 'native-rollback'
 
@@ -88,7 +68,6 @@ export async function handleProviderProfileIpc(
     })
   }
   if (action === 'native-codex-preview') return previewCodexNativeProviderImport()
-  if (isCcSwitchProviderProfileAction(action)) return handleCcSwitchProviderProfileAction(action, args)
   if (action === 'native-backups') return listProviderNativeImportBackups()
   if (action === 'native-codex-apply') {
     const previewId = typeof args[0] === 'string' ? args[0] : ''
@@ -98,7 +77,6 @@ export async function handleProviderProfileIpc(
   if (action === 'native-rollback') {
     return rollbackProviderNativeImportBackup(typeof args[0] === 'string' ? args[0] : '')
   }
-  if (isNativeConfigProviderProfileAction(action)) return handleNativeConfigProviderProfileAction(action, args)
   if (action === 'apply') {
     const previewId = typeof args[0] === 'string' ? args[0] : ''
     const decisions = Array.isArray(args[1]) ? args[1] as ProviderProfileImportDecision[] : []
@@ -146,51 +124,6 @@ async function previewProfile(sender: WebContents) {
 function isProviderProfileAction(value: unknown): value is ProviderProfileAction {
   return [
     'export', 'preview', 'apply', 'backups', 'backup-preview', 'backup-apply', 'backup-delete', 'rollback',
-    'native-codex-preview', 'native-codex-apply', 'native-backups', 'native-rollback',
-    'cc-switch-preview', 'cc-switch-apply', 'cc-switch-backups', 'cc-switch-rollback',
-    'native-config-preview', 'native-config-apply', 'native-config-backups', 'native-config-rollback'
+    'native-codex-preview', 'native-codex-apply', 'native-backups', 'native-rollback'
   ].includes(String(value))
-}
-
-type CcSwitchProviderProfileAction =
-  | 'cc-switch-preview'
-  | 'cc-switch-apply'
-  | 'cc-switch-backups'
-  | 'cc-switch-rollback'
-
-type NativeConfigProviderProfileAction =
-  | 'native-config-preview'
-  | 'native-config-apply'
-  | 'native-config-backups'
-  | 'native-config-rollback'
-
-function handleCcSwitchProviderProfileAction(action: CcSwitchProviderProfileAction, args: unknown[]) {
-  if (action === 'cc-switch-preview') return previewCcSwitchProviderImport()
-  if (action === 'cc-switch-backups') return listCcSwitchProviderImportBackups()
-  if (action === 'cc-switch-rollback') {
-    return rollbackCcSwitchProviderImportBackup(typeof args[0] === 'string' ? args[0] : '')
-  }
-  const previewId = typeof args[0] === 'string' ? args[0] : ''
-  const decisions = Array.isArray(args[1]) ? args[1] as ProviderProfileImportDecision[] : []
-  return applyCcSwitchProviderImport(previewId, decisions)
-}
-
-function isCcSwitchProviderProfileAction(value: unknown): value is CcSwitchProviderProfileAction {
-  return ['cc-switch-preview', 'cc-switch-apply', 'cc-switch-backups', 'cc-switch-rollback'].includes(String(value))
-}
-
-function handleNativeConfigProviderProfileAction(action: NativeConfigProviderProfileAction, args: unknown[]) {
-  if (action === 'native-config-preview') return previewCodexNativeConfig()
-  if (action === 'native-config-backups') return listCodexNativeConfigBackups()
-  if (action === 'native-config-rollback') {
-    return rollbackCodexNativeConfigBackup(typeof args[0] === 'string' ? args[0] : '')
-  }
-  return applyCodexNativeConfig(
-    typeof args[0] === 'string' ? args[0] : '',
-    typeof args[1] === 'string' ? args[1] : ''
-  )
-}
-
-function isNativeConfigProviderProfileAction(value: unknown): value is NativeConfigProviderProfileAction {
-  return ['native-config-preview', 'native-config-apply', 'native-config-backups', 'native-config-rollback'].includes(String(value))
 }

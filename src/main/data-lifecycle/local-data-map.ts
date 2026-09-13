@@ -534,16 +534,6 @@ export const LOCAL_DATA_LIFECYCLE_MAP: LocalDataLifecycleEntry[] = [
     ]
   },
   {
-    id: 'cc-switch-provider-import-backups', title: 'CC Switch Provider batch import and rollback records',
-    paths: ['userData/cc-switch-provider-import-backups/<backup-id>.json'], sourceModules: ['src/main/provider/ccSwitchProviderImport.ts'],
-    owner: { scope: 'user', key: 'backupId and Provider operationId' }, sensitivity: 'credential',
-    backup: { behavior: 'private_local', status: 'enforced' },
-    retention: { rule: 'Each import record persists until removed outside the service; no count or age limit is enforced.', status: 'inventory_only' },
-    export: { mode: 'excluded', status: 'enforced' }, implementationStatus: 'partial',
-    deletion: { softDelete: 'none', purge: 'none', externalDelete: 'external_untouched', status: 'inventory_only' },
-    gaps: ['Encrypted key material supports exact rollback but is never exported; purge and retention controls remain open.']
-  },
-  {
     id: 'provider-profile-sync', title: 'Credential-free Provider profile synchronization',
     paths: ['userData/provider-profile-sync/state.json', 'userData/provider-profile-webdav/config.json', 'userData/provider-profile-s3/config.json', '<selected-sync-folder-or-WebDAV-or-S3>/caogen-provider-sync-and-history'],
     sourceModules: ['src/main/provider/providerProfileSync.ts', 'src/main/provider/providerProfileWebDavSync.ts', 'src/main/provider/providerProfileS3Sync.ts'], owner: { scope: 'user', key: 'deviceId and revisionId' },
@@ -590,23 +580,6 @@ export const LOCAL_DATA_LIFECYCLE_MAP: LocalDataLifecycleEntry[] = [
     gaps: [
       'The PKCS#8 private key is persisted only inside an Electron safeStorage envelope; optional portable backups are separately encrypted with scrypt and AES-256-GCM, while manifests and trust bundles contain only public material.',
       'Trusted external identities and the three-mode organization trust policy use a digest-protected CAS Store with revocation tombstones; signed trust export/import, encrypted identity recovery, rotation, retired-key continuity, and policy enforcement are implemented_unverified.'
-    ]
-  },
-  {
-    id: 'codex-native-config-backups',
-    title: 'System-encrypted Codex config.toml rollback backups',
-    paths: ['userData/codex-native-config-backups/<backup-id>.json'],
-    sourceModules: ['src/main/provider/codexNativeConfigService.ts'],
-    owner: { scope: 'user', key: 'backupId and CODEX_HOME identity' },
-    sensitivity: 'credential',
-    backup: { behavior: 'private_local', status: 'enforced' },
-    retention: { rule: 'Unrolled backups persist until removed outside the service; no count or age limit is enforced.', status: 'inventory_only' },
-    export: { mode: 'excluded', status: 'enforced' },
-    deletion: { softDelete: 'none', purge: 'none', externalDelete: 'external_untouched', status: 'inventory_only' },
-    implementationStatus: 'partial',
-    gaps: [
-      'Original config.toml bytes are encrypted with Electron safeStorage; backup metadata is integrity checked and contains no plaintext configuration.',
-      'No maximum backup count, expiry, or user purge control exists.'
     ]
   },
   {
@@ -669,6 +642,16 @@ export const LOCAL_DATA_LIFECYCLE_MAP: LocalDataLifecycleEntry[] = [
     gaps: ['Routine deletion does not delete outputs in external systems; Project deletion records those boundaries separately.']
   },
   {
+    id: 'project-refactor-journals', title: 'Project refactor recovery journals',
+    paths: ['userData/project-refactor-journal/<operation-id>.json'], sourceModules: ['src/main/projectRefactorJournal.ts'],
+    owner: { scope: 'session', key: 'sessionId and operationId' }, sensitivity: 'confidential',
+    backup: { behavior: 'none', status: 'inventory_only' },
+    retention: { rule: 'Bounded journals persist through recovery; terminal records may be compacted when capacity is reached.', status: 'partial' },
+    export: { mode: 'excluded', status: 'enforced' },
+    deletion: { softDelete: 'none', purge: 'record', externalDelete: 'external_untouched', status: 'partial' },
+    implementationStatus: 'partial', gaps: ['Recovery and capacity limits are enforced; unified Project/Session deletion and legal-hold coverage remain open.']
+  },
+  {
     id: 'managed-worktrees',
     title: 'Managed worktree registry, patches, and merge receipts',
     paths: ['userData/worktrees/index.json', 'userData/patches/<session-id>.patch', 'userData/patches/<session-id>-<timestamp>.patch', 'userData/worktree-merges.json'],
@@ -687,20 +670,6 @@ export const LOCAL_DATA_LIFECYCLE_MAP: LocalDataLifecycleEntry[] = [
     deletion: { softDelete: 'none', purge: 'record', externalDelete: 'external_untouched', status: 'partial' },
     implementationStatus: 'partial',
     gaps: ['Project and standalone deletion remove only removed registry projections plus exact/timestamped patches and merge receipts; active worktrees remain blocked until their Effect completes, and runtime proof remains open.']
-  },
-  {
-    id: 'project-refactor-journal',
-    title: 'Project refactor recovery journal',
-    paths: ['userData/project-refactor-journal/<operation-id>.json'],
-    sourceModules: ['src/main/projectRefactorJournal.ts', 'src/main/projectRefactor.ts'],
-    owner: { scope: 'session', key: 'sessionId, workspace root, and operationId' },
-    sensitivity: 'confidential',
-    backup: { behavior: 'private_local', status: 'enforced' },
-    retention: { rule: 'At most 50 records and 250 MB are retained; capacity cleanup removes only terminal applied, recovered, or superseded records, while interrupted, blocked, and corrupt recovery evidence is preserved.', status: 'enforced' },
-    export: { mode: 'excluded', status: 'enforced' },
-    deletion: { softDelete: 'none', purge: 'record', externalDelete: 'external_untouched', status: 'partial' },
-    implementationStatus: 'partial',
-    gaps: ['Successful rollback and dismissed recovery remove their records, and bounded terminal compaction is implemented; Session/Project cascade deletion and an application-data reset contract remain open.']
   },
   {
     id: 'migration-backups',
@@ -755,9 +724,9 @@ export const LOCAL_DATA_LIFECYCLE_MAP: LocalDataLifecycleEntry[] = [
     gaps: ['Project deletion never implies plugin uninstall; user-home ownership remains separate.']
   },
   {
-    id: 'office-artifact-outputs', title: 'User-owned Office artifact outputs',
-    paths: ['projectRoot/<user-selected-relative-path>.{docx,xlsx,pptx,pdf}'],
-    sourceModules: ['src/main/agent/tools/office-artifact.ts', 'src/main/task/artifact-lifecycle-producer.ts', 'src/main/data-lifecycle/project-portable-runtime.ts', 'src/main/data-lifecycle/project-external-file-manifest.ts'],
+    id: 'office-artifact-outputs', title: 'User-owned Artifact outputs and delivery exports',
+    paths: ['projectRoot/<user-selected-relative-path>.{docx,xlsx,pptx,pdf}', '<user-selected-artifact-or-delivery-export-path>'],
+    sourceModules: ['src/main/agent/tools/office-artifact.ts', 'src/main/task/artifact-lifecycle-producer.ts', 'src/main/task/workflow-artifact-delivery.ts', 'src/main/task/workflow-artifact-export.ts', 'src/main/data-lifecycle/project-portable-runtime.ts', 'src/main/data-lifecycle/project-external-file-manifest.ts'],
     owner: { scope: 'external_resource', key: 'canonical Artifact id and frozen Project-relative output path' }, sensitivity: 'confidential',
     backup: { behavior: 'aggregate_export', status: 'partial' },
     retention: { rule: 'Generated files remain under the user-owned Project workspace lifecycle.', status: 'enforced' },
@@ -890,16 +859,6 @@ export const PERSISTENCE_SCAN_EXCLUSIONS: PersistenceScanExclusion[] = [
     sourceModule: 'src/main/migration-safety.ts',
     boundary: 'delegates_to_registered_store',
     reason: 'Provides atomic primitives for registered migration backups and explicit external target writes.'
-  },
-  {
-    sourceModule: 'src/main/task/workflow-artifact-delivery.ts',
-    boundary: 'external_user_action',
-    reason: 'Writes delivery manifests and packages only to a destination explicitly selected by the user in a save dialog.'
-  },
-  {
-    sourceModule: 'src/main/task/workflow-artifact-export.ts',
-    boundary: 'external_user_action',
-    reason: 'Copies verified Artifact bytes only to a destination explicitly selected by the user in a save dialog.'
   },
   {
     sourceModule: 'src/main/providerCredentialBroker.ts',

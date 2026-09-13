@@ -135,18 +135,11 @@ export class TaskSnapshotReplayCoordinator {
       plan.dispatching = false
     }
     if (!accepted || plan.pendingFailure) {
-      const failure = plan.pendingFailure
       this.fail(
         plan,
         'task-snapshot-replay-rejected',
-        failure ?? 'SessionManager rejected the recovered prompt'
+        plan.pendingFailure ?? 'SessionManager rejected the recovered prompt'
       )
-      // An explicit Supervisor resume is an interactive control operation.
-      // Preserve the Provider/runtime error for the caller while the control
-      // path transitions the Run back to a blocked, send-gated state.
-      if (plan.options.supervisorControlReplay && failure) {
-        throw sendError instanceof Error ? sendError : new Error(failure)
-      }
       return false
     }
     return true

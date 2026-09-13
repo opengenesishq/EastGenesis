@@ -17,6 +17,7 @@ import { hasOfficeFailoverSignal } from '../providerModelFailover'
 import { stableWatercolorRole, type WatercolorCharacterRole, type WatercolorCharacterState } from '../../../../../shared/watercolor-character'
 import type { Group, MeshStandardMaterial } from 'three'
 import type { OfficeHairStyle, OfficeOutfitPalette } from '../../../../../shared/types'
+import { resolveWorkstationDetail } from './workstationSupport'
 
 export type WorkstationActivity = OfficeSessionActivity
 export type WorkstationDetail = 'full' | 'compact'
@@ -25,9 +26,12 @@ export interface WorkstationProProps {
   sessionId: string
   position: [number, number, number]
   active: boolean
-  /** Selected stations always render at full detail; this can keep an inactive station full when needed. */
+  /** Selected stations default to full detail; this can keep an inactive station full when needed. */
   detail?: WorkstationDetail
+  /** Lets constrained quality tiers lower the selected station without changing inactive-station detail. */
+  activeDetail?: WorkstationDetail
   activity: WorkstationActivity
+  awaitingText?: string
   title: string
   costUsd: number
   brandName?: string
@@ -53,6 +57,7 @@ export interface WorkstationProProps {
 function whenInteractive<T extends object>(interactive: boolean, handlers: T): T | Record<string, never> {
   return interactive ? handlers : {}
 }
+
 /** 活动 → 屏幕/强调色(与办公区状态色规范一致,克制) */
 const ACTIVITY_COLOR: Record<WorkstationActivity, string> = {
   idle: '#7f95a6',
@@ -66,8 +71,6 @@ const OFFICE_STRUCTURE_TRIM = '#697680'
 const OFFICE_NEUTRAL_LIGHT = '#9aa8b5'
 const OPERATOR_INPUT_ARRAY_Z = 0.16
 
-/** 待授权时头顶气泡文案 */
-const AWAITING_TEXT = '等待授权'
 const FAULT_COLOR = '#a94842'
 
 export const activityOf = officeActivityOf
@@ -680,7 +683,8 @@ export default function WorkstationPro({
   position,
   active,
   detail,
-  activity,
+  activeDetail,
+  activity, awaitingText = '等待处理',
   title,
   costUsd,
   brandName,
@@ -719,24 +723,17 @@ export default function WorkstationPro({
             : 0.08
   const showOperator = !operatorAway
   const characterRole = watercolorRole ?? stableWatercolorRole(sessionId)
-  const resolvedDetail: WorkstationDetail = active ? 'full' : (detail ?? 'compact')
-
+  const resolvedDetail = resolveWorkstationDetail(active, activeDetail, detail)
   const phase = useMemo(
     () => (position[0] * 1.7 + position[2] * 0.9) % (Math.PI * 2),
     [position]
   )
 
-  const cursorOver = (e: { stopPropagation: () => void }): void => {
-    e.stopPropagation()
-    document.body.style.cursor = 'pointer'
-  }
+  const cursorOver = (e: { stopPropagation: () => void }): void => { e.stopPropagation(); document.body.style.cursor = 'pointer' }
   const cursorOut = (): void => {
     document.body.style.cursor = 'default'
   }
-  const clickSelect = (e: { stopPropagation: () => void }): void => {
-    e.stopPropagation()
-    onSelect()
-  }
+  const clickSelect = (e: { stopPropagation: () => void }): void => { e.stopPropagation(); onSelect() }
   const doubleClickOpen = (e: { stopPropagation: () => void }): void => {
     e.stopPropagation()
     onOpen?.()
@@ -774,7 +771,7 @@ export default function WorkstationPro({
         )}
 
         {activity === 'awaiting' && !operatorAway && (
-          <SpeechBubble position={[0, 1.98, 0.56]} kind="speak" text={AWAITING_TEXT} />
+          <SpeechBubble position={[0, 1.98, 0.56]} kind="speak" text={awaitingText} />
         )}
       </group>
     )
@@ -928,7 +925,7 @@ export default function WorkstationPro({
 
       {/* 待授权:头顶说话气泡 */}
       {activity === 'awaiting' && !operatorAway && (
-        <SpeechBubble position={[0, 1.98, 0.56]} kind="speak" text={AWAITING_TEXT} />
+        <SpeechBubble position={[0, 1.98, 0.56]} kind="speak" text={awaitingText} />
       )}
       {activity === 'error' && !operatorAway && (
         <>

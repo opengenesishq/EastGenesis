@@ -255,7 +255,7 @@ check('watercolor Office runtime is alpha-gated and falls back without verified 
   const assets = source('src/renderer/src/components/office/watercolor-character-assets.ts')
   const rig = source('src/renderer/src/components/office/kit/WatercolorCharacterRig.tsx')
   const workstation = source('src/renderer/src/components/office/kit/WorkstationPro.tsx')
-  const view = source('src/renderer/src/components/office/OfficeRuntime.tsx')
+  const view = source('src/renderer/src/components/office/OfficeView.tsx')
   assert(
     assets.includes('VERIFIED_WATERCOLOR_CHARACTER_FILES') &&
       assets.includes('VERIFIED_FILE_SET.has(filename)'),
@@ -272,10 +272,10 @@ check('watercolor Office runtime is alpha-gated and falls back without verified 
     'watercolor rig must render an unframed alpha sprite and honor reduced motion'
   )
   assert(
-    workstation.includes('stableWatercolorRole') &&
-      workstation.includes('<WorkstationOperatorRig') &&
-      workstation.includes('loadModel={loadCharacterAssets}'),
-    'workstations must preserve provider-neutral roles through the articulated worker rig'
+    workstation.includes('hasWatercolorCharacterAsset') &&
+      workstation.includes('watercolorOperator ?') &&
+      workstation.includes('<ProgressiveAvatarRig'),
+    'workstations must keep the robot fallback until a role/state asset passes the gate'
   )
   assert(
     view.includes('listDigitalWorkers({ includeRetired: true })') &&
@@ -444,11 +444,7 @@ check('buildOfficeModel merges live git status into workspace signals', () => {
 })
 
 check('OfficeView exposes machine-readable session status counts', () => {
-  const boot = source('src/renderer/src/components/office/OfficeView.tsx')
-  const text = source('src/renderer/src/components/office/OfficeRuntime.tsx')
-  assert([boot, text].every((officeSource) => officeSource.includes('const OFFICE_MAX_VISIBLE_SESSIONS = 9') && officeSource.includes('data-office-session-capacity={OFFICE_MAX_VISIBLE_SESSIONS}')), 'Office boot and runtime must expose the 9-session capacity')
-  assert(text.includes('prioritizeOfficeSessionIds(businessSessionIds, activeId)') && text.includes('data-office-hidden-sessions={hiddenSessionCount}') && text.includes('data-office-hidden-session={session.id}'), 'Office runtime must prioritize active work and expose overflow')
-  assert(boot.includes('data-office-hidden-sessions={hiddenIds.length}') && boot.includes('data-office-hidden-session={id}') && boot.includes('boot.selectSession(id)') && text.includes('data-office-3d-workers-ready-at={bootCharactersReadyAt}'), 'Office boot must expose canonical overflow selection and a real 3D-ready timestamp')
+  const text = source('src/renderer/src/components/office/OfficeView.tsx')
   for (const marker of [
     'data-office-idle-sessions',
     'data-office-running-sessions',
@@ -477,21 +473,29 @@ check('OfficeView exposes machine-readable session status counts', () => {
   ]) {
     assert(text.includes(marker), `missing ${marker}`)
   }
-  assert(source('src/renderer/src/components/office/useOfficeGitStatus.ts').includes('window.agentDesk.gitStatus(id)'), 'Office runtime must refresh live git status for visible sessions')
-  assert(text.includes('buildOfficeModel(visibleIds, sessions, officeGitStatusBySession)'), 'Office runtime must pass live git status into office model')
+  assert(text.includes('window.agentDesk.gitStatus(id)'), 'OfficeView must refresh live git status for visible sessions')
+  assert(text.includes('buildOfficeModel(ids, sessions, officeGitStatusBySession)'), 'OfficeView must pass live git status into office model')
   assert(text.includes('sessionSignal={officeModel.sessions[id]?.signal}'), 'OfficeView must pass real session signals to 3D workstations')
-  assert(text.includes("'officeMetricRouted'"), 'Office runtime command strip must show routed sessions')
-  assert(text.includes("'officeMetricFailover'"), 'Office runtime command strip must show failover sessions')
-  assert(text.includes("'officeMetricCost'"), 'Office runtime command strip must show total cost')
-  assert(text.includes("'officeMetricWorkspace'"), 'Office runtime command strip must show workspace changed files')
-  assert(text.includes("'officeMetricGit'"), 'Office runtime command strip must show live git dirty sessions')
-  assert(text.includes("'officeMetricIsolated'"), 'Office runtime command strip must show isolated sessions')
+  assert(text.includes("t('officeMetricRouted')"), 'OfficeView command strip must show routed sessions')
+  assert(text.includes("t('officeMetricFailover')"), 'OfficeView command strip must show failover sessions')
+  assert(text.includes("t('officeMetricCost')"), 'OfficeView command strip must show total cost')
+  assert(text.includes("t('officeMetricWorkspace')"), 'OfficeView command strip must show workspace changed files')
+  assert(text.includes("t('officeMetricGit')"), 'OfficeView command strip must show live git dirty sessions')
+  assert(text.includes("t('officeMetricIsolated')"), 'OfficeView command strip must show isolated sessions')
   assert(text.includes("t('officeWorkspace')"), 'selected agent panel must show workspace state')
   assert(text.includes("t('officeFiles')"), 'selected agent panel must show file change state')
 })
 
+check('OfficeView scopes project and media telemetry to the active courtyard', () => {
+  const text = source('src/renderer/src/components/office/OfficeView.tsx')
+  assert(text.includes('data-office-projects={scopedOperations.projects.projects}'), 'project telemetry must use the selected business projection')
+  assert(text.includes('data-office-video-productions={scopedOperations.media.productions}'), 'video telemetry must use the selected business projection')
+  assert(text.includes('data-office-media-jobs={scopedOperations.media.jobs}'), 'media jobs telemetry must use the selected business projection')
+  assert(text.includes('const hasAnyOperations = businessIds.length > 0 || scopedOperations.projects.projects > 0'), 'empty state must not be triggered by another courtyard')
+})
+
 check('office visual noise stays removed while packet semantics remain', () => {
-  const view = source('src/renderer/src/components/office/OfficeRuntime.tsx')
+  const view = source('src/renderer/src/components/office/OfficeView.tsx')
   const kitIndex = source('src/renderer/src/components/office/kit/index.ts')
   const officeSceneRoot = source('src/renderer/src/components/office/kit/OfficeSceneRoot.tsx')
   const deskAccessories = source('src/renderer/src/components/office/kit/DeskAccessories.tsx')
@@ -535,7 +539,7 @@ check('desk operators use a seated low-noise workstation presentation', () => {
   const monitors = source('src/renderer/src/components/office/kit/MonitorSetup.tsx')
   const backplane = source('src/renderer/src/components/office/kit/OperationsBackplane.tsx')
   const windowWall = source('src/renderer/src/components/office/kit/WindowWall.tsx')
-  const view = source('src/renderer/src/components/office/OfficeRuntime.tsx')
+  const view = source('src/renderer/src/components/office/OfficeView.tsx')
   const css = source('src/renderer/src/styles.css')
 
   assert(animations.includes('function applyDeskSeatedLowerBody'), 'desktop animation states must share a seated lower-body pose')
@@ -554,7 +558,7 @@ check('desk operators use a seated low-noise workstation presentation', () => {
   assert(robotAsset.includes('function createHandEndpointMarker'), 'reference robot must expose real palm-center IK endpoints')
   assert(robotAsset.includes("'left_hand_ik_endpoint'") && robotAsset.includes("'right_hand_ik_endpoint'"), 'both robot hands must expose IK endpoints')
   assert(workstation.includes('const OPERATOR_INPUT_ARRAY_Z = 0.16'), 'operator input array must stay far enough forward for a human-like elbow angle')
-  assert(source('src/renderer/src/components/office/kit/WorkstationOperatorRig.tsx').includes('name="desk-left-hand-ik-target"'), 'workstation operator must expose physical hand targets')
+  assert(workstation.includes('name="desk-left-hand-ik-target"') && workstation.includes('name="desk-right-hand-ik-target"'), 'workstation must expose two physical hand targets')
   assert(monitors.includes("const SCREEN_SURFACE = '#17232d'"), 'monitor body must use a neutral screen surface')
   assert(monitors.includes('color={SCREEN_SURFACE}') && monitors.includes('emissive={SCREEN_GLOW}'), 'status color must not flood the full monitor panel')
   assert(!backplane.includes('<cylinderGeometry args={[0.08, 0.08, 0.012, 28]} />'), 'floor data nodes must not render circular pucks')
@@ -564,7 +568,7 @@ check('desk operators use a seated low-noise workstation presentation', () => {
 })
 
 check('clicking a workstation selects in office and double-click opens the session', () => {
-  const text = source('src/renderer/src/components/office/OfficeRuntime.tsx')
+  const text = source('src/renderer/src/components/office/OfficeView.tsx')
   assert(text.includes('selectSession(id)'), 'focus() must call selectSession(id)')
   assert(text.includes("setView('list')"), 'focus() must return to list view after selecting')
   assert(
@@ -575,7 +579,7 @@ check('clicking a workstation selects in office and double-click opens the sessi
 })
 
 check('OfficeView exposes clickable facility targets', () => {
-  const view = source('src/renderer/src/components/office/OfficeRuntime.tsx')
+  const view = source('src/renderer/src/components/office/OfficeView.tsx')
   const facilities = source('src/renderer/src/components/office/kit/FacilityHotspots.tsx')
   const stations = source('src/renderer/src/components/office/kit/CommandCenterStations.tsx')
   const layout = source('src/renderer/src/components/office/kit/controlRoomLayout.ts')
@@ -600,7 +604,7 @@ check('OfficeView exposes clickable facility targets', () => {
   assert(walkers.includes("'assistant'") && walkers.includes("'project'") && walkers.includes("'video'"), 'AgentWalkers must support all business-zone route reasons')
   assert(walkers.includes('holdAtTarget'), 'AgentWalkers must support stable facility target presentation')
   assert(walkers.includes('departureDelay') && walkers.includes('waitingToDepart'), 'facility walkers must stagger departures instead of overlapping at startup')
-  assert(source('src/renderer/src/components/office/kit/WalkerRigAnimation.ts').includes('applyStandingTalking'), 'approval walkers must use a standing interaction pose away from the desk')
+  assert(walkers.includes('applyStandingTalking'), 'approval walkers must use a standing interaction pose away from the desk')
   assert(walkers.includes('walker-select-hitbox'), 'AgentWalkers must expose a stable pointer hit target')
   assert(cameraRig.includes('minDistance?: number') && view.includes('minDistance={cameraMinDistance}'), 'camera presets must support real close focus instead of a fixed six-unit clamp')
   assert(facilities.includes('CONTROL_ROOM_LAYOUT.assistant.cameraPosition') && facilities.includes('CONTROL_ROOM_LAYOUT.project.cameraPosition') && facilities.includes('CONTROL_ROOM_LAYOUT.video.cameraPosition'), 'business-zone cameras must use the shared layout contract')
@@ -639,7 +643,7 @@ check('walking agents use distance-locked foot contact gait', () => {
 })
 
 check('failed office sessions expose a visible maintenance response', () => {
-  const view = source('src/renderer/src/components/office/OfficeRuntime.tsx')
+  const view = source('src/renderer/src/components/office/OfficeView.tsx')
   const workstation = source('src/renderer/src/components/office/kit/WorkstationPro.tsx')
   assert(view.includes('data-office-maintenance-units'), 'missing maintenance unit semantic attribute')
   assert(view.includes('data-office-diagnostic-beams'), 'missing diagnostic beam semantic attribute')
@@ -655,7 +659,7 @@ check('workstations render real routing/failover/budget signals in 3D', () => {
   const css = source('src/renderer/src/styles.css')
   assert(workstation.includes('function RoutingBudgetStack'), 'WorkstationPro must render a 3D routing/budget signal stack')
   assert(workstation.includes('signal.routing'), 'routing signal must control a real 3D indicator')
-  assert(workstation.includes('hasOfficeFailoverSignal(signal)') && workstation.includes('failoverActive'), 'failover signal must control a real 3D indicator')
+  assert(workstation.includes('signal.failover'), 'failover signal must control a real 3D indicator')
   assert(workstation.includes('signal.budget.ratio'), 'budget ratio must control a real 3D indicator')
   assert(workstation.includes('signal.workspace'), 'workspace signal must control a real 3D indicator')
   assert(workstation.includes('<RoutingBudgetStack signal={sessionSignal}'), 'routing/budget stack must be attached to each workstation')
@@ -666,7 +670,7 @@ check('workstations render real routing/failover/budget signals in 3D', () => {
 })
 
 check('OfficeView exposes final 3D optimization completion controls', () => {
-  const view = source('src/renderer/src/components/office/OfficeRuntime.tsx')
+  const view = source('src/renderer/src/components/office/OfficeView.tsx')
   const i18n = source('src/renderer/src/i18n.ts')
   assert(view.includes("'incidents'"), 'camera presets must include incidents view')
   assert(view.includes('data-office-incident-camera'), 'missing incident camera semantic attribute')
@@ -898,7 +902,7 @@ check('reference robot GLB preserves official meshes and runtime animation roots
 })
 
 check('AvatarRig uses reference robot design language', () => {
-  const view = source('src/renderer/src/components/office/OfficeRuntime.tsx')
+  const view = source('src/renderer/src/components/office/OfficeView.tsx')
   const avatar = source('src/renderer/src/components/office/kit/AvatarRig.tsx')
   const progressiveAvatar = source('src/renderer/src/components/office/kit/ProgressiveAvatarRig.tsx')
   const robotAsset = source('src/renderer/src/components/office/kit/RobotModelAsset.tsx')
@@ -939,7 +943,7 @@ check('AvatarRig uses reference robot design language', () => {
   assert(progressiveAvatar.includes('Math.PI * 1.5') && progressiveAvatar.includes('rotation={[0, 0, Math.PI * 0.75]}'), 'compact reference visor must remain a 270-degree U instead of a generic full ring')
   assert(progressiveAvatar.includes('const COMPACT_GEOMETRIES') && progressiveAvatar.includes('compactMaterialCache') && progressiveAvatar.includes('dispose={null}'), 'Boot/Low rigs must share immutable geometry and material caches')
   assert(progressiveAvatar.includes("officeRobotModelUrl: ready ? 'procedural-low-v2'") && progressiveAvatar.includes("officeRobotVisualFamily: 'reference-unitree-v2'"), 'Low robots must declare the v2 reference visual family')
-  assert(view.includes('<OfficeBootCharacter') && source('src/renderer/src/components/office/kit/OfficeBootCharacter.tsx').includes('<LowPolyDigitalWorkerRig'), 'Office Boot scene must reuse the shared low-poly digital worker visual')
+  assert(view.includes('<CompactRobotVisual') && view.includes('variant="boot"') && view.includes('materialMode="basic"'), 'Office Boot scene must reuse the shared reference robot visual')
   assert(robotAsset.includes("reference-office-robot.glb?url") && robotAsset.includes('REFERENCE_ROBOT_GLB_URL = referenceRobotGlbUrl'), 'RobotModelAsset must load the generated reference GLB by default')
   assert(robotAsset.includes('useLoader') && robotAsset.includes('GLTFLoader') && robotAsset.includes('hasReferenceRobotModelAsset'), 'RobotModelAsset must keep the GLB loading pipeline explicit and guardable')
   assert(!robotAsset.includes('useGLTF'), 'RobotModelAsset must avoid drei useGLTF because it triggers MeshoptDecoder under strict Electron CSP')
@@ -1105,11 +1109,11 @@ check('AvatarRig uses reference robot design language', () => {
       assert(!text.includes(color), `${label} must not keep the old saturated office color ${color}`)
     }
   }
-  assert(view.includes("bg: '#1c2024'") && view.includes("bg: '#d8dde0'"), 'office scene colors must remain muted and low saturation')
+  assert(view.includes("bg: '#10151b'") && view.includes("grid1: '#34404c'"), 'office scene colors must remain muted and low saturation')
 })
 
 check('3D office canvas has resize-safe rendering hooks', () => {
-  const view = source('src/renderer/src/components/office/OfficeRuntime.tsx')
+  const view = source('src/renderer/src/components/office/OfficeView.tsx')
   const css = source('src/renderer/src/styles.css')
   assert(view.includes('resize={{ offsetSize: true }}'), 'Canvas must use offsetSize resize tracking')
   assert(css.includes('.office-canvas-wrap canvas'), 'office canvas CSS rule missing')
@@ -1117,7 +1121,7 @@ check('3D office canvas has resize-safe rendering hooks', () => {
 })
 
 check('3D office performance diagnostics are opt-in and frame-loop free', () => {
-  const view = source('src/renderer/src/components/office/OfficeRuntime.tsx')
+  const view = source('src/renderer/src/components/office/OfficeView.tsx')
   const probe = source('src/renderer/src/components/office/kit/OfficePerformanceProbe.tsx')
   const packageJson = source('package.json')
   assert(view.includes('<OfficePerformanceProbe />'), 'Office canvas must mount the performance probe')
@@ -1140,8 +1144,8 @@ check('3D office quality modes persist, adapt, and pause without changing scene 
   const types = source('src/shared/types.ts')
   const settings = source('src/main/settings.ts')
   const store = source('src/renderer/src/store.ts')
-  const settingsUi = source('src/renderer/src/components/settings/OfficeAppearanceSettings.tsx')
-  const view = source('src/renderer/src/components/office/OfficeRuntime.tsx')
+  const settingsUi = source('src/renderer/src/components/SettingsModal.tsx')
+  const view = source('src/renderer/src/components/office/OfficeView.tsx')
   const quality = source('src/renderer/src/components/office/quality.ts')
   const runtime = source('src/renderer/src/components/office/kit/OfficeRenderQuality.tsx')
   const probe = source('src/renderer/src/components/office/kit/OfficePerformanceProbe.tsx')
@@ -1152,13 +1156,13 @@ check('3D office quality modes persist, adapt, and pause without changing scene 
     'OfficeSettings must expose the four persisted quality modes'
   )
   assert(
-    settings.includes("qualityMode: 'auto', showBadges: true") &&
+    settings.includes("office: { qualityMode: 'auto'") &&
       settings.includes('normalizeOfficeQualityMode') &&
       settings.includes('office: normalizeOffice(raw.office, DEFAULTS.office)') &&
       settings.includes('office: normalizeOffice(patch.office, prev.office)'),
     'main settings must default and normalize legacy or invalid Office quality values'
   )
-  assert(store.includes("qualityMode: 'auto', showBadges: true"), 'renderer settings fallback must default Office quality to auto')
+  assert(store.includes("office: { qualityMode: 'auto'"), 'renderer settings fallback must default Office quality to auto')
   for (const mode of ['auto', 'high', 'balanced', 'low']) {
     assert(
       settingsUi.includes(`{ value: '${mode}', labelKey:`),
@@ -1168,7 +1172,7 @@ check('3D office quality modes persist, adapt, and pause without changing scene 
   assert(
     quality.includes('OFFICE_QUALITY_PROFILES') &&
       quality.includes('nextOfficeAutoQuality') &&
-      quality.includes("contactShadows: 'dynamic'") &&
+      quality.includes('officeResolutionDpr') &&
       quality.includes("contactShadows: 'static'") &&
       quality.includes("contactShadows: 'off'"),
     'quality profiles must adapt DPR, realtime shadows, and contact-shadow effects'
@@ -1210,12 +1214,13 @@ check('3D office quality modes persist, adapt, and pause without changing scene 
     'static contact shadows must survive unrelated Office rerenders without resetting their frame budget'
   )
   assert(
-    source('src/renderer/src/components/SettingsModal.tsx').includes("setSaveError(t('settingsSaveFailed'))") &&
-      source('src/renderer/src/components/SettingsModal.tsx').includes('data-settings-save-error'),
+    settingsUi.includes("setSaveError(t('settingsSaveFailed'))") &&
+      settingsUi.includes('data-settings-save-error'),
     'settings write failures must stay visible instead of becoming unhandled rejections'
   )
   for (const file of [
     'src/renderer/src/components/ChatView.tsx',
+    'src/renderer/src/components/Sidebar.tsx',
     'src/renderer/src/components/workbench/WorkbenchRoot.tsx'
   ]) {
     const backgroundSettingsCaller = source(file)

@@ -4,7 +4,6 @@ import { useStore, type ToolResultInfo } from '../store'
 import { useT } from '../i18n'
 import DiffView from './DiffView'
 import { DisclosureChevron } from './DisclosureChevron'
-import SearchToolResult from './SearchToolResult'
 
 type ToolUseBlock = Extract<AssistantBlock, { type: 'tool_use' }>
 
@@ -139,34 +138,6 @@ function isWorkspaceMutationTool(name: string): boolean {
   return name === 'Edit' || name === 'MultiEdit' || name === 'Write' || name === 'NotebookEdit'
 }
 
-function isSearchTool(name: string): boolean {
-  return name === 'web_search' || name === 'WebSearch'
-}
-
-type ToolCardStatus = 'reconciliation' | 'error' | 'done' | 'running' | 'pending'
-
-function toolCardStatus(result: ToolResultInfo | undefined, running: boolean): ToolCardStatus {
-  if (result?.effectStatus === 'waiting_reconciliation') return 'reconciliation'
-  if (result) return result.isError ? 'error' : 'done'
-  return running ? 'running' : 'pending'
-}
-
-function toolCardStatusLabel(status: ToolCardStatus, t: (key: string) => string): string {
-  const labels: Record<ToolCardStatus, string> = {
-    reconciliation: 'toolWaitingReconciliation',
-    done: 'toolDone',
-    error: 'toolFailed',
-    running: 'statusRunning',
-    pending: 'toolPending'
-  }
-  return t(labels[status])
-}
-
-function toolResultLabel(result: ToolResultInfo, waitingReconciliation: boolean, t: (key: string) => string): string {
-  if (waitingReconciliation) return t('toolReconciliationOutput')
-  return result.isError ? t('errorOutput') : t('output')
-}
-
 export default function ToolCallCard({
   block,
   result,
@@ -184,8 +155,23 @@ export default function ToolCallCard({
   const summary = toolSummary(block.name, input, t)
 
   const waitingReconciliation = result?.effectStatus === 'waiting_reconciliation'
-  const status = toolCardStatus(result, running)
-  const statusLabel = toolCardStatusLabel(status, t)
+  const status = waitingReconciliation
+    ? 'reconciliation'
+    : result
+      ? (result.isError ? 'error' : 'done')
+      : running
+        ? 'running'
+        : 'pending'
+  const statusLabel =
+    status === 'running'
+      ? t('statusRunning')
+      : status === 'reconciliation'
+        ? t('toolWaitingReconciliation')
+      : status === 'done'
+        ? t('toolDone')
+        : status === 'error'
+          ? t('toolFailed')
+          : t('toolPending')
 
   const resultText = result?.content ?? ''
   const truncated = !showFullResult && resultText.length > RESULT_PREVIEW_CHARS
@@ -214,12 +200,14 @@ export default function ToolCallCard({
           {result && (
             <div className={`tool-result ${waitingReconciliation ? 'tool-result-reconciliation' : result.isError ? 'tool-result-error' : ''}`}>
               <div className="tool-result-label">
-                {toolResultLabel(result, waitingReconciliation, t)}
+                {waitingReconciliation
+                  ? t('toolReconciliationOutput')
+                  : result.isError
+                    ? t('errorOutput')
+                    : t('output')}
               </div>
-              {isSearchTool(block.name)
-                ? <SearchToolResult content={resultText || t('noOutput')} />
-                : <pre className="code-block">{displayResult || t('noOutput')}</pre>}
-              {truncated && !isSearchTool(block.name) && (
+              <pre className="code-block">{displayResult || t('noOutput')}</pre>
+              {truncated && (
                 <button className="btn btn-ghost btn-sm" onClick={() => setShowFullResult(true)}>
                   {t('showAllChars', { n: resultText.length })}
                 </button>

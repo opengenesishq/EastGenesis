@@ -1,7 +1,7 @@
 import type { EffectRecord } from '../shared/types'
 import { getPersistedArtifactLifecycle } from './task/artifact-lifecycle-api'
 import type { ArtifactLifecycleRecord } from './task/artifact-lifecycle-types'
-import { settleCanonicalSystemOperation } from './task/system-operation-context'
+import { TaskKernel } from './task/task-kernel'
 import type { ProjectPermanentDeletionEffectTarget } from './project-deletion-effect-target'
 
 type ConfirmedProjectPermanentDeletionEffect = EffectRecord & {
@@ -25,7 +25,7 @@ export async function recoverConfirmedProjectPermanentDeletionArtifact(
       lifecycle.kind !== 'report' || lifecycle.storageKind !== 'blob') {
     throw new Error(`confirmed Project deletion report is missing or crosses ownership:${effect.id}`)
   }
-  await settleCanonicalSystemOperation({
+  await new TaskKernel(rootDir).deliver({
     rootDir,
     goalId: effect.target.goalId,
     workItemId: effect.target.workItemId
