@@ -5,6 +5,7 @@ import type { OfficeRevisionApi } from './office-revision-types'
 import type { SendMessagePayload } from './message-payload-types'
 import type { SessionInputApi } from './session-input-types'
 import type { PreparationPermissionApi } from './preparation-permission-types'
+import type { TaskExecutionAuthorityApi } from './task-execution-authority-types'
 import type { CouncilApi } from './council-types'
 export type * from './preparation-permission-types'
 export type { SendMessagePayload } from './message-payload-types'
@@ -629,6 +630,8 @@ export interface SessionMeta extends BusinessLineBinding, SessionRuntimeRoutingB
   engine?: EngineKind
   /** 查看/规划/执行；决定任务是否可以产生外部或工作区副作用。 */
   taskStrategy: TaskStrategy
+  /** Once enabled, recovery/import requires an explicit local file grant; never reset to legacy. */
+  taskExecutionAuthorityRequired?: true
   /**
    * 权限模式（派生只读）。
    * 收编后此字段由 derivePermissionModeFromStrategy(taskStrategy) 派生，
@@ -693,6 +696,7 @@ export interface HistoryEntry extends BusinessLineBinding, SessionRuntimeRouting
   engine?: EngineKind
   /** 旧历史缺失时迁移为 execute。 */
   taskStrategy?: TaskStrategy
+  taskExecutionAuthorityRequired?: true
   permissionMode: PermissionModeId
   sdkSessionId: string
   /** 显式跨 Provider/模型分叉的直接来源；新会话拥有独立 sdkSessionId。 */
@@ -2513,7 +2517,7 @@ export type MenuCommand =
   | { type: 'select-session'; index: number }
 
 /** 通过 contextBridge 暴露给渲染进程的 API */
-export interface AgentDeskApi extends CouncilApi, PreparationPermissionApi, SessionInputApi, WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, RemoteApi, MediaApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi, PalaceSceneBuilderApi {
+export interface AgentDeskApi extends CouncilApi, PreparationPermissionApi, TaskExecutionAuthorityApi, SessionInputApi, WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, RemoteApi, MediaApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi, PalaceSceneBuilderApi {
   listPendingPermissions(sessionId: string): Promise<PermissionRequestInfo[]>
   getTranscript(sessionId: string): Promise<TranscriptEntry[]>
   suggestFiles(sessionId: string, query: string): Promise<string[]>

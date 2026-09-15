@@ -108,6 +108,7 @@ function isSessionMeta(value: unknown): value is SessionMeta {
     providerId: isString,
     status: isSessionStatus,
     taskStrategy: optional(isString),
+    taskExecutionAuthorityRequired: optional((value: unknown) => value === true),
     permissionMode: isString,
     usage: isUsageTotals,
     costUsd: isNumber,

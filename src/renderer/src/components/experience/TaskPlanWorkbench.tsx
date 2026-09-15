@@ -5,6 +5,7 @@ import { useStore } from '../../store'
 import TaskPlanEditor from './TaskPlanEditor'
 import TaskPlanInstitutions from './TaskPlanInstitutions'
 import PreparationPermission from '../composer/PreparationPermission'
+import TaskExecutionAuthority from '../composer/TaskExecutionAuthority'
 import CouncilPanel from './CouncilPanel'
 import { DisclosureChevron } from '../DisclosureChevron'
 import { TASK_PLAN_NAVIGATION_EVENT, takeTaskPlanNavigation } from './task-plan-navigation'
@@ -119,6 +120,7 @@ export default function TaskPlanWorkbench({
       />
       {expanded && current && <TaskPlanInstitutions version={current} />}
       {expanded && <PreparationPermission key={sessionId} sessionId={sessionId} running={running} />}
+      {expanded && <TaskExecutionAuthority key={`authority:${sessionId}`} sessionId={sessionId} running={running} />}
       {expanded && showCouncil && <CouncilPanel sessionId={sessionId} />}
       {state?.approvalStatus === 'approved' && state.projection && (
         <div className={`task-plan-projection task-plan-projection-${state.projection.mode}`}

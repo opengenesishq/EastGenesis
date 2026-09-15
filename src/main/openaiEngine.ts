@@ -1,4 +1,5 @@
 import { preparationPermissionSystemPrompt } from './permission/preparation-tool-scope'
+import { taskExecutionAuthoritySystemPrompt } from './permission/task-execution-authority-prompt'
 import { readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
@@ -1407,6 +1408,7 @@ export class OpenAIEngine implements Engine {
       providerPrompt,
       taskStrategySystemPrompt(this.meta.taskStrategy),
       preparationPermissionSystemPrompt(this.meta, app.getPath('userData')),
+      taskExecutionAuthoritySystemPrompt(this.meta, app.getPath('userData')),
       '你是 CaoGen 桌面工作室里的编码 Agent。',
       `当前工作目录: ${this.meta.cwd}`,
       '你可以使用工具(bash/view/read_file/write_file/search_replace/edit_file/artifact_register/create_document/create_spreadsheet/create_presentation/create_pdf/list_dir/search_symbol/search_code/find_file/get_dependencies/task_decompose/genesis_orchestrate/task_dispatch_dag/task_decompose_and_dispatch_dag/git_status/git_diff/git_stage/git_stage_all/git_commit/git_push/git_create_pr/git_create_issue/git_merge/code_forge_delivery/send_notification)读写项目文件、生成 Word/Excel/PowerPoint/PDF 办公成品、执行命令、规划编排、发送已配置通知并完成 Git 流程。',

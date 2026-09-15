@@ -17,6 +17,7 @@ import type {
   BrowserViewState
 } from '../shared/types'
 import { DEFAULT_BROWSER_URL, normalizeBrowserNavigationUrl } from './browserNavigation'
+import { readBrowserPageSource, type BrowserPageSource } from './browser/browser-page-source'
 
 interface BrowserRecord {
   sessionId: string
@@ -25,6 +26,7 @@ interface BrowserRecord {
   consoleErrors: string[]
   /** 最近的网络失败(status>=400 或加载失败),供批注/只读观测 */
   networkFailures: string[]
+  navigationRevision: number
   state: BrowserViewState
 }
 
@@ -82,6 +84,7 @@ class BrowserViewManager {
       owner,
       consoleErrors: [],
       networkFailures: [],
+      navigationRevision: 0,
       state: {
         sessionId,
         url: DEFAULT_BROWSER_URL,
@@ -138,6 +141,16 @@ class BrowserViewManager {
   async evaluate(sessionId: string, script: string): Promise<unknown> {
     const record = this.requireRecord(sessionId)
     return record.view.webContents.executeJavaScript(script, true)
+  }
+
+  async readPage(sessionId: string): Promise<BrowserPageSource> {
+    const record = this.requireRecord(sessionId)
+    const wc = record.view.webContents
+    return readBrowserPageSource({
+      getURL: () => wc.getURL(), getTitle: () => wc.getTitle(), isLoading: () => wc.isLoadingMainFrame(),
+      getDocumentRevision: () => record.navigationRevision,
+      executeJavaScriptInIsolatedWorld: (worldId, scripts) => wc.executeJavaScriptInIsolatedWorld(worldId, scripts)
+    })
   }
 
   async goBack(sessionId: string): Promise<BrowserViewState> {
@@ -293,6 +306,9 @@ class BrowserViewManager {
 
   private wireRecord(record: BrowserRecord): void {
     const wc = record.view.webContents
+    wc.on('did-start-navigation', (details) => {
+      if (details.isMainFrame) record.navigationRevision += 1
+    })
     wc.setWindowOpenHandler(({ url }) => {
       if (url.startsWith('http://') || url.startsWith('https://')) {
         void wc.loadURL(url)

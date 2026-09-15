@@ -27,6 +27,7 @@ import {
 } from './session-active-registry-restore'
 import { prepareSessionDomainOwnershipForActivation } from './session-domain-activation'
 import { isUnroutedLocalPlan } from './session-local-plan'
+import { reconcileTaskExecutionAuthorityMarker } from './permission/task-execution-authority-marker'
 
 export interface ActiveSessionRecoveryPlan {
   records: SessionMeta[]
@@ -175,13 +176,14 @@ export function planActiveSessionRecovery(
   for (const record of registry.records) {
     let reconciled: SessionMeta
     try {
-      reconciled = sessionMetaForRecovery(record)
+      reconciled = sessionMetaForRecovery(reconcileTaskExecutionAuthorityMarker(record, app.getPath('userData')))
     } catch (error) {
       registryReconciled = true
       skippedErrors.push(error instanceof Error ? error.message : String(error))
       continue
     }
-    registryReconciled ||= !sameSessionPlacement(record, reconciled)
+    registryReconciled ||= !sameSessionPlacement(record, reconciled) ||
+      record.taskExecutionAuthorityRequired !== reconciled.taskExecutionAuthorityRequired
     records.push(reconciled)
     if (activeSessionIds.has(record.id) || snapshotSessionIds.has(record.id) || !record.sdkSessionId) continue
     restorable.push(reconciled)
@@ -344,6 +346,7 @@ function isSessionMetaRecord(value: unknown): value is SessionMeta {
     isSessionModel(record.model) &&
     (isRequiredSessionText(record.providerId) || isLocalPlanRegistryRecord(record)) &&
     isRequiredSessionText(record.permissionMode) &&
+    (record.taskExecutionAuthorityRequired === undefined || record.taskExecutionAuthorityRequired === true) &&
     isRequiredSessionText(record.status) &&
     (record.sdkSessionId === undefined || isRequiredSessionText(record.sdkSessionId)) &&
     typeof record.costUsd === 'number' && Number.isFinite(record.costUsd) &&

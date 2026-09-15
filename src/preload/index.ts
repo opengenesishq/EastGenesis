@@ -35,6 +35,7 @@ import type {
 import { resolveTaskDagFinalization } from './task-dag-finalization'
 import { workflowLedgerApi } from './workflow-ledger'
 import { preparationPermissionApi } from './preparation-permission'
+import { taskExecutionAuthorityApi } from './task-execution-authority'
 import { projectWorkspaceApi } from './project-workspace'
 import { remoteContinuationApi } from './remote-continuation'
 import { dataRetentionApi } from './data-retention'
@@ -58,6 +59,7 @@ import { councilApi } from './council'
 const api: AgentDeskApi = {
   ...councilApi,
   ...preparationPermissionApi,
+  ...taskExecutionAuthorityApi,
   ...sessionInputApi,
   ...sessionEntrypointApi,
   ...assistantSearchApi,

@@ -123,6 +123,7 @@ import { unresolvedImportedSessionInputReason } from './data-lifecycle/submissio
 import { ModelCrossValidationRuntime } from './model/cross-validation-runtime'
 import { CouncilService } from './council/council-service'
 import { assertCouncilSend, isCouncilSession } from './council/council-request-guard'
+import { mergeTaskExecutionAuthorityMarker, reconcileTaskExecutionAuthorityMarker } from './permission/task-execution-authority-marker'
 import { getSessionInputService } from './task/session-input-runtime'
 import type {
   AgentEvent,
@@ -539,6 +540,19 @@ class SessionManager {
     const meta = this.sessions.get(id)?.meta
     if (meta && isCouncilSession(meta) && value !== 'view') throw new Error('议事参与者的只读策略已固定')
     await this.taskPlans.setStrategy(id, value)
+  }
+
+  /** Persist the portable restriction before a local grant or revocation is written. */
+  async requireTaskExecutionAuthority(id: string): Promise<void> {
+    const session = this.sessions.get(id)
+    if (!session || session.meta.status === 'closed') throw new Error('当前任务不可修改授权。')
+    session.meta.taskExecutionAuthorityRequired = true
+    // Keep this restriction in memory even if persistence fails. Retrying can
+    // finish the write; a failed mutation must never reopen legacy access.
+    this.persistActiveSessions(true)
+    this.persist(id)
+    await this.writeTaskSnapshot(id, 'important-event', 0, undefined, undefined, true)
+    session.emitSyntheticEvent?.({ kind: 'meta', meta: { ...session.meta } })
   }
 
   getTaskPlan(id: string): TaskPlanStateView {
@@ -1126,6 +1140,10 @@ class SessionManager {
       session = await prepareRuntimeContinuation({ session, payload, run: currentRun,
         emit: (event, seq, identity) => this.dispatch(id, event, seq, identity),
         install: async (successor) => {
+          const current = this.sessions.get(id)
+          const restricted = reconcileTaskExecutionAuthorityMarker(
+            mergeTaskExecutionAuthorityMarker(successor.meta, current ? [current.meta] : []), app.getPath('userData'))
+          if (restricted.taskExecutionAuthorityRequired) successor.meta.taskExecutionAuthorityRequired = true
           this.sessions.set(id, successor)
           this.sessionStarts.forget(id)
           await this.writeTaskSnapshot(id, 'important-event', 0, undefined, undefined, true)
@@ -1817,7 +1835,7 @@ class SessionManager {
     const { lastError: _lastError, ...restMeta } = snapshot.meta
     assertTaskSnapshotWorktreeProjection(restMeta, snapshot.worktree)
     const meta: SessionMeta = {
-      ...sessionMetaForRecovery(restMeta),
+      ...sessionMetaForRecovery(reconcileTaskExecutionAuthorityMarker(restMeta, app.getPath('userData'))),
       status: 'starting',
       sdkSessionId: snapshot.execution.sdkSessionId,
       resumeSessionAt: snapshot.execution.resumeSessionAt
@@ -1846,7 +1864,7 @@ class SessionManager {
       snapshot.execution.cursor?.seq ?? snapshot.execution.lastSeq
     )
     this.sessions.set(meta.id, session)
-    this.persistActiveSessions()
+    this.persistActiveSessions(true)
     const recoveredSnapshot = { ...snapshot, run: recoveredRun }
     const restoredDagRuntimeCount = await this.restoreDagRuntimesFromSnapshot(meta.id, recoveredSnapshot)
     await this.writeTaskSnapshot(
@@ -1854,7 +1872,8 @@ class SessionManager {
       'recovered',
       snapshot.execution.cursor?.seq ?? snapshot.execution.lastSeq,
       snapshot.execution.lastEventKind,
-      snapshot.execution.cursor?.eventId ?? snapshot.execution.lastEventId
+      snapshot.execution.cursor?.eventId ?? snapshot.execution.lastEventId,
+      true
     )
     this.startRecoveredSession(session, recoveredSnapshot, restoredDagRuntimeCount > 0)
     return { ...meta }

@@ -1,0 +1,153 @@
+import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { BrowserWindow, session, type WebContentsView } from 'electron'
+import type { SessionMeta, TaskRunRecord } from '../src/shared/types'
+import { openProjectWorkspaceStore } from '../src/main/project-workspace/store'
+import { createProjectWorkspaceCommandService } from '../src/main/project-workspace/command-service'
+import { createProductionProjectAggregateService } from '../src/main/project-aggregate'
+import { buildTaskSnapshot, saveTaskSnapshot } from '../src/main/task/task-snapshot'
+import { listWorkflowEvidence, listPersistedWorkflowLedger, verifyPersistedWorkflowLedger } from '../src/main/task/workflow-ledger-api'
+import { taskRuntimeRegistry } from '../src/main/task/task-runtime-registry'
+import { browserViewManager } from '../src/main/browserView'
+import { executeBrowserTool, BROWSER_TOOLS } from '../src/main/agent/tools/browser-tools'
+import { readSessionBrowserResearchSource } from '../src/main/task/browser-research-source'
+import { BROWSER_PAGE_TEXT_LIMIT, type BrowserPageSource } from '../src/main/browser/browser-page-source'
+import { buildStudioResultSnapshot } from '../src/main/studio-result/studio-result-service'
+import { decideTaskStrategyTool } from '../src/main/task/task-strategy'
+import { isReadOnlyToolCall, isSideEffectingToolCall } from '../src/main/task/tool-idempotency'
+import { isLimitedFileExecutionReadOnlyCall } from '../src/main/permission/limited-file-execution-policy'
+import { classifyToolCapabilities } from '../src/main/permission/tool-capabilities'
+
+export async function run(_stage: string, root: string) {
+  const projectId = 'research-project', goalId = 'research-goal', workItemId = 'research-work'
+  const meta = { id: 'research-session', createdAt: 1, cwd: root, status: 'idle', taskStrategy: 'view',
+    title: 'Research', providerId: 'fixture', model: 'fixture', engine: 'openai', permissionMode: 'default',
+    costUsd: 0, usage: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }, contextTokens: 0,
+    workspaceId: projectId, projectId, goalId, workItemId, childTaskId: 'research-task' } as SessionMeta
+  const run: TaskRunRecord = { schemaVersion: 1, id: 'research-run', sessionId: meta.id, taskId: meta.childTaskId!,
+    status: 'executing', revision: 1, attempt: 1, recoveryCount: 0, createdAt: 1, updatedAt: 2,
+    steps: [], toolExecutions: [], effects: [] }
+  const workspace = await openProjectWorkspaceStore(root)
+  await workspace.createWorkspace({ id: projectId, name: 'Research', kind: 'office' })
+  const commands = createProjectWorkspaceCommandService(workspace, { rootDir: root })
+  await commands.reconcileShadowProjection()
+  await commands.createGoal({ id: goalId, projectId, title: 'Research', objective: 'Read actual sources', status: 'verifying' })
+  await commands.createWorkItem({ id: workItemId, projectId, goalId, title: 'Research', type: 'planning', status: 'verifying' })
+  await saveTaskSnapshot(buildTaskSnapshot({ meta, run, transcript: [], lastSeq: 0, eventCount: 0, reason: 'created', now: 2 }), root)
+  const item = await workspace.getWorkItem(workItemId)
+  await commands.updateWorkItem(workItemId, { runRefs: [run.id] }, { expectedRevision: item!.revision })
+  taskRuntimeRegistry.set(meta.id, run)
+  const pageUrl = 'https://research.invalid/source'
+  let html = `<html><title>Rendered source</title><body><h1>Annual figures</h1><p>Revenue increased by 12 percent.</p>
+    <p hidden>HIDDEN TEXT</p><p style="display:none">INVISIBLE TEXT</p>
+    <input value="FORM VALUE"><textarea>TEXTAREA VALUE</textarea><div contenteditable>EDITABLE VALUE</div>
+    <iframe srcdoc="<p>FRAME TEXT</p>"></iframe><p>password=do-not-export-value</p>
+    <p><span>password=</span><span>split-dom-value</span></p>
+    <script>document.createTreeWalker = () => { throw new Error('page override'); };</script></body></html>`
+  const partition = session.fromPartition('persist:caogen-browser-research-session')
+  // Every HTTPS request is answered in-process with fixture HTML; no network transport is used.
+  await partition.protocol.handle('https', () => new Response(html, { headers: { 'content-type': 'text/html' } }))
+  const owner = new BrowserWindow({ show: false, width: 900, height: 700 })
+  let passed = 0
+  const check = async (name: string, fn: () => Promise<void> | void) => { await fn(); passed++; console.log(`PASS ${name}`) }
+  const context = (toolUseId: string) => ({ sessionMeta: meta, userDataRoot: root, toolUseId })
+  const evidence = () => listWorkflowEvidence({ projectId, kind: 'research_source' }, root)
+  const call = async (toolUseId: string) => JSON.parse((await executeBrowserTool('browser_read', {}, meta.id, context(toolUseId))).output)
+  const acceptsBefore = (await listPersistedWorkflowLedger({ projectId }, root)).acceptances.items
+  try {
+    await browserViewManager.open(owner, meta.id, pageUrl)
+    browserViewManager.setBounds(meta.id, { x: 0, y: 0, width: 800, height: 600 })
+    let source: BrowserPageSource & { evidenceId: string; contentDigest: string }
+    await check('physical main-frame text enters original canonical Evidence and result page without auto acceptance', async () => {
+      source = await call('read-1')
+      assert.equal(source.url, pageUrl)
+      assert(source.text.includes('Revenue increased by 12 percent.'))
+      for (const excluded of ['HIDDEN TEXT', 'INVISIBLE TEXT', 'FORM VALUE', 'TEXTAREA VALUE', 'EDITABLE VALUE', 'FRAME TEXT', 'do-not-export-value', 'split-dom-value']) assert(!source.text.includes(excluded))
+      assert.equal(source.filtered, true)
+      assert.equal(source.contentDigest, createHash('sha256').update(source.text).digest('hex'))
+      const rows = await evidence()
+      assert.equal(rows.length, 1)
+      assert.deepEqual([rows[0].projectId, rows[0].goalId, rows[0].workItemId, rows[0].runId], [projectId, goalId, workItemId, run.id])
+      assert.equal(rows[0].uri, pageUrl)
+      assert.equal(rows[0].contentDigest, source.contentDigest)
+      const snapshot = buildStudioResultSnapshot(meta, await createProductionProjectAggregateService(root).verifyLiveProject(projectId))
+      assert.equal(snapshot.evidence.find(entry => entry.id === source.evidenceId)?.sourceUri, pageUrl)
+      assert.deepEqual((await listPersistedWorkflowLedger({ projectId }, root)).acceptances.items, acceptsBefore)
+    })
+    await check('same invocation replay preserves one immutable source; conflicting content is rejected', async () => {
+      const original = await evidence()
+      assert.equal((await call('read-1')).observedAt, source!.observedAt)
+      assert.deepEqual(await evidence(), original)
+      await assert.rejects(readSessionBrowserResearchSource(context('read-1'), async () => ({ ...source!, text: 'Different bytes' })), /different immutable content/)
+      assert.deepEqual(await evidence(), original)
+    })
+    await check('capture limits are explicit and digest matches only returned partial text', async () => {
+      html = `<html><title>Long source</title><body><p>${'Evidence '.repeat(4000)}</p></body></html>`
+      await browserViewManager.navigate(meta.id, pageUrl)
+      const partial = await call('read-2')
+      assert.equal(partial.truncated, true)
+      assert(partial.text.length <= BROWSER_PAGE_TEXT_LIMIT)
+      assert.equal(partial.contentDigest, createHash('sha256').update(partial.text).digest('hex'))
+      const row = (await evidence()).find(entry => entry.evidenceId === partial.evidenceId)!
+      assert.equal(row.metadata?.truncated, true)
+      assert.equal(row.metadata?.textLimit, BROWSER_PAGE_TEXT_LIMIT)
+      assert.match(row.summary!, /部分正文/)
+    })
+    await check('same-URL document replacement during physical read cannot mix sources', async () => {
+      const wc = (owner.contentView.children[0] as WebContentsView).webContents
+      const original = wc.executeJavaScriptInIsolatedWorld.bind(wc)
+      wc.executeJavaScriptInIsolatedWorld = async (...args) => {
+        const result = await original(...args)
+        await wc.loadURL(pageUrl)
+        return result
+      }
+      const before = await evidence()
+      try { await assert.rejects(call('reload-race'), /BROWSER_SOURCE_CHANGED/) }
+      finally { wc.executeJavaScriptInIsolatedWorld = original }
+      assert.deepEqual(await evidence(), before)
+    })
+    await check('private locators, blank pages, failed reads and wrong sessions leave no source evidence', async () => {
+      const before = await evidence()
+      await assert.rejects(readSessionBrowserResearchSource(context('failed'), async () => { throw new Error('fixture read failure') }), /fixture read failure/)
+      await assert.rejects(readSessionBrowserResearchSource(context('file'), async () => ({ ...source!, url: 'file:///tmp/local.html' })), /BROWSER_SOURCE_URL/)
+      await assert.rejects(readSessionBrowserResearchSource(context('private'), async () => ({ ...source!, url: `${pageUrl}?access_token=do-not-export-value` })), /secret-free/)
+      html = '<html><body><input value="only field"></body></html>'
+      await browserViewManager.navigate(meta.id, pageUrl)
+      await assert.rejects(call('blank'), /BROWSER_SOURCE_EMPTY/)
+      await assert.rejects(executeBrowserTool('browser_read', {}, 'other-session', context('wrong')), /BROWSER_SOURCE_SCOPE/)
+      await assert.rejects(executeBrowserTool('browser_read', { url: pageUrl }, meta.id, context('args')), /不接受/)
+      assert.deepEqual(await evidence(), before)
+    })
+    await check('scope change, run switch and cancellation during read cannot write to stale tasks', async () => {
+      const before = await evidence()
+      for (const key of ['cwd', 'goalId', 'workItemId', 'workspaceId'] as const) {
+        const old = meta[key]
+        try { await assert.rejects(readSessionBrowserResearchSource(context(`changed-${key}`), async () => { meta[key] = 'other'; return source! }), /BROWSER_SOURCE_SCOPE/) }
+        finally { meta[key] = old }
+      }
+      try { await assert.rejects(readSessionBrowserResearchSource(context('changed-run'), async () => {
+        taskRuntimeRegistry.set(meta.id, { ...run, id: 'different-run' }); return source!
+      }), /BROWSER_SOURCE_SCOPE/) } finally { taskRuntimeRegistry.set(meta.id, run) }
+      const controller = new AbortController()
+      await assert.rejects(readSessionBrowserResearchSource({ ...context('abort'), signal: controller.signal }, async () => {
+        controller.abort(); return source!
+      }), /BROWSER_SOURCE_CANCELLED/)
+      assert.deepEqual(await evidence(), before)
+    })
+    await check('tool admission inherits view, plan, limited-read and browser/network capability gates', () => {
+      assert(BROWSER_TOOLS.some(tool => tool.function.name === 'browser_read'))
+      for (const strategy of ['view', 'plan', 'execute']) assert.equal(decideTaskStrategyTool(strategy, 'browser_read', {}).allow, true)
+      assert.equal(isReadOnlyToolCall('browser_read', {}), true)
+      assert.equal(isSideEffectingToolCall('browser_read', {}), false)
+      assert.equal(isLimitedFileExecutionReadOnlyCall('browser_read', {}), true)
+      assert.deepEqual(classifyToolCapabilities('browser_read', {}), ['browser', 'network'])
+    })
+    assert.equal((await verifyPersistedWorkflowLedger(root)).valid, true)
+    console.log(`Browser research source: ${passed}/${passed} passed; physical Electron DOM, canonical stores, no network or Provider calls.`)
+  } finally {
+    browserViewManager.close(meta.id)
+    owner.destroy()
+    taskRuntimeRegistry.clear()
+    await partition.protocol.unhandle('https')
+  }
+}

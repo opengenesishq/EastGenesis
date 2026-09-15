@@ -13,7 +13,7 @@ export function executeContextBoundTool(name: string, args: Record<string, unkno
   if (isOfficeArtifactTool(name)) return executeOfficeCreationTool(name, args, cwd, options)
   if (OFFICE_REVISION_TOOL_NAMES.has(name)) return executeOfficeRevisionTool(name, args, options)
   if (isMediaToolName(name)) return executeMediaTool(name, args, options)
-  if (isBrowserToolName(name)) return executeBrowserTool(name, args, options.sessionId)
+  if (isBrowserToolName(name)) return executeBrowserTool(name, args, options.sessionId, options)
   if (isGuiToolName(name)) return executeGuiTool(name, args, cwd, options.signal)
   return undefined
 }

@@ -106,6 +106,8 @@ export interface ToolExecResult {
 export interface ToolExecutionOptions {
   /** Main-owned live rule check; propagated into the final file/Office writer. */
   assertFormalWriteAuthorized?: () => void
+  /** Main-owned version captured before approval; never supplied by model tool input. */
+  taskExecutionAuthorityRevision?: number
   preparationPermission?: PreparationToolPermission
   signal?: AbortSignal
   sandboxMode?: SandboxMode
@@ -968,7 +970,8 @@ export async function executeCodingTool(
   try {
     if (options.signal?.aborted) return { ok: false, output: '操作已中断' }
     const assertFormalWriteAuthorized = formalFileWriteGuard(name, args, cwd, {
-      preparation: Boolean(options.preparationPermission), sessionId: options.sessionId, effectTarget: options.effectTarget, rootDir: options.userDataRoot
+      preparation: Boolean(options.preparationPermission), sessionId: options.sessionId, effectTarget: options.effectTarget, rootDir: options.userDataRoot,
+      sessionMeta: options.sessionMeta, taskExecutionAuthorityRevision: options.taskExecutionAuthorityRevision
     })
     assertFormalWriteAuthorized()
     options = { ...options, assertFormalWriteAuthorized }
@@ -1322,7 +1325,8 @@ async function localFileWrite(
   toolName: string
 ): Promise<LocalCommandResult> {
   const assertResolvedTarget = formalFileWriteGuard(toolName, { path: targetPath, file_path: targetPath }, cwd, {
-    preparation: Boolean(options.preparationPermission), rootDir: options.userDataRoot
+    preparation: Boolean(options.preparationPermission), rootDir: options.userDataRoot, sessionId: options.sessionId,
+    sessionMeta: options.sessionMeta, taskExecutionAuthorityRevision: options.taskExecutionAuthorityRevision
   })
   const assertPreparation = () => {
     options.assertFormalWriteAuthorized?.()
@@ -1345,7 +1349,9 @@ async function localFileWrite(
     pipIndexUrl: options.pipIndexUrl,
     signal: options.signal
   })
-  if (!options.preparationPermission) return write()
+  if (!options.preparationPermission) return options.sessionMeta && options.userDataRoot
+    ? withDataLifecycleMutation(options.userDataRoot, async () => { assertPreparation(); return write() })
+    : write()
   if (!options.sessionMeta || !options.userDataRoot || !guard) throw new Error('准备区写入缺少当前任务、授权或冻结 Effect。')
   const { sessionMeta, userDataRoot } = options
   return withDataLifecycleMutation(userDataRoot, async () => {

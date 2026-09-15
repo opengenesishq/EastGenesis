@@ -6,11 +6,16 @@ const FILE_TOOLS = new Set(['write_file', 'edit_file', 'search_replace', 'create
 const UNSCOPED_READ_ALIASES = new Set(['run_skill', 'genesis_orchestrate'])
 const EXTRA_READ_TOOLS = new Set(['web_fetch', 'web_search', 'project_knowledge_search', 'browser_wait_for', 'gui_list_windows'])
 
+export function isLimitedFileExecutionReadOnlyCall(name: string, input: Record<string, unknown>): boolean {
+  const toolName = normalizeToolName(name)
+  return !UNSCOPED_READ_ALIASES.has(toolName) && (isReadOnlyToolCall(toolName, input) || EXTRA_READ_TOOLS.has(toolName))
+}
+
 /** This is an additional admission boundary; ordinary deny rules and Effect approval still apply. */
 export function limitedFileExecutionPolicyError(settings: AppSettings, name: string, input: Record<string, unknown>, cwd: string): string | undefined {
   if (!settings.limitedFileExecutionEnabled) return undefined
   const toolName = normalizeToolName(name)
-  if (!UNSCOPED_READ_ALIASES.has(toolName) && (isReadOnlyToolCall(toolName, input) || EXTRA_READ_TOOLS.has(toolName))) return undefined
+  if (isLimitedFileExecutionReadOnlyCall(toolName, input)) return undefined
   if (!FILE_TOOLS.has(toolName)) return '限定文件执行已阻止此工具：命令、桌面、连接器、委派及其他副作用没有可核验的文件路径范围。'
   // Only explicit structured tool AND path selectors confer write authority.
   // Existing rule disable/delete/expiry is revocation, and deny keeps precedence.

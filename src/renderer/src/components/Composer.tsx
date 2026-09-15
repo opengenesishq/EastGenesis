@@ -22,6 +22,7 @@ import { sessionInputIntent } from './composer/session-input-intent'
 import SessionInputQueue from './composer/SessionInputQueue'
 import SessionModelPicker from './composer/SessionModelPicker'
 import PreparationPermission from './composer/PreparationPermission'
+import TaskExecutionAuthority from './composer/TaskExecutionAuthority'
 import './composer/session-inputs.css'
 import { useAutosizeTextarea } from './useAutosizeTextarea'
 import { COMPOSER_DRAFTS_DELETED_EVENT, isDeletedComposerDraft } from '../store/composer-draft-persistence'
@@ -606,6 +607,7 @@ export default function Composer({ running }: { running: boolean }): React.JSX.E
       />
       {attachmentError && <div className="composer-error">{attachmentError}</div>}
       {activeId && <PreparationPermission key={activeId} sessionId={activeId} running={running} />}
+      {activeId && <TaskExecutionAuthority key={`authority:${activeId}`} sessionId={activeId} running={running} />}
       <SessionInputQueue
         zh={zh}
         records={sessionInputs.records} running={running} busy={sessionInputs.busy} error={sessionInputs.error}

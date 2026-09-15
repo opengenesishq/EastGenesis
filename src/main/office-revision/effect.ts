@@ -12,6 +12,7 @@ import { assertOfficeRevisionIntent } from './intent'
 import { getPreparedOfficePlan } from './plans'
 import { readScopedOfficeArtifact, type OfficeContext } from './scope'
 import { officeRevisionOutputRelativePath } from './output-path'
+import { withDataLifecycleMutation } from '../data-lifecycle/data-lifecycle-mutation-lock'
 
 export async function buildOfficeRevisionEffectTarget(input: { sessionId?: string; toolInput: Record<string, unknown>; cwd: string }): Promise<OfficeRevisionEffectTarget> {
   if (!input.sessionId) officeError('OFFICE_SCOPE_MISMATCH', 'Office修订缺少可信会话身份。')
@@ -51,16 +52,18 @@ export async function executeFrozenOfficeRevision(context: OfficeContext, args: 
   if (context.meta.taskStrategy !== 'execute') officeError('OFFICE_SCOPE_MISMATCH', '修订需要执行策略。')
   await verifyProductionProjectMutation(context.rootDir, target.projectId)
   const result = await regenerateFrozenOfficeRevision(context, target)
-  assertNotInterrupted(signal)
-  await assertOfficeOutputRoot(target)
-  assertWriteAuthorized?.()
-  await mkdir(dirname(target.workspacePath), { recursive: true, mode: 0o700 })
-  await assertOfficeOutputRoot(target)
-  assertNotInterrupted(signal)
-  assertWriteAuthorized?.()
-  // New path only. A partial write remains for reconciliation; never erase or overwrite evidence.
-  const handle = await open(target.workspacePath, 'wx', 0o600)
-  try { assertWriteAuthorized?.(); await handle.writeFile(result.bytes); await handle.sync() } finally { await handle.close() }
+  await withDataLifecycleMutation(context.rootDir, async () => {
+    assertNotInterrupted(signal)
+    await assertOfficeOutputRoot(target)
+    assertWriteAuthorized?.()
+    await mkdir(dirname(target.workspacePath), { recursive: true, mode: 0o700 })
+    await assertOfficeOutputRoot(target)
+    assertNotInterrupted(signal)
+    assertWriteAuthorized?.()
+    // New path only. A partial write remains for reconciliation; never erase or overwrite evidence.
+    const handle = await open(target.workspacePath, 'wx', 0o600)
+    try { assertWriteAuthorized?.(); await handle.writeFile(result.bytes); await handle.sync() } finally { await handle.close() }
+  })
   return { path: target.workspacePath, digest: target.expectedSha256, planDigest: target.planDigest,
     supersedesId: target.baseArtifactId, lineageId: target.lineageId, version: target.baseVersion + 1,
     status: 'awaiting_canonical_registration', checks: result.checks }

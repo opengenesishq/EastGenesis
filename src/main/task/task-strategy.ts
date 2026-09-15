@@ -18,6 +18,7 @@ const VIEW_TOOLS = new Set([
   'web_fetch',
   'web_search',
   'browser_wait_for',
+  'browser_read',
   'browser_screenshot',
   'browser_automation_status',
   'gui_list_windows',

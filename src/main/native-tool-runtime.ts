@@ -23,6 +23,7 @@ import {
 import { writeSessionAuditLog } from './permission/audit-log'
 import { evaluateToolPermission, type ToolPermissionDecision } from './permission/tool-permission'
 import { limitedFileExecutionError } from './permission/limited-file-execution'
+import { TaskExecutionAuthorityStore } from './permission/task-execution-authority-store'
 import { classifyToolCapabilities } from './permission/tool-capabilities'
 import { taskRuntimeRegistry, type ToolIdempotencyDecision } from './task/task-runtime-registry'
 import { registerSessionProducedArtifacts } from './task/session-artifact-producer'
@@ -67,6 +68,7 @@ type NativeToolPreflightDecision =
       toolCapabilityDecision: ToolCapabilityDecision
       idempotency: ToolIdempotencyDecision
       executionScope: PreparationToolScope
+      taskExecutionAuthorityRevision: number
     }
 
 interface PendingPermission {
@@ -308,16 +310,19 @@ export class NativeToolRuntime {
   ): NativeToolPreflightDecision {
     if (isCouncilSession(this.meta)) return { allow: false, message: '议事参与者仅可形成一轮意见，禁止调用工具或递归委派' }
     let executionScope: PreparationToolScope
+    let taskExecutionAuthorityRevision: number
     try {
       executionScope = capturedScope ?? resolvePreparationToolScope(this.meta, name, input, app.getPath('userData'))
       assertPreparationToolScope(this.meta, executionScope, app.getPath('userData'), name)
+      taskExecutionAuthorityRevision = executionScope.preparation ? 0 : new TaskExecutionAuthorityStore(app.getPath('userData')).get(this.meta).revision
     } catch (error) { return { allow: false, message: error instanceof Error ? error.message : String(error) } }
     const workerPolicyError = officeRevisionToolGate(this.meta.id, name, input) ?? digitalWorkerToolPolicyError(this.meta, name, input, app.getPath('userData'))
     if (workerPolicyError) return { allow: false, message: workerPolicyError }
     const settings = settingsForCaoGenDrive(getSettings(), this.meta.driveMode)
     const policy = evaluateToolPermission(settings, { toolName: name, input, cwd: executionScope.cwd })
     const fileScopeError = limitedFileExecutionError(settings, name, input, executionScope.cwd, {
-      preparation: Boolean(executionScope.preparation), sessionId: this.meta.id
+      preparation: Boolean(executionScope.preparation), sessionId: this.meta.id, sessionMeta: this.meta,
+      rootDir: app.getPath('userData'), taskExecutionAuthorityRevision
     })
     if (fileScopeError) {
       this.auditGateDecision('deny', 'policy', name, input, fileScopeError, policy.risk.level, policy.risk.reasons)
@@ -399,7 +404,7 @@ export class NativeToolRuntime {
       )
       return { allow: false, message: idempotency.reason }
     }
-    return { allow: true, policy, readOnlyCall, guiDecision, toolCapabilityDecision, idempotency, executionScope }
+    return { allow: true, policy, readOnlyCall, guiDecision, toolCapabilityDecision, idempotency, executionScope, taskExecutionAuthorityRevision }
   }
 
   async executeToolWithPermission(
@@ -441,7 +446,7 @@ export class NativeToolRuntime {
       '操作在审批后、外部执行前已中断'
     )
     if (interruptedAfterGate) return interruptedAfterGate
-    return this.executeAllowedTool(name, input, effectHandle, effectInput, preflight.executionScope, signal)
+    return this.executeAllowedTool(name, input, effectHandle, effectInput, preflight.executionScope, preflight.taskExecutionAuthorityRevision, signal)
   }
 
   private async prepareToolEffect(effectInput: PrepareEffectExecutionInput): Promise<PreparedEffect> {
@@ -568,6 +573,7 @@ export class NativeToolRuntime {
     effectHandle: EffectExecutionHandle,
     effectInput: PrepareEffectExecutionInput,
     executionScope: PreparationToolScope,
+    taskExecutionAuthorityRevision: number,
     signal?: AbortSignal
   ): Promise<NativeToolExecutionResult> {
     const settings = settingsForCaoGenDrive(getSettings(), this.meta.driveMode)
@@ -577,7 +583,14 @@ export class NativeToolRuntime {
       '操作在外部执行前已中断'
     )
     if (interruptedBeforeStart) return interruptedBeforeStart
-    try { assertPreparationToolScope(this.meta, executionScope, app.getPath('userData'), name) }
+    try {
+      assertPreparationToolScope(this.meta, executionScope, app.getPath('userData'), name)
+      const error = limitedFileExecutionError(settings, name, input, executionScope.cwd, {
+        preparation: Boolean(executionScope.preparation), sessionId: this.meta.id, sessionMeta: this.meta,
+        rootDir: app.getPath('userData'), effectTarget: effectHandle?.target, taskExecutionAuthorityRevision
+      })
+      if (error) throw new Error(error)
+    }
     catch (error) { return this.settlePermissionDenial(effectHandle, { allow: false, message: error instanceof Error ? error.message : String(error) }) }
     const startFailure = await this.markEffectStarted(effectHandle, effectInput)
     if (startFailure) return startFailure
@@ -591,6 +604,7 @@ export class NativeToolRuntime {
     try {
       exec = await executeCodingTool(name, input, executionScope.cwd, {
         preparationPermission: executionScope.preparation,
+        taskExecutionAuthorityRevision,
         signal,
         sandboxMode: settings.sandboxMode,
         chinaMirrorEnabled: settings.chinaEcosystemMirrorEnabled,

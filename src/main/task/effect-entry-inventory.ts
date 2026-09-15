@@ -192,7 +192,7 @@ export const AGENT_TOOL_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
     reconcile_media_job: 'MediaRuntime.reconcileMediaJob verified original-job query lease'
   }),
   policyGroup([
-    'browser_automation_status', 'browser_screenshot', 'browser_wait_for',
+    'browser_automation_status', 'browser_read', 'browser_screenshot', 'browser_wait_for',
     'china_notify', 'draft_skill', 'find_file', 'genesis_orchestrate',
     'get_dependencies', 'git_diff', 'git_status', 'gitee_prepare',
     'gui_list_windows', 'gui_screenshot', 'list_dir', 'list_skills', 'load_skill',

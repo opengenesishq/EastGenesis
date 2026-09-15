@@ -23,6 +23,7 @@ export const OPENAI_PERMISSION_READ_ONLY_TOOLS = new Set([
   'gitee_prepare',
   'memory_search',
   'browser_automation_status',
+  'browser_read',
   'git_status',
   'git_diff'
 ])

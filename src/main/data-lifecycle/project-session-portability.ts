@@ -27,6 +27,7 @@ import {
 import { contentDigest } from '../task/artifact-lifecycle-content'
 import { projectAggregateCanonicalJson } from '../project-aggregate/codec'
 import { collectProjectSessionInventory } from './project-session-purge'
+import { assertTaskExecutionAuthorityMarkersPortable, portableCreationAuthorityMarkers } from './task-execution-authority-portability'
 import {
   assertPortableProjectTestEvidence,
   collectOwnedProjectTestEvidencePaths
@@ -57,7 +58,11 @@ export function collectProjectSessionPortableSlice(
   const sdkSessionIds = new Set(inventory.sdkSessionIds)
   const sessionHistory = historyRecords(root).filter((record) => matchesSessionOrProject(record, sessionIds, project))
   const activeSessions = activeSessionRecords(root).filter((record) => matchesSessionOrProject(record, sessionIds, project))
-  const sessionCreationJournal = creationRecords(root).filter((record) => matchesSessionOrProject(record, sessionIds, project))
+  const sessionCreationJournal = portableCreationAuthorityMarkers(root,
+    creationRecords(root).filter((record) => matchesSessionOrProject(record, sessionIds, project)),
+    [...sessionHistory, ...activeSessions, ...taskSnapshots])
+  assertTaskExecutionAuthorityMarkersPortable(root, sessionIds,
+    [...sessionHistory, ...activeSessions, ...sessionCreationJournal, ...taskSnapshots])
   const taskPlans = projectTaskPlans(root, project, sessionIds)
   const sessionFiles = collectOwnedFiles(root, project, sessionIds, sdkSessionIds)
   const submissionReceipts = collectProjectSubmissionReceipts(root, project, {

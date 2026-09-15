@@ -897,14 +897,16 @@ function matchesRiskPaths(
   return mode === 'any' ? paths.some(matches) : paths.every(matches)
 }
 
-function wildcardMatch(pattern: string, value: string): boolean {
-  if (pattern === '*') return true
+function wildcardMatch(pattern: string, value: string, relativeGlob = false): boolean {
+  if (pattern === '*' && !relativeGlob) return true
   const doubleStarPlaceholder = '\u0000'
-  const escaped = pattern
+  const recursiveDirectoryPlaceholder = '\u0001'
+  const escaped = (relativeGlob ? pattern.replace(/\*\*\//g, recursiveDirectoryPlaceholder) : pattern)
     .replace(/[.+^${}()|[\]\\]/g, '\\$&')
     .replace(/\*\*/g, doubleStarPlaceholder)
     .replace(/\*/g, '[^/\\\\]*')
     .replaceAll(doubleStarPlaceholder, '.*')
+    .replaceAll(recursiveDirectoryPlaceholder, '(?:.*/)?')
   return new RegExp(`^${escaped}$`, 'i').test(value)
 }
 
@@ -913,6 +915,11 @@ function pathMatches(pattern: string, absolutePath: string, cwd: string): boolea
   const normalizedAbsolute = absolutePath.replace(/\\/g, '/')
   const relativePath = relative(resolve(cwd), absolutePath).replace(/\\/g, '/')
   return wildcardMatch(normalizedPattern, normalizedAbsolute) || wildcardMatch(normalizedPattern, relativePath)
+}
+
+/** Task scopes match relative paths only; cwd names must never widen a glob. */
+export function matchesRelativePermissionPathPattern(pattern: string, relativePath: string): boolean {
+  return wildcardMatch(pattern, relativePath, true)
 }
 
 function parseRisk(value: string): ToolRiskLevel | undefined {

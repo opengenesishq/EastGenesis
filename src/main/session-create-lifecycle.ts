@@ -1,4 +1,5 @@
 import { statSync } from 'node:fs'
+import { app } from 'electron'
 import { resolve } from 'node:path'
 import { newSessionMeta } from './session-meta'
 import { getCaoGenDrivePolicy } from './model/drive'
@@ -35,6 +36,7 @@ import type {
 } from '../shared/types'
 import { AUTO_MODEL, AUTO_PROVIDER_ID } from '../shared/types'
 import type { WorkItem } from '../shared/project-workspace-types'
+import { reconcileTaskExecutionAuthorityMarker } from './permission/task-execution-authority-marker'
 
 export interface SessionCreationDraft {
   opts: CreateSessionOptions
@@ -88,6 +90,11 @@ export function prepareSessionCreationDraft(
     taskStrategy,
     defaultPermissionMode: drivePolicy.defaultPermissionMode
   })
+  // A resumed, forked or delegated task cannot silently regain legacy file
+  // access when its source required an explicit local grant.
+  if (resumeHistory?.taskExecutionAuthorityRequired || parentMeta?.taskExecutionAuthorityRequired) {
+    baseMeta.taskExecutionAuthorityRequired = true
+  }
   if (historySource?.mode === 'resume' && resumeHistory && resumeWorktreeRecord) {
     baseMeta.id = resumeHistory.id
     baseMeta.createdAt = resumeHistory.createdAt
@@ -685,7 +692,7 @@ function sessionConversationHistory(
   const { mode, sdkSessionId } = source
   const history = listHistory().find((entry) => entry.sdkSessionId === sdkSessionId)
   if (!history) throw new Error(`未找到 sdkSessionId 对应的历史会话:${sdkSessionId}`)
-  return { history, mode }
+  return { history: reconcileTaskExecutionAuthorityMarker(history, app.getPath('userData')), mode }
 }
 
 function sessionRoutingScope(
