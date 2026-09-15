@@ -650,7 +650,10 @@ function taskEvidenceEventPayload(record: TaskEvidenceRecord): Record<string, un
   }
 }
 
-export function verifyWorkflowLedger(db: WorkflowLedgerDatabase): WorkflowLedgerVerification {
+export function verifyWorkflowLedger(
+  db: WorkflowLedgerDatabase,
+  options: { deferFileReadsForArtifactIds?: ReadonlySet<string> } = {}
+): WorkflowLedgerVerification {
   const goals = readGoals(db)
   const workItems = readWorkItems(db)
   const runs = readRuns(db)
@@ -661,7 +664,7 @@ export function verifyWorkflowLedger(db: WorkflowLedgerDatabase): WorkflowLedger
   verifyWorkflowEvidence(db)
   const events = readAndVerifyEvents(db)
   assertWorkflowEvidenceEventCoverage(workflowEvidence, events)
-  verifyProjectionReferences(db, goals, workItems, runs, artifacts, acceptances, evidenceLinks)
+  verifyProjectionReferences(db, goals, workItems, runs, artifacts, acceptances, evidenceLinks, options)
   const last = events.at(-1)
   return {
     valid: true,
@@ -789,7 +792,8 @@ function verifyProjectionReferences(
   runs: readonly WorkflowRunRecord[],
   artifacts: readonly WorkflowArtifactRecord[],
   acceptances: readonly WorkflowAcceptanceRecord[],
-  evidenceLinks: readonly WorkflowEvidenceLinkRecord[]
+  evidenceLinks: readonly WorkflowEvidenceLinkRecord[],
+  options: { deferFileReadsForArtifactIds?: ReadonlySet<string> } = {}
 ): void {
   const goalIds = new Set(goals.map((goal) => goal.id))
   const workItemIds = new Set(workItems.map((item) => item.id))
@@ -813,7 +817,7 @@ function verifyProjectionReferences(
   for (const artifact of artifacts) assertArtifactReferences(db, artifact)
   for (const acceptance of acceptances) {
     assertAcceptanceReferences(db, acceptance)
-    assertAcceptanceEvidenceRefs(db, acceptance)
+    assertAcceptanceEvidenceRefs(db, acceptance, options.deferFileReadsForArtifactIds)
     assertAcceptanceState(db, acceptance)
   }
   for (const link of evidenceLinks) assertEvidenceLinkReferences(db, link)

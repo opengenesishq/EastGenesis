@@ -190,7 +190,9 @@ export function buildWorkflowChangeImpactPlan(input: WorkflowChangeImpactInput):
   const impactedIds = impacts.filter((item) => item.disposition === 'rerun').map((item) => item.artifactId)
   const reviewIds = impacts.filter((item) => item.disposition === 'review').map((item) => item.artifactId)
   const protectedImpactIds = impacts.filter((item) => item.disposition === 'protected').map((item) => item.artifactId)
-  const impactedForWorkItems = impacts.filter((item) => item.disposition !== 'protected')
+  // Protecting the file prevents a blind rerun, but its WorkItem-level
+  // Acceptance still becomes stale even when it has no Artifact link.
+  const impactedForWorkItems = impacts
   const impactedWorkItemIds = uniqueSorted(impactedForWorkItems.flatMap((item) => {
     const workItemId = artifactsById.get(item.artifactId)?.workItemId
     return workItemId ? [workItemId] : []
@@ -202,7 +204,7 @@ export function buildWorkflowChangeImpactPlan(input: WorkflowChangeImpactInput):
       return workItemId ? [workItemId] : []
     }))
   const reviewWorkItemIds = uniqueSorted(impactedForWorkItems
-    .filter((item) => item.disposition === 'review')
+    .filter((item) => item.disposition === 'review' || item.disposition === 'protected')
     .flatMap((item) => {
       const workItemId = artifactsById.get(item.artifactId)?.workItemId
       return workItemId ? [workItemId] : []

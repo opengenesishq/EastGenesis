@@ -64,7 +64,7 @@ export interface ProjectWorkspaceCanonicalWriteOptions {
     rootDir: string,
     options: ProjectWorkspaceCanonicalWriteMigrationOptions
   ) => Promise<ProjectWorkspaceLedgerMigrationResult>
-  faultAt?: 'after_prepare' | 'after_canonical_commit' | 'after_json_commit_before_journal'
+  faultAt?: 'after_prepare' | 'before_canonical_commit' | 'after_canonical_commit' | 'after_json_commit_before_journal'
   onFault?: (checkpoint: string, journal: CanonicalWriteJournal) => Promise<void> | void
 }
 
@@ -113,6 +113,7 @@ export class ProjectWorkspaceCanonicalWriteBoundary {
     mutation: ProjectWorkspaceLedgerShadowMutation,
     writeSource: (hook: ProjectWorkspaceBeforeCommit) => Promise<T>
   ): Promise<T> {
+    assertFileChangeMutation(mutation)
     return this.withLock(async () => {
       await this.reconcilePendingLocked()
       const before = await readProjectWorkspaceState(projectWorkspaceFile(this.rootDir))
@@ -206,9 +207,11 @@ export class ProjectWorkspaceCanonicalWriteBoundary {
       updatedAt: this.now()
     })
     await writeJournal(journalPath, next)
+    await this.checkpoint('before_canonical_commit', next)
     const migration = await this.migrate(commit.after, workspaceId, this.rootDir, {
       now: this.now,
       faultAt: undefined,
+      fileChangeImpact: journal.mutation.fileChangeImpact,
       assertCurrentJsonUnchanged: async () => {
         const current = await readProjectWorkspaceState(projectWorkspaceFile(this.rootDir))
         if (current.revision !== commit.before.revision || digest(current) !== journal.before.digest) {
@@ -247,6 +250,7 @@ export class ProjectWorkspaceCanonicalWriteBoundary {
         const migration = await this.migrate(desiredState, journal.desired.workspaceId, this.rootDir, {
           now: this.now,
           faultAt: undefined,
+          fileChangeImpact: journal.mutation.fileChangeImpact,
           assertCurrentJsonUnchanged: async () => {
             const latest = await readProjectWorkspaceState(projectWorkspaceFile(this.rootDir))
             if (latest.revision !== journal.before.revision || digest(latest) !== journal.before.digest) {
@@ -408,7 +412,15 @@ function parseJournal(path: string, raw: string): CanonicalWriteJournal {
   if (typeof journalDigest !== 'string' || digest(unsealed) !== journalDigest) {
     throw new ProjectWorkspaceError('canonical_write_journal_invalid', `canonical write journal digest mismatch ${path}`)
   }
+  assertFileChangeMutation((value as unknown as CanonicalWriteJournal).mutation)
   return value as unknown as CanonicalWriteJournal
+}
+
+function assertFileChangeMutation(mutation: ProjectWorkspaceLedgerShadowMutation): void {
+  if ((mutation.command === 'work_item.reopen_for_file_change') !== Boolean(mutation.fileChangeImpact) ||
+      (mutation.fileChangeImpact && mutation.workspaceId !== mutation.fileChangeImpact.projectId)) {
+    throw new ProjectWorkspaceError('canonical_write_journal_invalid', 'File change impact requires its dedicated canonical Project command')
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

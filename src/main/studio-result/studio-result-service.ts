@@ -30,6 +30,7 @@ import {
   projectAggregateDigest
 } from '../project-aggregate/codec'
 import { workflowAcceptanceRepairWorkItemId } from '../task/workflow-acceptance-repair-coordinator'
+import { assertWorkflowArtifactUriSafe } from '../task/workflow-ledger-artifact-security'
 import {
   artifactAcceptanceDeliveryScope,
   currentArtifactLineageLeafIds,
@@ -504,6 +505,7 @@ function artifactDeliveryStatus(
 }
 
 function projectWorkflowEvidence(evidence: WorkflowEvidenceRecord): StudioResultEvidence {
+  const sourceUri = researchSourceUri(evidence)
   return {
     id: evidence.evidenceId,
     origin: 'workflow',
@@ -511,12 +513,23 @@ function projectWorkflowEvidence(evidence: WorkflowEvidenceRecord): StudioResult
     source: evidence.source,
     title: evidence.title,
     ...(evidence.summary ? { summary: evidence.summary } : {}),
+    ...(sourceUri ? { sourceUri } : {}),
     ...(evidence.runId ? { runId: evidence.runId } : {}),
     ...(evidence.artifactId ? { artifactId: evidence.artifactId } : {}),
     observedAt: evidence.observedAt,
     verifier: evidence.verifier,
     contentDigest: evidence.contentDigest
   }
+}
+
+function researchSourceUri(evidence: WorkflowEvidenceRecord): string | undefined {
+  if (evidence.kind !== 'research_source' || !evidence.uri || evidence.uri.includes('[REDACTED]')) return undefined
+  try {
+    const url = new URL(evidence.uri)
+    if (!['https:', 'http:'].includes(url.protocol)) return undefined
+    assertWorkflowArtifactUriSafe(evidence.uri)
+    return evidence.uri
+  } catch { return undefined }
 }
 
 function projectAcceptance(

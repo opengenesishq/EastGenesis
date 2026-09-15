@@ -24,6 +24,7 @@ export type ProjectWorkspaceLedgerShadowCommand =
   | 'work_item.reorder'
   | 'work_item.acceptance.set'
   | 'work_item.transition'
+  | 'work_item.reopen_for_file_change'
   | 'work_item.lease.acquire'
   | 'work_item.lease.renew'
   | 'work_item.lease.release'
@@ -87,6 +88,7 @@ export interface ProjectWorkspaceLedgerShadowMutation {
   entityId: string
   workspaceId?: string
   requiresCanonicalAcceptance?: boolean
+  fileChangeImpact?: import('./file-change-impact').ProjectWorkspaceFileChangeImpact
 }
 
 export interface ProjectWorkspaceLedgerShadowMigration {

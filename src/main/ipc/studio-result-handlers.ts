@@ -16,8 +16,9 @@ import type { StudioAuditTimelineQuery } from '../../shared/studio-result-types'
 import { assertTrustedWorkflowLedgerSender } from './workflow-ledger-handlers'
 import { registerSessionProducedArtifacts } from '../task/session-artifact-producer'
 import { buildPortableDeliveryPackage, safeFileStem } from '../studio-result/studio-result-package'
+import { checkStudioResultFiles } from '../studio-result/studio-result-file-changes'
 
-type StudioResultAction = 'get' | 'audit' | 'export' | 'save'
+type StudioResultAction = 'get' | 'audit' | 'export' | 'save' | 'check_files'
 
 export async function handleStudioResultIpc(
   event: IpcMainInvokeEvent,
@@ -29,6 +30,11 @@ export async function handleStudioResultIpc(
   const action = normalizeAction(rawAction)
   const sessionId = requiredSessionId(rawSessionId)
   if (action === 'get') return studioResultSnapshotForSession(sessionId)
+  if (action === 'check_files') {
+    const session = sessionManager.list().find(candidate => candidate.id === sessionId)
+    if (!session) throw new Error(`Studio result Session was not found: ${sessionId}`)
+    return checkStudioResultFiles(session, app.getPath('userData'))
+  }
   if (action === 'audit') return studioAuditTimelineForSession(sessionId, auditQuery(rawQuery))
   const exported = buildStudioResultExport(await studioResultSnapshotForSession(sessionId))
   if (action === 'export') return exported
@@ -158,7 +164,7 @@ async function saveStudioResult(
 }
 
 function normalizeAction(value: unknown): StudioResultAction {
-  if (value === 'get' || value === 'audit' || value === 'export' || value === 'save') return value
+  if (value === 'get' || value === 'audit' || value === 'export' || value === 'save' || value === 'check_files') return value
   throw new Error('Studio result action is invalid')
 }
 

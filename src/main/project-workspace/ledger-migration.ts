@@ -69,6 +69,12 @@ import {
   type SourceFile
 } from './ledger-migration-source'
 import type { ProjectWorkspaceState } from '../../shared/project-workspace-types'
+import {
+  validateProjectWorkspaceFileChangeImpact,
+  commitProjectWorkspaceFileChangeImpactInDatabase,
+  type ProjectWorkspaceFileChangeImpact
+} from './file-change-impact'
+import { verifyWorkflowArtifactGraph } from '../task/workflow-ledger-artifact-graph-query'
 
 const TASK_STORE_VERSION = 9
 const MIGRATION_METADATA_FORMAT = 'caogen.project-workspace-ledger-migration-metadata.v1'
@@ -85,6 +91,7 @@ export interface ProjectWorkspaceLedgerMigrationOptions {
 
 export interface ProjectWorkspaceCanonicalWriteMigrationOptions extends ProjectWorkspaceLedgerMigrationOptions {
   assertCurrentJsonUnchanged: () => Promise<void>
+  fileChangeImpact?: ProjectWorkspaceFileChangeImpact
 }
 
 export interface ProjectWorkspaceLedgerMigrationResult {
@@ -169,7 +176,7 @@ export async function commitProjectWorkspaceStateToWorkflowLedger(
   const journals = await readBridgeJournalState(databasePath, id)
 
   await assertCommittedBridgeTargetPresent(databasePath, journals.committed)
-  if (journals.inProgress.length === 0) {
+  if (journals.inProgress.length === 0 && !options.fileChangeImpact) {
     await readTaskSnapshotDatabase(root, () => undefined)
   }
 
@@ -221,6 +228,11 @@ async function migrateUnderBarrier(
     const version = readWorkflowLedgerStoreVersionStrict(db)
     assertSupportedVersion(version)
     const projection = buildProjectWorkspaceProjection(source.aggregate)
+    const fileChangeImpact = (options as Partial<ProjectWorkspaceCanonicalWriteMigrationOptions>).fileChangeImpact
+    if (fileChangeImpact) {
+      if (fileChangeImpact.projectId !== source.aggregate.workspace.id) throw new Error('STUDIO_FILE_CHECK_SCOPE: change impact Project differs')
+      validateProjectWorkspaceFileChangeImpact(db, fileChangeImpact, source.state)
+    }
     validateProjectWorkspaceRunReferences(db, projection.workItems)
     assertTerminalProjectionAcceptance(db, projection)
     const previous = latestProjectWorkspaceMigration(db, source.aggregate.workspace.id)
@@ -233,14 +245,17 @@ async function migrateUnderBarrier(
         throw migrationError('TARGET_STATE_REGRESSION', 'Workflow Ledger projection regressed after a committed migration')
       }
       await assertMigrationSourceUnchanged(source, options)
+      if (fileChangeImpact) verifyWorkflowArtifactGraph(db)
       return migrationResult('already_current', source, projection)
     }
 
     prepared = await prepareBridgeMigration(databasePath, targetBytes, version, options)
     await ensureBridgeSidecars(prepared, source, projection)
     applyProjection(db, projection, goalWrites, workItemWrites)
+    if (fileChangeImpact) commitProjectWorkspaceFileChangeImpactInDatabase(db, fileChangeImpact)
     appendMigrationEvent(db, source, projection, prepared)
     verifyWorkflowLedger(db)
+    if (fileChangeImpact) verifyWorkflowArtifactGraph(db)
     const candidateBytes = db.export()
     const report = assessWorkflowLedgerCanonicalReadiness(db, {
       sourceKind: 'sqlite',
@@ -253,6 +268,7 @@ async function migrateUnderBarrier(
     const committed = await persistPreparedWorkflowLedgerMigration(prepared, candidateBytes, report, {
       faultAt: options.faultAt,
       now: options.now,
+      ...(fileChangeImpact ? { acceptanceChangeImpact: { plan: fileChangeImpact.plan, now: fileChangeImpact.now } } : {}),
       readMode: 'legacy'
     })
     cacheWorkflowLedgerTaskStoreReadinessForDatabase(databasePath, {

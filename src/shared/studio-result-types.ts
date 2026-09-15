@@ -127,6 +127,8 @@ export interface StudioResultEvidence {
   source?: WorkflowEvidenceSource
   title: string
   summary?: string
+  /** Recorded research source, restricted to credential-free HTTP(S). Never inferred from prose. */
+  sourceUri?: string
   runId?: string
   artifactId?: string
   observedAt: number
@@ -345,6 +347,7 @@ export interface StudioResultSaveResult {
 }
 
 export interface StudioResultApi {
+  checkStudioResultFiles(sessionId: string): Promise<import('./studio-result-file-change-types').StudioResultFileCheck>
   getStudioResultSnapshot(sessionId: string): Promise<StudioResultSnapshot>
   queryStudioAuditTimeline(
     sessionId: string,

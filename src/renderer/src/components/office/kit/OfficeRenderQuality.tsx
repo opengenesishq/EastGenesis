@@ -137,6 +137,14 @@ export default function OfficeFrameDriver({
   const onFrameRef = useRef(onFrame)
   const advanceRef = useRef(advance)
   const elapsedRef = useRef(0)
+  const renderFailedRef = useRef(false)
+
+  useEffect(() => {
+    const wrap = gl.domElement.closest('.office-canvas-wrap')
+    renderFailedRef.current = false
+    wrap?.removeAttribute('data-office-render-error')
+    return () => { wrap?.removeAttribute('data-office-render-error') }
+  }, [gl])
 
   useEffect(() => {
     onFrameRef.current = onFrame
@@ -146,7 +154,7 @@ export default function OfficeFrameDriver({
   }, [advance])
 
   useEffect(() => {
-    if (!active) return
+    if (!active || renderFailedRef.current) return
     let previous = performance.now()
     let frame = 0
     // A lost WebGL context cannot accept useful renderer work. In particular,
@@ -168,9 +176,14 @@ export default function OfficeFrameDriver({
         recordOfficeRenderDuration(gl, performance.now() - startedAt)
         if (frameMs !== undefined) onFrameRef.current(frameMs)
       } catch (error) {
-        // Context loss can race the preflight check. Suppress only that
-        // recoverable case; surface unrelated renderer errors normally.
-        if (!contextIsLost()) throw error
+        // RAF exceptions are outside React's error boundary. Stop this canvas
+        // and expose the same reload action without unmounting task panels.
+        // Context loss can race preflight and will resume after restoration.
+        if (!contextIsLost()) {
+          renderFailedRef.current = true
+          gl.domElement.closest('.office-canvas-wrap')?.setAttribute('data-office-render-error', 'true')
+          console.error('[Office] Scene rendering stopped', error)
+        }
       }
     }
     // A newly mounted Electron canvas can briefly report an unfocused window
@@ -183,9 +196,9 @@ export default function OfficeFrameDriver({
       previous = now
       elapsedRef.current += delta
       renderFrame(delta * 1_000)
-      frame = window.requestAnimationFrame(tick)
+      if (!renderFailedRef.current) frame = window.requestAnimationFrame(tick)
     }
-    frame = window.requestAnimationFrame(tick)
+    if (!renderFailedRef.current) frame = window.requestAnimationFrame(tick)
     return () => window.cancelAnimationFrame(frame)
   }, [active, gl])
 

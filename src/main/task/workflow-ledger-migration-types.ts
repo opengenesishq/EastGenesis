@@ -140,6 +140,13 @@ export interface WorkflowLedgerCanonicalMigrationJournal {
   rollbackPreparedAt?: number
   rolledBackAt?: number
   transitions: Array<{ state: WorkflowLedgerMigrationState; at: number }>
+  /** Exact system-owned Acceptance invalidation permitted during a canonical source command. */
+  acceptanceChangeImpact?: WorkflowLedgerMigrationAcceptanceChangeImpact
+}
+
+export interface WorkflowLedgerMigrationAcceptanceChangeImpact {
+  plan: import('./workflow-change-impact').WorkflowChangeImpactPlan
+  now: number
 }
 
 export interface PreparedWorkflowLedgerMigration {

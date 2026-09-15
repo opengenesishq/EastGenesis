@@ -103,6 +103,22 @@ export function verifyWorkflowArtifactGraph(
   db: WorkflowLedgerDatabase,
   options: { ledgerVerification?: WorkflowLedgerVerification } = {}
 ): WorkflowArtifactGraphVerification {
+  const { edges, locations, events } = verifyWorkflowArtifactGraphStructure(db)
+  const ledger = options.ledgerVerification ?? verifyWorkflowLedger(db)
+  const last = events.at(-1)
+  return {
+    valid: true,
+    artifacts: ledger.artifacts,
+    edges: edges.length,
+    locations: locations.length,
+    events: events.length,
+    lastSeq: last?.seq ?? 0,
+    lastDigest: last?.digest ?? '0'.repeat(64)
+  }
+}
+
+/** Validate ownership and immutable graph events before repairing stale file verification. */
+export function verifyWorkflowArtifactGraphStructure(db: WorkflowLedgerDatabase) {
   setupWorkflowArtifactGraphSchema(db)
   const artifacts = readArtifacts(db)
   const edges = readArtifactEdges(db)
@@ -126,17 +142,7 @@ export function verifyWorkflowArtifactGraph(
   }
   const events = readAndVerifyEvents(db)
   verifyGraphEvents(edges, locations, events)
-  const ledger = options.ledgerVerification ?? verifyWorkflowLedger(db)
-  const last = events.at(-1)
-  return {
-    valid: true,
-    artifacts: ledger.artifacts,
-    edges: edges.length,
-    locations: locations.length,
-    events: events.length,
-    lastSeq: last?.seq ?? 0,
-    lastDigest: last?.digest ?? '0'.repeat(64)
-  }
+  return { artifacts, edges, locations, events }
 }
 
 /** Verify the base projection and additive Artifact Graph as one contract. */

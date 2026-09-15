@@ -35,7 +35,8 @@ export interface EvidenceResolution {
 export function resolveAcceptanceEvidenceRefs(
   db: WorkflowLedgerDatabase,
   acceptance: WorkflowAcceptanceRecord,
-  createError: EvidenceResolutionErrorFactory
+  createError: EvidenceResolutionErrorFactory,
+  deferFileReadsForArtifactIds?: ReadonlySet<string>
 ): readonly EvidenceResolution[] {
   if (acceptance.evidenceRefs.length === 0) return []
 
@@ -90,7 +91,7 @@ export function resolveAcceptanceEvidenceRefs(
     }
     for (const link of matchingLinks) {
       const record = link.evidenceOrigin === 'workflow'
-        ? resolveWorkflowEvidence(db, acceptance, link, loadWorkflowEvidence, loadVerifiedEvents, createError)
+        ? resolveWorkflowEvidence(db, acceptance, link, loadWorkflowEvidence, loadVerifiedEvents, createError, deferFileReadsForArtifactIds)
         : resolveTaskEffectEvidence(acceptance, link, loadTaskEvidence, loadVerifiedEvents, createError)
       resolutions.push({ evidence: record, link })
     }
@@ -149,7 +150,8 @@ function resolveWorkflowEvidence(
   link: WorkflowEvidenceLinkRecord,
   loadEvidence: () => ReadonlyMap<string, WorkflowEvidenceRecord>,
   loadVerifiedEvents: () => readonly WorkflowEventRecord[],
-  createError: EvidenceResolutionErrorFactory
+  createError: EvidenceResolutionErrorFactory,
+  deferFileReadsForArtifactIds?: ReadonlySet<string>
 ): WorkflowEvidenceRecord {
   let record: WorkflowEvidenceRecord | undefined
   try {
@@ -205,7 +207,7 @@ function resolveWorkflowEvidence(
     )
   }
   try {
-    assertWorkflowEvidenceArtifactByteIntegrity(db, acceptance, record, events)
+    assertWorkflowEvidenceArtifactByteIntegrity(db, acceptance, record, events, deferFileReadsForArtifactIds)
   } catch (error) {
     const reason = error instanceof WorkflowArtifactByteIntegrityError
       ? error.reason

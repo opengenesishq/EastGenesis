@@ -1,5 +1,7 @@
 import { artifactCategoryLabel, artifactVerificationStatus } from './studio-result-artifact-labels'
 import OfficeArtifactRevision from './office-revision/OfficeArtifactRevision'
+import StudioResultFileChanges from './StudioResultFileChanges'
+import ResearchSourceDetails from './ResearchSourceDetails'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   StudioAuditTimelineItem,
@@ -116,6 +118,8 @@ function BoundStudioResultPanel({ sessionId, standalone, onOpenSessionSurface }:
 
       {error && <div className="studio-result-notice studio-result-notice-error" role="alert">{labels.loadFailed}</div>}
       {message && <div className="studio-result-notice" role="status">{message}</div>}
+      {sessionId && snapshot?.state !== 'unbound' && <StudioResultFileChanges
+        sessionId={sessionId} snapshot={snapshot} language={language} onRefresh={refresh} />}
 
       {!sessionId ? (
         <ResultEmpty title={labels.noConversation} detail={labels.noConversationDetail} />
@@ -470,6 +474,7 @@ function ReadyResult({
           repairByAcceptanceId={repairByAcceptanceId}
           onRepairReported={handleRepairReported}
           onOpenRepair={handleOpenRepair}
+          onOpenSource={(url) => openTool('browser', url)}
         />
       )}
       {tab === 'timeline' && <TimelineView snapshot={snapshot} sessionId={sessionId} labels={labels} />}
@@ -802,7 +807,8 @@ function EvidenceView({
   drill,
   repairByAcceptanceId,
   onRepairReported,
-  onOpenRepair
+  onOpenRepair,
+  onOpenSource
 }: ResultViewProps & {
   language: 'zh' | 'en'
   acceptanceReview: ResultAcceptanceReviewState
@@ -811,6 +817,7 @@ function EvidenceView({
   repairByAcceptanceId: Record<string, string>
   onRepairReported: (repair: { acceptanceId: string; workItemId: string }) => void
   onOpenRepair: (workItemId: string) => Promise<void> | void
+  onOpenSource: (url: string) => Promise<void>
 }): React.JSX.Element {
   const drillEvidenceSet = useMemo(() => new Set(drill?.evidenceIds ?? []), [drill])
   const drillAcceptanceSet = useMemo(() => new Set(drill?.acceptanceIds ?? []), [drill])
@@ -882,6 +889,7 @@ function EvidenceView({
             <span>{evidence.kind ?? evidence.origin}</span>
             <strong>{evidence.title}</strong>
             <code>{shortDigest(evidence.contentDigest)}</code>
+            <ResearchSourceDetails evidence={evidence} language={language} onOpen={onOpenSource} />
           </div>
         ))}
       </section>

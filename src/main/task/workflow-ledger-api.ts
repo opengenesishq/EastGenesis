@@ -131,7 +131,7 @@ export async function commitWorkflowChangeImpactPlan(
   return mutateTaskSnapshotDatabase(rootDir, (db) => commitWorkflowChangeImpactPlanInDatabase(db, plan, now))
 }
 
-function commitWorkflowChangeImpactPlanInDatabase(
+export function commitWorkflowChangeImpactPlanInDatabase(
   db: Parameters<typeof setupWorkflowLedgerSchema>[0],
   plan: WorkflowChangeImpactPlan,
   now: number

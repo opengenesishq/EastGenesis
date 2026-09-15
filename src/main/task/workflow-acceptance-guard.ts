@@ -289,12 +289,14 @@ export function planWorkflowAcceptanceReview(
  */
 export function assertAcceptanceEvidenceRefs(
   db: WorkflowLedgerDatabase,
-  acceptance: WorkflowAcceptanceRecord
+  acceptance: WorkflowAcceptanceRecord,
+  deferFileReadsForArtifactIds?: ReadonlySet<string>
 ): readonly EvidenceResolution[] {
   const resolutions = resolveAcceptanceEvidenceRefs(
     db,
     acceptance,
-    (code, message, details) => new WorkflowAcceptanceGateError(code, message, details)
+    (code, message, details) => new WorkflowAcceptanceGateError(code, message, details),
+    deferFileReadsForArtifactIds
   )
   assertAcceptanceCriterionEvidence(
     acceptance,

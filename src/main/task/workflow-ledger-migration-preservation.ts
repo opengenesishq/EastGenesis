@@ -6,13 +6,17 @@ import { digest } from './workflow-ledger-codec'
 import type { WorkflowLedgerDatabase } from './workflow-ledger-db'
 import {
   WorkflowLedgerMigrationError,
+  type WorkflowLedgerMigrationAcceptanceChangeImpact,
   type WorkflowLedgerMigrationSource
 } from './workflow-ledger-migration-types'
 import {
   openWorkflowLedgerDatabase,
   validateLegacyJsonMigrationSource
 } from './workflow-ledger-readiness'
-import { readGoals, readRuns, readWorkItems } from './workflow-ledger-query'
+import { readGoals, readRuns, readWorkItems, readAcceptances, readArtifacts, readEvidenceLinks, findEventById } from './workflow-ledger-query'
+import { applyWorkflowAcceptanceRechecks, buildWorkflowChangeImpactPlan } from './workflow-change-impact'
+import { readArtifactEdges } from './workflow-ledger-artifact-graph-query'
+import { insertAcceptance } from './workflow-ledger-sql'
 
 const PREFIX_APPEND_TABLES = new Set(['task_evidence', 'workflow_events'])
 const ADDITIVE_PROJECTION_TABLES = new Set(['workflow_goals', 'workflow_runs', 'workflow_work_items'])
@@ -36,7 +40,8 @@ interface SchemaObject {
 /** Fail closed unless candidate bytes retain every pre-migration state row. */
 export async function assertWorkflowLedgerMigrationPreservesSource(
   source: WorkflowLedgerMigrationSource,
-  candidateBytes: Uint8Array
+  candidateBytes: Uint8Array,
+  acceptanceChangeImpact?: WorkflowLedgerMigrationAcceptanceChangeImpact
 ): Promise<void> {
   const candidate = await openDatabase(candidateBytes, 'CANDIDATE')
   try {
@@ -50,7 +55,7 @@ export async function assertWorkflowLedgerMigrationPreservesSource(
     }
     const sourceDb = await openDatabase(source.sourceBytes, 'SOURCE')
     try {
-      assertSqliteStatePreserved(sourceDb, candidate)
+      assertSqliteStatePreserved(sourceDb, candidate, acceptanceChangeImpact)
     } finally {
       sourceDb.close()
     }
@@ -61,7 +66,8 @@ export async function assertWorkflowLedgerMigrationPreservesSource(
 
 function assertSqliteStatePreserved(
   source: WorkflowLedgerDatabase,
-  candidate: WorkflowLedgerDatabase
+  candidate: WorkflowLedgerDatabase,
+  acceptanceChangeImpact?: WorkflowLedgerMigrationAcceptanceChangeImpact
 ): void {
   assertSchemaObjectsPreserved(source, candidate)
   const sourceTables = readUserTableNames(source)
@@ -79,6 +85,10 @@ function assertSqliteStatePreserved(
       assertAdditiveProjectionTable(table, source, candidate)
       continue
     }
+    if (table === 'workflow_acceptances' && acceptanceChangeImpact) {
+      assertPlannedAcceptanceInvalidation(source, candidate, acceptanceChangeImpact)
+      continue
+    }
     const ordered = PREFIX_APPEND_TABLES.has(table)
     const sourceRows = readCanonicalRowDigests(source, table, sourceColumns, ordered)
     const candidateRows = readCanonicalRowDigests(candidate, table, candidateColumns, ordered)
@@ -88,6 +98,45 @@ function assertSqliteStatePreserved(
       assertExactRows(table, sourceRows, candidateRows)
     }
   }
+}
+
+function assertPlannedAcceptanceInvalidation(
+  source: WorkflowLedgerDatabase,
+  candidate: WorkflowLedgerDatabase,
+  impact: WorkflowLedgerMigrationAcceptanceChangeImpact
+): void {
+  const { plan, now } = impact
+  if (!plan?.projectId || !Number.isFinite(now)) {
+    throw preservationError('ACCEPTANCE_CHANGE_INVALID', 'Acceptance invalidation must have a Project and timestamp')
+  }
+  const original = readAcceptances(source)
+  const rebuilt = buildWorkflowChangeImpactPlan({
+    projectId: plan.projectId, changedArtifactIds: plan.changedArtifactIds,
+    manuallyModifiedArtifactIds: plan.changedArtifactIds,
+    artifacts: readArtifacts(source).filter(item => item.projectId === plan.projectId),
+    edges: readArtifactEdges(source).filter(item => item.projectId === plan.projectId),
+    evidenceLinks: readEvidenceLinks(source).filter(item => item.projectId === plan.projectId),
+    acceptances: original.filter(item => item.projectId === plan.projectId)
+  })
+  const event = findEventById(candidate, `workflow:change-impact:${plan.planDigest}`)
+  if (digest(rebuilt) !== digest(plan) || !event || event.kind !== 'workflow.change-impact.plan.created' ||
+      digest(event.payload) !== digest(plan)) {
+    throw preservationError('ACCEPTANCE_CHANGE_INVALID', 'Acceptance invalidation differs from the source graph or canonical plan event')
+  }
+  const expected = applyWorkflowAcceptanceRechecks(original, plan, now).sort((left, right) => left.id.localeCompare(right.id))
+  const actual = readAcceptances(candidate).sort((left, right) => left.id.localeCompare(right.id))
+  if (digest(expected) !== digest(actual)) {
+    throw preservationError('ACCEPTANCE_CHANGE_INVALID', 'Candidate changed an Acceptance outside the exact invalidation plan')
+  }
+  // The opened source DB is a disposable copy of the immutable backup. Apply
+  // only the permitted row writes there, then retain the original SQL-level
+  // comparison (including storage classes and every unchanged column).
+  const recheckedIds = new Set(plan.acceptanceRechecks.map(item => item.acceptanceId))
+  for (const acceptance of expected) if (recheckedIds.has(acceptance.id)) insertAcceptance(source, acceptance)
+  const columns = readTableColumns(source, 'workflow_acceptances')
+  assertExactRows('workflow_acceptances',
+    readCanonicalRowDigests(source, 'workflow_acceptances', columns, false),
+    readCanonicalRowDigests(candidate, 'workflow_acceptances', columns, false))
 }
 
 function readUserTableNames(db: WorkflowLedgerDatabase): Set<string> {

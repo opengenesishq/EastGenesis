@@ -23,6 +23,7 @@ import {
   validateLegacyJsonMigrationSource
 } from './workflow-ledger-readiness'
 import { assertWorkflowLedgerMigrationPreservesSource } from './workflow-ledger-migration-preservation'
+import { digest } from './workflow-ledger-codec'
 import {
   assertCommittedWorkflowLedgerTargetContinuity,
   findCommittedWorkflowLedgerMigration
@@ -179,10 +180,26 @@ export async function persistPreparedWorkflowLedgerMigration(
   prepared: PreparedWorkflowLedgerMigration,
   candidateBytes: Uint8Array,
   report: WorkflowLedgerCanonicalReadinessReport,
-  options: WorkflowLedgerMigrationFaultOptions & { readMode?: WorkflowLedgerReadMode } = {}
+  options: WorkflowLedgerMigrationFaultOptions & {
+    readMode?: WorkflowLedgerReadMode
+    acceptanceChangeImpact?: import('./workflow-ledger-migration-types').WorkflowLedgerMigrationAcceptanceChangeImpact
+  } = {}
 ): Promise<PreparedWorkflowLedgerMigration> {
   let journal = await readWorkflowLedgerCanonicalMigrationJournal(prepared.journalPath)
   assertJournalIdentity(journal, prepared)
+  if (options.acceptanceChangeImpact) {
+    const sameImpact = journal.acceptanceChangeImpact && digest(journal.acceptanceChangeImpact) === digest(options.acceptanceChangeImpact)
+    if (journal.acceptanceChangeImpact && !sameImpact) {
+      throw new WorkflowLedgerMigrationError('MIGRATION_CANDIDATE_DRIFT', 'Acceptance change impact differs from its durable migration journal')
+    }
+    if (!journal.acceptanceChangeImpact) {
+      if (journal.state !== 'prepared' && journal.state !== 'backup_verified') {
+        throw new WorkflowLedgerMigrationError('MIGRATION_CANDIDATE_DRIFT', 'Cannot add Acceptance invalidation to an existing candidate')
+      }
+      journal = { ...journal, acceptanceChangeImpact: structuredClone(options.acceptanceChangeImpact) }
+      await writeMigrationJournal(prepared.journalPath, journal)
+    }
+  }
   if (journal.state === 'committed') {
     if (!journal.readiness) {
       throw new WorkflowLedgerMigrationError('MIGRATION_JOURNAL_INVALID', 'Committed migration has no readiness evidence')
@@ -217,7 +234,7 @@ export async function persistPreparedWorkflowLedgerMigration(
     targetPath: journal.targetPath,
     sourceBytes: backupBytes,
     targetExisted: journal.targetExisted
-  }, candidate)
+  }, candidate, journal.acceptanceChangeImpact)
   await assertOriginalSourceUnchangedOrCandidatePresent(journal, migrated)
 
   if (journal.state === 'prepared') {

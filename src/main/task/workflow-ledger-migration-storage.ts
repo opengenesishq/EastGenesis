@@ -159,7 +159,17 @@ function isMigrationJournal(value: unknown): value is WorkflowLedgerCanonicalMig
   const item = value as Partial<WorkflowLedgerCanonicalMigrationJournal>
   return hasJournalEnvelope(item) && hasJournalVersions(item) && hasJournalFiles(item) &&
     hasJournalTimestamps(item) && isValidTransitionHistory(item) && hasStatePayload(item) &&
-    hasConsistentSourceIdentity(item)
+    hasConsistentSourceIdentity(item) && hasValidAcceptanceChangeImpact(item)
+}
+
+function hasValidAcceptanceChangeImpact(item: Partial<WorkflowLedgerCanonicalMigrationJournal>): boolean {
+  if (item.acceptanceChangeImpact === undefined) return true
+  const impact = item.acceptanceChangeImpact
+  if (!impact || typeof impact !== 'object' || !isTimestamp(impact.now) ||
+      !impact.plan || typeof impact.plan !== 'object' || impact.plan.schemaVersion !== 1 ||
+      impact.plan.contract !== 'workflow-change-impact-v1' || !isNonEmptyString(impact.plan.projectId)) return false
+  const { planDigest, ...unsignedPlan } = impact.plan
+  return typeof planDigest === 'string' && digest(unsignedPlan) === planDigest
 }
 
 function hasJournalEnvelope(item: Partial<WorkflowLedgerCanonicalMigrationJournal>): boolean {

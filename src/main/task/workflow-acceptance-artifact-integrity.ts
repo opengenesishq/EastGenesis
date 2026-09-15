@@ -60,7 +60,8 @@ export function assertWorkflowEvidenceArtifactByteIntegrity(
   db: WorkflowLedgerDatabase,
   acceptance: WorkflowAcceptanceRecord,
   evidence: WorkflowEvidenceRecord,
-  verifiedEvents: readonly WorkflowEventRecord[]
+  verifiedEvents: readonly WorkflowEventRecord[],
+  deferFileReadsForArtifactIds?: ReadonlySet<string>
 ): void {
   if (acceptance.status !== 'passed' || !evidence.artifactId) return
 
@@ -81,6 +82,10 @@ export function assertWorkflowEvidenceArtifactByteIntegrity(
     if (paths.length === 0) continue
     localCandidateCount += paths.length
     assertLocationDeclarations(location, evidenceDigest)
+    // The file-change repair ingress already observed these exact Artifact
+    // bytes. Keep all identity/digest/location declarations checked before
+    // it invalidates verification; ordinary callers always read the files.
+    if (deferFileReadsForArtifactIds?.has(evidence.artifactId)) continue
     for (const path of paths) {
       const observed = readStableRegularFile(path)
       if (observed.sizeBytes !== location.sizeBytes) {
