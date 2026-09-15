@@ -210,7 +210,7 @@
 
 .pws-goal-task-starter {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   padding: 14px 18px;
   border-bottom: 1px solid var(--border-soft);
@@ -220,6 +220,12 @@
 .pws-goal-task-starter .input {
   min-width: 0;
 }
+
+.pws-goal-task-options { grid-column: 1 / -1; font-size: 12px; color: var(--text-dim); }
+.pws-goal-task-options summary { cursor: pointer; }
+.pws-goal-task-options label { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.pws-inbox-intake > label { display: flex; align-items: center; gap: 8px; padding: 8px 18px; font-size: 12px; }
+.pws-inbox-intake > label select { min-width: 0; max-width: 280px; }
 
 .pws-goal-task-error,
 .pws-goal-task-success {

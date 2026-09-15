@@ -8,11 +8,17 @@ const forms = readFileSync(resolve(root, 'src/renderer/src/components/studio/Pro
 const model = readFileSync(resolve(root, 'src/renderer/src/components/studio/projectWorkspaceStudioModel.ts'), 'utf8')
 const navigation = readFileSync(resolve(root, 'src/renderer/src/components/studio/projectWorkspaceNavigation.ts'), 'utf8')
 
+const starter = readFileSync(resolve(root, 'src/renderer/src/components/studio/GoalTaskStarter.tsx'), 'utf8')
+
 const checks: { id: string; status: 'passed' | 'failed'; detail?: string }[] = []
 function check(id: string, predicate: boolean, detail: string): void {
   checks.push(predicate ? { id, status: 'passed' } : { id, status: 'failed', detail })
 }
 
+check('shared-natural-language-starter', inbox.includes('<GoalTaskStarter') && studio.includes('<GoalTaskStarter') && starter.includes('data-goal-task-objective'), 'home and project workspace must use the same natural language starter')
+check('optional-project-context', inbox.includes('data-goal-task-project') && inbox.includes('intakeProject?.id'), 'standalone input must not require creating a project')
+check('optional-template', starter.includes('<details') && starter.includes('data-goal-task-options'), 'planning templates must be optional advanced settings')
+check('durable-draft', starter.includes('readComposerDraft') && starter.includes('writeComposerDraft'), 'goal input must survive view unmounts')
 check('work-inbox-create-goal-action', inbox.includes('data-work-inbox-action="create-goal"') && inbox.includes("requestProjectWorkspaceNavigation(project.id, 'goal')"), 'Work Inbox must expose a create-goal action that routes to a project')
 check('empty-project-fallback', inbox.includes('openNewProjectWorkspace()'), 'the create-goal action must open project creation when no active project exists')
 check('goal-navigation-focus', navigation.includes("| 'goal'") && studio.includes("requestedFocus === 'goal'") && studio.includes("setForm('goal')") && studio.includes("if (requestedFocus === 'goal') return"), 'goal navigation must open and retain the existing GoalCreateForm while the project loads')
@@ -25,7 +31,7 @@ check('existing-create-action', studio.includes('<GoalCreateForm') && studio.inc
 const failed = checks.filter((item) => item.status === 'failed')
 const report = {
   schemaVersion: 1,
-  contract: '0913 Goal intake entry',
+  contract: '2026-09-15 natural language intake and legacy advanced form',
   status: failed.length ? 'failed' : 'passed',
   checks,
   summary: `${checks.length - failed.length}/${checks.length} checks passed`,

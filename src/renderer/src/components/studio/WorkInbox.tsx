@@ -13,12 +13,16 @@ import RunDetailPanel from './RunDetailPanel'
 import { createRunDetailRoute, parseRunDetailRoute, resolveRunRecoverySnapshotId } from '../../../../shared/run-detail-projection'
 import { requestTaskPlanNavigation } from '../experience/task-plan-navigation'
 import TaskPlanWorkbench from '../experience/TaskPlanWorkbench'
+import GoalTaskStarter from './GoalTaskStarter'
+import { useProjectGoalTaskStart } from './useProjectWorkspaceStudio'
 
 const REFRESH_INTERVAL_MS = 15_000
 const PAGE_SIZE = 500
 
 export default function WorkInbox({ active }: { active: boolean }): React.JSX.Element {
   const projects = useStore((state) => state.projectWorkspaces)
+  const preferredProjectId = useStore((state) => state.preferredProjectWorkspaceId)
+  const [intakeProjectId, setIntakeProjectId] = useState<string | null>(null)
   const taskSnapshots = useStore((state) => state.taskSnapshots)
   const recoverTaskSnapshot = useStore((state) => state.recoverTaskSnapshot)
   const selectSession = useStore((state) => state.selectSession)
@@ -54,6 +58,9 @@ export default function WorkInbox({ active }: { active: boolean }): React.JSX.El
       setLoading(false)
     }
   }, [refreshProjects])
+  const goalStarter = useProjectGoalTaskStart(refresh)
+  const selectedIntakeProject = intakeProjectId ?? preferredProjectId ?? ''
+  const intakeProject = projects.find((project) => project.id === selectedIntakeProject && project.status === 'active')
   const recoverRun = useCallback(async (runId: string): Promise<void> => {
     const canonicalRun = ledger?.runs.items.find((run) => run.id === runId)
     if (!canonicalRun) throw new Error('Run 已不在 canonical Ledger 中，已阻止恢复。')
@@ -98,6 +105,17 @@ export default function WorkInbox({ active }: { active: boolean }): React.JSX.El
           <button type="button" className="btn btn-ghost btn-sm" disabled={loading} onClick={() => void refresh().catch(() => undefined)}>{loading ? localized('刷新中…', 'Refreshing…') : localized('刷新', 'Refresh')}</button>
         </div>
       </header>
+      <div className="pws-inbox-intake" data-work-inbox-intake>
+        <label>{localized('当前项目', 'Current project')}
+          <select className="input" value={intakeProject?.id ?? ''} disabled={goalStarter.busy}
+            onChange={(event) => setIntakeProjectId(event.target.value)} data-goal-task-project>
+            <option value="">{localized('独立任务', 'Standalone task')}</option>
+            {projects.filter((project) => project.status === 'active').map((project) =>
+              <option key={project.id} value={project.id}>{project.name}</option>)}
+          </select>
+        </label>
+        <GoalTaskStarter key={intakeProject?.id ?? 'personal'} projectId={intakeProject?.id} state={goalStarter} />
+      </div>
       {error && <p className="pws-inbox-error" role="alert">{error}</p>}
       {!loading && !error && projection?.total === 0 && <p className="pws-inbox-empty">{localized('暂无工作项', 'No work items')}</p>}
       {projection && projection.total > 0 && <div className="pws-inbox-lanes" data-cross-project-inbox-total={projection.total}>

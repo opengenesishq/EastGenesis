@@ -1,3 +1,4 @@
+import GoalTaskStarter from './GoalTaskStarter'
 import { memo, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import type { AcceptanceResult, Goal, GoalPatch, ProjectSquad, ProjectWorkspace, ProjectWorkspaceLeaseOptions, WorkItem, WorkItemComment, WorkItemOwner } from '../../../../shared/types'
 import {
@@ -415,7 +416,7 @@ function ProjectContents({
       {waitingForContents && <LoadingState message={TEXT.loadingContents} />}
       {!waitingForContents && !contentsUnavailable && (
         <>
-          <GoalTaskStarter projectId={project.id} state={starter} />
+          <GoalTaskStarter key={project.id} projectId={project.id} state={starter} />
           <ProjectInbox
             active={active}
             projectId={project.id}
@@ -529,51 +530,6 @@ function ProgressiveProjectSection({
       </summary>
       {mounted && <div className="pws-advanced-section-content">{children}</div>}
     </details>
-  )
-}
-
-function GoalTaskStarter({
-  projectId,
-  state
-}: {
-  projectId: string
-  state: GoalTaskStarterState
-}): React.JSX.Element {
-  const [objective, setObjective] = useState('')
-  const [template, setTemplate] = useState<'auto' | 'product-launch'>('auto')
-  const language = useStore((state) => state.settings.language)
-  const english = language === 'en'
-  const submit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault()
-    if (await state.start(projectId, objective, template)) setObjective('')
-  }
-  return (
-    <>
-    <form className="pws-goal-task-starter" onSubmit={(event) => void submit(event)} data-goal-task-starter>
-      <label className="pws-visually-hidden" htmlFor={`goal-task-${projectId}`}>{TEXT.goalTaskPlaceholder}</label>
-      <select className="input" aria-label={english ? 'Planning template' : '规划模板'} disabled={state.busy} value={template} onChange={(event) => setTemplate(event.target.value as 'auto' | 'product-launch')} data-goal-task-template>
-        <option value="auto">{english ? 'Automatic plan' : '自动规划'}</option>
-        <option value="product-launch">{english ? 'Product launch · four roles' : '产品发布 · 四岗位'}</option>
-      </select>
-      <input
-        id={`goal-task-${projectId}`}
-        className="input"
-        name="objective"
-        value={objective}
-        maxLength={20_000}
-        placeholder={TEXT.goalTaskPlaceholder}
-        disabled={state.busy}
-        onChange={(event) => setObjective(event.target.value)}
-        data-goal-task-objective
-      />
-      <button type="submit" className="btn btn-primary" disabled={state.busy || !objective.trim()} data-goal-task-start>
-        {state.busy ? TEXT.startingGoalTask : TEXT.startGoalTask}
-      </button>
-      {state.error && <p className="pws-goal-task-error" role="alert">{state.error}</p>}
-      {state.announcement && <p className="pws-goal-task-success" role="status">{state.announcement}</p>}
-    </form>
-    {state.planSessionId && state.planProjectId === projectId && <TaskPlanWorkbench sessionId={state.planSessionId} strategy="plan" running={false} />}
-    </>
   )
 }
 

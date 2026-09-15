@@ -268,12 +268,19 @@ async function main() {
     await clickVisible(page, 'Work Inbox', '[data-studio-section-option="inbox"]')
     await waitForVisible(page, '[data-cross-project-work-inbox]')
     if (args.fixture === 'mission-compile') {
-      await clickVisible(page, 'Project Workspace for mission', '[data-studio-section-option="work"]')
-      await waitForVisible(page, '[data-goal-task-objective]')
-      await page.select('[data-goal-task-template]', 'product-launch')
+      await page.select('[data-goal-task-project]', 'fixture-runs-review-project')
       const objective = '形成包含可运行实现、使用说明和验证报告的本地交付计划'
       await page.type('[data-goal-task-objective]', objective)
-      await clickVisible(page, 'Compile mission plan', '[data-goal-task-start]')
+      await clickVisible(page, 'Project Workspace for mission', '[data-studio-section-option="work"]')
+      await waitForVisible(page, '[data-project-workspace-studio] [data-goal-task-objective]')
+      assertCondition(await page.$eval('[data-project-workspace-studio] [data-goal-task-objective]', (node) => node.value) === objective, 'Goal draft was lost between inbox and project workspace')
+      await clickVisible(page, 'Return to Inbox intake', '[data-studio-section-option="inbox"]')
+      await page.select('[data-goal-task-project]', 'fixture-runs-review-project')
+      const intake = '[data-work-inbox-intake]'
+      assertCondition(await page.$eval(`${intake} [data-goal-task-objective]`, (node) => node.value) === objective, 'Goal draft was lost on inbox remount')
+      await clickVisible(page, 'Optional planning settings', `${intake} [data-goal-task-options] summary`)
+      await page.select(`${intake} [data-goal-task-template]`, 'product-launch')
+      await clickVisible(page, 'Compile mission plan', `${intake} [data-goal-task-start]`)
       await page.waitForFunction(() => Boolean(document.querySelector('[data-task-plan-status="pending"]') || document.querySelector('.pws-goal-task-error')), { timeout: 25_000 })
       const compileError = await page.$eval('.pws-goal-task-error', (node) => node.textContent).catch(() => '')
       assertCondition(!compileError, `Mission compilation failed: ${compileError}`)
@@ -309,7 +316,7 @@ async function main() {
       clicks.push({ name: 'Goal starter opens compiled Mission plan', sessionId, at: new Date().toISOString() })
       // Studio and the retained Session surface can render the same plan.
       // Scope interactions to the visible workspace, never the hidden copy.
-      const workbench = `[data-project-workspace-studio] [data-task-plan-session="${sessionId}"]`
+      const workbench = `[data-work-inbox-intake] [data-task-plan-session="${sessionId}"]`
       const originalVersion = plan.currentVersion
       await clickVisible(page, 'Edit Mission step title', `${workbench} [data-task-plan-step-title="0"]`)
       await page.keyboard.press('End')
@@ -355,6 +362,21 @@ async function main() {
       report.missionCompilation = { sessionId, versionId: plan.currentVersion.id, originalVersionId: originalVersion.id, editedVersionId: edited.currentVersion.id, approvalStatus: afterApproval.approvalStatus, binding, steps: plan.currentVersion.steps.map(({ id, role, executionRole, workItemType, acceptanceSpec, dependsOn }) => ({ id, role, executionRole, workItemType, acceptanceSpec, dependsOn })), projection, runs: executions }
       recordCheck('Mission approval projects canonical role WorkItems', 'approval only; execution not dispatched')
       clicks.push({ name: 'Mission plan approval projects four WorkItems', sessionId, at: new Date().toISOString() })
+      const missionScreenshot = path.join(outputDir, `${runId}-mission-workspace.png`)
+      mkdirSync(outputDir, { recursive: true })
+      await page.screenshot({ path: missionScreenshot, fullPage: false })
+      report.missionScreenshot = path.relative(repoRoot, missionScreenshot)
+      const sessionsBeforeContinue = await page.evaluate(() => window.agentDesk.listSessions())
+      await clickVisible(page, 'Continue original task', '[data-work-inbox-intake] [data-goal-task-continue]')
+      await waitForVisible(page, '[data-studio-surface="session"] .composer-input')
+      await waitForVisible(page, `#studio-projection-panel-session [data-task-plan-session="${sessionId}"]`)
+      const sessionsAfterContinue = await page.evaluate(() => window.agentDesk.listSessions())
+      assert.deepEqual(sessionsAfterContinue.map((item) => item.id).sort(), sessionsBeforeContinue.map((item) => item.id).sort(), 'Continue task created a second Session')
+      const sameSession = sessionsAfterContinue.find((item) => item.id === sessionId)
+      assertCondition(sameSession?.goalId === binding.goalId && sameSession?.workItemId === binding.workItemId, 'Continue task lost canonical ownership')
+      report.missionCompilation.continuedSessionId = sessionId
+      recordCheck('Continue opens the original task conversation', 'same Session Goal and WorkItem; visible Composer; no dispatch')
+      await clickVisible(page, 'Return to project surfaces', '[data-studio-projection-tab="workspace"]')
     }
     if (args.fixture === 'plan-confirmation') {
       const snapshots = await page.evaluate(() => window.agentDesk.listTaskSnapshots())

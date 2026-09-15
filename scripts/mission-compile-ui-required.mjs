@@ -18,5 +18,6 @@ runUiEvidenceGate({
     check('compile and approval refer to the same Session', sessionIds[0] === sessionIds[1] && report.missionCompilation?.sessionId === sessionIds[0])
     check('canonical approval readback is present', report.missionCompilation?.approvalStatus === 'approved' && report.missionCompilation?.projection?.steps?.length === 4)
     check('edited form version is the approved version', Boolean(report.missionCompilation?.editedVersionId) && report.missionCompilation.editedVersionId === report.missionCompilation.versionId && report.missionCompilation.originalVersionId !== report.missionCompilation.editedVersionId)
+    check('continue opens the original conversation', report.missionCompilation?.continuedSessionId === sessionIds[0])
   }
 })

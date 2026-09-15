@@ -80,7 +80,7 @@
     "test:task-plan-inbox-entry:required": "tsx scripts/task-plan-inbox-entry-required.ts",
     "test:delivery-acceptance-inbox-entry:required": "tsx scripts/delivery-acceptance-inbox-entry-required.ts",
     "test:work-inbox:first-screen:required": "tsx scripts/work-inbox-first-screen-required.ts",
-    "test:goal-intake:required": "tsx scripts/goal-intake-required.ts",
+    "test:goal-intake:required": "tsx scripts/goal-intake-required.ts && tsx scripts/project-goal-submission-required.ts",
     "test:golden-task-entry:required": "tsx scripts/golden-task-entry-required.ts",
     "test:golden-task-evidence-bridge:required": "tsx scripts/golden-task-evidence-bridge-required.ts",
     "test:work-os-navigation:required": "tsx scripts/work-os-navigation-required.ts",

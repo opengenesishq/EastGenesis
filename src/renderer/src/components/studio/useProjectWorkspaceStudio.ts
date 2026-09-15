@@ -1,3 +1,5 @@
+import { createProjectGoalSubmissionClient } from '../../lib/project-goal-task-submission'
+import { createPersonalTaskSubmissionClient } from '../../lib/personal-task-submission'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   Goal,
@@ -325,53 +327,63 @@ export function useProjectGoalTaskStart(refreshContents: () => Promise<void>): {
   announcement: string
   planSessionId: string | null
   planProjectId: string | null
-  start: (projectId: string, objective: string, template?: 'auto' | 'product-launch') => Promise<boolean>
+  start: (projectId: string | undefined, objective: string, template?: 'auto' | 'product-launch') => Promise<boolean>
 } {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [announcement, setAnnouncement] = useState('')
   const [compiledPlan, setCompiledPlan] = useState<{ sessionId: string; projectId: string } | null>(null)
   const locked = useRef(false)
-  const retry = useRef<{ key: string; requestId: string; sessionId?: string } | null>(null)
-
-  const start = useCallback(async (projectId: string, rawObjective: string, template: 'auto' | 'product-launch' = 'auto'): Promise<boolean> => {
+  const start = useCallback(async (projectId: string | undefined, rawObjective: string, template: 'auto' | 'product-launch' = 'auto'): Promise<boolean> => {
     const objective = rawObjective.trim()
     if (!objective || locked.current) return false
     locked.current = true
     setBusy(true)
     setError('')
     setAnnouncement('')
-    const key = `${projectId}\0${template}\0${objective}`
-    if (retry.current?.key !== key) retry.current = { key, requestId: newGoalTaskRequestId() }
     try {
-      const result = await window.agentDesk.createProjectGoalTask({
-        requestId: retry.current.requestId,
-        projectId,
-        objective
-      })
-      await refreshContents()
-      const sessionId = retry.current.sessionId ?? await useStore.getState().createSession({
-          cwd: '',
-          workspaceId: projectId,
-          goalId: result.goal.id,
-          workItemId: result.workItem.id,
-          businessLineId: result.workItem.businessLineId,
-          model: AUTO_MODEL,
-          providerId: AUTO_PROVIDER_ID,
-          routingScope: 'global',
-          initialPrompt: objective,
-          taskStrategy: 'plan',
-          title: result.workItem.title
+      if (!projectId) {
+        const client = createPersonalTaskSubmissionClient({ storageKey: 'caogen.work-inbox.personal-submission.v1' })
+        const { receipt, pendingCleanupError } = await client.submit({
+          text: objective, providerId: AUTO_PROVIDER_ID, model: AUTO_MODEL, routingScope: 'global',
+          taskStrategy: useStore.getState().settings.defaultTaskStrategy
         })
-      retry.current.sessionId = sessionId
-      useStore.getState().selectSession(sessionId)
-      const plan = template === 'product-launch'
-        ? await useStore.getState().compileMissionTaskPlan(sessionId, { expectedGoalRevision: result.goal.revision })
-        : await useStore.getState().generateTaskPlan(sessionId, { objective })
-      if (!plan?.currentVersion) throw new Error(useStore.getState().taskPlanErrors[sessionId] || '工作流草案未生成，任务与会话已保留，可重试')
+        if (receipt.status !== 'submitted' || !receipt.binding) throw new Error(receipt.error?.message ?? '任务尚未确认发送，输入已保留，请查询原任务后重试。')
+        const sessionId = receipt.binding.sessionId
+        // Submission success is independent of whether this view can load immediately.
+        const loaded = await useStore.getState().syncSession(sessionId).catch(() => false)
+        if (loaded) {
+          useStore.getState().selectSession(sessionId)
+          useStore.getState().setExperienceMode('studio')
+          useStore.getState().setStudioSurface('session')
+          useStore.getState().setShowNewSession(false)
+        }
+        setAnnouncement(pendingCleanupError ?? (loaded ? '任务已提交，可在同一对话继续工作。' : '任务已提交，请从任务历史打开原会话。'))
+        return true
+      }
+      const client = createProjectGoalSubmissionClient(window.localStorage, {
+        createGoal: (input) => window.agentDesk.createProjectGoalTask(input),
+        listSessions: () => window.agentDesk.listSessions(),
+        createSession: async (result) => (await window.agentDesk.createSession({
+          cwd: '', workspaceId: projectId, goalId: result.goal.id, workItemId: result.workItem.id,
+          businessLineId: result.workItem.businessLineId, model: AUTO_MODEL, providerId: AUTO_PROVIDER_ID,
+          routingScope: 'global', initialPrompt: objective, taskStrategy: 'plan', title: result.workItem.title
+        })).id,
+        getPlan: (sessionId) => window.agentDesk.getTaskPlan(sessionId),
+        generatePlan: async (sessionId, result, selectedTemplate) => {
+          const plan = selectedTemplate === 'product-launch'
+            ? await useStore.getState().compileMissionTaskPlan(sessionId, { expectedGoalRevision: result.goal.revision })
+            : await useStore.getState().generateTaskPlan(sessionId, { objective })
+          if (!plan?.currentVersion) throw new Error(useStore.getState().taskPlanErrors[sessionId] || '计划尚未生成，输入与任务已保留，可重试。')
+          return plan
+        }
+      })
+      const { sessionId, requestId } = await client.submit({ projectId, objective, template })
+      if (!await useStore.getState().syncSession(sessionId)) throw new Error('原任务已保存，会话尚未载入，请重试打开。')
       setCompiledPlan({ sessionId, projectId })
-      useStore.getState().openProjectWorkspace(projectId)
-      retry.current = null
+      // Failed projection refresh must not turn a confirmed plan into a new submission.
+      await refreshContents().catch(() => undefined)
+      try { client.acknowledge(requestId) } catch { /* retained journal safely reopens the same plan */ }
       setAnnouncement(TEXT.goalTaskStarted)
       return true
     } catch (cause) {
@@ -384,10 +396,6 @@ export function useProjectGoalTaskStart(refreshContents: () => Promise<void>): {
   }, [refreshContents])
 
   return { busy, error, announcement, planSessionId: compiledPlan?.sessionId ?? null, planProjectId: compiledPlan?.projectId ?? null, start }
-}
-
-function newGoalTaskRequestId(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `goal-task-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 function chooseProjectId(projects: ProjectWorkspace[], preferredId?: string): string {
