@@ -1132,6 +1132,8 @@ export interface ProjectWorkspaceApi {
   createProjectWorkspaceWithTemplate(input: ProjectWorkspaceInput, options?: MutationOptions): Promise<ProjectWorkspace>
   applyProjectWorkspaceTemplate(input: ProjectWorkspaceTemplateApplyInput): Promise<ProjectWorkspaceTemplateApplyResult>
   updateProjectWorkspace(id: string, patch: ProjectWorkspacePatch, options?: MutationOptions): Promise<ProjectWorkspace>
+  previewProjectInstitutionMigration(id: string, input: import('./project-institution-template').ProjectInstitutionMigrationPreviewInput): Promise<import('./project-institution-template').ProjectInstitutionMigrationView>
+  applyProjectInstitutionMigration(id: string, input: import('./project-institution-template').ProjectInstitutionMigrationApplyInput): Promise<import('./project-institution-template').ProjectInstitutionMigrationResult>
   mutateProjectConnector(
     projectId: string,
     resourceId: string,

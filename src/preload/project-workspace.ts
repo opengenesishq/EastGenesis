@@ -1,4 +1,5 @@
 import { ipcRenderer } from 'electron'
+import type { ProjectInstitutionMigrationPreviewInput, ProjectInstitutionMigrationApplyInput } from '../shared/project-institution-template'
 import type {
   AcceptanceResult,
   AgentDeskApi,
@@ -67,6 +68,8 @@ export const projectWorkspaceApi: Pick<AgentDeskApi,
   | 'createProjectGoalTask'
   | 'prepareProjectGoalTask'
   | 'startProjectGoalTask'
+  | 'previewProjectInstitutionMigration'
+  | 'applyProjectInstitutionMigration'
   | 'reorderProjectWorkItem'
   | 'setProjectWorkItemAcceptance' | 'acquireProjectWorkItemLease'
   | 'renewProjectWorkItemLease' | 'releaseProjectWorkItemLease'
@@ -108,6 +111,10 @@ export const projectWorkspaceApi: Pick<AgentDeskApi,
     invokeProjectWorkspace('templates:apply', input),
   updateProjectWorkspace: (id: string, patch: ProjectWorkspacePatch, options?: MutationOptions) =>
     invokeProjectWorkspace('update', id, patch, options),
+  previewProjectInstitutionMigration: (id: string, input: ProjectInstitutionMigrationPreviewInput) =>
+    invokeProjectWorkspace('institutions:preview', id, input),
+  applyProjectInstitutionMigration: (id: string, input: ProjectInstitutionMigrationApplyInput) =>
+    invokeProjectWorkspace('institutions:apply', id, input),
   mutateProjectConnector: (projectId: string, resourceId: string, mutation: ProjectConnectorMutation, options?: MutationOptions) =>
     invokeProjectWorkspace('connectors:mutate', projectId, resourceId, mutation, options),
   archiveProjectWorkspace: (id: string, options?: MutationOptions) =>

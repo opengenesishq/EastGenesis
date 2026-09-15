@@ -13,7 +13,7 @@ import { TaskPlanContractStore } from './task-plan-contract-store'
 import { TaskPlanCanonicalProjector } from './task-plan-canonical-projection'
 import { reconcileTaskPlanLedger, syncTaskPlanLedger } from './task-plan-ledger'
 import { buildCanonicalMissionTaskPlan, enrichCanonicalTaskPlanInstitutions } from './mission-task-plan'
-import { openProjectWorkspaceStore } from '../project-workspace/store'
+import { readGoalInstitutionContext } from '../project-workspace/institution-goal-binding'
 import { bindTaskPlanInstitutions } from './task-plan-institutions'
 
 export class TaskPlanSessionCoordinator {
@@ -269,11 +269,11 @@ export class TaskPlanSessionCoordinator {
 
   private async assertMissionSourceCurrent(meta: SessionMeta, version: TaskPlanVersion): Promise<void> {
     if (version.institutionTemplate) {
-      const workspace = meta.workspaceId ? await (await openProjectWorkspaceStore(this.userDataRoot())).getWorkspace(meta.workspaceId) : undefined
-      if (!workspace || workspace.status !== 'active' ||
-          workspace.institutionTemplate?.templateId !== version.institutionTemplate.templateId ||
-          workspace.institutionTemplate?.templateVersion !== version.institutionTemplate.templateVersion) {
-        throw new Error('计划机构模板与项目当前版本不一致，请重新生成并确认计划')
+      if (!meta.workspaceId || (!meta.goalId && !meta.workItemId)) throw new Error('计划机构职责缺少原项目或任务身份')
+      const { template } = await readGoalInstitutionContext(this.userDataRoot(), meta.workspaceId, meta.goalId, meta.workItemId)
+      if (template.templateId !== version.institutionTemplate.templateId ||
+          template.templateVersion !== version.institutionTemplate.templateVersion) {
+        throw new Error('计划机构模板与原目标的职责版本不一致，请核对原计划')
       }
     }
     if (!version.missionSource) return

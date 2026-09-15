@@ -1,4 +1,5 @@
 import { app, ipcMain } from 'electron'
+import type { ProjectInstitutionMigrationPreviewInput, ProjectInstitutionMigrationApplyInput } from '../../shared/project-institution-template'
 import { isAbsolute, relative, resolve } from 'node:path'
 import {
   openProjectWorkspaceStore,
@@ -115,6 +116,8 @@ const WORK_ITEM_PATCH_KEYS = new Set([
 const GOAL_TASK_KEYS = new Set(['requestId', 'projectId', 'objective', 'businessLineId'])
 const GOAL_PREPARATION_KEYS = new Set([...GOAL_TASK_KEYS, 'template', 'legacySessionId', 'legacyCreationClaimed'])
 const GOAL_START_KEYS = new Set([...GOAL_PREPARATION_KEYS, 'mode'])
+const INSTITUTION_PREVIEW_KEYS = new Set(['scope', 'target'])
+const INSTITUTION_APPLY_KEYS = new Set([...INSTITUTION_PREVIEW_KEYS, 'expectedWorkspaceRevision', 'previewDigest'])
 const PROJECT_TEMPLATE_APPLY_KEYS = new Set(['requestId', 'projectId', 'templateId'])
 const PROJECT_KNOWLEDGE_SEARCH_KEYS = new Set(['projectId', 'query', 'limit'])
 const PROJECT_DEPENDENCY_KEYS = new Set(['id', 'fromProjectId', 'toProjectId', 'fromWorkItemId', 'toWorkItemId', 'label'])
@@ -150,9 +153,9 @@ const PROJECT_WORKSPACE_MUTATIONS = new Set([
   'comments:create', 'comments:update', 'comments:delete',
   'sharedApprovals:create', 'sharedApprovals:decide', 'sharedApprovals:revoke',
   'collaborationInbox:mark',
-  'goalTask:create', 'goalTask:prepare', 'goalTask:start', 'connectors:mutate', 'knowledge:search'
+  'goalTask:create', 'goalTask:prepare', 'goalTask:start', 'connectors:mutate', 'knowledge:search', 'institutions:apply'
 ])
-const WORKSPACE_ID_MUTATIONS = new Set(['update', 'archive', 'restore', 'delete', 'purge'])
+const WORKSPACE_ID_MUTATIONS = new Set(['update', 'archive', 'restore', 'delete', 'purge', 'institutions:apply'])
 const PROJECT_INPUT_MUTATIONS = new Set([
   'goals:create', 'workItems:create', 'squads:create', 'members:create',
   'invitations:create', 'comments:create', 'sharedApprovals:create'
@@ -167,6 +170,14 @@ const PROJECT_WORKSPACE_HANDLERS: Record<string, ProjectWorkspaceHandler> = {
     return workspaces
   }),
   get: (rawId) => withStore((store) => store.getWorkspace(assertUserManagedWorkspaceId(rawId))),
+  'institutions:preview': (rawId, rawInput) => withStore((store) => store.previewInstitutionMigration(
+    assertUserManagedWorkspaceId(rawId),
+    normalizeInput<ProjectInstitutionMigrationPreviewInput>(rawInput, INSTITUTION_PREVIEW_KEYS, 'institution migration preview')
+  )),
+  'institutions:apply': (rawId, rawInput) => withStore((store) => store.applyInstitutionMigration(
+    assertUserManagedWorkspaceId(rawId),
+    normalizeInput<ProjectInstitutionMigrationApplyInput>(rawInput, INSTITUTION_APPLY_KEYS, 'institution migration')
+  )),
   'authorization:get': (rawId) => withStore(async (store) => {
     const projectId = assertUserManagedWorkspaceId(rawId, 'authorization')
     const state = await store.getState()

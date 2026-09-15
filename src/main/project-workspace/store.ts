@@ -50,6 +50,9 @@ import { WorkItemRepository } from './work-item-repository'
 import { WorkspaceRepository } from './workspace-repository'
 import { canonicalJson as canonicalProjectJson, normalizeInstitutionTemplate } from './codec'
 import { ProjectCollaborationRepository } from './collaboration-repository'
+import type { ProjectInstitutionMigrationApplyInput, ProjectInstitutionMigrationPreviewInput,
+  ProjectInstitutionMigrationResult, ProjectInstitutionMigrationView } from '../../shared/project-institution-template'
+import { assertInstitutionMigrationEvents } from './institution-migration'
 
 export { canonicalJson } from './codec'
 export { ProjectWorkspaceError } from './errors'
@@ -113,6 +116,7 @@ export class ProjectWorkspaceStore {
       // Import keeps missing legacy refs missing, and rejects unknown versions
       // before they could make the whole workspace store unreadable.
       if (input.workspace.institutionTemplate !== undefined) normalizeInstitutionTemplate(input.workspace.institutionTemplate)
+      assertInstitutionMigrationEvents([input.workspace], input.events)
       const projectId = input.workspace.id
       const existingSlice = projectWorkspaceImportSlice(current, projectId)
       if (existingSlice.workspace) {
@@ -178,6 +182,14 @@ export class ProjectWorkspaceStore {
 
   updateWorkspace(id: string, patch: ProjectWorkspacePatch, options?: MutationOptions | number): Promise<ProjectWorkspace> {
     return this.workspaces.update(id, patch, options)
+  }
+
+  previewInstitutionMigration(id: string, input: ProjectInstitutionMigrationPreviewInput, options?: MutationOptions | number): Promise<ProjectInstitutionMigrationView> {
+    return this.workspaces.previewInstitutionMigration(id, input, options)
+  }
+
+  applyInstitutionMigration(id: string, input: ProjectInstitutionMigrationApplyInput, options?: MutationOptions | number): Promise<ProjectInstitutionMigrationResult> {
+    return this.workspaces.applyInstitutionMigration(id, input, options)
   }
 
   archiveWorkspace(id: string, options?: MutationOptions | number): Promise<ProjectWorkspace> {

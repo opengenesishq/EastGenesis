@@ -3,6 +3,7 @@ import type { TaskPlanDraftInput, TaskPlanMissionCompileInput } from '../../shar
 import { assertActiveBusinessLine } from '../business-line-registry-reader'
 import { assertSameBusinessLine, storedBusinessLineId } from '../business-line-ownership'
 import { createProjectWorkspaceReadService } from '../project-workspace/canonical-read-service'
+import { readGoalInstitutionContext } from '../project-workspace/institution-goal-binding'
 import { openProjectWorkspaceStore } from '../project-workspace/store'
 import { compileMission, missionCompilationToTaskPlanDraft } from './mission-compiler'
 import { digest } from './workflow-ledger-codec'
@@ -15,15 +16,19 @@ export async function enrichCanonicalTaskPlanInstitutions(
   rootDir: string
 ): Promise<TaskPlanDraftInput> {
   if (!meta.workspaceId) return bindTaskPlanInstitutions(draft)
-  const store = await openProjectWorkspaceStore(rootDir)
-  const workspace = await store.getWorkspace(meta.workspaceId)
-  if (!workspace || workspace.status !== 'active') throw new Error('计划所属项目不存在或不可用')
-  if (workspace.institutionTemplate?.templateId !== 'cabinet-six-ministries') return bindTaskPlanInstitutions(draft)
+  if (!meta.workItemId && !meta.goalId) {
+    const workspace = await (await openProjectWorkspaceStore(rootDir)).getWorkspace(meta.workspaceId)
+    if (!workspace || workspace.status !== 'active') throw new Error('计划所属项目不存在或不可用')
+    // Older project-only Sessions have no Goal generation to migrate. Their
+    // roles remain legacy until work is bound to a canonical task.
+    return bindTaskPlanInstitutions(draft)
+  }
   const parent = meta.workItemId ? await createProjectWorkspaceReadService(rootDir, 'canonical').getWorkItem(meta.workItemId) : undefined
   if (!parent || parent.projectId !== meta.workspaceId || (meta.goalId !== undefined && parent.goalId !== meta.goalId)) {
     throw new Error('机构计划与当前项目任务归属不一致')
   }
-  return bindTaskPlanInstitutions(draft, workspace.institutionTemplate)
+  const { template } = await readGoalInstitutionContext(rootDir, meta.workspaceId, parent.goalId, parent.id)
+  return bindTaskPlanInstitutions(draft, template)
 }
 
 /** Read host-owned inputs only. Compilation never opens resources or starts a Runtime. */
@@ -43,11 +48,12 @@ export async function buildCanonicalMissionTaskPlan(
     throw new Error('Mission 编译需要同一 Project 的 Goal 和父 WorkItem 绑定')
   }
   const reads = createProjectWorkspaceReadService(rootDir, 'canonical')
-  const [goal, parent, workspace] = await Promise.all([
+  const [goal, parent, institutionContext] = await Promise.all([
     reads.getGoal(goalId),
     reads.getWorkItem(workItemId),
-    openProjectWorkspaceStore(rootDir).then((store) => store.getWorkspace(workspaceId))
+    readGoalInstitutionContext(rootDir, workspaceId, goalId)
   ])
+  const { workspace, template } = institutionContext
   if (!workspace || workspace.status !== 'active') throw new Error('Mission 所属 Project 不存在或不可用')
   if (!goal || goal.projectId !== workspaceId || goal.revision !== input.expectedGoalRevision) {
     throw new Error('Mission Goal 归属或 revision 已变化，请刷新后重新生成计划')
@@ -63,8 +69,8 @@ export async function buildCanonicalMissionTaskPlan(
   assertSameBusinessLine(meta.businessLineId, businessLineId)
   assertActiveBusinessLine(businessLineId, rootDir)
   const contract = goal.contract
-  const institutionTemplate = !options.legacyInstitutions && workspace.institutionTemplate?.templateId === 'cabinet-six-ministries'
-    ? workspace.institutionTemplate : undefined
+  const institutionTemplate = !options.legacyInstitutions && template.templateId === 'cabinet-six-ministries'
+    ? template : undefined
   const constraints = [...new Set([
     '计划须由用户确认；编译不执行任务，不授予外发或工具权限',
     ...contract.constraints,

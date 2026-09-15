@@ -85,7 +85,7 @@
     "test:task-local-data-cleanup:required": "tsx scripts/task-local-data-cleanup-required.ts",
     "test:preparation-permission:required": "tsx scripts/preparation-permission-required.ts && tsx scripts/preparation-permission-lifecycle-required.ts",
     "test:submission-receipt-portability:required": "tsx scripts/submission-receipt-portability-required.ts",
-    "test:project-institutions:required": "tsx scripts/project-institution-template-required.ts && tsx scripts/task-plan-institutions-required.ts",
+    "test:project-institutions:required": "tsx scripts/project-institution-template-required.ts && tsx scripts/task-plan-institutions-required.ts && npm run test:project-institution-migration:required",
     "test:goal-intake:required": "tsx scripts/goal-intake-required.ts && tsx scripts/project-goal-submission-required.ts && tsx scripts/project-goal-preparation-required.ts && npm run test:project-goal-start:required",
     "test:golden-task-entry:required": "tsx scripts/golden-task-entry-required.ts",
     "test:golden-task-evidence-bridge:required": "tsx scripts/golden-task-evidence-bridge-required.ts",
@@ -105,7 +105,8 @@
     "test:office-role-work-items:required": "node scripts/office-role-work-items-required.mjs",
     "test:local-plan-session:required": "node scripts/local-plan-session-required.mjs",
     "test:preparation-portability:required": "tsx scripts/preparation-portability-required.ts",
-    "test:project-goal-start:required": "tsx scripts/project-goal-start-required.ts"
+    "test:project-goal-start:required": "tsx scripts/project-goal-start-required.ts",
+    "test:project-institution-migration:required": "tsx scripts/project-institution-migration-required.ts"
   },
   "build": {
     "appId": "com.caogen.app",

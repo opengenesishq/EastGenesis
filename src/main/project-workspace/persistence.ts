@@ -13,6 +13,7 @@ import { PROJECT_WORKSPACE_SCHEMA_VERSION } from '../../shared/project-workspace
 import { canonicalJson, clone, digest, redact } from './codec'
 import { ProjectWorkspaceError } from './errors'
 import { isProjectInstitutionTemplateRef } from '../../shared/project-institution-template'
+import { assertInstitutionMigrationEvents } from './institution-migration'
 
 const STORE_FILE_NAME = 'project-workspace.json'
 const LOCK_FILE_SUFFIX = '.lock'
@@ -80,6 +81,7 @@ function assertState(value: unknown): asserts value is ProjectWorkspaceState {
       throw new ProjectWorkspaceError('unsupported_schema', `workspace ${workspace.id} institution template is unsupported`)
     }
   }
+  assertInstitutionMigrationEvents(candidate.workspaces!, candidate.events!)
 }
 
 export async function readProjectWorkspaceState(filePath: string): Promise<ProjectWorkspaceState> {

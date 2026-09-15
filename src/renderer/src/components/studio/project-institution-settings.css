@@ -6,6 +6,12 @@
 .pws-institution-preview select { max-width: 100%; padding: 7px; color: inherit; background: var(--bg-secondary, transparent); border: 1px solid var(--border-color, #d9d9d9); border-radius: 6px; }
 .pws-institution-preview dl { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 3fr); gap: 8px 16px; margin: 4px 0; font-size: 13px; line-height: 1.6; }
 .pws-institution-preview dd { margin: 0; overflow-wrap: anywhere; }
+.pws-institution-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.pws-institution-actions span { font-size: 13px; line-height: 1.5; color: var(--text-secondary, inherit); }
+.pws-institution-basis { font-size: 13px; }
+.pws-institution-basis summary { cursor: pointer; }
+.pws-institution-basis dl { margin-top: 8px; }
+.pws-institution-basis code { font-size: 12px; overflow-wrap: anywhere; }
 .pws-institution-table { overflow-x: auto; margin-top: 10px; }
 .pws-institution-table table { width: 100%; text-align: left; border-collapse: collapse; font-size: 13px; }
 .pws-institution-table th, .pws-institution-table td { padding: 8px; border-bottom: 1px solid var(--border-color, #d9d9d9); vertical-align: top; }

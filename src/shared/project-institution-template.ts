@@ -1,4 +1,4 @@
-import type { WorkItemStatus } from './project-workspace-types'
+import type { ProjectWorkspace, ProjectWorkspaceEvent, WorkItemStatus } from './project-workspace-types'
 
 /** Project institution identities are separate from agents and permission grants. */
 export interface ProjectInstitutionTemplateRef {
@@ -106,6 +106,66 @@ export interface ProjectInstitutionMigrationPreview {
   legacyOnly: readonly ProjectInstitutionRole[]
   pendingWorkCount: number
   recordedWorkCount: number
+}
+
+export const PROJECT_INSTITUTION_MIGRATION_EVENT = 'institution-template-migrated'
+
+export interface ProjectInstitutionMigrationPreviewInput {
+  scope: 'future_goals'
+  target: ProjectInstitutionTemplateRef
+}
+
+export interface ProjectInstitutionMigrationApplyInput extends ProjectInstitutionMigrationPreviewInput {
+  expectedWorkspaceRevision: number
+  previewDigest: string
+}
+
+/** Server preview freezes exact existing identities; dates never decide a goal's generation. */
+export interface ProjectInstitutionMigrationView extends ProjectInstitutionMigrationPreview {
+  schemaVersion: 1
+  projectId: string
+  scope: 'future_goals'
+  expectedWorkspaceRevision: number
+  previewDigest: string
+  preservedGoalIds: string[]
+  preservedWorkItemIds: string[]
+  recordedGoalCount: number
+  canApply: boolean
+}
+
+export interface ProjectInstitutionMigrationEventPayload {
+  schemaVersion: 1
+  scope: 'future_goals'
+  fromTemplate: ProjectInstitutionTemplateRef
+  toTemplate: ProjectInstitutionTemplateRef
+  preservedGoalIds: string[]
+  preservedWorkItemIds: string[]
+  expectedWorkspaceRevision: number
+  previewDigest: string
+}
+
+export interface ProjectInstitutionMigrationResult {
+  workspace: ProjectWorkspace
+  event: ProjectWorkspaceEvent
+  replayed: boolean
+}
+
+export function isProjectInstitutionMigrationEventPayload(value: unknown): value is ProjectInstitutionMigrationEventPayload {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const payload = value as Partial<ProjectInstitutionMigrationEventPayload>
+  return payload.schemaVersion === 1 && payload.scope === 'future_goals' &&
+    isProjectInstitutionTemplateRef(payload.fromTemplate) && isProjectInstitutionTemplateRef(payload.toTemplate) &&
+    payload.fromTemplate.templateId !== payload.toTemplate.templateId &&
+    Number.isSafeInteger(payload.expectedWorkspaceRevision) && payload.expectedWorkspaceRevision! >= 1 &&
+    typeof payload.previewDigest === 'string' && /^[a-f0-9]{64}$/.test(payload.previewDigest) &&
+    isPreservedInstitutionIds(payload.preservedGoalIds) && isPreservedInstitutionIds(payload.preservedWorkItemIds) &&
+    Object.keys(payload).every((key) => ['schemaVersion', 'scope', 'fromTemplate', 'toTemplate',
+      'preservedGoalIds', 'preservedWorkItemIds', 'expectedWorkspaceRevision', 'previewDigest'].includes(key))
+}
+
+function isPreservedInstitutionIds(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((id) => typeof id === 'string' && id.length > 0 &&
+    id === id.trim() && !/[\0-\x1f\x7f]/.test(id)) && new Set(value).size === value.length
 }
 
 /** Describes differences only. It cannot rename roles, grant permissions or dispatch work. */

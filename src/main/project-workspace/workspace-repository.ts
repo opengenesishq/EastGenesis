@@ -17,7 +17,10 @@ import type {
   ProjectCollaborationInboxReceipt
 } from '../../shared/project-workspace-types'
 import { isProjectWorkspaceKind, PROJECT_WORKSPACE_SCHEMA_VERSION } from '../../shared/project-workspace-types'
-import { DEFAULT_PROJECT_INSTITUTION_TEMPLATE, projectInstitutionTemplate } from '../../shared/project-institution-template'
+import { DEFAULT_PROJECT_INSTITUTION_TEMPLATE, PROJECT_INSTITUTION_MIGRATION_EVENT, projectInstitutionTemplate,
+  type ProjectInstitutionMigrationApplyInput, type ProjectInstitutionMigrationEventPayload,
+  type ProjectInstitutionMigrationPreviewInput, type ProjectInstitutionMigrationResult,
+  type ProjectInstitutionMigrationView } from '../../shared/project-institution-template'
 import {
   clone,
   digest,
@@ -27,6 +30,7 @@ import {
   optionalText,
   redact,
   requiredText,
+  requiredId,
   timestamp
 } from './codec'
 import { ProjectWorkspaceError } from './errors'
@@ -34,6 +38,8 @@ import { appendEvent, atomicWrite, ProjectWorkspacePersistence } from './persist
 import type { DeleteOptions, ListOptions } from './repository-types'
 import { activeWorkspaceFrom, workspaceFrom } from './state-access'
 import { assertProjectAuthorized, projectMutationActor } from './project-authorization'
+import { buildInstitutionMigrationPreview, institutionMigrationReplay,
+  normalizeInstitutionMigrationApplyInput, normalizeInstitutionMigrationPreviewInput } from './institution-migration'
 
 export class WorkspaceRepository {
   constructor(private readonly persistence: ProjectWorkspacePersistence) {}
@@ -90,7 +96,7 @@ export class WorkspaceRepository {
           state.workItems.some((item) => item.projectId === id)
         )) {
           throw new ProjectWorkspaceError('institution_migration_preview_only',
-            '已有任务的项目保留原机构模板；当前可预览迁移，或为新任务新建内阁项目。')
+            '已有任务的项目必须先预览机构迁移，再显式应用到后续新目标。')
         }
       }
       applyWorkspacePatch(workspace, patch)
@@ -99,6 +105,52 @@ export class WorkspaceRepository {
       appendEvent(state, id, 'workspace', id, 'workspace.updated', workspace.revision, patch as unknown as Record<string, unknown>, now)
       return workspace
     })
+  }
+
+  async previewInstitutionMigration(id: string, raw: ProjectInstitutionMigrationPreviewInput, options?: MutationOptions | number): Promise<ProjectInstitutionMigrationView> {
+    const projectId = requiredId(id, 'project id'), input = normalizeInstitutionMigrationPreviewInput(raw)
+    const state = await this.persistence.read(), workspace = activeWorkspaceFrom(state, projectId)
+    assertProjectAuthorized(state, workspace, projectMutationActor(options), 'edit')
+    this.persistence.assertEntityRevision(workspace.revision, options, 'workspace')
+    return clone(buildInstitutionMigrationPreview(state, workspace, input))
+  }
+
+  async applyInstitutionMigration(id: string, raw: ProjectInstitutionMigrationApplyInput, options?: MutationOptions | number): Promise<ProjectInstitutionMigrationResult> {
+    const projectId = requiredId(id, 'project id'), input = normalizeInstitutionMigrationApplyInput(raw)
+    try {
+      // Check optional CAS after receipt lookup so an exact replay cannot cause
+      // a second mutation or fail solely because its first call already committed.
+      return await this.persistence.mutate(undefined, ({ state, now }) => {
+        const workspace = activeWorkspaceFrom(state, projectId)
+        assertProjectAuthorized(state, workspace, projectMutationActor(options), 'edit')
+        const replay = institutionMigrationReplay(state, projectId, input)
+        if (replay) throw new InstitutionMigrationReplay({ workspace: clone(workspace), event: replay, replayed: true })
+        this.persistence.assertGlobalRevision(state, typeof options === 'object' ? options?.expectedStoreRevision : undefined)
+        this.persistence.assertEntityRevision(workspace.revision, options, 'workspace')
+        this.persistence.assertEntityRevision(workspace.revision, input.expectedWorkspaceRevision, 'workspace')
+        const preview = buildInstitutionMigrationPreview(state, workspace, input)
+        if (preview.previewDigest !== input.previewDigest) {
+          throw new ProjectWorkspaceError('institution_migration_preview_stale', '项目目标或任务已变化，请刷新机构迁移预览。')
+        }
+        if (!preview.canApply) throw new ProjectWorkspaceError('institution_migration_unchanged', '当前项目已使用目标机构模板。')
+        const payload: ProjectInstitutionMigrationEventPayload = {
+          schemaVersion: 1, scope: 'future_goals', fromTemplate: clone(preview.current.ref), toTemplate: clone(input.target),
+          preservedGoalIds: preview.preservedGoalIds, preservedWorkItemIds: preview.preservedWorkItemIds,
+          expectedWorkspaceRevision: input.expectedWorkspaceRevision, previewDigest: input.previewDigest
+        }
+        workspace.institutionTemplate = clone(input.target)
+        workspace.updatedAt = now
+        workspace.revision += 1
+        appendEvent(state, projectId, 'workspace', projectId, PROJECT_INSTITUTION_MIGRATION_EVENT,
+          workspace.revision, payload as unknown as Record<string, unknown>, now)
+        return { workspace, event: state.events.at(-1)!, replayed: false }
+      })
+    } catch (error) {
+      // The callback exits before the persistence layer changes any bytes or
+      // revision. This also covers two identical requests waiting on the lock.
+      if (error instanceof InstitutionMigrationReplay) return clone(error.result)
+      throw error
+    }
   }
 
   async archive(id: string, options?: MutationOptions | number): Promise<ProjectWorkspace> {
@@ -198,6 +250,10 @@ export class WorkspaceRepository {
     }
     return clone(manifest)
   }
+}
+
+class InstitutionMigrationReplay extends Error {
+  constructor(readonly result: ProjectInstitutionMigrationResult) { super('institution migration already applied') }
 }
 
 function buildWorkspace(input: ProjectWorkspaceInput, id: string, now: number): ProjectWorkspace {
