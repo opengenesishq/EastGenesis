@@ -3,9 +3,11 @@
 ## 设计主线
 
 ```text
-BusinessLine → Palace → Goal → WorkItem → Run → Effect
+Goal → WorkItem → Run → Effect
   → Artifact → Evidence → Acceptance → Delivery → Recovery
 ```
+
+BusinessLine、机构模板与 Palace 引用这条链，不是创建工作的必填前置层级。
 
 这条链是同一份工作真相。宫苑、列表和时间线只能投影它，不能保存第二套任务、权限或审批状态。
 
@@ -24,6 +26,6 @@ BusinessLine → Palace → Goal → WorkItem → Run → Effect
 
 ## V2 边界
 
-V2 首发先完成“产品发布府”这一条纵向闭环：目标输入、太子计划、四类可用岗位、路由回执、Context Pack、统一成果、验收证据、失败恢复和 Proof Pack。新 UI 或 3D 区域必须调用既有契约，不得引入平行存储。
+2026-09-15 起以 [完整重构方案](../CAOGEN-REFACTOR-MASTERPLAN-2026-09-15.md) 为实施基线：现代自然语言入口与真实交付先行，故宫复用同一任务和命令。新建默认皇帝、内阁、六部及相关机构；旧太子三省模板保留身份、权限与运行记录，迁移先预览。机构按需参与，预算/权限/状态优先使用程序；“产品发布府”四岗位仍是可选模板。路由回执、Context Pack、成果、证据、验收与恢复沿用现有账本。新 UI 或 3D 区域必须调用既有契约，不得引入平行存储。
 
 模型直调、代码 Agent、研究 Agent 和 Office/文件 Runtime 通过 Adapter 接入；Run 创建后锁定 Provider、Model、Runtime、Tool、Skill 与 Policy 版本，未授权 Provider 不得接收项目资料。

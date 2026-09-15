@@ -1,5 +1,7 @@
 # CaoGen V2 验收矩阵
 
+> 2026-09-15 重构实施覆盖说明：以 [完整重构方案](../CAOGEN-REFACTOR-MASTERPLAN-2026-09-15.md) 和 [R00—R14 清单](../planning/refactor-2026-09-15/BACKLOG.csv) 为后续实施顺序。新建默认皇帝、内阁、六部及相关机构；太子三省与四岗位为兼容/可选模板，旧身份、权限、记录及运行版本保留。下文 09-13 切片和既有报告保留原时间边界，不能作为本次重构完成证据。当前实施记录见 [执行进度](../planning/refactor-2026-09-15/PROGRESS.md)。
+
 2026-09-15 本轮状态：组件/存储/失败报告回归已补齐；修改后的整机 Electron UI、目录包和完整主测试链待重验。历史 UI 计数不代表本轮已通过。
 
 2026-09-15 使用用户本轮授权的临时测试凭据取得有限真实 Provider 证据：`GET /v1/models` 返回 200、发现 34 个模型；`gpt-5.4-mini` 的 Chat 和 Responses 均返回 400，Responses 明确为 `model_not_found` / `unknown provider`；`gpt-5.6-luna` 的 Responses 返回 200，输出 `OK`，报告 `exactResponseMatched=true`。上游报告 usage 为输入 4391、输出 5、合计 4396 tokens，此数值不作为计费核验证据。总计 4 次请求，报告状态 `partial`；仅有一次成功生成，未覆盖 CaoGen 主流程、四岗位执行、failover、真人任务或发布。证据：`test-results/provider-connection-probe/latest.json`。
