@@ -354,9 +354,8 @@ export function useProjectGoalTaskStart(refreshContents: () => Promise<void>): {
         const loaded = await useStore.getState().syncSession(sessionId).catch(() => false)
         if (loaded) {
           useStore.getState().selectSession(sessionId)
-          useStore.getState().setExperienceMode('studio')
-          useStore.getState().setStudioSurface('session')
-          useStore.getState().setShowNewSession(false)
+          // Respect the canonical Session's presentation identity. Personal tasks
+          // currently belong to Assistant; forcing Studio would hide their Composer.
         }
         setAnnouncement(pendingCleanupError ?? (loaded ? '任务已提交，可在同一对话继续工作。' : '任务已提交，请从任务历史打开原会话。'))
         return true

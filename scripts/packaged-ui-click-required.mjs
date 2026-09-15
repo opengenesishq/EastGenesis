@@ -268,6 +268,20 @@ async function main() {
     await clickVisible(page, 'Work Inbox', '[data-studio-section-option="inbox"]')
     await waitForVisible(page, '[data-cross-project-work-inbox]')
     if (args.fixture === 'mission-compile') {
+      const standaloneText = '整理一份六页客户汇报（缺连接保留输入检查）'
+      await page.select('[data-goal-task-project]', '')
+      await page.type('[data-goal-task-objective]', standaloneText)
+      await clickVisible(page, 'Standalone intake without a connection', '[data-work-inbox-intake] [data-goal-task-start]')
+      await waitForVisible(page, '[data-work-inbox-intake] .pws-goal-task-error')
+      assertCondition(await page.$eval('[data-work-inbox-intake] [data-goal-task-objective]', (node) => node.value) === standaloneText, 'Missing connection discarded standalone input')
+      const standaloneRequest = await page.evaluate(() => {
+        const journal = JSON.parse(localStorage.getItem('caogen.work-inbox.personal-submission.v1') || '{}')
+        return journal.pending?.[0]?.clientRequestId
+      })
+      assertCondition(Boolean(standaloneRequest), 'Standalone submission has no durable request identity')
+      const standaloneReceipt = await page.evaluate((id) => window.agentDesk.getPersonalTaskSubmission(id), standaloneRequest)
+      assertCondition(standaloneReceipt && standaloneReceipt.status !== 'submitted', 'Missing connection unexpectedly submitted work')
+      recordCheck('Standalone intake preserves missing-connection input and request identity', 'production PersonalTaskService with isolated data and no configured Provider')
       await page.select('[data-goal-task-project]', 'fixture-runs-review-project')
       const objective = '形成包含可运行实现、使用说明和验证报告的本地交付计划'
       await page.type('[data-goal-task-objective]', objective)

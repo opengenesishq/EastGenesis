@@ -92,7 +92,7 @@ const report = {
     { name: 'Mission plan approval projects four WorkItems', sessionId: 'mission-session' }
   ],
   missionCompilation: {
-    sessionId: 'mission-session', approvalStatus: 'approved',
+    sessionId: 'mission-session', continuedSessionId: mode === 'missing-continuation' ? undefined : 'mission-session', approvalStatus: 'approved',
     versionId: 'edited-version', originalVersionId: 'original-version', editedVersionId: 'edited-version',
     projection: { steps: [{}, {}, {}, {}] }
   }
@@ -108,7 +108,9 @@ process.exit(mode === 'child-failed-with-passed-report' ? 1 : 0)
     mkdirSync(path.dirname(wrapperReportPath), { recursive: true })
     mkdirSync(path.dirname(sharedReportPath), { recursive: true })
     let previousRunId = 'previous-wrapper-run'
-    for (const [mode, expectedError] of scenarios) {
+    const wrapperScenarios = script === 'mission-compile-ui-required.mjs'
+      ? [...scenarios, ['missing-continuation', /continue opens the original conversation/u]] : scenarios
+    for (const [mode, expectedError] of wrapperScenarios) {
       writeFileSync(wrapperReportPath, JSON.stringify({ status: 'passed', runId: previousRunId }))
       writeFileSync(sharedReportPath, JSON.stringify({ status: 'passed', runId: 'old-shared-report' }))
       const started = Date.now()
