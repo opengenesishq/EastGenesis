@@ -43,6 +43,7 @@ import { SYSTEM_ROLES, systemRoleById, type SystemRoleActionId, type SystemRoleI
 import OfficeScene from './kit/MingAcademyScene'
 import OfficePerformanceProbe from './kit/OfficePerformanceProbe'
 import OfficeWebglLifecycle from './kit/OfficeWebglLifecycle'
+import OfficeSceneBoundary, { OfficeSceneRecovery } from './OfficeSceneBoundary'
 import OfficeFrameDriver, { useOfficeRenderQuality } from './kit/OfficeRenderQuality'
 import WorkstationPro from './kit/ming-characters/MingWorkstation'
 import OfficeBootScene from './OfficeBootScene'
@@ -193,6 +194,7 @@ export default function OfficeView(): React.JSX.Element {
   // cold Intel GPU; mounting it on the next frame preserves the shell's first
   // useful paint while leaving the scene and all canonical semantics intact.
   const [canvasMounted, setCanvasMounted] = useState(false)
+  const [canvasRevision, setCanvasRevision] = useState(0)
   const officeHitRef = useRef({ seq: 0, kind: '', id: '' })
   const [officeGitStatusBySession, setOfficeGitStatusBySession] = useState<Record<string, GitStatus | undefined>>({})
   const [watercolorRoleByWorkerId, setWatercolorRoleByWorkerId] = useState<Record<string, WatercolorCharacterRole>>({})
@@ -1196,7 +1198,10 @@ export default function OfficeView(): React.JSX.Element {
             <div className="office-idle-notice no-drag" data-office-empty="true">{t('officeEmpty')}</div>
           )}
           <OfficeTaskLabelLayer ref={taskLabelLayer} labels={sceneDetailEnabled ? taskLabels : []} zh={settings.language === 'zh'} onSelect={selectTaskLabel} />
-          {canvasMounted && <Canvas
+          <OfficeSceneRecovery zh={settings.language === 'zh'} contextLost onRetry={() => setCanvasRevision(value => value + 1)} />
+          {canvasMounted && <OfficeSceneBoundary key={canvasRevision}
+            fallback={<OfficeSceneRecovery zh={settings.language === 'zh'} onRetry={() => setCanvasRevision(value => value + 1)} />}><Canvas
+            fallback={<OfficeSceneRecovery zh={settings.language === 'zh'} onRetry={() => setCanvasRevision(value => value + 1)} />}
             className="office-render-surface"
             shadows={renderQuality.profile.shadows}
             camera={initialCanvasCamera.current}
@@ -1368,7 +1373,7 @@ export default function OfficeView(): React.JSX.Element {
             onSettledChange={(settled) => document.querySelector('.office-canvas-wrap')?.setAttribute('data-office-camera-settled', settled ? '1' : '0')}
           />
 
-          </Canvas>}
+          </Canvas></OfficeSceneBoundary>}
         </div>
     </div>
   )

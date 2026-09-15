@@ -5,7 +5,9 @@ import { recordPalaceGeometryBytes } from './palaceResourceStats'
 
 export type PalaceGeometryTier = 'high' | 'balanced' | 'low'
 
-const resources: Partial<Record<PalaceGeometryTier, Promise<PalaceGeometry>>> = {}
+// High and balanced currently use the same export. Cache by asset identity so
+// changing quality does not parse and retain a second copy of that geometry.
+const resources = new Map<string, Promise<PalaceGeometry>>()
 const resourceListeners = new Set<() => void>()
 let latestResource: PalaceGeometry | null = null
 
@@ -18,10 +20,11 @@ export const palaceModelUrls: Record<PalaceGeometryTier, string> = {
 
 /** One bounded local asset; defer parsing until the useful first frames have rendered. */
 export function loadPalaceResource(tier: PalaceGeometryTier = 'high'): Promise<PalaceGeometry> {
-  const existing = resources[tier]
+  const url = palaceModelUrls[tier]
+  const existing = resources.get(url)
   if (existing) return existing
   const pending = import('three/examples/jsm/loaders/GLTFLoader.js')
-    .then(({ GLTFLoader }) => new GLTFLoader().loadAsync(palaceModelUrls[tier]))
+    .then(({ GLTFLoader }) => new GLTFLoader().loadAsync(url))
     .then(({ scene }) => batchPalaceGeometry(scene))
     .then((loaded) => {
       // The vLow architecture export intentionally omits review characters.
@@ -33,20 +36,24 @@ export function loadPalaceResource(tier: PalaceGeometryTier = 'high'): Promise<P
         resourceListeners.forEach((listener) => listener())
       }
       let bytes = 0
+      const seen = new Set<import('three').BufferGeometry>()
       const retained = [loaded.scene, loaded.authoredCharacters]
       retained.forEach((root) => root.traverse((node) => {
         if (!('geometry' in node)) return
         const geometry = (node as import('three').Mesh).geometry
+        if (seen.has(geometry)) return
+        seen.add(geometry)
         bytes += Object.values(geometry.attributes).reduce((total, attribute) => total + attribute.array.byteLength, 0)
+        bytes += geometry.index?.array.byteLength ?? 0
       }))
-      recordPalaceGeometryBytes(bytes)
+      recordPalaceGeometryBytes(url, bytes)
       return loaded
     })
     .catch((error: unknown) => {
-      delete resources[tier]
+      resources.delete(url)
       throw error
     })
-  resources[tier] = pending
+  resources.set(url, pending)
   return pending
 }
 

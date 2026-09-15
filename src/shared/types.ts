@@ -5,6 +5,7 @@ import type { OfficeRevisionApi } from './office-revision-types'
 import type { SendMessagePayload } from './message-payload-types'
 import type { SessionInputApi } from './session-input-types'
 import type { PreparationPermissionApi } from './preparation-permission-types'
+import type { CouncilApi } from './council-types'
 export type * from './preparation-permission-types'
 export type { SendMessagePayload } from './message-payload-types'
 export type * from './office-revision-types'
@@ -21,6 +22,8 @@ import type { ProjectPortfolioApi } from './project-portfolio-types'
 import type { RemoteApi } from './remote-types'
 import type { OutboundContextManifest } from './project-workspace-types'
 import type { LearningApi } from './learning-types'
+import type { LegacyMemoryImportInput, LegacyMemoryImportResult, LegacyMemoryPreview } from './legacy-memory-import-types'
+export type * from './legacy-memory-import-types'
 import type { SupervisorStateApi } from './supervisor-types'
 import type { UserMessageAttachmentView } from './attachment-types'
 import type { ProviderProfileApi } from './provider-profile-types'
@@ -909,6 +912,7 @@ export interface TaskDagRuntimeMergeSession {
 }
 
 export interface TaskDagRuntimeSnapshot {
+  council?: import('./council-types').CouncilRuntimeBinding
   executionId: string
   parentSessionId: string
   capturedAt: number
@@ -1322,6 +1326,8 @@ export interface AppSettings extends BusinessLineSettings {
   permissionRulesVersion: 2
   /** 结构化用户权限规则；旧文本规则加载后迁移到这里。 */
   permissionRules: PermissionRuleConfig[]
+  /** Opt-in native file-only execution, requiring explicit tool and path allow rules. */
+  limitedFileExecutionEnabled: boolean
   /** 权限:GUI 自动化总开关;默认关闭,避免 Agent 直接操作真实桌面。 */
   guiAutomationEnabled: boolean
   /** @deprecated 旧全局 GUI grant 占位；主进程始终归零，不再作为授权依据。 */
@@ -2507,7 +2513,7 @@ export type MenuCommand =
   | { type: 'select-session'; index: number }
 
 /** 通过 contextBridge 暴露给渲染进程的 API */
-export interface AgentDeskApi extends PreparationPermissionApi, SessionInputApi, WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, RemoteApi, MediaApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi, PalaceSceneBuilderApi {
+export interface AgentDeskApi extends CouncilApi, PreparationPermissionApi, SessionInputApi, WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, RemoteApi, MediaApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi, PalaceSceneBuilderApi {
   listPendingPermissions(sessionId: string): Promise<PermissionRequestInfo[]>
   getTranscript(sessionId: string): Promise<TranscriptEntry[]>
   suggestFiles(sessionId: string, query: string): Promise<string[]>
@@ -2701,6 +2707,8 @@ export interface AgentDeskApi extends PreparationPermissionApi, SessionInputApi,
   writeProjectContext(projectPath: string, content: string): Promise<import('./project-context-types').ProjectContextOperationResult<ProjectContextReadResult>>
   generateProjectContextTemplate(projectPath: string): Promise<string>
   readProjectMemory(sessionId: string): Promise<ReadProjectMemoryResult>
+  previewLegacyProjectMemory(sessionId: string): Promise<LegacyMemoryPreview>
+  importLegacyProjectMemory(sessionId: string, input: LegacyMemoryImportInput): Promise<LegacyMemoryImportResult>
   proposeMemoryDraft(sessionId: string, input: ProjectMemoryDraftInput): Promise<ProjectMemoryDraft>
   acceptMemoryDraft(sessionId: string, draftId: string): Promise<ProjectMemoryEntry>
   deleteMemoryEntry(sessionId: string, entryId: string): Promise<{ id: string; deleted: boolean; deletedFrom: Array<'confirmed' | 'drafts'> }>

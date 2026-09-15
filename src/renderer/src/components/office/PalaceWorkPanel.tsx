@@ -9,6 +9,7 @@ import { projectInstitutionTemplate, DEFAULT_PROJECT_INSTITUTION_TEMPLATE, LEGAC
 import { requestProjectWorkspaceNavigation } from '../studio/projectWorkspaceNavigation'
 import PermissionBar, { formatPermissionInput } from '../PermissionBar'
 import TaskPlanWorkbench from '../experience/TaskPlanWorkbench'
+import CouncilPanel from '../experience/CouncilPanel'
 import RunDetailPanel from '../studio/RunDetailPanel'
 import { ProjectDeliveryWorkbench } from '../studio/ProjectDeliveryWorkbench'
 import './palace-work-panel.css'
@@ -130,12 +131,11 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
         </select></label>
       {selected ? <p className="palace-work-identity">{selected.meta.title} · {selected.meta.id}<br />{zh ? '沿用同一会话、文件和授权。' : 'Continues the same session, files and permissions.'}</p> : <p>{zh ? '选择已有任务后继续；当前没有绑定任务。' : 'Choose an existing task to continue.'}</p>}
     </>}
-    {action === 'council' && <p role="status" data-palace-council-unavailable>{zh
-      ? '当前可在此复核同一任务的计划、证据和决策。自动多 Agent 议事尚未接入次数、时间与预算停止控制，因此暂不启动议事运行。'
-      : 'Review the existing task plan, evidence and decisions here. Automated Agent discussion is unavailable until round, time and budget limits are enforced.'}</p>}
+    {action === 'council' && selected && <CouncilPanel sessionId={selected.meta.id} expanded />}
+    {action === 'audience' && selected && <CouncilPanel sessionId={selected.meta.id} expanded mode="audience" institutionId={roleId === 'all' ? undefined : roleId} />}
     {selected && (action === 'approve' || action === 'council') && <>
       <PermissionBar sessionId={selected.meta.id} requests={selected.pendingPermissions} />
-      <TaskPlanWorkbench sessionId={selected.meta.id} strategy={selected.meta.taskStrategy ?? 'view'} running={['running', 'starting'].includes(selected.meta.status)} />
+      <TaskPlanWorkbench sessionId={selected.meta.id} strategy={selected.meta.taskStrategy ?? 'view'} running={['running', 'starting'].includes(selected.meta.status)} showCouncil={action !== 'council'} />
     </>}
     {selected && ['audience', 'study', 'inspect', 'council'].includes(action) && <>
       <nav aria-label={zh ? '任务工作区' : 'Task workspace'}>{(['chat', 'logs', 'files', 'diff'] as const).map((tab) => <button key={tab} className="btn btn-ghost btn-sm" aria-pressed={surface === tab} onClick={() => setSurface(tab)}>{surfaceLabel(tab, zh)}</button>)}</nav>

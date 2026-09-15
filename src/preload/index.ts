@@ -7,6 +7,7 @@ import type {
   DispatchSubagentsInput,
   LayeredMemorySearchInput,
   LayeredMemoryUpdateInput,
+  LegacyMemoryImportInput,
   MarkRunOptions,
   RoutineRunReviewInput,
   MenuCommand,
@@ -52,8 +53,10 @@ import { sessionEntrypointApi } from './session-entrypoints'
 import { assistantSearchApi } from './assistant-search'
 import { palaceSceneBuilderApi } from './palace-scene-builder'
 import { sessionInputApi } from './session-input'
+import { councilApi } from './council'
 
 const api: AgentDeskApi = {
+  ...councilApi,
   ...preparationPermissionApi,
   ...sessionInputApi,
   ...sessionEntrypointApi,
@@ -429,6 +432,9 @@ const api: AgentDeskApi = {
   generateProjectContextTemplate: (projectPath: string) =>
     ipcRenderer.invoke('projectContext:template', projectPath),
   readProjectMemory: (sessionId: string) => ipcRenderer.invoke('memory:read', sessionId),
+  previewLegacyProjectMemory: (sessionId: string) => ipcRenderer.invoke('memory:legacyPreview', sessionId),
+  importLegacyProjectMemory: (sessionId: string, input: LegacyMemoryImportInput) =>
+    ipcRenderer.invoke('memory:legacyImport', sessionId, input),
   proposeMemoryDraft: (sessionId: string, input: ProjectMemoryDraftInput) =>
     ipcRenderer.invoke('memory:propose', sessionId, input),
   acceptMemoryDraft: (sessionId: string, draftId: string) =>

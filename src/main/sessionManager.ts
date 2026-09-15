@@ -121,6 +121,9 @@ import { SessionStartCoordinator } from './session-start-coordinator'
 import { approvedTaskPlanToDag, taskDagToPlanDraft } from './task/task-plan-dag'
 import { unresolvedImportedSessionInputReason } from './data-lifecycle/submission-receipt-files'
 import { ModelCrossValidationRuntime } from './model/cross-validation-runtime'
+import { CouncilService } from './council/council-service'
+import { assertCouncilSend, isCouncilSession } from './council/council-request-guard'
+import { getSessionInputService } from './task/session-input-runtime'
 import type {
   AgentEvent,
   AgentEventIdentity,
@@ -233,6 +236,19 @@ class SessionManager {
   })
   /** DAG 最新执行视图:用于恢复/快照保留已经完成或已从调度器移除的 DAG 状态。 */
   private readonly dagExecutionSnapshots = new Map<string, TaskDagExecutionView>()
+  readonly council = new CouncilService(app.getPath('userData'), {
+    ready: () => this.whenInitialized(),
+    meta: (id) => this.sessions.get(id)?.meta,
+    metas: () => this.list(),
+    transcript: (id) => this.getTranscript(id),
+    create: (options, id) => this.createManaged(options, { reservedSessionId: id, retainJournal: true }),
+    inputs: () => getSessionInputService(app.getPath('userData')),
+    persist: async (id) => { await this.writeTaskSnapshot(id, 'important-event', 0, undefined, undefined, true) },
+    update: (execution) => this.dagExecutionSnapshots.set(execution.id, execution),
+    interrupt: (id) => this.interrupt(id),
+    reserve: (id) => this.agentCapacity.tryReserve(id),
+    acknowledge: (id) => this.acknowledgeSessionCreation(id)
+  })
   /** Serializes repeated approval clicks before the deterministic DAG becomes observable. */
   private readonly approvedPlanDispatches = new Map<string, Promise<TaskPlanDispatchResult>>()
   private readonly workflowAcceptanceRepairStarts = new Map<string, Promise<WorkflowAcceptanceRepairStartResult>>()
@@ -520,6 +536,8 @@ class SessionManager {
   }
 
   async setTaskStrategy(id: string, value: unknown): Promise<void> {
+    const meta = this.sessions.get(id)?.meta
+    if (meta && isCouncilSession(meta) && value !== 'view') throw new Error('议事参与者的只读策略已固定')
     await this.taskPlans.setStrategy(id, value)
   }
 
@@ -1032,6 +1050,12 @@ class SessionManager {
   ): Promise<boolean> {
     let session = this.sessions.get(id)
     if (!session) return false
+    await this.council.loadSnapshots()
+    try {
+      assertCouncilSend(session.meta, typeof input === 'string' ? undefined : input.messageId)
+    } catch (error) {
+      return this.rejectBeforeRun(session, error instanceof Error ? error.message : String(error))
+    }
     const assertDirectStart = () => {
       if (options.readOnlyGoalStart && (session!.meta.taskStrategy !== 'view' ||
           session!.meta.permissionMode !== 'default' || this.taskPlans.get(id).currentVersion)) {
@@ -1186,6 +1210,7 @@ class SessionManager {
   }
 
   async interrupt(id: string): Promise<void> {
+    await this.council.stopForParent(id)
     const session = this.sessions.get(id)
     if (!session) return
     this.effectRecoveryPreservedSessions.add(id)
@@ -1194,7 +1219,7 @@ class SessionManager {
       await this.workflow.flush(id)
       const run = this.taskRuns.get(id)
       const preserveRecovery = runHasUnresolvedEffects(run) || await this.modelAttemptRecoveryGate.shouldPreserveAfterRefresh(id, 'interrupt')
-      const preserveDagFinalization = this.dagFinalizationCoordinator.hasIncomplete(id)
+      const preserveDagFinalization = this.dagFinalizationCoordinator.hasIncomplete(id) || this.council.snapshots(id).length > 0
       if (preserveRecovery) {
         // 未知外部效果不能留在 active 会话里，否则恢复面板会过滤它且会话还能继续发工具。
         // 统一走 close 屏障：终止底层执行器、持久化 waiting_reconciliation、移出 active。
@@ -1224,6 +1249,7 @@ class SessionManager {
   ): Promise<SubagentDispatchResult> {
     let parent = this.sessions.get(parentSessionId)
     if (!parent) throw new Error('父会话不存在')
+    if (isCouncilSession(parent.meta)) throw new Error('议事参与者不能递归派发子任务')
     await this.taskPlans.assertExecution(parent.meta, '派发子 Agent')
     const tasks = Array.isArray(input?.tasks) ? input.tasks : []
     if (tasks.length === 0) throw new Error('至少需要一个子代理任务')
@@ -1300,6 +1326,7 @@ class SessionManager {
   async decomposeTask(parentSessionId: string, input: TaskDecomposeInput): Promise<TaskDecomposeResult> {
     const parent = this.sessions.get(parentSessionId)
     if (!parent) throw new Error('父会话不存在')
+    if (isCouncilSession(parent.meta)) throw new Error('议事参与者不能递归派发子任务')
     requirePlanningTaskStrategy(parent.meta, '拆解任务 DAG')
     const existingRun = this.taskRuns.get(parentSessionId)
     const frozenTarget = existingRun ? frozenRoutingPolicyForRun(existingRun)?.initialTarget : undefined
@@ -1395,6 +1422,7 @@ class SessionManager {
   ): Promise<TaskDagDispatchResult> {
     const parent = this.sessions.get(parentSessionId)
     if (!parent) throw new Error('父会话不存在')
+    if (isCouncilSession(parent.meta)) throw new Error('议事参与者不能递归派发子任务')
     await this.taskPlans.assertExecution(parent.meta, '执行任务 DAG')
     const children: SubagentDispatchResult['children'] = []
     const scheduler = new TaskDagScheduler(parentSessionId, input, {
@@ -1527,11 +1555,12 @@ class SessionManager {
   }
 
   private async closeAfterExecutorStops(id: string, session: Engine): Promise<void> {
+    await this.council.stopForParent(id)
     await session.dispose()
     await this.workflow.flush(id)
     let run = this.taskRuns.get(id)
     const preserveRecovery = runHasUnresolvedEffects(run) || await this.modelAttemptRecoveryGate.shouldPreserveAfterRefresh(id, 'close')
-    const preserveDagFinalization = this.dagFinalizationCoordinator.hasIncomplete(id)
+    const preserveDagFinalization = this.dagFinalizationCoordinator.hasIncomplete(id) || this.council.snapshots(id).length > 0
     if (run && !isTaskRunTerminal(run.status)) {
       if (preserveRecovery) {
         run = recoverTaskExecutionState(run)
@@ -1596,6 +1625,7 @@ class SessionManager {
   }
 
   async disposeAll(): Promise<void> {
+    await Promise.all([...this.sessions.keys()].map((id) => this.council.stopForParent(id)))
     this.persistActiveSessions()
     this.taskSnapshotReplay.clear()
     this.agentCapacity.clear()
@@ -1661,7 +1691,7 @@ class SessionManager {
         if (this.sessions.has(snapshot.sessionId)) return snapshot
         const reconciled = reconcileSnapshotWithReceipts(snapshot)
         if (reconciled.terminalRun) {
-          if (this.dagFinalizationCoordinator.hasIncomplete(snapshot.sessionId)) {
+          if (this.dagFinalizationCoordinator.hasIncomplete(snapshot.sessionId) || snapshot.dagRuntimes?.some((runtime) => runtime.council)) {
             return reconcileExistingPersistedTaskSnapshot(reconciled.snapshot)
           }
           const persisted = await reconcileExistingPersistedTaskSnapshot(reconciled.snapshot)
@@ -1775,7 +1805,7 @@ class SessionManager {
     const prepared = await prepareTaskSnapshotRecovery(
       stored,
       app.getPath('userData'),
-      (sessionId) => this.dagFinalizationCoordinator.hasIncomplete(sessionId)
+      (sessionId) => this.dagFinalizationCoordinator.hasIncomplete(sessionId) || stored.dagRuntimes?.some((runtime) => runtime.council) === true
     )
     return this.activateRecoveredTaskSnapshot(prepared.snapshot, prepared.recoveredRun)
   }
@@ -2127,6 +2157,15 @@ class SessionManager {
       const execution = executionById.get(runtime.executionId)
       if (!execution) continue
       this.dagExecutionSnapshots.set(execution.id, execution)
+      if (runtime.council) {
+        await this.council.restore(runtime, execution)
+        restored += 1
+        continue
+      }
+      if (runtime.executionId.startsWith('council-') || execution.dag.source === 'council-v1') {
+        // A missing council binding must never enter the generic auto-send finalizer.
+        continue
+      }
       if (runtime.mergeSessions) this.dagRuntimeMergeSessions.set(execution.id, runtime.mergeSessions)
       if (execution.completedAt !== undefined && (execution.status === 'success' || execution.status === 'failed')) {
         await this.dagFinalizationCoordinator.restoreTerminalExecution(
@@ -2323,6 +2362,13 @@ class SessionManager {
   private dispatchChildResult(sessionId: string, session: Engine | undefined, event: AgentEvent): void {
     if (!shouldDispatchChildResult(session?.meta, event, (id) => this.sessions.has(id))) return
     const childSession = session!
+    if (isCouncilSession(childSession.meta)) {
+      void this.council.complete(sessionId, { ok: !event.isError, resultText: event.resultText,
+        error: event.isError ? event.resultText ?? event.subtype : undefined })
+        .catch((error) => console.error('[caogen] council result persistence failed:', error))
+        .finally(() => this.agentCapacity.scheduleDrain())
+      return
+    }
     const parentSessionId = childSession.meta.parentSessionId!
     const childResult: AgentEvent = {
       kind: 'subagent-result',
@@ -2452,7 +2498,7 @@ class SessionManager {
       event,
       this.taskRuns.get(sessionId),
       this.effectRecoveryPreservedSessions.has(sessionId),
-      this.dagFinalizationCoordinator.hasIncomplete(sessionId)
+      this.dagFinalizationCoordinator.hasIncomplete(sessionId) || this.council.snapshots(sessionId).length > 0
     )) {
       if (!this.preservingSnapshotsOnDispose) {
         this.snapshotCounts.delete(sessionId)
@@ -2515,6 +2561,7 @@ class SessionManager {
     eventId?: string
   ): Promise<void> {
     await this.writeTaskSnapshot(sessionId, reason, seq, eventKind, eventId, true)
+    if (this.council.snapshots(sessionId).length > 0) return
     await deleteTaskSnapshot(sessionId, undefined, this.taskRuns.get(sessionId))
   }
 
@@ -2581,7 +2628,7 @@ class SessionManager {
   }
 
   private snapshotDagRuntimesFor(sessionId: string): TaskDagRuntimeSnapshot[] {
-    const runtimes: TaskDagRuntimeSnapshot[] = []
+    const runtimes: TaskDagRuntimeSnapshot[] = this.council.snapshots(sessionId)
     for (const [executionId, scheduler] of this.dagSchedulers.entries()) {
       const execution = scheduler.view()
       if (

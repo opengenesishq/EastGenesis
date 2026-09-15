@@ -123,6 +123,7 @@ import { registerQuickbarIpc } from './quickbar'
 import { registerPalaceSceneBuilderIpc } from './ipc/palace-scene-builder-handlers'
 import { registerSessionInputIpc } from './ipc/session-input-handlers'
 import { registerPreparationPermissionIpc } from './ipc/preparation-permission-handlers'
+import { registerCouncilIpc } from './ipc/council-handlers'
 import type {
   BrowserBounds,
   BrowserPickResult,
@@ -292,6 +293,7 @@ function effectIntentDescription(snapshot: TaskSnapshotRecord, effect: EffectRec
 export function registerIpc(): void {
   registerPreparationPermissionIpc()
   registerSessionInputIpc()
+  registerCouncilIpc()
   configureMigrationOperationBackupRoot(migrationBackupRoot())
   for (const register of [registerQuickbarIpc, registerTaskRecoveryIpc, registerWorkflowLedgerIpc, registerProjectWorkspaceIpc, registerDataRetentionIpc, registerDigitalWorkerIpc, registerSupervisorIpc, registerInteractiveMutationIpc, registerAppFeatureIpc, registerProviderGatewayIpc, registerFileIntelligenceIpc, registerPermissionGrantIpc, registerPalaceSceneBuilderIpc]) register()
   // Search adapters are resolved only by an explicit main-process factory. The

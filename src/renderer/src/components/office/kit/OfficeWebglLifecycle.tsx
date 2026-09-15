@@ -22,6 +22,7 @@ export default function OfficeWebglLifecycle(): null {
     const restored = (): void => {
       wrap.setAttribute('data-office-webgl-context', 'restored')
       wrap.setAttribute('data-office-webgl-context-restored-at', String(Date.now()))
+      gl.shadowMap.needsUpdate = true
       invalidate()
     }
     canvas.addEventListener('webglcontextlost', lost, { passive: false })
@@ -30,6 +31,7 @@ export default function OfficeWebglLifecycle(): null {
     return () => {
       canvas.removeEventListener('webglcontextlost', lost)
       canvas.removeEventListener('webglcontextrestored', restored)
+      wrap.removeAttribute('data-office-webgl-context')
     }
   }, [gl, invalidate])
 

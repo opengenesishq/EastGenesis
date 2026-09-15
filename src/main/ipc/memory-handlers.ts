@@ -11,6 +11,8 @@ import {
 import { createTrustedUserLearningDecision } from '../learning/learning-security'
 import { verifyProductionProjectMutation } from '../project-aggregate/project-mutation-ingress'
 import { assertTrustedWorkflowLedgerSender } from './workflow-ledger-handlers'
+import { importLegacyProjectMemory, previewLegacyProjectMemory } from '../memory/legacy-memory-import'
+import type { LegacyMemoryImportInput } from '../../shared/legacy-memory-import-types'
 
 export interface ProjectMemoryIpcOptions {
   memoryRoot: () => string
@@ -18,6 +20,18 @@ export interface ProjectMemoryIpcOptions {
 }
 
 export function registerProjectMemoryIpc(options: ProjectMemoryIpcOptions): void {
+  ipcMain.handle('memory:legacyPreview', async (event, sessionId: string) => {
+    assertTrustedWorkflowLedgerSender(event)
+    const target = requiredTarget(options, sessionId)
+    const preview = await previewLegacyProjectMemory(target, options.memoryRoot())
+    assertTargetUnchanged(options, sessionId, target)
+    return preview
+  })
+  ipcMain.handle('memory:legacyImport', (event, sessionId: string, input: LegacyMemoryImportInput) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return verifiedMemoryMutation(options, sessionId, (target, root) => importLegacyProjectMemory(target, root, input,
+      () => assertTargetUnchanged(options, sessionId, target)))
+  })
   ipcMain.handle('memory:read', (event, sessionId: string) => {
     assertTrustedWorkflowLedgerSender(event)
     const target = options.targetForSession(sessionId)
@@ -59,4 +73,11 @@ function requiredTarget(options: ProjectMemoryIpcOptions, sessionId: string): Pr
   const target = options.targetForSession(sessionId)
   if (!target) throw new Error('会话不存在')
   return target
+}
+
+function assertTargetUnchanged(options: ProjectMemoryIpcOptions, sessionId: string, target: ProjectMemoryTarget): void {
+  const current = requiredTarget(options, sessionId)
+  if (current.projectId !== target.projectId || current.projectRoot !== target.projectRoot) {
+    throw new Error('当前任务的项目或目录已变化，请重新预览旧记忆。')
+  }
 }

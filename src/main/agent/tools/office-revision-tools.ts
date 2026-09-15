@@ -32,7 +32,7 @@ export async function executeOfficeRevisionTool(name: string, args: Record<strin
     return officeToolJson(await inspectScopedOffice(context, officeText(args.artifactId, 'artifactId'), args.expectedDigest === undefined ? undefined : officeDigest(args.expectedDigest)))
   }
   if (name === 'plan_office_revision') return officeToolJson(await prepareOfficeRevision(context, args))
-  return { ok: true, output: JSON.stringify(await executeFrozenOfficeRevision(context, args, options.effectTarget, options.signal)) }
+  return { ok: true, output: JSON.stringify(await executeFrozenOfficeRevision(context, args, options.effectTarget, options.signal, options.assertFormalWriteAuthorized)) }
 }
 function officeToolJson(value: unknown): ToolExecResult {
   const output = JSON.stringify(value)

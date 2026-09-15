@@ -6,6 +6,7 @@ import type {
   ReadProjectMemoryResult
 } from '../../../shared/types'
 import LearningApprovalPanel from './LearningApprovalPanel'
+import LegacyMemoryImportPanel from './LegacyMemoryImportPanel'
 
 const EMPTY_FORM = { kind: 'note', title: '', body: '', reason: '' }
 type LoopOutcome = 'success' | 'partial' | 'failure'
@@ -294,6 +295,8 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
       <p className="settings-hint">
         记忆按项目隔离，修订草稿确认后生效。记忆提供上下文，不授予工具权限。
       </p>
+
+      <LegacyMemoryImportPanel key={sessionId} sessionId={sessionId} onImported={load} />
 
       <div className="memory-group">
         <h4 className="settings-h3">任务复盘</h4>

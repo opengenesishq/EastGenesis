@@ -10,13 +10,14 @@ import { readRequestBudgetSnapshot } from '../budget/request-budget-store'
 import type { RequestBudgetScope } from '../budget/request-budget-types'
 import { settingsForCaoGenDrive } from './drive'
 import { findConfiguredModelProfile } from './configured-model-profile'
+import { councilBudgetConstraints } from '../council/council-request-guard'
 
 export interface NativeRequestBudgetInput {
   rootDir: string
   scope: RequestBudgetScope
   estimatedUsd?: number
 }
-type BudgetMeta = Pick<SessionMeta, 'id' | 'sdkSessionId' | 'createdAt' | 'costUsd' | 'budgetUsd' | 'providerId' | 'driveMode'>
+type BudgetMeta = Pick<SessionMeta, 'id' | 'sdkSessionId' | 'createdAt' | 'costUsd' | 'budgetUsd' | 'providerId' | 'driveMode' | 'goalId' | 'workspaceId'>
 
 /** Call from the actual native request boundary, after the wire model/body is
  * fixed. All identity, budget and price inputs come from main-process state. */
@@ -41,12 +42,14 @@ export function nativeBudgetScope(meta: BudgetMeta, input: {
   const history = input.history ?? listHistory()
   const current = { ...meta, costUsd: nonnegative(meta.costUsd) }
   const monthly = calculateMonthlyBudgetSnapshot({ settings, history, currentSession: current })
+  const council = councilBudgetConstraints(meta, history)
   return {
+    ...(council.budgets.length ? { aggregateBudgets: council.budgets } : {}),
     sessionId: meta.id || 'session-creation-preview', sdkSessionId: meta.sdkSessionId,
     sessionTextCostUsd: current.costUsd,
     sessionLimitUsd: positive(meta.budgetUsd) ?? positive(input.providerBudgetUsd) ?? positive(settings.budgetUsdPerSession),
     monthlyLimitUsd: positive(settings.budgetUsdPerMonth), monthlyTextSpentUsd: monthly.spentUsd,
-    observedSessions: [...history.map((entry) => ({ id: entry.id, sdkSessionId: entry.sdkSessionId, costUsd: nonnegative(entry.costUsd) })),
+    observedSessions: [...history.map((entry) => ({ id: entry.id, sdkSessionId: entry.sdkSessionId, costUsd: nonnegative(entry.costUsd) })), ...council.observed,
       { id: current.id, sdkSessionId: current.sdkSessionId, costUsd: current.costUsd }].filter((entry) => entry.id)
   }
 }

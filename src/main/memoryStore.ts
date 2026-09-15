@@ -10,7 +10,7 @@ import {
   listLearningProject
 } from './learning/learning-lifecycle'
 import { requireTrustedUserLearningActor, type TrustedLearningDecision } from './learning/learning-security'
-import { learningProjectHash } from './learning/learning-store'
+import { learningProjectHash, readLearningState } from './learning/learning-store'
 import { projectLearningNamespace } from './project-aggregate/project-memory-adapter'
 import { writeDurableFile } from './durable-file'
 
@@ -119,6 +119,32 @@ export async function readProjectMemory(
     entries,
     drafts
   }
+}
+
+/** Migration preview only: no expiry, materialization or legacy JSON rewrite. */
+export async function readLegacyProjectMemoryEntries(projectRoot: string, memoryRoot: string): Promise<Array<{
+  storage: 'learning' | 'confirmed' | 'drafts'
+  sourceState: 'active' | 'draft'
+  entry: ProjectMemoryEntry
+}>> {
+  const root = normalizeMemoryRoot(memoryRoot)
+  const project = normalizeProjectRoot(projectRoot)
+  const projectDir = projectMemoryDir(root, learningProjectHash(project))
+  const [state, confirmed, drafts] = await Promise.all([
+    readLearningState(learningRootForMemoryRoot(root), project),
+    readBucket<ProjectMemoryEntry>(path.join(projectDir, 'confirmed'), 'confirmed', false),
+    readBucket<ProjectMemoryDraft>(path.join(projectDir, 'drafts'), 'drafts', false)
+  ])
+  // A Learning tombstone or superseded version must not reappear through an old JSON copy.
+  const ownedIds = new Set(state.records.filter(isMemoryRecord).map((record) => record.id))
+  const now = new Date().toISOString()
+  return [
+    ...state.records.filter(isProjectMemoryRecord)
+      .filter((record) => (record.status === 'active' || record.status === 'draft') && (!record.expiresAt || record.expiresAt > now))
+      .map((record) => ({ storage: 'learning' as const, sourceState: record.status as 'active' | 'draft', entry: memoryEntryFromRecord(record) })),
+    ...confirmed.filter((entry) => !ownedIds.has(entry.id)).map((entry) => ({ storage: 'confirmed' as const, sourceState: 'active' as const, entry })),
+    ...drafts.filter((entry) => !ownedIds.has(entry.id)).map((entry) => ({ storage: 'drafts' as const, sourceState: 'draft' as const, entry }))
+  ]
 }
 
 export async function proposeMemoryDraft(
@@ -315,7 +341,8 @@ async function writeEntry(
 
 async function readBucket<T extends ProjectMemoryEntry | ProjectMemoryDraft>(
   bucketDir: string,
-  bucket: MemoryBucket
+  bucket: MemoryBucket,
+  upgradeLegacy = true
 ): Promise<T[]> {
   const names = await readdir(bucketDir).catch((err: NodeJS.ErrnoException) => {
     if (err.code === 'ENOENT') return []
@@ -330,7 +357,7 @@ async function readBucket<T extends ProjectMemoryEntry | ProjectMemoryDraft>(
     const raw = await readFile(filePath, 'utf8')
     const parsed = bucket === 'drafts' ? parseDraft(raw, filePath) : parseConfirmed(raw, filePath)
     entries.push(parsed.entry as T)
-    if (parsed.legacy) {
+    if (parsed.legacy && upgradeLegacy) {
       await atomicWriteText(filePath, `${JSON.stringify(storedMemoryEntry(parsed.entry), null, JSON_INDENT)}\n`)
     }
   }

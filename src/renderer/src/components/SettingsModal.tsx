@@ -1096,6 +1096,12 @@ export default function SettingsPage(): React.JSX.Element {
                     </button>
                   </div>
                   <p className="settings-hint">{t('permissionRulesHint')}</p>
+                  <label className="settings-check">
+                    <input type="checkbox" checked={draft.limitedFileExecutionEnabled} onChange={(event) => set('limitedFileExecutionEnabled', event.target.checked)} data-limited-file-execution />
+                    限定文件执行
+                  </label>
+                  <p className="settings-hint">开启后，正式目录仅允许下面同时指定工具和路径的有效允许规则，支持文本编辑及 Office 文件生成和修订。保存后，停用、删除或到期的规则会阻止后续写入。准备区继续使用单独授权；命令、桌面、连接器和委派操作不可用。此设置适用于所有任务；相对路径以各任务目录为准，限定项目请填写绝对路径。</p>
+                  <p className="settings-hint">例如：允许工具 write_file，路径 reports/**，能力勾选“工作区写入”。Office 修订输出位于 artifacts/**，需同时勾选工作区读取与写入。关闭时沿用原执行权限，不代表授予新的动作审批。</p>
                   {draft.permissionRules.length === 0 ? (
                     <div className="permission-rule-empty">{t('permissionRulesEmpty')}</div>
                   ) : (

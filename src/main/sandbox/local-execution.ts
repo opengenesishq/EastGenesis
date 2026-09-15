@@ -131,7 +131,9 @@ async function writeTextFileOnHost(
     if (options.expectedFile) {
       await writeGuardedTextFileOnHost(options)
     } else {
+      options.assertWriteAuthorized?.()
       await mkdir(dirname(options.targetPath), { recursive: true })
+      options.assertWriteAuthorized?.()
       await writeFile(options.targetPath, options.content, { encoding: 'utf8', signal: options.signal })
     }
     return {
@@ -243,7 +245,7 @@ async function writeGuardedTextFileOnHost(options: LocalFileWriteOptions): Promi
     await writeAbsentTextFileOnHost(options)
     return
   }
-  const guardedParent = await captureGuardedParentPath(options.cwd, options.targetPath)
+  const guardedParent = await captureGuardedParentPath(options.cwd, options.targetPath, undefined, options.assertWriteAuthorized)
   const handle = await open(options.targetPath, safeOpenFlags(constants.O_RDWR))
   try {
     const before = await handle.stat({ bigint: true })
@@ -306,7 +308,7 @@ async function writeAbsentTextFileOnHost(options: LocalFileWriteOptions): Promis
   const guardedParent = await captureGuardedParentPath(options.cwd, options.targetPath, {
     rootPath: expected.rootPath,
     rootIdentity: expected.rootIdentity
-  })
+  }, options.assertWriteAuthorized)
   await verifyAbsentFilePrecondition(options.targetPath)
   const tempPath = join(dirname(options.targetPath), `.${randomUUID()}.caogen-write.tmp`)
   const noFollow = process.platform !== 'win32' && typeof constants.O_NOFOLLOW === 'number'
@@ -368,10 +370,12 @@ async function verifyAbsentFilePrecondition(targetPath: string): Promise<void> {
 async function captureGuardedParentPath(
   cwd: string,
   targetPath: string,
-  approvedRoot?: { rootPath: string; rootIdentity: { device: string; inode: string } }
+  approvedRoot?: { rootPath: string; rootIdentity: { device: string; inode: string } },
+  assertWriteAuthorized?: () => void
 ): Promise<GuardedParentPath> {
   const initial = await resolveWritableProjectPath(cwd, targetPath)
   if (approvedRoot) await verifyApprovedRoot(initial.root, approvedRoot)
+  assertWriteAuthorized?.()
   await mkdir(dirname(targetPath), { recursive: true })
   const resolved = await resolveWritableProjectPath(cwd, targetPath)
   if (approvedRoot) await verifyApprovedRoot(resolved.root, approvedRoot)

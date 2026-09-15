@@ -10,7 +10,7 @@ export default function PalaceArchitecture({ cutaway, openedRoom, qualityTier = 
   qualityTier?: PalaceGeometryTier
   onReady?: (ready: boolean) => void
 }): React.JSX.Element | null {
-  const [resource, setResource] = useState<PalaceGeometry | null>(null)
+  const [loaded, setLoaded] = useState<{ tier: PalaceGeometryTier; resource: PalaceGeometry } | null>(null)
   const renderedFrames = useRef(0)
   const { gl, invalidate } = useThree()
   useEffect(() => {
@@ -23,7 +23,7 @@ export default function PalaceArchitecture({ cutaway, openedRoom, qualityTier = 
     // live worker projection render first, then promote the selected tier.
     const timer = window.setTimeout(() => { void loadPalaceResource(qualityTier).then((loaded) => {
       if (cancelled) return
-      setResource(loaded)
+      setLoaded({ tier: qualityTier, resource: loaded })
       wrap?.setAttribute('data-office-palace-source-meshes', String(loaded.sourceMeshes))
       wrap?.setAttribute('data-office-palace-batches', String(loaded.batches))
       wrap?.setAttribute('data-office-palace-architecture-batches', String(loaded.architectureBatches))
@@ -38,10 +38,11 @@ export default function PalaceArchitecture({ cutaway, openedRoom, qualityTier = 
     }) }, 1300)
     return () => { cancelled = true; window.clearTimeout(timer) }
   }, [gl, invalidate, onReady, qualityTier])
+  const resource = loaded?.resource
   const scene = resource?.scene
   useEffect(() => resource ? retainPalaceResourceStats() : undefined, [resource])
   useFrame(() => {
-    if (!scene || renderedFrames.current >= 2) return
+    if (!scene || loaded?.tier !== qualityTier || renderedFrames.current >= 2) return
     if (++renderedFrames.current === 2) {
       gl.domElement.closest('.office-canvas-wrap')?.setAttribute('data-office-palace-loaded', '1')
       onReady?.(true)

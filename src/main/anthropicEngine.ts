@@ -21,6 +21,7 @@ import {
 } from './anthropic-history'
 import { rebuildSessionAnthropicHistory } from './session-anthropic-history'
 import { nativeRequestBudgetInput } from './model/native-request-budget'
+import { boundedCouncilBody, claimCouncilPhysicalRequest } from './council/council-request-guard'
 import {
   type AnthropicMessagesContentBlock,
   type AnthropicMessagesMessage,
@@ -472,7 +473,7 @@ export class AnthropicEngine implements Engine {
     }, target.credentialProvider.advancedConfig?.runtime)
     rememberAnthropicRecoveryTarget(this.recoveryState, target)
     if (target.keyId) this.dependencies.markProviderKeyUsed(target.providerId, target.keyId)
-    const body = this.dependencies.buildWireBody(request)
+    const body = boundedCouncilBody(this.meta, this.dependencies.buildWireBody(request), target.providerId, target.model, 'anthropic.messages') as Record<string, unknown>
     const assertPhysicalRequestAllowed = async (): Promise<void> => {
       await assertPersistedSessionExecutionAllowed(this.meta, app.getPath('userData'))
       // The SDK may issue more than one physical request during a single
@@ -533,6 +534,8 @@ export class AnthropicEngine implements Engine {
         onThinking: (text) => this.appendThinking(text),
         fetch: async (url, init = {}) => {
           await assertPhysicalRequestAllowed()
+          const wire = boundedCouncilBody(this.meta, init.body, target.providerId, target.model, 'anthropic.messages')
+          await claimCouncilPhysicalRequest(this.meta, typeof url === 'string' ? url : url.toString())
           const scope = providerCredentialScopeForSession(this.meta, target.providerId, operationId)
           const selection = target.issueCredentialLease(scope)
           if (target.credentialProvider.authMode !== 'none' && (!selection.available || !selection.lease)) {
@@ -543,7 +546,7 @@ export class AnthropicEngine implements Engine {
             lease: selection.lease,
             scope,
             url: typeof url === 'string' ? url : url.toString(),
-            init: { ...init, headers: target.headers }
+            init: { ...init, body: wire as RequestInit['body'], headers: target.headers }
           })
         }
       })

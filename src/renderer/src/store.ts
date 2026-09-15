@@ -1213,6 +1213,7 @@ export const useStore = create<AppStore>((set, get) => {
     permissionTemporaryAllowlist: '',
     permissionRulesVersion: 2,
     permissionRules: [],
+    limitedFileExecutionEnabled: false,
     guiAutomationEnabled: false,
     guiAutomationTemporaryGrantUntil: 0,
     notificationsEnabled: true,

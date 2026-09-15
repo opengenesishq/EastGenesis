@@ -1,5 +1,6 @@
 /** Main-process budget inputs; never accepted from tool arguments or renderer IPC. */
 export interface RequestBudgetScope {
+  aggregateBudgets?: Array<{ id: string; sessionIds: string[]; limitUsd: number; textSpentUsd: number }>
   sessionId: string
   sdkSessionId?: string
   sessionTextCostUsd: number
@@ -38,6 +39,7 @@ export interface RequestBudgetDocument {
 }
 
 export interface RequestBudgetSnapshot {
+  aggregateRemainingUsd?: number[]
   /** Settled text only; excludes media and live reservations. Missing if any
    * completed text request lacks an actual priced usage result. */
   actualTextCostUsd?: number

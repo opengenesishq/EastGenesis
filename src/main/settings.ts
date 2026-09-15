@@ -96,6 +96,7 @@ const DEFAULTS: AppSettings = {
   permissionTemporaryAllowlist: '',
   permissionRulesVersion: 2,
   permissionRules: [],
+  limitedFileExecutionEnabled: false,
   guiAutomationEnabled: false,
   guiAutomationTemporaryGrantUntil: 0,
   notificationsEnabled: true,
@@ -338,6 +339,7 @@ export function normalizeSettingsDocument(document: RoutingSettingsDocument): Ap
     allowedTools: '',
     disallowedTools: '',
     permissionRulesVersion: 2,
+    limitedFileExecutionEnabled: normalizeLimitedFileExecution(raw.limitedFileExecutionEnabled),
     permissionRules: mergePermissionRules(
       normalizePermissionRules(raw.permissionRules, false),
       migrateLegacyPermissionRules(raw)
@@ -365,6 +367,17 @@ export function getSettings(): AppSettings {
     }
   }
   return cache
+}
+
+/** Writer authority is read from the durable settings domain, never a tool's old snapshot. */
+export function readCurrentPermissionSettings(rootDir?: string): AppSettings {
+  return normalizeSettingsDocument(readSettingsFileSnapshot(rootDir ? join(rootDir, 'settings.json') : settingsFile()).document)
+}
+
+function normalizeLimitedFileExecution(value: unknown): boolean {
+  if (value === undefined) return false // Explicit compatibility for older settings.
+  if (typeof value !== 'boolean') throw new Error('限定文件执行设置必须是布尔值。')
+  return value
 }
 
 export function updateSettings(patch: Partial<AppSettings>): AppSettings {
@@ -406,6 +419,7 @@ export function updateSettings(patch: Partial<AppSettings>): AppSettings {
     permissionDenylist: '',
     permissionTemporaryAllowlist: '',
     permissionRulesVersion: 2 as const,
+    limitedFileExecutionEnabled: normalizeLimitedFileExecution(patch.limitedFileExecutionEnabled === undefined ? prev.limitedFileExecutionEnabled : patch.limitedFileExecutionEnabled),
     permissionRules,
     guiAutomationTemporaryGrantUntil: 0,
     office: normalizeOffice(patch.office, prev.office),

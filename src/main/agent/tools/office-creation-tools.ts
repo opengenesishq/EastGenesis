@@ -24,7 +24,9 @@ export async function executeOfficeCreationTool(name: string, args: Record<strin
       sourceCwd: sessionMeta.cwd, assertWriteAuthorized,
       withWriteAccess: (commit) => withDataLifecycleMutation(userDataRoot, commit)
     })
-  })() : executeOfficeArtifactTool(name, args, cwd, options.effectTarget, options.signal))
+  })() : executeOfficeArtifactTool(name, args, cwd, options.effectTarget, options.signal, {
+    assertWriteAuthorized: options.assertFormalWriteAuthorized
+  }))
   return { ok: true, output: clipToolOutput(JSON.stringify({ path: artifact.path, sha256: artifact.sha256, bytes: artifact.bytes,
     mediaType: artifact.mediaType, artifactKind: artifact.artifactKind, title: artifact.title, sourceRefs: artifact.sourceRefs })) }
 }

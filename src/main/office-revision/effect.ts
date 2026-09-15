@@ -11,6 +11,7 @@ import { generateOfficeRevision } from './inspection'
 import { assertOfficeRevisionIntent } from './intent'
 import { getPreparedOfficePlan } from './plans'
 import { readScopedOfficeArtifact, type OfficeContext } from './scope'
+import { officeRevisionOutputRelativePath } from './output-path'
 
 export async function buildOfficeRevisionEffectTarget(input: { sessionId?: string; toolInput: Record<string, unknown>; cwd: string }): Promise<OfficeRevisionEffectTarget> {
   if (!input.sessionId) officeError('OFFICE_SCOPE_MISMATCH', 'Office修订缺少可信会话身份。')
@@ -21,8 +22,7 @@ export async function buildOfficeRevisionEffectTarget(input: { sessionId?: strin
   await verifyProductionProjectMutation(context.rootDir, prepared.loaded.scope.projectId)
   const loaded = await readScopedOfficeArtifact(context, prepared.draft.baseArtifactId, prepared.draft.expectedDigest)
   if (!loaded.latest) officeError('OFFICE_BASE_NOT_HEAD', '原稿已有新版本。')
-  const extension = loaded.record.kind === 'document' ? 'docx' : loaded.record.kind === 'presentation' ? 'pptx' : 'xlsx'
-  const filename = `artifacts/office-${officeValueDigest(loaded.record.lineageId).slice(-16)}-v${loaded.record.version + 1}-${prepared.view.planDigest.slice(-12)}.${extension}`
+  const filename = officeRevisionOutputRelativePath(loaded.record.kind as OfficeRevisionKind, loaded.record.lineageId, loaded.record.version, prepared.view.planDigest)
   const output = await resolveWritableProjectPath(input.cwd, filename)
   if (await lstat(output.fullPath).catch(absentOnly)) officeError('OFFICE_OUTPUT_CONFLICT', '该修订输出已存在，请先对账原操作。')
   const root = await lstat(output.root)
@@ -43,7 +43,7 @@ export async function regenerateFrozenOfficeRevision(context: OfficeContext, tar
   if (officeBytesDigest(result.bytes) !== target.expectedSha256 || result.bytes.length !== target.expectedBytes || result.unchangedScopeDigest !== target.unchangedScopeDigest) officeError('OFFICE_OUTPUT_CONFLICT', '修订结果与审批时冻结的摘要不一致。')
   return result
 }
-export async function executeFrozenOfficeRevision(context: OfficeContext, args: Record<string, unknown>, value: EffectTarget | undefined, signal?: AbortSignal) {
+export async function executeFrozenOfficeRevision(context: OfficeContext, args: Record<string, unknown>, value: EffectTarget | undefined, signal?: AbortSignal, assertWriteAuthorized?: () => void) {
   if (!value || value.kind !== 'office_artifact_revision') officeError('OFFICE_PLAN_MISMATCH', '缺少冻结的Office修订Effect。')
   const target = value, intent = normalizeOfficeIntent(args)
   assertOfficeRevisionIntent(context.meta.id, args)
@@ -53,12 +53,14 @@ export async function executeFrozenOfficeRevision(context: OfficeContext, args: 
   const result = await regenerateFrozenOfficeRevision(context, target)
   assertNotInterrupted(signal)
   await assertOfficeOutputRoot(target)
+  assertWriteAuthorized?.()
   await mkdir(dirname(target.workspacePath), { recursive: true, mode: 0o700 })
   await assertOfficeOutputRoot(target)
   assertNotInterrupted(signal)
+  assertWriteAuthorized?.()
   // New path only. A partial write remains for reconciliation; never erase or overwrite evidence.
   const handle = await open(target.workspacePath, 'wx', 0o600)
-  try { await handle.writeFile(result.bytes); await handle.sync() } finally { await handle.close() }
+  try { assertWriteAuthorized?.(); await handle.writeFile(result.bytes); await handle.sync() } finally { await handle.close() }
   return { path: target.workspacePath, digest: target.expectedSha256, planDigest: target.planDigest,
     supersedesId: target.baseArtifactId, lineageId: target.lineageId, version: target.baseVersion + 1,
     status: 'awaiting_canonical_registration', checks: result.checks }

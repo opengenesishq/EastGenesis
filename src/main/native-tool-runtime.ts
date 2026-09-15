@@ -22,6 +22,7 @@ import {
 } from './permission/permission-manager'
 import { writeSessionAuditLog } from './permission/audit-log'
 import { evaluateToolPermission, type ToolPermissionDecision } from './permission/tool-permission'
+import { limitedFileExecutionError } from './permission/limited-file-execution'
 import { classifyToolCapabilities } from './permission/tool-capabilities'
 import { taskRuntimeRegistry, type ToolIdempotencyDecision } from './task/task-runtime-registry'
 import { registerSessionProducedArtifacts } from './task/session-artifact-producer'
@@ -305,6 +306,7 @@ export class NativeToolRuntime {
     effectTargetDigest?: string,
     capturedScope?: PreparationToolScope
   ): NativeToolPreflightDecision {
+    if (isCouncilSession(this.meta)) return { allow: false, message: '议事参与者仅可形成一轮意见，禁止调用工具或递归委派' }
     let executionScope: PreparationToolScope
     try {
       executionScope = capturedScope ?? resolvePreparationToolScope(this.meta, name, input, app.getPath('userData'))
@@ -314,6 +316,13 @@ export class NativeToolRuntime {
     if (workerPolicyError) return { allow: false, message: workerPolicyError }
     const settings = settingsForCaoGenDrive(getSettings(), this.meta.driveMode)
     const policy = evaluateToolPermission(settings, { toolName: name, input, cwd: executionScope.cwd })
+    const fileScopeError = limitedFileExecutionError(settings, name, input, executionScope.cwd, {
+      preparation: Boolean(executionScope.preparation), sessionId: this.meta.id
+    })
+    if (fileScopeError) {
+      this.auditGateDecision('deny', 'policy', name, input, fileScopeError, policy.risk.level, policy.risk.reasons)
+      return { allow: false, message: fileScopeError }
+    }
     if (policy.kind === 'deny') {
       writeSessionAuditLog(this.meta, {
         action: 'deny',
@@ -756,3 +765,4 @@ function requiresExplicitApprovalDespiteBypass(name: string, riskLevel: ToolRisk
   return riskLevel === 'critical' || riskLevel === 'high' || NON_BYPASSABLE_TOOLS.has(name) ||
     name.toLowerCase().startsWith('mcp__')
 }
+import { isCouncilSession } from './council/council-request-guard'

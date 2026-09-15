@@ -454,7 +454,8 @@ function isTaskDagRuntimeMergeSession(value: unknown): boolean {
 }
 
 export function isTaskDagRuntimeSnapshot(value: unknown): value is TaskDagRuntimeSnapshot {
-  return hasShape(value, {
+  if (!hasShape(value, {
+    council: optional(isCouncilRuntimeBinding),
     executionId: isString,
     parentSessionId: isString,
     capturedAt: isNumber,
@@ -463,7 +464,11 @@ export function isTaskDagRuntimeSnapshot(value: unknown): value is TaskDagRuntim
     recoveryBlockedError: optional(isString),
     mergeSessions: optional(arrayOf(isTaskDagRuntimeMergeSession)),
     autoMerge: optional(isTaskDagRuntimeAutoMergeOptions)
-  })
+  })) return false
+  const runtime = value as unknown as TaskDagRuntimeSnapshot
+  return !runtime.council || (runtime.council.record.councilId === runtime.executionId &&
+    runtime.council.record.sessionId === runtime.parentSessionId && runtime.dispatchOptions.taskTimeoutMs === runtime.council.record.limits.timeoutMs &&
+    runtime.dispatchOptions.isolated === false && runtime.dispatchOptions.permissionMode === 'default' && !runtime.autoMerge?.enabled)
 }
 
 function isConversationLedgerIntegrityView(value: unknown): boolean {
@@ -508,3 +513,4 @@ export function isTaskSnapshotRecord(value: unknown): value is TaskSnapshotRecor
     hasConsistentTaskSnapshotIdentity(record, isSessionMeta, isTaskRunRecord)
   )
 }
+import { isCouncilRuntimeBinding } from '../council/council-contract'

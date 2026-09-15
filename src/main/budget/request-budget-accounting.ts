@@ -8,6 +8,7 @@ export function requestBudgetSnapshot(document: RequestBudgetDocument, scope: Re
   let monthlyUnknown = false
   let sessionUnknown = false
   let actualTextCostUsd: number | undefined
+  const aggregates = (scope.aggregateBudgets ?? []).map((budget) => ({ ...budget, spent: budget.textSpentUsd, unknown: false }))
   const month = monthKeyFor(now)
   for (const session of document.sessions) {
     const own = sameBudgetSession(session, scope)
@@ -24,6 +25,11 @@ export function requestBudgetSnapshot(document: RequestBudgetDocument, scope: Re
     const unknown = [...pendingText, ...monthlyMedia].some(unknownCharge)
     monthlySpentUsd += unreflected + sumCharges(pendingText) + sumCharges(monthlyMedia)
     monthlyUnknown ||= unknown
+    for (const aggregate of aggregates) {
+      if (!session.sessionIds.some((id) => aggregate.sessionIds.includes(id))) continue
+      aggregate.spent += unreflected + sumCharges(pendingText) + sumCharges(media)
+      aggregate.unknown ||= [...pendingText, ...media].some(unknownCharge)
+    }
     if (own) {
       const completed = entries.filter((entry) => entry.kind === 'model' && entry.status === 'settled')
       actualTextCostUsd = completed.every((entry) => entry.actualUsd !== undefined)
@@ -33,6 +39,7 @@ export function requestBudgetSnapshot(document: RequestBudgetDocument, scope: Re
     }
   }
   return {
+    ...(aggregates.length ? { aggregateRemainingUsd: aggregates.map((budget) => remaining(budget.limitUsd, budget.spent, budget.unknown)!) } : {}),
     actualTextCostUsd, sessionSpentUsd, monthlySpentUsd, sessionUnknown, monthlyUnknown,
     sessionRemainingUsd: remaining(scope.sessionLimitUsd, sessionSpentUsd, sessionUnknown),
     monthlyRemainingUsd: remaining(scope.monthlyLimitUsd, monthlySpentUsd, monthlyUnknown)
@@ -40,7 +47,7 @@ export function requestBudgetSnapshot(document: RequestBudgetDocument, scope: Re
 }
 
 export function assertRequestBudget(snapshot: RequestBudgetSnapshot, estimatedUsd: number | undefined): void {
-  for (const remaining of [snapshot.sessionRemainingUsd, snapshot.monthlyRemainingUsd]) {
+  for (const remaining of [snapshot.sessionRemainingUsd, snapshot.monthlyRemainingUsd, ...(snapshot.aggregateRemainingUsd ?? [])]) {
     if (remaining === undefined) continue
     if (remaining <= 0) throw new ModelRouteError('ROUTING_BUDGET_EXHAUSTED', '会话或月度预算已耗尽，或存在费用待对账的请求。')
     if (estimatedUsd === undefined || estimatedUsd > remaining) {

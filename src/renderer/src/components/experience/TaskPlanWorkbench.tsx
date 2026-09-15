@@ -5,6 +5,7 @@ import { useStore } from '../../store'
 import TaskPlanEditor from './TaskPlanEditor'
 import TaskPlanInstitutions from './TaskPlanInstitutions'
 import PreparationPermission from '../composer/PreparationPermission'
+import CouncilPanel from './CouncilPanel'
 import { DisclosureChevron } from '../DisclosureChevron'
 import { TASK_PLAN_NAVIGATION_EVENT, takeTaskPlanNavigation } from './task-plan-navigation'
 import {
@@ -18,16 +19,19 @@ interface TaskPlanWorkbenchProps {
   strategy: 'view' | 'plan' | 'execute'
   running: boolean
   compact?: boolean
+  showCouncil?: boolean
 }
 
 export default function TaskPlanWorkbench({
   sessionId,
   strategy,
   running,
-  compact = false
+  compact = false,
+  showCouncil = true
 }: TaskPlanWorkbenchProps): React.JSX.Element | null {
   const t = useT()
   const state = useStore((store) => store.taskPlans[sessionId])
+  const meta = useStore((store) => store.sessions[sessionId]?.meta)
   const busy = useStore((store) => store.taskPlanBusy[sessionId] === true)
   const error = useStore((store) => store.taskPlanErrors[sessionId])
   const refresh = useStore((store) => store.refreshTaskPlan)
@@ -77,7 +81,10 @@ export default function TaskPlanWorkbench({
     setLoadedVersionId(current?.id)
   }, [current, loadedVersionId])
 
-  if (strategy !== 'plan' && !current && !navigationOpened) return null
+  if (strategy !== 'plan' && !current && !navigationOpened) {
+    return showCouncil && meta?.workspaceId && meta.goalId && meta.workItemId && !meta.parentSessionId
+      ? <CouncilPanel sessionId={sessionId} /> : null
+  }
 
   const save = async (): Promise<void> => {
     const plan = await createVersion(sessionId, taskPlanDraftFromForm(form))
@@ -112,6 +119,7 @@ export default function TaskPlanWorkbench({
       />
       {expanded && current && <TaskPlanInstitutions version={current} />}
       {expanded && <PreparationPermission key={sessionId} sessionId={sessionId} running={running} />}
+      {expanded && showCouncil && <CouncilPanel sessionId={sessionId} />}
       {state?.approvalStatus === 'approved' && state.projection && (
         <div className={`task-plan-projection task-plan-projection-${state.projection.mode}`}
           data-task-plan-projection={state.projection.mode}>

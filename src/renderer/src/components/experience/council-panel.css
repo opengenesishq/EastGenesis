@@ -1,0 +1,13 @@
+.council-panel { margin: 10px 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+.council-panel > summary { cursor: pointer; font-weight: 600; }
+.council-panel p { line-height: 1.6; margin: 6px 0; }
+.council-panel textarea { display: block; box-sizing: border-box; width: 100%; margin: 6px 0; padding: 8px; resize: vertical; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+.council-panel fieldset { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0; border: 1px solid var(--border); }
+.council-panel fieldset label { display: flex; align-items: center; gap: 5px; }
+.council-panel .btn { margin: 4px 6px 4px 0; }
+.council-panel article, .council-preview { margin-top: 10px; padding: 10px; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.council-panel article header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.council-panel article header > strong { flex: 1; }
+.council-panel article details { margin: 8px 0; }
+.council-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
+.council-panel [role=alert] { color: var(--danger, #db6b6b); }

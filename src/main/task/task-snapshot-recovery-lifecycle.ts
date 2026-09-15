@@ -89,7 +89,7 @@ export async function prepareTaskSnapshotRecovery(
     meta: persistedMeta,
     ...(persistedRun ? { run: persistedRun } : {})
   }
-  const finalizerRecovery = hasIncompleteFinalization(snapshot.sessionId)
+  const finalizerRecovery = hasIncompleteFinalization(snapshot.sessionId) || snapshot.dagRuntimes?.some((runtime) => runtime.council) === true
   assertTaskSnapshotRecoverable(snapshot, finalizerRecovery)
   return { snapshot, recoveredRun: recoveredTaskRun(snapshot, finalizerRecovery) }
 }
@@ -183,7 +183,7 @@ async function settleTerminalRecoverySnapshot(
   reconciled: ReturnType<typeof reconcileSnapshotWithReceipts>,
   hasIncompleteFinalization: FinalizationRecoveryProbe
 ): Promise<void> {
-  if (!reconciled.terminalRun || hasIncompleteFinalization(stored.sessionId)) return
+  if (!reconciled.terminalRun || hasIncompleteFinalization(stored.sessionId) || stored.dagRuntimes?.some((runtime) => runtime.council)) return
   await deleteTaskSnapshot(stored.id, undefined, reconciled.terminalRun)
   throw new Error('任务已完成，恢复入口已自动收敛')
 }

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { formalFileWriteGuard } from './permission/limited-file-execution'
 import { assertPreparationToolScope, isPreparationTool, resolvePreparationToolScope, type PreparationToolPermission } from './permission/preparation-tool-scope'
 import { withDataLifecycleMutation } from './data-lifecycle/data-lifecycle-mutation-lock'
 import { assertPreparationSessionNotDeleted } from './permission/preparation-permission-lifecycle'
@@ -103,6 +104,8 @@ export interface ToolExecResult {
   producedArtifacts?: ToolProducedArtifactDescriptor[]
 }
 export interface ToolExecutionOptions {
+  /** Main-owned live rule check; propagated into the final file/Office writer. */
+  assertFormalWriteAuthorized?: () => void
   preparationPermission?: PreparationToolPermission
   signal?: AbortSignal
   sandboxMode?: SandboxMode
@@ -964,6 +967,11 @@ export async function executeCodingTool(
   }
   try {
     if (options.signal?.aborted) return { ok: false, output: '操作已中断' }
+    const assertFormalWriteAuthorized = formalFileWriteGuard(name, args, cwd, {
+      preparation: Boolean(options.preparationPermission), sessionId: options.sessionId, effectTarget: options.effectTarget, rootDir: options.userDataRoot
+    })
+    assertFormalWriteAuthorized()
+    options = { ...options, assertFormalWriteAuthorized }
     const contextBound = executeContextBoundTool(name, args, cwd, options)
     if (contextBound) return clipExecResult(await contextBound)
     if (isGitToolName(name)) {
@@ -1004,7 +1012,7 @@ export async function executeCodingTool(
         const p = jailWritable(cwd, String(args.path ?? ''))
         const content = String(args.content ?? '')
         const guard = fileWritePrecondition(cwd, p, content, options.effectTarget)
-        const writeResult = await localFileWrite(cwd, p, content, options, guard)
+        const writeResult = await localFileWrite(cwd, p, content, options, guard, name)
         return withExecutionMetadata(
           {
             ok: writeResult.ok,
@@ -1033,7 +1041,7 @@ export async function executeCodingTool(
         }, {
           effectTarget: options.effectTarget?.kind === 'file_content' ? options.effectTarget : undefined,
           writeTextFile: async (filePath, content, guard) => {
-            writeResult = await localFileWrite(cwd, filePath, content, options, guard)
+            writeResult = await localFileWrite(cwd, filePath, content, options, guard, name)
             if (!writeResult.ok) throw new Error(writeResult.output)
           }
         })
@@ -1057,7 +1065,7 @@ export async function executeCodingTool(
         }, {
           effectTarget: options.effectTarget?.kind === 'file_content' ? options.effectTarget : undefined,
           writeTextFile: async (filePath, content, guard) => {
-            writeResult = await localFileWrite(cwd, filePath, content, options, guard)
+            writeResult = await localFileWrite(cwd, filePath, content, options, guard, name)
             if (!writeResult.ok) throw new Error(writeResult.output)
           }
         })
@@ -1310,9 +1318,15 @@ async function localFileWrite(
   targetPath: string,
   content: string,
   options: ToolExecutionOptions,
-  guard?: LocalFileWritePrecondition
+  guard: LocalFileWritePrecondition | undefined,
+  toolName: string
 ): Promise<LocalCommandResult> {
+  const assertResolvedTarget = formalFileWriteGuard(toolName, { path: targetPath, file_path: targetPath }, cwd, {
+    preparation: Boolean(options.preparationPermission), rootDir: options.userDataRoot
+  })
   const assertPreparation = () => {
+    options.assertFormalWriteAuthorized?.()
+    assertResolvedTarget()
     if (!options.preparationPermission) return
     if (!options.sessionMeta || !options.userDataRoot || !guard) throw new Error('准备区写入缺少当前任务、授权或冻结 Effect。')
     assertPreparationToolScope(options.sessionMeta, { cwd, preparation: options.preparationPermission }, options.userDataRoot)

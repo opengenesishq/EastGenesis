@@ -43,6 +43,7 @@ import { runtimeConversationReplay, validateRuntimeContinuationContext } from '.
 import { rebuildOpenAiTextHistory } from './openai-text-history'
 import { persistContextPack, restoreContextPack } from './agent/context-pack-persistence'
 import { nativeRequestBudgetInput } from './model/native-request-budget'
+import { boundedCouncilBody, claimCouncilPhysicalRequest } from './council/council-request-guard'
 import { nativeTurnRejection } from './model/native-turn-rejection'
 import { boundedOpenAiRequestBody } from './model/native-output-limit'
 import { emitNativeUserMessage } from './native-user-message'
@@ -1492,6 +1493,7 @@ export class OpenAIEngine implements Engine {
     const model = this.effectiveModel()
     const protocol = this.protocol() === 'chat' ? 'openai.chat-completions' : 'openai.responses'
     init = { ...init, body: boundedOpenAiRequestBody(init.body, protocol, auth.baseUrl) }
+    init = { ...init, body: boundedCouncilBody(this.meta, init.body, providerId, model, protocol) as RequestInit['body'] }
     const deadlines = new WeakMap<Response, ProviderRequestDeadline>()
     return this.modelAttempts.fetch({
       run: taskRuntimeRegistry.get(this.meta.id),
@@ -1653,6 +1655,7 @@ export class OpenAIEngine implements Engine {
     auth: OpenAIAuthConfig,
     operationId: string
   ): Promise<Response> {
+    boundedCouncilBody(this.meta, init.body, this.meta.providerId, this.effectiveModel(), this.protocol() === 'chat' ? 'openai.chat-completions' : 'openai.responses')
     const scope = providerCredentialScopeForSession(this.meta, auth.providerId, operationId)
     const currentProvider = auth.provider ? getProvider(auth.providerId) : undefined
     if (currentProvider && auth.authorizationAccountId) {
@@ -1661,6 +1664,8 @@ export class OpenAIEngine implements Engine {
         auth.authorizationAccountId,
         scope
       )
+      boundedCouncilBody(this.meta, init.body, this.meta.providerId, this.effectiveModel(), this.protocol() === 'chat' ? 'openai.chat-completions' : 'openai.responses')
+      await claimCouncilPhysicalRequest(this.meta, url)
       return fetchWithProviderCredentialLease({
         provider: account.credentialProvider,
         lease: account.lease,
@@ -1688,6 +1693,8 @@ export class OpenAIEngine implements Engine {
     if (auth.authMode !== 'none' && (!selection.available || !selection.lease)) {
       throw new Error('Provider credential lease is unavailable')
     }
+    boundedCouncilBody(this.meta, init.body, this.meta.providerId, this.effectiveModel(), this.protocol() === 'chat' ? 'openai.chat-completions' : 'openai.responses')
+    await claimCouncilPhysicalRequest(this.meta, url)
     return fetchWithProviderCredentialLease({
       provider: currentProvider ?? auth.provider,
       lease: selection.lease,

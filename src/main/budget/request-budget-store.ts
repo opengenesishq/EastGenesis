@@ -104,6 +104,11 @@ function budgetFile(rootDir: string): string {
   return join(resolve(rootDir), 'request-budget-reservations.json')
 }
 function validateScope(scope: RequestBudgetScope): void {
+  if (scope.aggregateBudgets !== undefined && (!Array.isArray(scope.aggregateBudgets) || scope.aggregateBudgets.some((budget) =>
+    !budget.id || !Array.isArray(budget.sessionIds) || budget.sessionIds.some((id) => typeof id !== 'string' || !id) ||
+    !Number.isFinite(budget.limitUsd) || budget.limitUsd < 0 || !Number.isFinite(budget.textSpentUsd) || budget.textSpentUsd < 0))) {
+    throw new Error('Invalid aggregate request budget scope')
+  }
   if (!scope.sessionId || !finiteMoney(scope.sessionTextCostUsd) || !finiteMoney(scope.monthlyTextSpentUsd) ||
       !money(scope.sessionLimitUsd) || !money(scope.monthlyLimitUsd) || !Array.isArray(scope.observedSessions)) {
     throw new Error('Invalid trusted request budget scope')
