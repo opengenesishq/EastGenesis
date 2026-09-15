@@ -2,17 +2,17 @@ import { useState } from 'react'
 import type { OfficeArtifactSnapshot, OfficeRevisionCheck, OfficeRevisionOperation, OfficeRevisionPlan, OfficeRevisionResult } from '../../../../../shared/office-revision-types'
 import type { StudioResultArtifact, StudioResultSnapshot } from '../../../../../shared/studio-result-types'
 import { useStore } from '../../../store'
-import OfficeRevisionEditor, { officeCellLabel, officeParagraphLabel } from './OfficeRevisionEditor'
+import OfficeRevisionEditor, { officeCellLabel, officeParagraphLabel, officeSlideTextLabel } from './OfficeRevisionEditor'
 import { runOfficeRevision } from './office-revision-run'
 import './office-revision.css'
 
 export default function OfficeArtifactRevision({ snapshot }: { snapshot: StudioResultSnapshot }): React.JSX.Element | null {
-  const artifacts = snapshot.artifacts.filter((artifact) => artifact.kind === 'document' || artifact.kind === 'spreadsheet')
+  const artifacts = snapshot.artifacts.filter((artifact) => artifact.kind === 'document' || artifact.kind === 'spreadsheet' || artifact.kind === 'presentation')
   const [artifactId, setArtifactId] = useState('')
   if (!artifacts.length) return null
   const artifact = artifacts.find((item) => item.id === artifactId)
   return <section className="office-artifact-revision" data-office-artifact-revision>
-    <strong>指定修改</strong><p>选择这项任务的成果，预览一个段落或单元格的精确修改，再交给同一任务执行。</p>
+    <strong>指定修改</strong><p>选择这项任务的成果，预览一个段落、单元格或页面文本框的精确修改，再交给同一任务执行。</p>
     <label>成果版本<select value={artifactId} onChange={(event) => setArtifactId(event.target.value)} data-office-artifact-select><option value="">选择成果…</option>{artifacts.map((item) => <option key={item.id} value={item.id}>{item.title} · 第 {item.version} 版 · {item.deliveryScope === 'current' ? '当前版本' : '旧版本，只读'}</option>)}</select></label>
     {artifact && <OfficeArtifactDetail key={`${snapshot.scope.sessionId}:${artifact.id}:${artifact.digest}`} sessionId={snapshot.scope.sessionId} artifact={artifact} />}
   </section>
@@ -48,7 +48,7 @@ function OfficeArtifactDetail({ sessionId, artifact }: { sessionId: string; arti
     <button type="button" className="btn btn-secondary btn-sm" disabled={busy} data-office-inspect onClick={() => void inspect()}>读取任务成果</button>
     {snapshot && <>
       <p data-office-snapshot-scope={snapshot.scope.workItemId}>{snapshot.artifact.title} · 第 {snapshot.artifact.version} 版</p>
-      <p>{snapshot.coverage.complete ? '内容已完整读取' : '内容未完整载入，当前只能查看，不能修改'} · {snapshot.artifact.kind === 'document' ? `${snapshot.coverage.paragraphCount} 个段落` : `${snapshot.coverage.cellCount} 个单元格`}</p>
+      <p>{snapshot.coverage.complete ? '选区已完整读取' : '选区未完整载入，当前只能查看，不能修改'} · {snapshot.artifact.kind === 'document' ? `${snapshot.coverage.paragraphCount} 个段落` : snapshot.artifact.kind === 'presentation' ? `${snapshot.coverage.slideCount ?? 0} 页 · ${snapshot.coverage.textBoxCount ?? 0} 个文本框` : `${snapshot.coverage.cellCount} 个单元格`}</p>
       {snapshot.editability.reasons.map((reason) => <p key={reason}>{reason}</p>)}
       {!plan && !result && <RevisionChecks checks={snapshot.checks} />}
       <OfficeRevisionEditor key={snapshot.artifact.digest} snapshot={snapshot} busy={busy} onChange={() => setPlan(undefined)} onPreview={preview} />
@@ -75,6 +75,8 @@ export function officeRevisionTargetLabel(snapshot: OfficeArtifactSnapshot | und
   if (paragraph) return officeParagraphLabel(paragraph)
   const cell = snapshot?.cells.find((item) => `${item.sheetId}!${item.address}` === targetId)
   if (cell && snapshot) return officeCellLabel(snapshot, cell)
+  const text = snapshot?.slideTexts?.find((item) => `${item.slideId}!${item.shapeId}` === targetId)
+  if (text && snapshot) return officeSlideTextLabel(snapshot, text)
   return '已选内容'
 }
 

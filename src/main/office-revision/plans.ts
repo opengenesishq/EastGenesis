@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { OfficeRevisionDraftInput, OfficeRevisionIntent, OfficeRevisionPlan } from '../../shared/office-revision-types'
+import type { OfficeRevisionDraftInput, OfficeRevisionIntent, OfficeRevisionKind, OfficeRevisionPlan } from '../../shared/office-revision-types'
 import { officeBytesDigest, officeValueDigest } from './digest'
 import { officeError } from './errors'
 import { normalizeOfficeDraft, normalizeOfficeIntent } from './input'
@@ -17,7 +17,7 @@ export async function prepareOfficeRevision(context: OfficeContext, input: unkno
   const draft = normalizeOfficeDraft(input)
   const loaded = await readScopedOfficeArtifact(context, draft.baseArtifactId, draft.expectedDigest)
   if (!loaded.latest) officeError('OFFICE_BASE_NOT_HEAD', '原稿已被后续版本替代，请重新选择最新成果。')
-  const result = await generateOfficeRevision(loaded.record.kind as 'document' | 'spreadsheet', loaded.bytes, draft.operations)
+  const result = await generateOfficeRevision(loaded.record.kind as OfficeRevisionKind, loaded.bytes, draft.operations)
   const planId = `office-plan:${randomUUID()}`, expiresAt = Date.now() + TTL_MS
   const view: OfficeRevisionPlan = { schemaVersion: 1, planId,
     planDigest: officeValueDigest({ schemaVersion: 1, sessionId: context.meta.id, scope: loaded.scope, draft, unchangedScopeDigest: result.unchangedScopeDigest }),

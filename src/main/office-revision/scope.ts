@@ -1,12 +1,13 @@
 import { constants } from 'node:fs'
 import { open } from 'node:fs/promises'
+import { isAbsolute, relative, resolve } from 'node:path'
 import type { SessionMeta } from '../../shared/types'
 import type { OfficeRevisionScope } from '../../shared/office-revision-types'
 import { resolveBusinessLineId } from '../../shared/business-line-types'
 import { assertSameBusinessLine } from '../business-line-ownership'
 import { assertActiveBusinessLine } from '../business-line-registry-reader'
 import { readTaskSnapshotDatabase } from '../task/task-snapshot'
-import { findWorkflowArtifact, findWorkflowWorkItem } from '../task/workflow-ledger-store'
+import { findWorkflowArtifact, findWorkflowRun, findWorkflowWorkItem } from '../task/workflow-ledger-store'
 import { getLatestPersistedArtifactLifecycleByLineage, getPersistedArtifactLifecycle, resolveLifecycleRoots } from '../task/artifact-lifecycle-api'
 import { artifactBlobPath } from '../task/artifact-lifecycle-content'
 import { findArtifactPurge } from '../task/artifact-lifecycle-store'
@@ -15,6 +16,7 @@ import { resolveExistingProjectPath } from '../utils/safe-project-path'
 import { officeError } from './errors'
 import { officeBytesDigest } from './digest'
 import { OFFICE_PACKAGE_LIMITS } from './package'
+import { assertPreparationPath, preparationPaths } from '../data-lifecycle/preparation-data-files'
 
 export interface OfficeContext { meta: SessionMeta; rootDir: string }
 export interface ScopedOfficeArtifact { record: ArtifactLifecycleRecord; title: string; mediaType: string; bytes: Buffer; latest: boolean; scope: OfficeRevisionScope }
@@ -32,7 +34,7 @@ export async function readScopedOfficeArtifact(context: OfficeContext, artifactI
   const scope = await officeSessionScope(context)
   const record = await getPersistedArtifactLifecycle(artifactId, context.rootDir)
   if (!record || record.projectId !== scope.projectId || record.workItemId !== scope.workItemId || record.goalId !== scope.goalId) officeError('OFFICE_SCOPE_MISMATCH', '成果不属于当前任务。')
-  if (!['document', 'spreadsheet'].includes(record.kind)) officeError('OFFICE_UNSUPPORTED_STRUCTURE', '仅支持Word和Excel成果。')
+  if (!['document', 'spreadsheet', 'presentation'].includes(record.kind)) officeError('OFFICE_UNSUPPORTED_STRUCTURE', '仅支持 Word、Excel 和 PowerPoint 成果。')
   if (expectedDigest !== undefined && expectedDigest !== record.digest) officeError('OFFICE_BASE_CHANGED', '原稿摘要已变化，请重新检查。')
   const artifact = await readTaskSnapshotDatabase(context.rootDir, (db) => findArtifactPurge(db, artifactId) ? null : findWorkflowArtifact(db, artifactId))
   if (!artifact) officeError('OFFICE_SCOPE_MISMATCH', 'canonical成果缺失。')
@@ -45,6 +47,17 @@ export async function readScopedOfficeArtifact(context: OfficeContext, artifactI
 async function officeArtifactReadPath(context: OfficeContext, record: ArtifactLifecycleRecord): Promise<string> {
   if (record.storageKind === 'blob') return artifactBlobPath(resolveLifecycleRoots(context.rootDir).workflowRoot, record.digest)
   if (!record.sourceRef) officeError('OFFICE_BASE_CHANGED', '原稿文件位置缺失。')
+  const producer = await readTaskSnapshotDatabase(context.rootDir, (db) => findWorkflowRun(db, record.runId))
+  if (producer?.sessionId && producer.projectId === record.projectId && producer.workItemId === record.workItemId && producer.goalId === record.goalId) {
+    const files = preparationPaths(context.rootDir, producer.sessionId).files
+    const owned = relative(files, resolve(record.sourceRef))
+    if (isAbsolute(record.sourceRef) && owned && !owned.startsWith('..') && !isAbsolute(owned)) {
+      // Historical read authority comes from the Artifact's canonical producer,
+      // not from a current preparation write grant or a caller-supplied root.
+      if (!assertPreparationPath(context.rootDir, record.sourceRef, false)) officeError('OFFICE_BASE_CHANGED', '准备区原稿文件已不可用。')
+      return (await resolveExistingProjectPath(files, record.sourceRef)).fullPath
+    }
+  }
   // Legacy source_ref is mutable: verify bytes, never treat a lossy preview as the original.
   return (await resolveExistingProjectPath(context.meta.cwd, record.sourceRef)).fullPath
 }

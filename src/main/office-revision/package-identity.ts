@@ -5,7 +5,8 @@ import { xmlSpans } from './xml-spans'
 
 const MAIN_TYPES: Record<OfficeRevisionKind, { part: string; contentType: string }> = {
   document: { part: '/word/document.xml', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml' },
-  spreadsheet: { part: '/xl/workbook.xml', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml' }
+  spreadsheet: { part: '/xl/workbook.xml', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml' },
+  presentation: { part: '/ppt/presentation.xml', contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml' }
 }
 /** Check the actual package's main part, not a filename extension or a mutable preview. */
 export function assertOfficePackageIdentity(parts: OfficePackage, kind: OfficeRevisionKind): void {

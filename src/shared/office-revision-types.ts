@@ -1,5 +1,5 @@
-/** Office revision V1 edits ordinary paragraph text and literal cells only. */
-export type OfficeRevisionKind = 'document' | 'spreadsheet'
+/** Local revisions preserve package content outside the explicitly selected region. */
+export type OfficeRevisionKind = 'document' | 'spreadsheet' | 'presentation'
 export type OfficeLiteral = string | number | boolean | null
 export type OfficeRevisionCheckState = 'passed' | 'failed' | 'not_checked'
 export interface OfficeRevisionCheck { id: string; state: OfficeRevisionCheckState; message: string }
@@ -16,17 +16,24 @@ export interface OfficeCellSnapshot {
   value?: OfficeLiteral; formula?: string; cachedValue?: string; nodeDigest: string; editable: boolean; reason?: string
 }
 export interface OfficeSheetSnapshot { id: string; name: string; usedRange?: string }
+export interface OfficeSlideSnapshot { id: string; index: number; name: string }
+export interface OfficeSlideTextSnapshot {
+  slideId: string; shapeId: string; name: string; text: string; nodeDigest: string
+  editable: boolean; reason?: string
+}
 export interface OfficeArtifactSnapshot {
   schemaVersion: 1; artifact: OfficeArtifactIdentity; scope: OfficeRevisionScope
   editability: { editable: boolean; reasons: string[] }
-  coverage: { complete: boolean; truncated: boolean; paragraphCount: number; cellCount: number; limits: { paragraphs: number; cells: number; characters?: number } }
+  coverage: { complete: boolean; truncated: boolean; paragraphCount: number; cellCount: number; slideCount?: number; textBoxCount?: number; limits: { paragraphs: number; cells: number; slides?: number; textBoxes?: number; characters?: number } }
   paragraphs: OfficeParagraphSnapshot[]; sheets: OfficeSheetSnapshot[]; cells: OfficeCellSnapshot[]
+  slides?: OfficeSlideSnapshot[]; slideTexts?: OfficeSlideTextSnapshot[]
   checks: OfficeRevisionCheck[]
 }
 export interface OfficeArtifactInspectInput { sessionId: string; artifactId: string; expectedDigest?: string; locationId?: string }
 export type OfficeRevisionOperation =
   | { kind: 'replaceParagraphText'; paragraphId: string; expectedNodeDigest: string; text: string }
   | { kind: 'setCellValue'; sheetId: string; address: string; expectedNodeDigest: string; value: OfficeLiteral }
+  | { kind: 'replaceSlideText'; slideId: string; shapeId: string; expectedNodeDigest: string; text: string }
 export interface OfficeRevisionDraftInput {
   baseArtifactId: string; expectedDigest: string; operations: OfficeRevisionOperation[]
 }

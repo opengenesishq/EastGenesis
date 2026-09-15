@@ -25,8 +25,15 @@ export function officeLiteralText(value: unknown): string {
   }
   return value
 }
+function officeSlideText(value: unknown): string {
+  if (typeof value !== 'string' || value.length > 32_767) officeError('OFFICE_PLAN_MISMATCH', '文本超出文本框修订范围。')
+  // Paragraph boundaries may remain, but runs/line breaks are never synthesized.
+  value.split('\n').forEach(officeLiteralText)
+  if (/_x[a-f0-9]{4}_/i.test(value)) officeError('OFFICE_UNSUPPORTED_STRUCTURE', '文本包含 Office 转义序列，不能作为普通文字替换。')
+  return value
+}
 export function normalizeOfficeOperation(value: unknown): OfficeRevisionOperation {
-  const raw = officeRecord(value, ['kind', 'paragraphId', 'sheetId', 'address', 'expectedNodeDigest', 'text', 'value'])
+  const raw = officeRecord(value, ['kind', 'paragraphId', 'sheetId', 'address', 'slideId', 'shapeId', 'expectedNodeDigest', 'text', 'value'])
   const expectedNodeDigest = officeDigest(raw.expectedNodeDigest)
   if (raw.kind === 'replaceParagraphText') {
     officeRecord(raw, ['kind', 'paragraphId', 'expectedNodeDigest', 'text'])
@@ -34,7 +41,13 @@ export function normalizeOfficeOperation(value: unknown): OfficeRevisionOperatio
     if (!/^paragraph:[1-9][0-9]*$/.test(paragraphId)) officeError('OFFICE_PLAN_MISMATCH', '段落ID无效。')
     return { kind: raw.kind, paragraphId, expectedNodeDigest, text: officeLiteralText(raw.text) }
   }
-  if (raw.kind !== 'setCellValue') officeError('OFFICE_PLAN_MISMATCH', '只允许替换普通段落和设置普通单元格。')
+  if (raw.kind === 'replaceSlideText') {
+    officeRecord(raw, ['kind', 'slideId', 'shapeId', 'expectedNodeDigest', 'text'])
+    const slideId = officeText(raw.slideId, 'slideId'), shapeId = officeText(raw.shapeId, 'shapeId')
+    if (!/^slide:[1-9][0-9]*$/.test(slideId) || !/^shape:[1-9][0-9]*$/.test(shapeId)) officeError('OFFICE_PLAN_MISMATCH', '页面或文本框身份无效。')
+    return { kind: raw.kind, slideId, shapeId, expectedNodeDigest, text: officeSlideText(raw.text) }
+  }
+  if (raw.kind !== 'setCellValue') officeError('OFFICE_PLAN_MISMATCH', '只允许替换普通段落、文本框文字和设置普通单元格。')
   officeRecord(raw, ['kind', 'sheetId', 'address', 'expectedNodeDigest', 'value'])
   const sheetId = officeText(raw.sheetId, 'sheetId'), address = officeText(raw.address, 'address')
   if (!/^sheet:[1-9][0-9]*$/.test(sheetId) || !validCellAddress(address)) officeError('OFFICE_PLAN_MISMATCH', '单元格身份无效。')
@@ -52,7 +65,9 @@ export function normalizeOfficeDraft(value: unknown): OfficeRevisionDraftInput {
   return { baseArtifactId: officeText(raw.baseArtifactId, 'baseArtifactId'), expectedDigest: officeDigest(raw.expectedDigest), operations }
 }
 export function officeOperationKey(operation: OfficeRevisionOperation): string {
-  return operation.kind === 'replaceParagraphText' ? operation.paragraphId : `${operation.sheetId}!${operation.address}`
+  if (operation.kind === 'replaceParagraphText') return operation.paragraphId
+  if (operation.kind === 'replaceSlideText') return `${operation.slideId}!${operation.shapeId}`
+  return `${operation.sheetId}!${operation.address}`
 }
 export function normalizeOfficeIntent(value: unknown): OfficeRevisionIntent {
   const raw = officeRecord(value, ['planId', 'planDigest', 'baseArtifactId', 'baseDigest'])

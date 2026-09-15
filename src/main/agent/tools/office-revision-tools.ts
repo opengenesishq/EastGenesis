@@ -10,12 +10,14 @@ const operation = { oneOf: [
   { type: 'object', additionalProperties: false, required: ['kind', 'paragraphId', 'expectedNodeDigest', 'text'], properties: {
     kind: { type: 'string', enum: ['replaceParagraphText'] }, paragraphId: text, expectedNodeDigest: text, text } },
   { type: 'object', additionalProperties: false, required: ['kind', 'sheetId', 'address', 'expectedNodeDigest', 'value'], properties: {
-    kind: { type: 'string', enum: ['setCellValue'] }, sheetId: text, address: text, expectedNodeDigest: text, value: { type: ['string', 'number', 'boolean', 'null'] } } }
+    kind: { type: 'string', enum: ['setCellValue'] }, sheetId: text, address: text, expectedNodeDigest: text, value: { type: ['string', 'number', 'boolean', 'null'] } } },
+  { type: 'object', additionalProperties: false, required: ['kind', 'slideId', 'shapeId', 'expectedNodeDigest', 'text'], properties: {
+    kind: { type: 'string', enum: ['replaceSlideText'] }, slideId: text, shapeId: text, expectedNodeDigest: text, text } }
 ] }
 export const OFFICE_REVISION_TOOLS: ToolDefinition[] = [
-  { type: 'function', function: { name: 'inspect_office_artifact', description: '检查当前任务Word/Excel成果完整选区；返回段落/已有单元格ID和摘要。复杂结构与公式只读，不接受文件路径或任意项目。',
+  { type: 'function', function: { name: 'inspect_office_artifact', description: '检查当前任务 Word/Excel/PowerPoint 成果选区；返回段落、已有单元格、页面与文本框身份和摘要。复杂结构与公式只读，不接受文件路径或任意项目。',
     parameters: { type: 'object', additionalProperties: false, required: ['artifactId'], properties: { artifactId: text, expectedDigest: text } } } },
-  { type: 'function', function: { name: 'plan_office_revision', description: '只读生成精确局部修订预览。先inspect取得选区摘要；仅普通段落和literal单元格，不改公式。不应用修改。',
+  { type: 'function', function: { name: 'plan_office_revision', description: '只读生成精确局部修订预览。先 inspect 取得选区摘要；支持普通段落、literal 单元格及指定页面文本框文字。文本框须保留段落数量，其他页面和形状不变。不应用修改。',
     parameters: { type: 'object', additionalProperties: false, required: ['baseArtifactId', 'expectedDigest', 'operations'], properties: {
       baseArtifactId: text, expectedDigest: text, operations: { type: 'array', minItems: 1, maxItems: 128, items: operation } } } } },
   { type: 'function', function: { name: 'revise_office_artifact', description: '通过原工具权限/Effect应用已准备的精确修订计划，产生同lineage下一版本并保留旧稿。UI指定planDigest时必须原样使用。只在返回registered后才宣称应用完成。',

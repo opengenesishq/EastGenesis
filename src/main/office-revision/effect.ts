@@ -1,7 +1,7 @@
 import { lstat, mkdir, open } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { EffectTarget } from '../../shared/types'
-import type { OfficeRevisionEffectTarget } from '../../shared/office-revision-types'
+import type { OfficeRevisionEffectTarget, OfficeRevisionKind } from '../../shared/office-revision-types'
 import { verifyProductionProjectMutation } from '../project-aggregate/project-mutation-ingress'
 import { resolveWritableProjectPath } from '../utils/safe-project-path'
 import { officeBytesDigest, officeValueDigest } from './digest'
@@ -21,11 +21,12 @@ export async function buildOfficeRevisionEffectTarget(input: { sessionId?: strin
   await verifyProductionProjectMutation(context.rootDir, prepared.loaded.scope.projectId)
   const loaded = await readScopedOfficeArtifact(context, prepared.draft.baseArtifactId, prepared.draft.expectedDigest)
   if (!loaded.latest) officeError('OFFICE_BASE_NOT_HEAD', '原稿已有新版本。')
-  const filename = `artifacts/office-${officeValueDigest(loaded.record.lineageId).slice(-16)}-v${loaded.record.version + 1}-${prepared.view.planDigest.slice(-12)}.${loaded.record.kind === 'document' ? 'docx' : 'xlsx'}`
+  const extension = loaded.record.kind === 'document' ? 'docx' : loaded.record.kind === 'presentation' ? 'pptx' : 'xlsx'
+  const filename = `artifacts/office-${officeValueDigest(loaded.record.lineageId).slice(-16)}-v${loaded.record.version + 1}-${prepared.view.planDigest.slice(-12)}.${extension}`
   const output = await resolveWritableProjectPath(input.cwd, filename)
   if (await lstat(output.fullPath).catch(absentOnly)) officeError('OFFICE_OUTPUT_CONFLICT', '该修订输出已存在，请先对账原操作。')
   const root = await lstat(output.root)
-  return { kind: 'office_artifact_revision', schemaVersion: 1, artifactKind: loaded.record.kind as 'document' | 'spreadsheet',
+  return { kind: 'office_artifact_revision', schemaVersion: 1, artifactKind: loaded.record.kind as OfficeRevisionKind,
     sessionId: input.sessionId, ...loaded.scope, baseArtifactId: loaded.record.artifactId, baseDigest: loaded.record.digest,
     baseVersion: loaded.record.version, lineageId: loaded.record.lineageId, planId: prepared.view.planId,
     planDigest: prepared.view.planDigest, operations: structuredClone(prepared.draft.operations), unchangedScopeDigest: prepared.view.unchangedScopeDigest,
@@ -35,7 +36,7 @@ export async function buildOfficeRevisionEffectTarget(input: { sessionId?: strin
 }
 export async function regenerateFrozenOfficeRevision(context: OfficeContext, target: OfficeRevisionEffectTarget, requireHead = true) {
   const loaded = await readScopedOfficeArtifact(context, target.baseArtifactId, target.baseDigest)
-  if (loaded.record.version !== target.baseVersion || loaded.record.lineageId !== target.lineageId ||
+  if (loaded.record.kind !== target.artifactKind || loaded.record.version !== target.baseVersion || loaded.record.lineageId !== target.lineageId ||
       officeValueDigest(loaded.scope) !== officeValueDigest({ projectId: target.projectId, goalId: target.goalId, workItemId: target.workItemId, businessLineId: target.businessLineId })) officeError('OFFICE_SCOPE_MISMATCH', '冻结原稿或任务归属不一致。')
   if (requireHead && !loaded.latest) officeError('OFFICE_BASE_NOT_HEAD', '原稿已有后续修订，旧预览不能覆盖。')
   const result = await generateOfficeRevision(target.artifactKind, loaded.bytes, target.operations)

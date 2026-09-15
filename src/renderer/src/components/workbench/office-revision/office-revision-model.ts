@@ -19,6 +19,14 @@ export function cellRevision(snapshot: OfficeArtifactSnapshot, cell: OfficeCellS
     expectedNodeDigest: current.nodeDigest, value: parseLiteral(type, text) }
 }
 
+export function slideTextRevision(snapshot: OfficeArtifactSnapshot, slideId: string, shapeId: string, text: string): OfficeRevisionOperation {
+  const current = snapshot.slideTexts?.find((item) => item.slideId === slideId && item.shapeId === shapeId)
+  assertEditable(snapshot, current?.editable)
+  if (!current) throw new Error('文本框已不可用，请重新读取成果。')
+  if (current.text.split('\n').length !== text.split('\n').length) throw new Error('请保留原文本框的段落数量。')
+  return { kind: 'replaceSlideText', slideId, shapeId, expectedNodeDigest: current.nodeDigest, text }
+}
+
 function assertEditable(snapshot: OfficeArtifactSnapshot, editable?: boolean): void {
   if (!snapshot.artifact.latest || !snapshot.editability.editable || !editable) throw new Error('当前选区只读；请查看原因或选择最新成果。')
 }

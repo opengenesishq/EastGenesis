@@ -1,20 +1,28 @@
 import { useState } from 'react'
-import type { OfficeArtifactSnapshot, OfficeCellSnapshot, OfficeParagraphSnapshot, OfficeRevisionOperation } from '../../../../../shared/office-revision-types'
-import { cellRevision, paragraphRevision } from './office-revision-model'
+import type { OfficeArtifactSnapshot, OfficeCellSnapshot, OfficeParagraphSnapshot, OfficeRevisionOperation, OfficeSlideTextSnapshot } from '../../../../../shared/office-revision-types'
+import { cellRevision, paragraphRevision, slideTextRevision } from './office-revision-model'
 
 export default function OfficeRevisionEditor({ snapshot, busy, onChange, onPreview }: {
   snapshot: OfficeArtifactSnapshot; busy: boolean; onChange(): void; onPreview(operation: OfficeRevisionOperation): Promise<void>
 }): React.JSX.Element {
   const [paragraphId, setParagraphId] = useState(snapshot.paragraphs[0]?.id ?? '')
   const [cellKey, setCellKey] = useState(snapshot.cells[0] ? keyForCell(snapshot.cells[0]) : '')
+  const [textKey, setTextKey] = useState(snapshot.slideTexts?.[0] ? keyForSlideText(snapshot.slideTexts[0]) : '')
   const paragraph = snapshot.paragraphs.find((item) => item.id === paragraphId)
   const cell = snapshot.cells.find((item) => keyForCell(item) === cellKey)
+  const slideText = snapshot.slideTexts?.find((item) => keyForSlideText(item) === textKey)
   const select = (change: () => void): void => { change(); onChange() }
   return <div className="office-revision-editor">
     {snapshot.artifact.kind === 'document' ? <>
       <label>段落<select value={paragraphId} disabled={busy} onChange={(event) => select(() => setParagraphId(event.target.value))} data-office-paragraph-select>{snapshot.paragraphs.map((item) => <option key={item.id} value={item.id}>{officeParagraphLabel(item)} · {item.editable ? '可修改' : '只读'} · {item.text.slice(0, 48)}</option>)}</select></label>
       {paragraph && <div><pre>{paragraph.text}</pre>{!paragraph.editable && <p>{paragraph.reason ?? '此段包含复杂结构，仅可预览。'}</p>}
         <ReplacementEditor key={paragraph.id} initial={paragraph.text} editable={paragraph.editable && snapshot.editability.editable && snapshot.artifact.latest} busy={busy} onChange={onChange} onPreview={(text) => onPreview(paragraphRevision(snapshot, paragraph.id, text))} />
+      </div>}
+    </> : snapshot.artifact.kind === 'presentation' ? <>
+      <label>页面与文本框<select value={textKey} disabled={busy} onChange={(event) => select(() => setTextKey(event.target.value))} data-office-slide-text-select>{snapshot.slideTexts?.map((item) => <option key={keyForSlideText(item)} value={keyForSlideText(item)}>{officeSlideTextLabel(snapshot, item)} · {item.editable ? '可修改' : '只读'} · {item.text.slice(0, 48)}</option>)}</select></label>
+      {slideText && <div><pre>{slideText.text}</pre>{!slideText.editable && <p>{slideText.reason ?? '此文本框包含复杂结构，仅可预览。'}</p>}
+        <p>保留原段落数量和文字样式。请核对新文字的换行与显示范围。</p>
+        <ReplacementEditor key={textKey} initial={slideText.text} editable={slideText.editable && snapshot.editability.editable && snapshot.artifact.latest} busy={busy} onChange={onChange} onPreview={(text) => onPreview(slideTextRevision(snapshot, slideText.slideId, slideText.shapeId, text))} />
       </div>}
     </> : <>
       <label>工作表与单元格<select value={cellKey} disabled={busy} onChange={(event) => select(() => setCellKey(event.target.value))} data-office-cell-select>{snapshot.cells.map((item) => <option key={keyForCell(item)} value={keyForCell(item)}>{officeCellLabel(snapshot, item)} · {item.editable ? '可修改' : '只读'}</option>)}</select></label>
@@ -24,8 +32,13 @@ export default function OfficeRevisionEditor({ snapshot, busy, onChange, onPrevi
 }
 
 function keyForCell(cell: OfficeCellSnapshot): string { return `${cell.sheetId}\0${cell.address}` }
+function keyForSlideText(text: OfficeSlideTextSnapshot): string { return `${text.slideId}!${text.shapeId}` }
 export function officeParagraphLabel(paragraph: OfficeParagraphSnapshot): string { return `第 ${paragraph.index + 1} 段` }
 export function officeCellLabel(snapshot: OfficeArtifactSnapshot, cell: OfficeCellSnapshot): string { return `${snapshot.sheets.find((sheet) => sheet.id === cell.sheetId)?.name ?? '工作表'} · ${cell.address} 单元格` }
+export function officeSlideTextLabel(snapshot: OfficeArtifactSnapshot, text: OfficeSlideTextSnapshot): string {
+  const slide = snapshot.slides?.find((item) => item.id === text.slideId)
+  return `${slide ? `第 ${slide.index + 1} 页` : '已选页面'} · ${text.name}`
+}
 
 function ReplacementEditor({ initial, editable, busy, forceChanged = false, onChange, onPreview }: {
   initial: string; editable: boolean; busy: boolean; forceChanged?: boolean; onChange(): void; onPreview(text: string): Promise<void>
