@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { createProjectGoalSubmissionClient, type ProjectGoalSubmissionHost } from '../src/renderer/src/lib/project-goal-task-submission'
-import type { ProjectGoalTaskPrepareInput, ProjectGoalTaskPrepared } from '../src/shared/types'
+import type { ProjectGoalTaskPrepareInput, ProjectGoalTaskPrepared, ProjectGoalTaskStarted } from '../src/shared/types'
 
 const checks: { name: string; status: string }[] = []
 async function check(name: string, run: () => Promise<void>) {
@@ -117,6 +117,53 @@ try {
     const first = await f.client().submit(input)
     f.client().acknowledge(first.requestId)
     assert.notEqual((await f.client().submit(input)).requestId, first.requestId)
+  })
+  await check('new simple tasks accept direct receipts without a plan and retain identity after response loss', async () => {
+    const f = fixture()
+    let lost = true
+    const receipts = new Map<string, Extract<ProjectGoalTaskStarted, { kind: 'direct' }>>()
+    f.host.start = async (request) => {
+      if (!receipts.has(request.requestId)) {
+        const prepared = await f.host.prepare(request)
+        receipts.set(request.requestId, {
+          ...prepared, kind: 'direct',
+          decision: { schemaVersion: 1, kind: 'direct', mode: 'auto', taskStrategy: 'view', reason: 'Simple request' },
+          input: { schemaVersion: 1, id: 'goal-start-fixture', sessionId: prepared.sessionId,
+            workspaceId: request.projectId, goalId: prepared.goal.id, workItemId: prepared.workItem.id,
+            messageId: `session-input:${prepared.sessionId}:goal-start-fixture`, payload: { text: request.objective },
+            phase: 'applied', createdAt: 1, updatedAt: 1 }
+        })
+        delete (receipts.get(request.requestId) as unknown as Record<string, unknown>).plan
+      }
+      if (lost) throw new Error('direct response lost')
+      return receipts.get(request.requestId)!
+    }
+    await assert.rejects(f.client().submit(input), /direct response lost/)
+    lost = false
+    const result = await f.client().submit(input)
+    assert.equal(result.kind, 'direct')
+    assert.equal(result.inputPhase, 'applied')
+    assert.equal(receipts.size, 1)
+    assert.equal(f.calls(), 1)
+    const receipt = receipts.get(result.requestId)!
+    receipt.input.phase = 'needs_reconciliation'
+    receipt.input.error = '原提交结果待核对'
+    assert.equal((await f.client().submit(input)).message, receipt.input.error)
+    receipt.input.workItemId = 'foreign'
+    await assert.rejects(f.client().submit(input), /执行回执与原任务身份不一致/)
+  })
+  await check('legacy pending preparation never calls automatic start', async () => {
+    const f = fixture()
+    f.host.start = async () => { throw new Error('old task must not execute') }
+    f.values.set('caogen.project-goal-submissions.v1', JSON.stringify([{ ...input, requestId: 'legacy-plan' }]))
+    assert.equal((await f.client().submit(input)).kind, 'plan')
+    assert.equal(f.calls(), 1)
+  })
+  await check('changing pending start mode cannot turn a plan request into execution', async () => {
+    const f = fixture(); f.fail(true)
+    await assert.rejects(f.client().submit({ ...input, mode: 'plan' }), /Preparation failed/)
+    await assert.rejects(f.client().submit({ ...input, mode: 'auto' }), /已固定开始方式/)
+    assert.equal(f.calls(), 1)
   })
 } catch (error) {
   console.error(error)

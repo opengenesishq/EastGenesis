@@ -6,11 +6,13 @@ import type { SessionMeta } from '../../shared/types'
 import { writeDurableFileSync } from '../durable-file'
 
 interface DirectoryIdentity { device: string; inode: string }
-interface PreparationPermissionRecord {
+export interface PreparationPermissionRecord {
   schemaVersion: 1
   sessionId: string
   revision: number
   status: 'granted' | 'revoked'
+  /** Imported records retain evidence only; a local explicit grant collects destination ownership. */
+  importedNeedsReauthorization?: true
   bindingDigest: string
   directory: string
   directoryIdentity: DirectoryIdentity
@@ -43,7 +45,7 @@ export class PreparationPermissionStore {
     if (meta.taskStrategy === 'view') throw new Error('查看策略不能申请写入准备区；请先明确选择规划或执行。')
     const current = this.read(meta.id)
     assertRevision(raw, current?.revision ?? 0)
-    if (current) this.assertCurrent(meta, current)
+    if (current && !current.importedNeedsReauthorization) this.assertCurrent(meta, current)
     if (current?.status === 'granted') return this.get(meta)
     const directory = this.directory(meta.id)
     const sourceCwd = realpathSync(meta.cwd)
@@ -99,17 +101,7 @@ export class PreparationPermissionStore {
       if (info.isSymbolicLink() || !info.isFile()) throw new Error('准备区授权记录必须是普通文件。')
       raw = readFileSync(file, 'utf8')
     } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error }
-    const record = JSON.parse(raw) as PreparationPermissionRecord
-    const { digest, ...body } = record
-    if (record.schemaVersion !== 1 || record.sessionId !== sessionId || record.directory !== this.directory(sessionId) ||
-      !Number.isSafeInteger(record.revision) || record.revision < 1 || !['granted', 'revoked'].includes(record.status) ||
-      !record.directoryIdentity || !/^\d+$/.test(record.directoryIdentity.device) || !/^\d+$/.test(record.directoryIdentity.inode) ||
-      !Number.isFinite(record.grantedAt) || (record.status === 'revoked' && !Number.isFinite(record.revokedAt)) ||
-      !/^[a-f0-9]{64}$/.test(record.bindingDigest) || digest !== hash(body) || !Array.isArray(record.events) ||
-      record.events.length !== record.revision || record.events.some((event, index) => event.revision !== index + 1 ||
-        !['granted', 'revoked'].includes(event.status) || typeof event.actorId !== 'string' || !event.actorId.startsWith('local-user:') || !Number.isFinite(event.at)) ||
-      record.events.at(-1)?.status !== record.status) throw new Error('准备区授权记录损坏，已阻止使用。')
-    return record
+    return parsePreparationPermissionRecord(JSON.parse(raw), sessionId, this.directory(sessionId))
   }
 
   private persist(record: Omit<PreparationPermissionRecord, 'digest'>): void {
@@ -119,6 +111,27 @@ export class PreparationPermissionStore {
   }
   private file(sessionId: string): string { return join(this.root, 'private', 'preparation-permissions', `${sessionKey(sessionId)}.json`) }
   private directory(sessionId: string): string { return join(this.root, 'preparation-drafts', sessionKey(sessionId), 'files') }
+}
+
+/** Validate the source body before any normalization; digest uses its original JSON key order. */
+export function parsePreparationPermissionRecord(value: unknown, sessionId: string, expectedDirectory?: string): PreparationPermissionRecord {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('准备区授权记录损坏，已阻止使用。')
+  const record = value as PreparationPermissionRecord
+  const { digest, ...body } = record
+  if (record.schemaVersion !== 1 || record.sessionId !== sessionId ||
+    typeof record.directory !== 'string' || (!isAbsolute(record.directory) && !/^[A-Za-z]:[\\/]/.test(record.directory)) || record.directory.includes('\0') ||
+    (expectedDirectory !== undefined && record.directory !== expectedDirectory) ||
+    !Number.isSafeInteger(record.revision) || record.revision < 1 || !['granted', 'revoked'].includes(record.status) ||
+    (record.importedNeedsReauthorization !== undefined && (record.importedNeedsReauthorization !== true || record.status !== 'revoked')) ||
+    !record.directoryIdentity || typeof record.directoryIdentity.device !== 'string' || typeof record.directoryIdentity.inode !== 'string' ||
+    !/^\d+$/.test(record.directoryIdentity.device) || !/^\d+$/.test(record.directoryIdentity.inode) ||
+    !Number.isFinite(record.grantedAt) || (record.status === 'revoked' && !Number.isFinite(record.revokedAt)) ||
+    typeof record.bindingDigest !== 'string' || !/^[a-f0-9]{64}$/.test(record.bindingDigest) || digest !== hash(body) || !Array.isArray(record.events) ||
+    record.events.length !== record.revision || record.events.some((event, index) => !event || event.revision !== index + 1 ||
+      !['granted', 'revoked'].includes(event.status) || typeof event.actorId !== 'string' || !event.actorId.startsWith('local-user:') || !Number.isFinite(event.at)) ||
+    record.events.at(-1)?.status !== record.status) throw new Error('准备区授权记录损坏，已阻止使用。')
+  sessionKey(sessionId)
+  return record
 }
 
 function bindingDigest(meta: SessionMeta): string {
@@ -142,7 +155,7 @@ function assertIdle(meta: SessionMeta): void {
   if (meta.status === 'closed') throw new Error('已关闭会话不能变更准备区授权。')
 }
 function assertActor(value: string): void { if (!value.startsWith('local-user:')) throw new Error('准备区授权必须来自已验证的本地用户。') }
-function sessionKey(value: string): string {
+export function sessionKey(value: string): string {
   if (typeof value !== 'string' || !value.trim() || value.length > 200 || /[\0-\x1f]/.test(value)) throw new Error('会话身份无效。')
   return hash(value)
 }

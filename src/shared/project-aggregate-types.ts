@@ -25,6 +25,7 @@ import type { TaskSnapshotRecord } from './types'
 import type { ProjectDependency, ProjectMilestone } from './project-portfolio-types'
 import type { MediaProjectSlice } from './media-types'
 import type { ProjectSubmissionReceiptSlice } from './submission-receipt-portability-types'
+import type { ProjectPreparationSlice } from './preparation-portability-types'
 
 export const PROJECT_AGGREGATE_SCHEMA_VERSION = 1 as const
 export const PROJECT_AGGREGATE_FORMAT = 'caogen.project-aggregate.v1' as const
@@ -239,6 +240,8 @@ export interface ProjectAggregatePortableRuntime {
   sessionFiles: ProjectAggregatePortableFile[]
   /** Optional for exports predating durable task submission and in-flight additions. */
   submissionReceipts?: ProjectSubmissionReceiptSlice
+  /** Optional for bundles created before isolated preparation drafts were portable. */
+  preparation?: ProjectPreparationSlice
   taskSnapshots: TaskSnapshotRecord[]
   modelAttempts: ModelAttemptRecord[]
   artifactLifecycles: unknown[]

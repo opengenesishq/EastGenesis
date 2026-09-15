@@ -8,7 +8,7 @@ import type { SendMessagePayload } from '../../shared/types'
 import { writeDurableFileSync } from '../durable-file'
 import { messagePayloadDigest } from '../message-payload-digest'
 import { normalizeStableMessagePayload } from '../stable-message-payload'
-import { goalPreparationDigest, normalizeGoalPreparation } from '../project-workspace/goal-submission-store'
+import { assertGoalStartDecision, goalPreparationDigest, normalizeGoalPreparation } from '../project-workspace/goal-submission-store'
 import { goalTaskIds } from '../project-workspace/goal-task-service'
 import { assertNoCredentialMaterial, projectAggregateCanonicalJson, projectAggregateDigest } from '../project-aggregate/codec'
 import { listProjectSubmissionReceiptFiles } from './submission-receipt-files'
@@ -202,6 +202,7 @@ function parseSessionInput(value: unknown): SessionInputRecord {
 function parseProjectGoal(value: unknown): PortableProjectGoalSubmission {
   if (!isRecord(value) || !isRecord(value.input)) fail('invalid Project submission')
   const record = value as unknown as PortableProjectGoalSubmission
+  assertGoalStartDecision(record.startDecision)
   const input = normalizeGoalPreparation(record.input)
   if (record.schemaVersion !== 1 || record.digest !== goalPreparationDigest(input) ||
       !/^[a-f0-9-]{36}$/.test(record.sessionId) || !Number.isSafeInteger(record.revision) || record.revision < 1 ||

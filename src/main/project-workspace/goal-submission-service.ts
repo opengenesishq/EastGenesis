@@ -13,6 +13,7 @@ export type GoalSessionIdentity = Pick<SessionMeta | HistoryEntry,
   'id' | 'workspaceId' | 'goalId' | 'workItemId' | 'businessLineId' | 'parentSessionId' | 'personalWorkspaceId'>
 
 export interface ProjectGoalSubmissionRuntime {
+  withTaskWriteAccess?<T>(operation: () => Promise<T>): Promise<T>
   whenInitialized(): Promise<void>
   get(id: string): { meta: SessionMeta } | undefined
   /** Active, historical, snapshot and pending journal identities, including inactive Sessions. */
@@ -34,7 +35,8 @@ export class ProjectGoalSubmissionService {
     if (input.projectId === MANAGED_PERSONAL_WORKSPACE_ID) throw new Error('个人任务必须从个人任务入口提交')
     const ids = goalTaskIds(input.projectId, input.requestId)
     // Shared across service instances as well as browser windows.
-    return withSessionOperationQueue(`project-goal:${this.rootDir}:${ids.goalId}`, () => this.perform(input))
+    return withSessionOperationQueue(`project-goal:${this.rootDir}:${ids.goalId}`, () =>
+      this.runtime.withTaskWriteAccess ? this.runtime.withTaskWriteAccess(() => this.perform(input)) : this.perform(input))
   }
 
   private async perform(input: ProjectGoalTaskPrepareInput): Promise<ProjectGoalTaskPrepared> {
@@ -43,6 +45,7 @@ export class ProjectGoalSubmissionService {
     if (!workspace || workspace.status !== 'active') throw new Error('项目不存在或已停用，已阻止创建任务提交记录')
     const ids = goalTaskIds(input.projectId, input.requestId)
     const prior = this.store.read(input)
+    if (prior?.startDecision?.kind === 'direct') throw new Error('该提交已直接开始，请从原任务继续；不能替换为另一个计划')
     const identities = await this.runtime.identities()
     const matches = identities.filter((meta) => meta.workspaceId === input.projectId &&
       meta.goalId === ids.goalId && meta.workItemId === ids.workItemId && !meta.parentSessionId)

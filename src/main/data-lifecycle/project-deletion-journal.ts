@@ -86,6 +86,17 @@ export class ProjectDeletionJournal {
     return clone(readDocument(this.filePath).entries.find((entry) => entry.operationId === id))
   }
 
+  /** Match frozen Session scope as well as current ownership, including completed purges. */
+  sessionDeletionState(sessionIdInput: string, projectIdInput?: string): { pending: boolean; completedAt?: number } {
+    const sessionId = requiredId(sessionIdInput, 'sessionId')
+    const projectId = projectIdInput === undefined ? undefined : requiredId(projectIdInput, 'projectId')
+    const entries = readDocument(this.filePath).entries.filter((entry) =>
+      entry.sessionIds.includes(sessionId) || (projectId !== undefined && entry.projectId === projectId))
+    const completed = entries.filter((entry) => entry.phase === 'completed').map((entry) => entry.completedAt!)
+    return { pending: entries.some((entry) => entry.phase !== 'completed'),
+      ...(completed.length ? { completedAt: Math.max(...completed) } : {}) }
+  }
+
   async begin(input: ProjectDeletionJournalBeginInput): Promise<ProjectDeletionJournalEntry> {
     const projectId = requiredId(input.projectId, 'projectId')
     const operationId = input.operationId === undefined ? randomUUID() : requiredId(input.operationId, 'operationId')

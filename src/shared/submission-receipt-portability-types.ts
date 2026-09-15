@@ -1,4 +1,4 @@
-import type { ProjectGoalTaskPrepareInput } from './project-workspace-types'
+import type { ProjectGoalTaskPrepareInput, ProjectGoalTaskStartDecision } from './project-workspace-types'
 import type { SessionInputRecord } from './session-input-types'
 
 export interface PortableProjectGoalSubmission {
@@ -6,6 +6,7 @@ export interface PortableProjectGoalSubmission {
   input: ProjectGoalTaskPrepareInput
   digest: string
   sessionId: string
+  startDecision?: ProjectGoalTaskStartDecision
   phase: 'reserved' | 'task_created' | 'creating_session' | 'session_ready' | 'ready'
   revision: number
   createdAt: number

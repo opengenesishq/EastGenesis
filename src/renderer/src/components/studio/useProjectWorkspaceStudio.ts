@@ -327,14 +327,14 @@ export function useProjectGoalTaskStart(refreshContents: () => Promise<void>): {
   announcement: string
   planSessionId: string | null
   planProjectId: string | null
-  start: (projectId: string | undefined, objective: string, template?: 'auto' | 'product-launch') => Promise<boolean>
+  start: (projectId: string | undefined, objective: string, template?: 'auto' | 'product-launch', mode?: 'auto' | 'plan') => Promise<boolean>
 } {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [announcement, setAnnouncement] = useState('')
   const [compiledPlan, setCompiledPlan] = useState<{ sessionId: string; projectId: string } | null>(null)
   const locked = useRef(false)
-  const start = useCallback(async (projectId: string | undefined, rawObjective: string, template: 'auto' | 'product-launch' = 'auto'): Promise<boolean> => {
+  const start = useCallback(async (projectId: string | undefined, rawObjective: string, template: 'auto' | 'product-launch' = 'auto', mode: 'auto' | 'plan' = 'auto'): Promise<boolean> => {
     const objective = rawObjective.trim()
     if (!objective || locked.current) return false
     locked.current = true
@@ -361,16 +361,25 @@ export function useProjectGoalTaskStart(refreshContents: () => Promise<void>): {
         return true
       }
       const client = createProjectGoalSubmissionClient(window.localStorage, {
-        prepare: (input) => window.agentDesk.prepareProjectGoalTask(input)
+        prepare: (input) => window.agentDesk.prepareProjectGoalTask(input),
+        start: (input) => window.agentDesk.startProjectGoalTask(input)
       })
-      const { sessionId, requestId } = await client.submit({ projectId, objective, template })
+      const result = await client.submit({ projectId, objective, template, mode })
+      const { sessionId, requestId } = result
       if (!await useStore.getState().syncSession(sessionId)) throw new Error('原任务已保存，会话尚未载入，请重试打开。')
-      await useStore.getState().refreshTaskPlan(sessionId)
-      setCompiledPlan({ sessionId, projectId })
+      if (result.kind === 'direct') {
+        setCompiledPlan(null)
+        useStore.getState().selectSession(sessionId)
+      } else {
+        await useStore.getState().refreshTaskPlan(sessionId)
+        setCompiledPlan({ sessionId, projectId })
+      }
       // Failed projection refresh must not turn a confirmed plan into a new submission.
       await refreshContents().catch(() => undefined)
       try { client.acknowledge(requestId) } catch { /* retained journal safely reopens the same plan */ }
-      setAnnouncement(TEXT.goalTaskStarted)
+      setAnnouncement(result.kind === 'plan' ? TEXT.goalTaskStarted : result.inputPhase === 'applied'
+        ? '任务已开始，可在同一对话继续工作。'
+        : result.message ?? '任务已保存，请在原对话核对提交状态后继续。')
       return true
     } catch (cause) {
       setError(errorText(cause))

@@ -8,6 +8,7 @@ import type {
   MutationOptions,
   ProjectGoalTaskInput,
   ProjectGoalTaskPrepareInput,
+  ProjectGoalTaskStartInput,
   ProjectMemberCreateInput,
   ProjectMemberPatch,
   ProjectInvitationInput,
@@ -65,6 +66,7 @@ export const projectWorkspaceApi: Pick<AgentDeskApi,
   | 'transferProjectWorkItem'
   | 'createProjectGoalTask'
   | 'prepareProjectGoalTask'
+  | 'startProjectGoalTask'
   | 'reorderProjectWorkItem'
   | 'setProjectWorkItemAcceptance' | 'acquireProjectWorkItemLease'
   | 'renewProjectWorkItemLease' | 'releaseProjectWorkItemLease'
@@ -146,6 +148,8 @@ export const projectWorkspaceApi: Pick<AgentDeskApi,
     invokeProjectWorkspace('goalTask:create', input),
   prepareProjectGoalTask: (input: ProjectGoalTaskPrepareInput) =>
     invokeProjectWorkspace('goalTask:prepare', input),
+  startProjectGoalTask: (input: ProjectGoalTaskStartInput) =>
+    invokeProjectWorkspace('goalTask:start', input),
   updateProjectWorkItem: (id: string, patch: WorkItemPatch, options?: MutationOptions) =>
     invokeProjectWorkspace('workItems:update', id, patch, options),
   transferProjectWorkItem: (input: WorkItemTransferInput) =>

@@ -4,7 +4,7 @@ import { deleteComposerDrafts } from './composer-draft-persistence'
 export function clearDeletedTaskLocalData(sessionIds: readonly string[], projectId?: string, storage = window.localStorage): void {
   const sessions = new Set(sessionIds)
   const draftKeys = [...sessions]
-  if (projectId) draftKeys.push(`goal-intake:${projectId}`, `goal-intake:${projectId}:template`)
+  if (projectId) draftKeys.push(`goal-intake:${projectId}`, `goal-intake:${projectId}:template`, `goal-intake:${projectId}:mode`)
   deleteComposerDrafts(storage, draftKeys)
   for (const id of sessions) storage.removeItem(`caogen.session-input-request.v1:${id}`)
   const key = 'caogen.project-goal-submissions.v1'

@@ -87,6 +87,15 @@ export class SessionDeletionJournal {
     return entry ? clone(entry) : undefined
   }
 
+  /** Keep pending deletion separate from completed receipts that a verified import may supersede. */
+  sessionDeletionState(sessionIdInput: string): { pending: boolean; completedAt?: number } {
+    const sessionId = requiredId(sessionIdInput, 'sessionId')
+    const entries = readDocument(this.filePath).entries.filter((entry) => entry.sessionId === sessionId)
+    const completed = entries.filter((entry) => entry.phase === 'completed').map((entry) => entry.completedAt!)
+    return { pending: entries.some((entry) => entry.phase !== 'completed'),
+      ...(completed.length ? { completedAt: Math.max(...completed) } : {}) }
+  }
+
   async begin(input: SessionDeletionJournalBeginInput): Promise<SessionDeletionJournalEntry>
   async begin(sessionId: string, sdkSessionId: string): Promise<SessionDeletionJournalEntry>
   async begin(

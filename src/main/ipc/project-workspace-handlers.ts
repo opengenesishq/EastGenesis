@@ -23,6 +23,7 @@ import {
   type MutationOptions,
   type ProjectGoalTaskInput,
   type ProjectGoalTaskPrepareInput,
+  type ProjectGoalTaskStartInput,
   type ProjectSquadCreateInput,
   type ProjectSquadInput,
   type ProjectSquadMemberInput,
@@ -51,7 +52,7 @@ import {
   type WorkItemReorderPlacement
 } from '../../shared/project-workspace-types'
 import { createProjectGoalTask } from '../project-workspace/goal-task-service'
-import { prepareProjectGoalTask } from '../project-workspace/goal-submission-runtime'
+import { prepareProjectGoalTask, startProjectGoalTask } from '../project-workspace/goal-submission-runtime'
 import { createWorkItemTransferService } from '../project-workspace/work-item-transfer-service'
 import { LOCAL_USER_ACTOR } from '../project-workspace/work-item-authorization'
 import { assertTrustedWorkflowLedgerSender } from './workflow-ledger-handlers'
@@ -113,6 +114,7 @@ const WORK_ITEM_PATCH_KEYS = new Set([
 ])
 const GOAL_TASK_KEYS = new Set(['requestId', 'projectId', 'objective', 'businessLineId'])
 const GOAL_PREPARATION_KEYS = new Set([...GOAL_TASK_KEYS, 'template', 'legacySessionId', 'legacyCreationClaimed'])
+const GOAL_START_KEYS = new Set([...GOAL_PREPARATION_KEYS, 'mode'])
 const PROJECT_TEMPLATE_APPLY_KEYS = new Set(['requestId', 'projectId', 'templateId'])
 const PROJECT_KNOWLEDGE_SEARCH_KEYS = new Set(['projectId', 'query', 'limit'])
 const PROJECT_DEPENDENCY_KEYS = new Set(['id', 'fromProjectId', 'toProjectId', 'fromWorkItemId', 'toWorkItemId', 'label'])
@@ -148,7 +150,7 @@ const PROJECT_WORKSPACE_MUTATIONS = new Set([
   'comments:create', 'comments:update', 'comments:delete',
   'sharedApprovals:create', 'sharedApprovals:decide', 'sharedApprovals:revoke',
   'collaborationInbox:mark',
-  'goalTask:create', 'goalTask:prepare', 'connectors:mutate', 'knowledge:search'
+  'goalTask:create', 'goalTask:prepare', 'goalTask:start', 'connectors:mutate', 'knowledge:search'
 ])
 const WORKSPACE_ID_MUTATIONS = new Set(['update', 'archive', 'restore', 'delete', 'purge'])
 const PROJECT_INPUT_MUTATIONS = new Set([
@@ -286,6 +288,10 @@ const PROJECT_WORKSPACE_HANDLERS: Record<string, ProjectWorkspaceHandler> = {
   ),
   'goalTask:prepare': (rawInput) => prepareProjectGoalTask(
     normalizeInput<ProjectGoalTaskPrepareInput>(rawInput, GOAL_PREPARATION_KEYS, 'goal preparation'),
+    app.getPath('userData')
+  ),
+  'goalTask:start': (rawInput) => startProjectGoalTask(
+    normalizeInput<ProjectGoalTaskStartInput>(rawInput, GOAL_START_KEYS, 'goal start'),
     app.getPath('userData')
   ),
   'workItems:update': (rawId, rawPatch, rawOptions) => updateWorkItem(rawId, rawPatch, rawOptions),
@@ -434,12 +440,15 @@ export function registerProjectWorkspaceIpc(): void {
     const handler = PROJECT_WORKSPACE_HANDLERS[action]
     if (!handler) throw new Error(`project workspace action is not supported: ${action}`)
     const mutation = PROJECT_WORKSPACE_MUTATIONS.has(action)
-    if (action === 'goalTask:prepare') await sessionManager.whenInitialized()
+    if (action === 'goalTask:prepare' || action === 'goalTask:start') await sessionManager.whenInitialized()
     const invoke = async () => {
       const result = await handler(...args)
       if (mutation) await verifyProjectWorkspaceMutation(action, args, result)
       return result
     }
+    // Start owns a short write phase, then dispatches through Session.send, which
+    // acquires assignment access itself. The coordinator lock is not reentrant.
+    if (action === 'goalTask:start' || action === 'goalTask:prepare') return invoke()
     return mutation
       ? await withAssignmentOwnerWriteAccess(userDataRoot, invoke)
       : await withAssignmentOwnerReadAccess(userDataRoot, invoke)
@@ -467,7 +476,7 @@ function workspaceMutationProjectId(action: string, args: unknown[], result: unk
   if (PROJECT_INPUT_MUTATIONS.has(action)) {
     return isRecord(args[0]) ? optionalString(args[0].projectId) : undefined
   }
-  if (action === 'goalTask:create' || action === 'goalTask:prepare') {
+  if (action === 'goalTask:create' || action === 'goalTask:prepare' || action === 'goalTask:start') {
     return isRecord(args[0]) ? optionalString(args[0].projectId) : undefined
   }
   return undefined

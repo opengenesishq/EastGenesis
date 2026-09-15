@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto'
-import { assertPreparationToolScope, type PreparationToolPermission } from './permission/preparation-tool-scope'
+import { assertPreparationToolScope, resolvePreparationToolScope, type PreparationToolPermission } from './permission/preparation-tool-scope'
+import { withDataLifecycleMutation } from './data-lifecycle/data-lifecycle-mutation-lock'
+import { assertPreparationSessionNotDeleted } from './permission/preparation-permission-lifecycle'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { extname, resolve } from 'node:path'
@@ -1316,8 +1318,7 @@ async function localFileWrite(
     if (!options.sessionMeta || !options.userDataRoot || !guard) throw new Error('准备区写入缺少当前任务、授权或冻结 Effect。')
     assertPreparationToolScope(options.sessionMeta, { cwd, preparation: options.preparationPermission }, options.userDataRoot)
   }
-  assertPreparation()
-  return writeTextFileLocally({
+  const write = () => writeTextFileLocally({
     beforeGuardedCommit: assertPreparation,
     assertWriteAuthorized: assertPreparation,
     cwd,
@@ -1330,6 +1331,18 @@ async function localFileWrite(
     npmRegistry: options.npmRegistry,
     pipIndexUrl: options.pipIndexUrl,
     signal: options.signal
+  })
+  if (!options.preparationPermission) return write()
+  if (!options.sessionMeta || !options.userDataRoot || !guard) throw new Error('准备区写入缺少当前任务、授权或冻结 Effect。')
+  const { sessionMeta, userDataRoot } = options
+  return withDataLifecycleMutation(userDataRoot, async () => {
+    assertPreparationSessionNotDeleted(userDataRoot, sessionMeta)
+    const scope = resolvePreparationToolScope(sessionMeta, 'write_file', { path: targetPath }, userDataRoot)
+    if (!scope.preparation || scope.cwd !== cwd) throw new Error('准备区写入目标已不属于当前任务授权。')
+    assertPreparation()
+    // Hold through every async mkdir/open/write so purge cannot finish and then
+    // have an older writer recreate its directories. Keep the final guard too.
+    return write()
   })
 }
 

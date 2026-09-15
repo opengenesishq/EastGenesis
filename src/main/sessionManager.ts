@@ -1020,7 +1020,7 @@ class SessionManager {
   send(
     id: string,
     input: string | SendMessagePayload,
-    options: { modelAttemptRecoveryReplay?: boolean; supervisorControlReplay?: boolean } = {}
+    options: { modelAttemptRecoveryReplay?: boolean; supervisorControlReplay?: boolean; readOnlyGoalStart?: boolean } = {}
   ): Promise<boolean> {
     return withSessionOperationQueue(id, () => this.performSend(id, input, options))
   }
@@ -1028,10 +1028,21 @@ class SessionManager {
   private async performSend(
     id: string,
     input: string | SendMessagePayload,
-    options: { modelAttemptRecoveryReplay?: boolean; supervisorControlReplay?: boolean }
+    options: { modelAttemptRecoveryReplay?: boolean; supervisorControlReplay?: boolean; readOnlyGoalStart?: boolean }
   ): Promise<boolean> {
     let session = this.sessions.get(id)
     if (!session) return false
+    const assertDirectStart = () => {
+      if (options.readOnlyGoalStart && (session!.meta.taskStrategy !== 'view' ||
+          session!.meta.permissionMode !== 'default' || this.taskPlans.get(id).currentVersion)) {
+        throw new Error('任务的授权或计划已变化，请从原任务继续；直接开始不会扩大权限或跳过计划审批')
+      }
+    }
+    try {
+      assertDirectStart()
+    } catch (cause) {
+      return this.rejectBeforeRun(session, cause instanceof Error ? cause.message : String(cause))
+    }
     try {
       const unresolvedInput = unresolvedImportedSessionInputReason(app.getPath('userData'), id)
       if (unresolvedInput) return this.rejectBeforeRun(session, unresolvedInput)
@@ -1128,6 +1139,7 @@ class SessionManager {
       if (!await this.taskPlans.authorizeSend(session)) {
         throw new Error(session.meta.lastError ?? 'Mission 执行来源已变化，已阻止 Provider 请求')
       }
+      assertDirectStart()
       session.send(payload)
     } catch (error) {
       clearSessionTurnRoute(session.meta)

@@ -20,6 +20,8 @@ export default function GoalTaskStarter({ projectId, state }: {
   const [objective, setObjective] = useState(() => readComposerDraft(storage.current, draftKey))
   const [template, setTemplate] = useState<GoalPlanningTemplate>(() =>
     readComposerDraft(storage.current, `${draftKey}:template`) === 'product-launch' ? 'product-launch' : 'auto')
+  const [mode, setMode] = useState<'auto' | 'plan'>(() =>
+    readComposerDraft(storage.current, `${draftKey}:mode`) === 'plan' ? 'plan' : 'auto')
   const input = useRef<HTMLTextAreaElement>(null)
   const changeObjective = (text: string): void => {
     setObjective(text)
@@ -27,7 +29,7 @@ export default function GoalTaskStarter({ projectId, state }: {
   }
   const submit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
-    if (await state.start(projectId, objective, template)) changeObjective('')
+    if (await state.start(projectId, objective, template, mode)) changeObjective('')
   }
   return <>
     <form className="pws-goal-task-starter" onSubmit={(event) => void submit(event)} data-goal-task-starter>
@@ -46,6 +48,16 @@ export default function GoalTaskStarter({ projectId, state }: {
       </button>
       {projectId && <details className="pws-goal-task-options" data-goal-task-options>
         <summary>{localized('高级选项', 'Advanced options')}</summary>
+        <label>{localized('开始方式', 'Start mode')}
+          <select className="input" aria-label={localized('开始方式', 'Start mode')} disabled={state.busy}
+            value={mode} onChange={(event) => {
+              setMode(event.target.value as 'auto' | 'plan')
+              writeComposerDraft(storage.current, `${draftKey}:mode`, event.target.value)
+            }} data-goal-task-mode>
+            <option value="auto">{localized('自动 · 简单任务直接回答', 'Auto · answer simple tasks directly')}</option>
+            <option value="plan">{localized('先给我计划', 'Show me a plan first')}</option>
+          </select>
+        </label>
         <label>{localized('规划模板', 'Planning template')}
           <select className="input" aria-label={localized('规划模板', 'Planning template')} disabled={state.busy}
             value={template} onChange={(event) => {
@@ -53,7 +65,7 @@ export default function GoalTaskStarter({ projectId, state }: {
               writeComposerDraft(storage.current, `${draftKey}:template`, event.target.value)
             }} data-goal-task-template>
             <option value="auto">{localized('自动规划', 'Automatic plan')}</option>
-            <option value="product-launch">{localized('产品发布 · 四岗位', 'Product launch · four roles')}</option>
+            <option value="product-launch">{localized('产品发布 · 机构协作', 'Product launch · coordinated teams')}</option>
           </select>
         </label>
       </details>}

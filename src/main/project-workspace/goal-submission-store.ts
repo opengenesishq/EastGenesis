@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ProjectGoalTaskPrepareInput } from '../../shared/project-workspace-types'
+import type { ProjectGoalTaskPrepareInput, ProjectGoalTaskStartDecision } from '../../shared/project-workspace-types'
 import { writeDurableFileSync } from '../durable-file'
 import { goalTaskIds, normalizeProjectGoalTaskInput } from './goal-task-service'
 
@@ -11,6 +11,7 @@ export interface ProjectGoalSubmissionRecord {
   input: ProjectGoalTaskPrepareInput
   digest: string
   sessionId: string
+  startDecision?: ProjectGoalTaskStartDecision
   phase: 'reserved' | 'task_created' | 'creating_session' | 'session_ready' | 'ready'
   revision: number
   createdAt: number
@@ -42,6 +43,7 @@ export class ProjectGoalSubmissionStore {
       throw error
     }
     const record = JSON.parse(raw) as ProjectGoalSubmissionRecord
+    assertGoalStartDecision(record.startDecision)
     const normalized = normalizeGoalPreparation(record.input)
     if (record.schemaVersion !== 1 || record.digest !== goalPreparationDigest(normalized) ||
         !/^[a-f0-9-]{36}$/.test(record.sessionId) || !Number.isSafeInteger(record.revision) || record.revision < 1 ||
@@ -54,12 +56,15 @@ export class ProjectGoalSubmissionStore {
     return record
   }
 
-  reserve(input: ProjectGoalTaskPrepareInput, existingSessionId?: string): ProjectGoalSubmissionRecord {
+  reserve(input: ProjectGoalTaskPrepareInput, existingSessionId?: string, startDecision?: ProjectGoalTaskStartDecision): ProjectGoalSubmissionRecord {
+    input = normalizeGoalPreparation(input)
     const prior = this.read(input)
     if (prior) return prior
+    assertGoalStartDecision(startDecision)
     const now = Date.now()
     const record: ProjectGoalSubmissionRecord = {
       schemaVersion: 1, input, digest: goalPreparationDigest(input), sessionId: existingSessionId ?? randomUUID(),
+      ...(startDecision ? { startDecision: structuredClone(startDecision) } : {}),
       phase: 'reserved', revision: 1, createdAt: now, updatedAt: now
     }
     writeDurableFileSync(this.path(input), JSON.stringify(record), { replace: false })
@@ -76,5 +81,16 @@ export class ProjectGoalSubmissionStore {
 
   private path(input: ProjectGoalTaskPrepareInput): string {
     return join(this.rootDir, 'private', 'project-goal-submissions', `${goalTaskIds(input.projectId, input.requestId).goalId}.json`)
+  }
+}
+
+export function assertGoalStartDecision(value: unknown): asserts value is ProjectGoalTaskStartDecision | undefined {
+  if (value === undefined) return
+  const decision = value as ProjectGoalTaskStartDecision | null
+  if (!decision || decision.schemaVersion !== 1 || !['auto', 'plan'].includes(decision.mode) ||
+      !['direct', 'plan'].includes(decision.kind) || typeof decision.reason !== 'string' ||
+      !decision.reason.trim() || decision.reason.length > 1000 ||
+      (decision.kind === 'direct' ? decision.mode !== 'auto' || decision.taskStrategy !== 'view' : decision.taskStrategy !== 'plan')) {
+    throw new Error('任务启动决策记录无效，已阻止改变原提交方式')
   }
 }

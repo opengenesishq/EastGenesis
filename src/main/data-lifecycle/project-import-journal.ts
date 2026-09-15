@@ -54,6 +54,12 @@ export class ProjectImportJournal {
     return readDocument(this.filePath).entries.filter((entry) => entry.phase !== 'completed').map(clone)
   }
 
+  listCompleted(projectId: string): ProjectImportJournalEntry[] {
+    const id = requiredId(projectId, 'projectId')
+    return readDocument(this.filePath).entries.filter((entry) => entry.projectId === id && entry.phase === 'completed')
+      .sort((left, right) => (right.completedAt ?? 0) - (left.completedAt ?? 0)).map(clone)
+  }
+
   getOperation(operationId: string): ProjectImportJournalEntry | undefined {
     const id = requiredId(operationId, 'operationId')
     return clone(readDocument(this.filePath).entries.find((entry) => entry.operationId === id))

@@ -1033,6 +1033,28 @@ export interface ProjectGoalTaskPrepared extends ProjectGoalTaskResult {
   plan: TaskPlanStateView
 }
 
+export interface ProjectGoalTaskStartInput extends ProjectGoalTaskPrepareInput {
+  mode: 'auto' | 'plan'
+}
+
+/** Frozen when reserving the submission; text classification never grants execution authority. */
+export interface ProjectGoalTaskStartDecision {
+  schemaVersion: 1
+  mode: 'auto' | 'plan'
+  kind: 'direct' | 'plan'
+  reason: string
+  taskStrategy: 'view' | 'plan'
+}
+
+export type ProjectGoalTaskStarted =
+  | (ProjectGoalTaskPrepared & { kind: 'plan'; decision: ProjectGoalTaskStartDecision })
+  | (ProjectGoalTaskResult & {
+      kind: 'direct'
+      sessionId: string
+      decision: ProjectGoalTaskStartDecision
+      input: import('./session-input-types').SessionInputRecord
+    })
+
 export interface ProjectWorkspaceTemplateResourceSuggestion {
   kind: ProjectResourceKind
   label: string
@@ -1134,6 +1156,7 @@ export interface ProjectWorkspaceApi {
   createProjectWorkItem(input: WorkItemInput, options?: MutationOptions): Promise<WorkItem>
   createProjectGoalTask(input: ProjectGoalTaskInput): Promise<ProjectGoalTaskResult>
   prepareProjectGoalTask(input: ProjectGoalTaskPrepareInput): Promise<ProjectGoalTaskPrepared>
+  startProjectGoalTask(input: ProjectGoalTaskStartInput): Promise<ProjectGoalTaskStarted>
   updateProjectWorkItem(id: string, patch: WorkItemPatch, options?: MutationOptions): Promise<WorkItem>
   transferProjectWorkItem(input: WorkItemTransferInput): Promise<WorkItemTransferResult>
   reorderProjectWorkItem(id: string, targetId: string, placement: WorkItemReorderPlacement, options?: MutationOptions): Promise<WorkItem>

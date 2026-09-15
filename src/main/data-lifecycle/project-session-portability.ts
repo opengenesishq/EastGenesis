@@ -35,10 +35,14 @@ import {
   assertProjectSubmissionReceiptsImportable, collectProjectSubmissionReceipts,
   importProjectSubmissionReceipts, validateProjectSubmissionReceipts, verifyProjectSubmissionReceipts
 } from './submission-receipt-portability'
+import {
+  assertProjectPreparationImportable, collectProjectPreparation, importProjectPreparation,
+  validateProjectPreparation, verifyProjectPreparation
+} from './preparation-portability'
 
 export type ProjectSessionPortableSlice = Pick<ProjectAggregatePortableRuntime,
   'sessionIds' | 'sdkSessionIds' | 'sessionHistory' | 'activeSessions' |
-  'sessionCreationJournal' | 'taskPlans' | 'sessionFiles' | 'submissionReceipts'>
+  'sessionCreationJournal' | 'taskPlans' | 'sessionFiles' | 'submissionReceipts' | 'preparation'>
 
 export function collectProjectSessionPortableSlice(
   rootDir: string,
@@ -59,6 +63,10 @@ export function collectProjectSessionPortableSlice(
   const submissionReceipts = collectProjectSubmissionReceipts(root, project, {
     sessionIds: [...sessionIds], sessionFiles, sessionHistory, activeSessions, sessionCreationJournal, taskPlans, taskSnapshots
   })
+  const preparation = collectProjectPreparation(root, project, {
+    sessionIds: [...sessionIds], sessionHistory, activeSessions, sessionCreationJournal,
+    taskSnapshots: taskSnapshots as ProjectAggregatePortableRuntime['taskSnapshots']
+  })
   return {
     sessionIds: [...sessionIds].sort(),
     sdkSessionIds: [...sdkSessionIds].sort(),
@@ -67,7 +75,8 @@ export function collectProjectSessionPortableSlice(
     sessionCreationJournal: sessionCreationJournal.sort(byRecordIdentity),
     taskPlans,
     sessionFiles,
-    submissionReceipts
+    submissionReceipts,
+    preparation
   }
 }
 
@@ -86,6 +95,7 @@ export function validateProjectSessionPortableSlice(
   validateTaskPlans(value.taskPlans, sessionIds)
   validateSessionFiles(value.sessionFiles, project, sessionIds, sdkSessionIds)
   validateProjectSubmissionReceipts(project, value.submissionReceipts, value)
+  validateProjectPreparation(project, value.preparation, value)
 }
 
 function validateSessionRecords(
@@ -155,6 +165,7 @@ export function assertProjectSessionPortableSliceImportable(
   if (conflicts.length > 0) throw new Error(`Project import Session identity conflict: ${conflicts.join(', ')}`)
   for (const file of slice.sessionFiles) assertExistingFileCompatible(root, file)
   assertProjectSubmissionReceiptsImportable(root, projectId, slice.submissionReceipts, slice)
+  assertProjectPreparationImportable(root, projectId, slice.preparation, slice)
 }
 
 export function importProjectSessionPortableSlice(
@@ -165,6 +176,7 @@ export function importProjectSessionPortableSlice(
   validateProjectSessionPortableSlice(projectId, slice)
   const root = requiredRoot(rootDir)
   assertProjectSubmissionReceiptsImportable(root, projectId, slice.submissionReceipts, slice)
+  assertProjectPreparationImportable(root, projectId, slice.preparation, slice)
   mergeDocument(
     join(root, 'sessions.json'),
     historyRecords(root),
@@ -193,6 +205,7 @@ export function importProjectSessionPortableSlice(
     writeDurableFileSync(target, decodeBase64(file.data), { mode: 0o600, replace: false })
   }
   importProjectSubmissionReceipts(root, projectId, slice.submissionReceipts, slice)
+  importProjectPreparation(root, projectId, slice.preparation, slice)
 }
 
 export function verifyProjectSessionPortableSlice(
@@ -210,6 +223,7 @@ export function verifyProjectSessionPortableSlice(
   const expectedPaths = new Set(slice.sessionFiles.map((file) => file.path))
   assertSame(target.sessionFiles.filter((file) => expectedPaths.has(file.path)), slice.sessionFiles, 'Session files')
   verifyProjectSubmissionReceipts(rootDir, projectId, slice.submissionReceipts, slice)
+  verifyProjectPreparation(rootDir, projectId, slice.preparation, slice)
 }
 
 function collectOwnedFiles(
