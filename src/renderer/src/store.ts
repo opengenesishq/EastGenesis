@@ -765,7 +765,7 @@ export interface AppStore extends BusinessLineSlice, ExperienceModeSlice, Settin
   syncSession(sessionId: string): Promise<boolean>
   /** 建会话并立即发送首条消息(首屏"打开即输入"用) */
   startSessionWithPrompt(opts: CreateSessionOptions, prompt: string): Promise<string>
-  recoverTaskSnapshot(snapshotId: string): Promise<void>
+  recoverTaskSnapshot(snapshotId: string, options?: { activate?: boolean }): Promise<void>
   dispatchSubagents(input: DispatchSubagentsInput): Promise<SubagentDispatchResult | undefined>
   decomposeAndDispatchTaskDag(
     request: string,
@@ -1536,12 +1536,13 @@ export const useStore = create<AppStore>((set, get) => {
     return sessionId
   },
 
-  async recoverTaskSnapshot(snapshotId) {
+  async recoverTaskSnapshot(snapshotId, options) {
+    const activate = options?.activate !== false
     set({ taskSnapshotsLoading: true, taskSnapshotsError: undefined })
     try {
       const previousId = get().activeId
       const meta = await window.agentDesk.recoverTaskSnapshot(snapshotId)
-      if (previousId && previousId !== meta.id) closeNativeBrowserView(previousId)
+      if (activate && previousId && previousId !== meta.id) closeNativeBrowserView(previousId)
       set((s) => {
         const current = s.sessions[meta.id]
         const base = current ? { ...current, meta } : newSessionState(meta)
@@ -1551,7 +1552,12 @@ export const useStore = create<AppStore>((set, get) => {
             [meta.id]: drainPendingEvents(meta.id, base)
           },
           order: s.order.includes(meta.id) ? s.order : [...s.order, meta.id],
-          activeId: meta.id
+          ...(activate ? {
+            activeId: meta.id,
+            showNewSession: false,
+            newSessionProjectId: null,
+            ...sessionProjectionPatch(s.studioSessionNavigationNonce, meta)
+          } : {})
         }
       })
       const transcript = await transcriptHydrator.load(meta.id)
@@ -1569,10 +1575,14 @@ export const useStore = create<AppStore>((set, get) => {
       ])
       set({ history, projects, taskSnapshots, taskSnapshotsLoading: false, taskSnapshotsError: undefined })
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
       set({
         taskSnapshotsLoading: false,
-        taskSnapshotsError: err instanceof Error ? err.message : String(err)
+        taskSnapshotsError: message
       })
+      // Recovery is a command boundary. Preserve the failure for the UI while
+      // propagating it to the owning action so callers cannot report success.
+      throw err instanceof Error ? err : new Error(message)
     }
   },
   ...createTaskRecoveryActions((update) => set(update), get),

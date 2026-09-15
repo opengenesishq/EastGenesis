@@ -321,6 +321,10 @@ export function pickFailoverTarget(opts: {
 }): FailoverTarget | null {
   const preferred = pickPreferredFailoverTarget(opts)
   if (preferred) return preferred
+  // Explicit fallback settings are an authorization boundary. Do not silently
+  // broaden them into an arbitrary healthy Provider when the requested target
+  // is absent or unverified.
+  if (opts.fallbackProviderId?.trim() || opts.fallbackModel?.trim()) return null
 
   const want = capOf(opts.desiredModel || 'sonnet').quality
   let best: { c: FailoverCandidate; model?: string; dist: number } | null = null
@@ -366,11 +370,14 @@ function pickPreferredFailoverTarget(opts: {
   if (fallbackProviderId) {
     preferredCandidates = healthyCandidates.filter((c) => c.id === fallbackProviderId)
   } else if (fallbackModel) {
-    preferredCandidates = healthyCandidates.filter((c) => c.models.length === 0 || c.models.includes(fallbackModel))
+    // An explicit model is a frozen routing target. An empty catalog cannot
+    // establish that the target exists, so keep the fallback fail-closed.
+    preferredCandidates = healthyCandidates.filter((c) => c.models.includes(fallbackModel))
   }
 
   const candidate = preferredCandidates[0]
   if (!candidate) return null
+  if (fallbackModel && !candidate.models.includes(fallbackModel)) return null
 
   return {
     providerId: candidate.id,

@@ -49,10 +49,12 @@ import { studioResultApi } from './studio-result'
 import { mediaApi } from './media'
 import { sessionEntrypointApi } from './session-entrypoints'
 import { assistantSearchApi } from './assistant-search'
+import { palaceSceneBuilderApi } from './palace-scene-builder'
 
 const api: AgentDeskApi = {
   ...sessionEntrypointApi,
   ...assistantSearchApi,
+  ...palaceSceneBuilderApi,
   listPendingPermissions: (sessionId: string) =>
     ipcRenderer.invoke('sessions:pendingPermissions', sessionId),
   getTranscript: (sessionId: string) => ipcRenderer.invoke('sessions:transcript', sessionId),

@@ -571,6 +571,8 @@ export interface WorkItem extends BusinessLineBinding {
   goalId?: string
   parentId?: string
   type: WorkItemType
+  /** Stable task role; assigning a role does not assign a Worker or permission. */
+  role?: string
   title: string
   description?: string
   dependencyIds: string[]
@@ -598,6 +600,7 @@ export interface WorkItemInput extends BusinessLineBinding {
   goalId?: string
   parentId?: string
   type?: WorkItemType
+  role?: string
   title: string
   description?: string
   dependencyIds?: string[]
@@ -616,6 +619,7 @@ export interface WorkItemPatch {
   title?: string
   description?: string
   type?: WorkItemType
+  role?: string | null
   parentId?: string
   dependencyIds?: string[]
   priority?: number

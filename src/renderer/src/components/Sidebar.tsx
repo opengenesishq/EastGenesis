@@ -30,6 +30,8 @@ import SidebarFooter from './SidebarFooter'
 import { sidebarSearchKey, sidebarVisibleCount, splitAssistantEntries } from './sidebar-mode-projection'
 import { cancelOfficeIdlePrewarm } from './office/loadOffice'
 import { restoreComposerFocus, SidebarPanelIcon } from './SidebarControls'
+import WorkOsPrimaryNav from './WorkOsPrimaryNav'
+import { requestStudioSectionNavigation, requestWorkOsNavigation, type WorkOsNavigationTarget } from './work-os-navigation'
 import {
   buildSidebarProjectGroups,
   sidebarEntryPath,
@@ -161,6 +163,7 @@ function Sidebar({
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [archivedProjectsOpen, setArchivedProjectsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [workOsTarget, setWorkOsTarget] = useState<WorkOsNavigationTarget>('inbox')
   const searchRef = useRef<HTMLInputElement>(null)
   const { sidebarWidth, patchLayout, startSidebarResize } = useSidebarResize(layout, updateSettings)
   const isAssistant = experienceMode === 'assistant'
@@ -581,6 +584,22 @@ function Sidebar({
   const contentSearchActive = query.trim().length >= 2
   const searchPlaceholder = t(sidebarSearchKey(experienceMode))
 
+  const navigateWorkOs = (target: WorkOsNavigationTarget): void => {
+    setWorkOsTarget(target)
+    if (target === 'settings') {
+      setShowTaskRecovery(false)
+      setShowSettings(true)
+      return
+    }
+    setShowSettings(false)
+    setShowTaskRecovery(false)
+    setView('list')
+    onExperienceModeChange('studio')
+    const section = target === 'inbox' ? 'inbox' : target === 'library' ? 'team' : 'work'
+    requestStudioSectionNavigation(section)
+    requestWorkOsNavigation(target)
+  }
+
   return (
     <aside
       className={`sidebar ${layout.sidebarCollapsed ? 'sidebar-collapsed' : ''}`}
@@ -644,6 +663,8 @@ function Sidebar({
           </button>
         </When>
       </nav>
+
+      <WorkOsPrimaryNav language={language} mode={experienceMode} activeTarget={workOsTarget} onNavigate={navigateWorkOs} />
 
       <div className={`sidebar-search-wrap ${searchOpen || query ? 'is-open' : ''}`}>
         <input

@@ -3,6 +3,7 @@ import type {
   TaskPlanDispatchResult,
   TaskPlanDraftInput,
   TaskPlanGenerateInput,
+  TaskPlanMissionCompileInput,
   TaskPlanStateView,
   TaskStrategy
 } from '../../../shared/types'
@@ -13,6 +14,7 @@ export interface TaskPlanSlice {
   taskPlanErrors: Record<string, string | undefined>
   refreshTaskPlan(sessionId: string): Promise<TaskPlanStateView | undefined>
   generateTaskPlan(sessionId: string, input: TaskPlanGenerateInput): Promise<TaskPlanStateView | undefined>
+  compileMissionTaskPlan(sessionId: string, input: TaskPlanMissionCompileInput): Promise<TaskPlanStateView | undefined>
   createTaskPlanVersion(sessionId: string, draft: TaskPlanDraftInput): Promise<TaskPlanStateView | undefined>
   approveTaskPlan(sessionId: string, input: TaskPlanApprovalInput): Promise<TaskPlanStateView | undefined>
   dispatchApprovedTaskPlan(sessionId: string, input: TaskPlanApprovalInput): Promise<TaskPlanDispatchResult | undefined>
@@ -65,6 +67,8 @@ export function createTaskPlanSlice(
     refreshTaskPlan: (sessionId) => run(sessionId, () => window.agentDesk.getTaskPlan(sessionId)),
     generateTaskPlan: (sessionId, input) =>
       run(sessionId, () => window.agentDesk.generateTaskPlan(sessionId, input)),
+    compileMissionTaskPlan: (sessionId, input) =>
+      run(sessionId, () => window.agentDesk.compileMissionTaskPlan(sessionId, input)),
     createTaskPlanVersion: (sessionId, draft) =>
       run(sessionId, () => window.agentDesk.createTaskPlanVersion(sessionId, draft)),
     approveTaskPlan: (sessionId, input) =>

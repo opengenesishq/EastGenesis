@@ -3,6 +3,7 @@ import type {
   TaskPlanApprovalInput,
   TaskPlanDraftInput,
   TaskPlanGenerateInput,
+  TaskPlanMissionCompileInput,
   TaskStrategy
 } from '../shared/types'
 import { invokeAppFeature } from './app-feature'
@@ -17,6 +18,8 @@ export const taskPlanApi: TaskPlanApi = {
   getTaskPlan: (sessionId: string) => invoke('get', sessionId),
   generateTaskPlan: (sessionId: string, input: TaskPlanGenerateInput) =>
     invoke('generate', sessionId, input),
+  compileMissionTaskPlan: (sessionId: string, input: TaskPlanMissionCompileInput) =>
+    invoke('compile-mission', sessionId, input),
   createTaskPlanVersion: (sessionId: string, draft: TaskPlanDraftInput) =>
     invoke('create-version', sessionId, draft),
   approveTaskPlan: (sessionId: string, input: TaskPlanApprovalInput) =>

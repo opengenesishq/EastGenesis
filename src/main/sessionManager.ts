@@ -85,7 +85,7 @@ import { createTaskRun, createSessionTaskRun, isTaskRunTerminal, transitionTaskR
 import { bindFrozenRunRoutingPolicy } from './task/frozen-routing-binding'
 import { frozenPolicyForSessionRun } from './task/frozen-routing-from-session'
 import { assertFrozenRunRequestTarget, frozenRoutingPolicyForRun } from './task/frozen-routing-policy'
-import { getProvider, getProviderConnectionIdentity } from './providers'
+import { getProvider, getProviderConnectionIdentity, listProviders, providerIsReady } from './providers'
 import { resolveProviderRuntimeTarget, resolveOpenAIProtocol } from './provider/providerRuntimeTarget'
 import { isLocalProviderUrl } from './model/routing-expert-policy'
 import { recoverTaskExecutionState } from './task/task-execution'
@@ -148,6 +148,7 @@ import type {
   TaskPlanDraftInput,
   TaskPlanDispatchResult,
   TaskPlanGenerateInput,
+  TaskPlanMissionCompileInput,
   TaskPlanStateView,
   TaskRunRecord,
   TranscriptEntry
@@ -533,6 +534,10 @@ class SessionManager {
     return this.taskPlans.createAgentVersion(id, draft)
   }
 
+  compileMissionTaskPlan(id: string, input: TaskPlanMissionCompileInput): Promise<TaskPlanStateView> {
+    return this.taskPlans.compileMission(id, input)
+  }
+
   async generateTaskPlan(id: string, input: TaskPlanGenerateInput): Promise<TaskPlanStateView> {
     const session = this.sessions.get(id)
     if (!session) throw new Error('会话不存在')
@@ -593,7 +598,7 @@ class SessionManager {
     id: string,
     input: TaskPlanApprovalInput
   ): Promise<TaskPlanDispatchResult> {
-    const approved = this.taskPlans.requireApprovedVersion(id, input)
+    const approved = await this.taskPlans.requireApprovedVersion(id, input)
     const dag = approvedTaskPlanToDag(id, approved.version, approved.projection)
     const existing = this.currentTaskDagExecution(dag.id)
     await this.taskPlans.setStrategy(id, 'execute')
@@ -627,8 +632,8 @@ class SessionManager {
     return this.taskPlans.revoke(id, input, actorId)
   }
 
-  assertInteractiveExecutionAuthorized(id: string, action: string): void {
-    this.taskPlans.assertInteractiveExecution(id, action)
+  async assertInteractiveExecutionAuthorized(id: string, action: string): Promise<void> {
+    await this.taskPlans.assertInteractiveExecution(id, action)
   }
 
   subscribe(listener: (payload: SessionEventPayload) => void): () => void {
@@ -1026,7 +1031,7 @@ class SessionManager {
   ): Promise<boolean> {
     let session = this.sessions.get(id)
     if (!session) return false
-    if (!this.taskPlans.authorizeSend(session)) return false
+    if (!await this.taskPlans.authorizeSend(session)) return false
     const currentRun = this.taskRuns.get(id)
     const sendGateError = managedSessionSendGateError(this.taskSnapshotReplay.blocksOrdinarySend(id, options),
       this.supervisor.blocksSend(id, currentRun, options.supervisorControlReplay === true))
@@ -1111,6 +1116,11 @@ class SessionManager {
       return false
     }
     try {
+      // Earlier gates and durable Run writes await other services. Recheck the
+      // Mission source immediately before handing a request to the Engine.
+      if (!await this.taskPlans.authorizeSend(session)) {
+        throw new Error(session.meta.lastError ?? 'Mission 执行来源已变化，已阻止 Provider 请求')
+      }
       session.send(payload)
     } catch (error) {
       clearSessionTurnRoute(session.meta)
@@ -1193,9 +1203,9 @@ class SessionManager {
     parentSessionId: string,
     input: DispatchSubagentsInput
   ): Promise<SubagentDispatchResult> {
-    const parent = this.sessions.get(parentSessionId)
+    let parent = this.sessions.get(parentSessionId)
     if (!parent) throw new Error('父会话不存在')
-    this.taskPlans.assertExecution(parent.meta, '派发子 Agent')
+    await this.taskPlans.assertExecution(parent.meta, '派发子 Agent')
     const tasks = Array.isArray(input?.tasks) ? input.tasks : []
     if (tasks.length === 0) throw new Error('至少需要一个子代理任务')
     if (tasks.length > MAX_DIRECT_SUBAGENT_TASKS) throw new Error(DIRECT_SUBAGENT_LIMIT_MESSAGE)
@@ -1217,6 +1227,9 @@ class SessionManager {
     try {
       this.subagentOrchestration.begin(orchestrationId, parentSessionId)
       for (const { task, taskId, prompt, role, title } of plannedTasks) {
+        parent = this.sessions.get(parentSessionId)
+        if (!parent) throw new Error('父会话不存在，已阻止继续派发子 Agent')
+        await this.taskPlans.assertExecution(parent.meta, '继续派发子 Agent')
         const meta = await this.createManaged({
           cwd: subagentCwd(task, input, parent.meta),
           isolated: task.isolated ?? input.isolated ?? true,
@@ -1363,13 +1376,15 @@ class SessionManager {
   ): Promise<TaskDagDispatchResult> {
     const parent = this.sessions.get(parentSessionId)
     if (!parent) throw new Error('父会话不存在')
-    this.taskPlans.assertExecution(parent.meta, '执行任务 DAG')
+    await this.taskPlans.assertExecution(parent.meta, '执行任务 DAG')
     const children: SubagentDispatchResult['children'] = []
     const scheduler = new TaskDagScheduler(parentSessionId, input, {
       reserveTaskCapacity: () => this.agentCapacity.tryReserve(parentSessionId),
       runTask: async (task, context) => {
-        this.taskPlans.assertExecution(parent.meta, '继续执行任务 DAG')
-        const result = await provisionDagChildSession(parent.meta, input, task, context, {
+        const currentParent = this.sessions.get(parentSessionId)
+        if (!currentParent) throw new Error('父会话不存在，已阻止继续执行任务 DAG')
+        await this.taskPlans.assertExecution(currentParent.meta, '继续执行任务 DAG')
+        const result = await provisionDagChildSession(currentParent.meta, input, task, context, {
           createManaged: (options, lifecycle) => this.createManaged(options, lifecycle),
           send: (sessionId, prompt) => this.send(sessionId, prompt)
         })
@@ -1417,7 +1432,7 @@ class SessionManager {
       runTask: async (task, context) => {
         const parent = this.sessions.get(parentSessionId)
         if (!parent) throw new Error('Parent session no longer exists for recovered DAG')
-        this.taskPlans.assertExecution(parent.meta, '继续执行任务 DAG')
+        await this.taskPlans.assertExecution(parent.meta, '继续执行任务 DAG')
         const result = await provisionDagChildSession(parent.meta, input, task, context, {
           createManaged: (options, lifecycle) => this.createManaged(options, lifecycle),
           send: (sessionId, prompt) => this.send(sessionId, prompt)
@@ -2041,6 +2056,16 @@ class SessionManager {
   private async recoverAndStartWorkflowAcceptanceRepairs(): Promise<void> {
     const { recoverWorkflowAcceptanceRepairMaterializations } = await import('./task/workflow-acceptance-repair-service.js')
     const result = await recoverWorkflowAcceptanceRepairMaterializations(app.getPath('userData'))
+    // Materialize failed Acceptance repairs even when the installation has no
+    // configured Provider, but leave execution blocked until one is available.
+    // This keeps startup deterministic and avoids attempting a session that
+    // cannot satisfy the creation-time Provider gate.
+    if (!listProviders().some((provider) => providerIsReady(provider))) {
+      if (result.recovered.length > 0) {
+        console.error('[caogen] workflow repair auto-start deferred: no configured Provider is available')
+      }
+      return
+    }
     for (const candidate of result.recovered) {
       try {
         const started = await this.startWorkflowAcceptanceRepair(

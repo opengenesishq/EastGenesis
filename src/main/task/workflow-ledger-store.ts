@@ -1,5 +1,6 @@
 import type { TaskRunRecord } from '../../shared/types'
 import { assertFrozenRoutingWrite } from './frozen-routing-policy'
+import { workflowAcceptanceStatusAfterChange } from './workflow-acceptance-change-policy'
 import type {
   WorkflowAcceptanceInput,
   WorkflowAcceptanceRecord,
@@ -74,6 +75,7 @@ import {
 } from './workflow-ledger-query'
 import {
   assertAcceptanceCanProject,
+  assertAcceptanceCompatibility,
   assertAcceptanceReferences,
   assertAcceptanceState,
   assertArtifactReferences,
@@ -365,6 +367,55 @@ export function projectWorkflowAcceptance(
     entityType: 'acceptance',
     entityId: acceptance.id,
     kind: existing ? 'acceptance.updated' : 'acceptance.created',
+    payload: { ...acceptance },
+    occurredAt: acceptance.updatedAt,
+    correlationId: acceptance.workItemId ?? acceptance.goalId ?? acceptance.id
+  }, {
+    projectId: acceptance.projectId,
+    goalId: acceptance.goalId,
+    workItemId: acceptance.workItemId
+  })
+  return acceptance
+}
+
+/**
+ * Fence every affected Acceptance after a canonical Artifact change, including
+ * pending work and in-flight verification. Keep a known failure visible until
+ * an explicit retest. This is separate from the normal state machine: a
+ * change impact transition is an explicit system-owned invalidation, never a
+ * generic permission to regress Acceptance state.
+ */
+export function invalidateWorkflowAcceptanceForChange(
+  db: WorkflowLedgerDatabase,
+  input: WorkflowAcceptanceInput,
+  options: WorkflowAcceptanceGateOptions = { caller: 'system', actorId: 'workflow-change-impact' }
+): WorkflowAcceptanceRecord {
+  if (options.caller !== 'system') throw new WorkflowLedgerCorruptionError('change impact invalidation requires system authority')
+  const acceptance = normalizeAcceptanceInput(input)
+  assertAcceptanceReferences(db, acceptance)
+  assertAcceptanceWriteAuthorization(acceptance, options)
+  assertAcceptanceEvidenceRefs(db, acceptance)
+  const existing = findWorkflowAcceptance(db, acceptance.id)
+  if (!existing) throw new WorkflowLedgerCorruptionError(`acceptance ${acceptance.id} does not exist for invalidation`)
+  assertAcceptanceCompatibility(existing, acceptance)
+  if (acceptance.status !== workflowAcceptanceStatusAfterChange(existing.status)) {
+    throw new WorkflowLedgerCorruptionError(`acceptance ${acceptance.id} invalidation has an invalid target state`)
+  }
+  if (acceptance.evidenceRefs.length || acceptance.criterionEvidence !== undefined || acceptance.verifier !== undefined ||
+    acceptance.verifiedAt !== undefined || acceptance.waiverReason !== undefined || acceptance.waivedBy !== undefined) {
+    throw new WorkflowLedgerCorruptionError(`acceptance ${acceptance.id} invalidation must clear prior verification and evidence selections`)
+  }
+  if (acceptance.revision !== existing.revision + 1) {
+    throw new WorkflowLedgerCorruptionError(`acceptance ${acceptance.id} invalidation revision must increment by one`)
+  }
+  assertAcceptanceState(db, acceptance)
+  insertAcceptance(db, acceptance)
+  appendWorkflowEvent(db, {
+    eventId: `workflow:acceptance:${acceptance.id}:revision:${acceptance.revision}`,
+    streamId: acceptance.workItemId ? `work-item:${acceptance.workItemId}` : `acceptance:${acceptance.id}`,
+    entityType: 'acceptance',
+    entityId: acceptance.id,
+    kind: 'acceptance.invalidated_by_change',
     payload: { ...acceptance },
     occurredAt: acceptance.updatedAt,
     correlationId: acceptance.workItemId ?? acceptance.goalId ?? acceptance.id

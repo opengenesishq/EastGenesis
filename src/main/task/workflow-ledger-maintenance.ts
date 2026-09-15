@@ -450,7 +450,11 @@ function sanitizeSelection(
     artifactLocations: sanitizePage(selection.artifactLocations),
     acceptances: sanitizePage(selection.acceptances),
     evidenceLinks: sanitizePage(selection.evidenceLinks),
-    events: sanitizePage(selection.events),
+    events: closedPage(selection.events.items.map((event) => sanitizeValue({
+      ...event,
+      eventId: portableEventId(event.eventId),
+      ...(event.causationId ? { causationId: portableEventId(event.causationId) } : {})
+    }) as WorkflowEventRecord)),
     taskEvidence: sanitizePage(selection.taskEvidence) as {
       items: WorkflowLedgerExportTaskEvidenceRecord[]
       total: number
@@ -458,6 +462,19 @@ function sanitizeSelection(
     },
     workflowEvidence: sanitizePage(selection.workflowEvidence)
   }
+}
+
+/**
+ * Credential redaction is lossy, so it cannot define event identity. For
+ * example, successive `...session:revision:...` IDs redact to the same text.
+ * Fingerprint only IDs that need redaction, and use the same mapping for
+ * causation references. The opaque identity survives re-export and does not
+ * depend on the ledger sequence, which changes when a Project is imported.
+ */
+function portableEventId(value: string): string {
+  return sanitizeString(value) === value
+    ? value
+    : `workflow-event-redacted:${digest({ eventId: value })}`
 }
 
 function sanitizePage<T>(page: { items: T[]; total: number; hasMore: boolean }): {

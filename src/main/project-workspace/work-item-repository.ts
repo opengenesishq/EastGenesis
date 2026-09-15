@@ -280,6 +280,7 @@ function buildWorkItem(
     goalId: goal?.id,
     parentId: optionalId(input.parentId, 'work item parentId'),
     type,
+    ...(input.role === undefined ? {} : { role: requiredId(input.role, 'work item role') }),
     title: requiredText(input.title, 'work item title'),
     description: optionalText(input.description, 'work item description'),
     dependencyIds: uniqueIds(input.dependencyIds, 'work item dependency id'),
@@ -397,6 +398,7 @@ function applyWorkItemFields(state: ProjectWorkspaceState, item: WorkItem, patch
     if (!isWorkItemType(patch.type)) throw new ProjectWorkspaceError('invalid_input', 'work item type is invalid')
     item.type = patch.type
   }
+  if (Object.hasOwn(patch, 'role')) item.role = patch.role === null ? undefined : requiredId(patch.role, 'work item role')
   if (patch.priority !== undefined) item.priority = finiteNumber(patch.priority, 'work item priority', item.priority)
   if (Object.hasOwn(patch, 'owner')) {
     item.owner = normalizeOwner(patch.owner)

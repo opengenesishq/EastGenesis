@@ -16,6 +16,7 @@ import { loadStudioView } from './studio/loadStudioView'
 import { loadVideoStudioView } from './studio/loadVideoStudioView'
 import { resolveSelectedBusinessLine } from '../../../shared/business-line-types'
 import BusinessLineWorkbench from './business-lines/BusinessLineWorkbench'
+import { WORK_OS_NAVIGATION_EVENT, requestStudioSectionNavigation, type WorkOsNavigationTarget } from './work-os-navigation'
 
 const StudioView = lazy(loadStudioView)
 const VideoStudioView = lazy(loadVideoStudioView)
@@ -170,6 +171,16 @@ export default function AppListView({
     projection.hasProjectTask,
     projection.hasProjectSession
   )
+  useEffect(() => {
+    const onWorkOsNavigation = (event: Event): void => {
+      const target = (event as CustomEvent<WorkOsNavigationTarget>).detail
+      if (!target || target === 'settings') return
+      setStudioSurface(target === 'runs' || target === 'review' || target === 'inbox' || target === 'projects' || target === 'library' ? 'workspace' : studioSurface)
+      if (target === 'runs' || target === 'review') requestStudioSectionNavigation(target)
+    }
+    window.addEventListener(WORK_OS_NAVIGATION_EVENT, onWorkOsNavigation)
+    return () => window.removeEventListener(WORK_OS_NAVIGATION_EVENT, onWorkOsNavigation)
+  }, [setStudioSurface, studioSurface])
   const sessionProjection = experienceMode === 'studio' && studioSurface === 'session' ? 'studio' : 'assistant'
   const sessionHidden = experienceMode === 'video' || (experienceMode === 'studio' && studioSurface !== 'session')
   const workspaceHidden = experienceMode !== 'studio' || studioSurface !== 'workspace'

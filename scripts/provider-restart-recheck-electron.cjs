@@ -2,7 +2,7 @@ const path = require('node:path')
 const os = require('node:os')
 const fs = require('node:fs')
 const http = require('node:http')
-const { app, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain } = require('electron')
 
 const repoOut = path.resolve(__dirname, '..', 'out', 'main')
 const tmpUserData = fs.mkdtempSync(path.join(os.tmpdir(), 'caogen-provider-recheck-'))
@@ -19,7 +19,13 @@ function check(name, ok, detail) {
 async function invoke(channel, ...args) {
   const map = ipcMain._invokeHandlers
   if (!map || !map.has(channel)) throw new Error(`通道未注册: ${channel}`)
-  return map.get(channel)({}, ...args)
+  const win = await waitFor(() => BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed()), 10_000, 'main window not ready')
+  const sender = win.webContents
+  await waitFor(() => {
+    const frameUrl = sender.mainFrame?.url || ''
+    return !sender.isDestroyed() && frameUrl.startsWith('file:')
+  }, 10_000, 'renderer frame not ready')
+  return map.get(channel)({ sender, senderFrame: sender.mainFrame }, ...args)
 }
 
 function json(res, status, body) {
@@ -69,7 +75,7 @@ function waitFor(fn, timeoutMs, label) {
 async function run() {
   require(path.join(repoOut, 'index.js'))
   await new Promise((resolve) => setTimeout(resolve, 900))
-  await invoke('settings:update', { failoverEnabled: false })
+  await invoke('settings-domain:update', { failoverEnabled: false })
 
   const modelServer = await startModelServer()
   const errorServer = await startErrorResponseServer()
@@ -165,7 +171,13 @@ async function run() {
       'turn-result not emitted for provider error'
     )
     const text = turn.resultText || ''
-    check('OpenAI runtime error includes provider/baseUrl/model/protocol', turn.isError && text.includes('404 response gateway') && text.includes(errorServer.base) && text.includes('does-not-exist') && text.includes('responses'), text)
+    check('OpenAI runtime error includes provider/redacted-baseUrl/model/protocol',
+      turn.isError
+        && text.includes('404 response gateway')
+        && text.includes('[provider-url-redacted]')
+        && !text.includes(errorServer.base)
+        && text.includes('does-not-exist')
+        && text.includes('responses'), text)
   } finally {
     await new Promise((resolve) => modelServer.server.close(resolve))
     await new Promise((resolve) => errorServer.server.close(resolve))

@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "kind": "caogen.golden-user-task-suite",
+  "id": "golden-user-tasks-v1",
+  "sourcePlan": "CAOGEN-FLAGSHIP-RESTRUCTURE-2026-09-13.md",
+  "language": "zh-CN",
+  "taskCount": 5,
+  "measurementPolicy": {
+    "realUsersOnly": true,
+    "syntheticEvidenceAllowed": false,
+    "captureBeforeTask": true,
+    "captureAfterTask": true,
+    "timingClock": "monotonic",
+    "timezone": "Asia/Shanghai",
+    "retention": "redacted-summary-only",
+    "missingEvidenceStatus": "blocked"
+  },
+  "thresholds": {
+    "participantsPerTaskMin": 5,
+    "firstUsefulResultMaxSeconds": 600,
+    "firstUsefulResultMedianMaxSeconds": 300,
+    "firstUsefulResultSuccessRateMin": 0.8,
+    "contextCopyFreeRateMin": 0.7,
+    "evidenceCompleteRateMin": 0.8,
+    "recoverySuccessRateMin": 0.95
+  },
+  "tasks": [
+    {
+      "id": "golden-code-change",
+      "scenario": "代码变更",
+      "userInstruction": "修复登录超时并提交 PR",
+      "userProfile": "独立开发者或技术负责人",
+      "inputContract": ["代码仓库路径", "超时复现步骤", "验收约束", "提交边界"],
+      "requiredDeliverables": ["计划", "隔离工作区或分支", "代码改动", "测试证据", "差异审查", "PR 或可继续状态"],
+      "acceptance": {
+        "requiredEvidenceKinds": ["plan", "diff", "test", "review"],
+        "requiresHumanDecision": true,
+        "mustPreserveContext": true,
+        "mustBeRecoverable": true,
+        "externalSideEffectPolicy": "approval_required"
+      }
+    },
+    {
+      "id": "golden-research-report",
+      "scenario": "研究报告",
+      "userInstruction": "分析这批资料并形成结论",
+      "userProfile": "技术型知识工作者",
+      "inputContract": ["资料目录或授权来源", "研究问题", "输出格式", "引用要求"],
+      "requiredDeliverables": ["来源清单", "检索记录", "分析产物", "引用", "人工确认点"],
+      "acceptance": {
+        "requiredEvidenceKinds": ["source", "retrieval", "analysis", "citation"],
+        "requiresHumanDecision": true,
+        "mustPreserveContext": true,
+        "mustBeRecoverable": true,
+        "externalSideEffectPolicy": "approval_required"
+      }
+    },
+    {
+      "id": "golden-office-delivery",
+      "scenario": "Office 交付",
+      "userInstruction": "把数据做成周报和 PPT",
+      "userProfile": "需要文档和汇报交付的知识工作者",
+      "inputContract": ["数据文件", "指标口径", "周报模板", "PPT 受众和页数约束"],
+      "requiredDeliverables": ["可编辑周报", "可编辑 PPT", "数据来源", "生成步骤", "质量检查", "导出证据"],
+      "acceptance": {
+        "requiredEvidenceKinds": ["source", "generation", "quality_check", "export"],
+        "requiresHumanDecision": true,
+        "mustPreserveContext": true,
+        "mustBeRecoverable": true,
+        "externalSideEffectPolicy": "approval_required"
+      }
+    },
+    {
+      "id": "golden-long-running-maintenance",
+      "scenario": "长程维护",
+      "userInstruction": "每周检查依赖和失败 CI",
+      "userProfile": "维护多个仓库的开发者或小型软件团队",
+      "inputContract": ["仓库清单", "检查周期", "依赖和 CI 范围", "升级或升级禁止边界"],
+      "requiredDeliverables": ["定时 Run", "变更摘要", "失败升级记录", "可回放历史", "待人工处理清单"],
+      "acceptance": {
+        "requiredEvidenceKinds": ["schedule", "run", "change_summary", "escalation"],
+        "requiresHumanDecision": true,
+        "mustPreserveContext": true,
+        "mustBeRecoverable": true,
+        "externalSideEffectPolicy": "approval_required"
+      }
+    },
+    {
+      "id": "golden-team-collaboration",
+      "scenario": "团队协作",
+      "userInstruction": "让前端、后端、验证 Agent 并行推进",
+      "userProfile": "需要多人和多个 Agent 协作的小型软件团队",
+      "inputContract": ["目标和边界", "前端/后端/验证任务", "依赖关系", "合并和发布规则"],
+      "requiredDeliverables": ["WorkItem DAG", "角色路由", "共享证据", "阻塞记录", "合并门禁"],
+      "acceptance": {
+        "requiredEvidenceKinds": ["dag", "route_receipt", "parallel_run", "shared_evidence", "merge_gate"],
+        "requiresHumanDecision": true,
+        "mustPreserveContext": true,
+        "mustBeRecoverable": true,
+        "externalSideEffectPolicy": "approval_required"
+      }
+    }
+  ]
+}

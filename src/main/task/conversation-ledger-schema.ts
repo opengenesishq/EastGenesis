@@ -23,6 +23,7 @@ export function setupConversationLedgerSchema(db: WorkflowLedgerDatabase): void 
       work_item_id TEXT,
       source_cwd TEXT NOT NULL,
       provider_id TEXT NOT NULL,
+      provider_binding TEXT NOT NULL DEFAULT 'provider',
       model TEXT NOT NULL,
       engine TEXT,
       current_generation INTEGER NOT NULL,
@@ -30,6 +31,12 @@ export function setupConversationLedgerSchema(db: WorkflowLedgerDatabase): void 
       updated_at INTEGER NOT NULL
     );
   `)
+  // Existing archives were all provider-bound. Preserve that stricter default
+  // while giving newly created local plans an explicit, durable discriminator.
+  const streamColumns = db.exec('PRAGMA table_info(conversation_ledger_streams)')[0]?.values ?? []
+  if (!streamColumns.some((column) => column[1] === 'provider_binding')) {
+    db.run("ALTER TABLE conversation_ledger_streams ADD COLUMN provider_binding TEXT NOT NULL DEFAULT 'provider'")
+  }
   db.run('CREATE INDEX IF NOT EXISTS idx_conversation_ledger_streams_session ON conversation_ledger_streams(current_session_id);')
   db.run('CREATE INDEX IF NOT EXISTS idx_conversation_ledger_streams_project ON conversation_ledger_streams(project_id);')
   db.run('CREATE INDEX IF NOT EXISTS idx_conversation_ledger_streams_work_item ON conversation_ledger_streams(work_item_id);')

@@ -2,6 +2,7 @@ import type { SessionMeta, TaskRunRecord } from '../../shared/types'
 import { taskRuntimeRegistry } from '../task/task-runtime-registry'
 import type { ModelAttemptCostIdentity } from '../provider/modelAttemptCost'
 import { preflightDigitalWorkerBillableAction } from './billable-action-policy'
+import { resolveDigitalWorkerExecutionContext } from './worker-execution-prompt'
 
 interface SessionActionPolicyInput {
   rootDir: string
@@ -17,7 +18,7 @@ export class DigitalWorkerProviderDispatchDeniedError extends Error {
 /** Recheck the frozen worker/Assignment immediately before every Provider attempt. */
 export async function assertDigitalWorkerProviderDispatchAllowed(
   meta: SessionMeta,
-  rootDir?: string,
+  rootDir: string,
   attempt: ModelAttemptCostIdentity = modelAttemptIdentityForSession(meta)
 ): Promise<void> {
   const run = taskRuntimeRegistry.get(meta.id)
@@ -37,6 +38,13 @@ export async function assertDigitalWorkerProviderDispatchAllowed(
   }, attempt)
   if ('message' in decision) {
     throw new DigitalWorkerProviderDispatchDeniedError(decision.message)
+  }
+  // Handoff/outbound preparation and budget checks can await after prompt
+  // construction. Revalidate the role and frozen Assignment at actual dispatch.
+  try {
+    resolveDigitalWorkerExecutionContext(rootDir, meta)
+  } catch (error) {
+    throw new DigitalWorkerProviderDispatchDeniedError(error instanceof Error ? error.message : String(error))
   }
 }
 

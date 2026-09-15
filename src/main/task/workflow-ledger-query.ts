@@ -616,7 +616,7 @@ function assertAcceptanceEventBindings(
   for (const acceptance of acceptances.values()) {
     assertProjectionEvent(
       acceptance,
-      latestEntityEvent(projectionEvents, 'acceptance', acceptance.id, ['acceptance.created', 'acceptance.updated']),
+      latestEntityEvent(projectionEvents, 'acceptance', acceptance.id, ['acceptance.created', 'acceptance.updated', 'acceptance.invalidated_by_change']),
       `workflow:acceptance:${acceptance.id}:revision:${acceptance.revision}`,
       'Acceptance'
     )

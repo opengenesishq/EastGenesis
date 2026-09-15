@@ -71,6 +71,7 @@ export const PROJECT_STUDIO_ENGLISH: Readonly<Record<string, unknown>> = {
   constraints: 'Constraints (one per line)',
   successCriteria: 'Success criteria (one per line)',
   acceptanceCriteria: 'Acceptance criteria (one per line)',
+  deliverables: 'Deliverables (one per line)',
   forbiddenActions: 'Forbidden actions (one per line)',
   risk: 'Risk level',
   dueDate: 'Due date',

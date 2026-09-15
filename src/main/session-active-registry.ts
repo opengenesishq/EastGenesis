@@ -26,6 +26,7 @@ import {
   type PreparedActiveSession
 } from './session-active-registry-restore'
 import { prepareSessionDomainOwnershipForActivation } from './session-domain-activation'
+import { isUnroutedLocalPlan } from './session-local-plan'
 
 export interface ActiveSessionRecoveryPlan {
   records: SessionMeta[]
@@ -341,12 +342,20 @@ function isSessionMetaRecord(value: unknown): value is SessionMeta {
     typeof record.title === 'string' &&
     isRequiredSessionText(record.cwd) &&
     isSessionModel(record.model) &&
-    isRequiredSessionText(record.providerId) &&
+    (isRequiredSessionText(record.providerId) || isLocalPlanRegistryRecord(record)) &&
     isRequiredSessionText(record.permissionMode) &&
     isRequiredSessionText(record.status) &&
     (record.sdkSessionId === undefined || isRequiredSessionText(record.sdkSessionId)) &&
     typeof record.costUsd === 'number' && Number.isFinite(record.costUsd) &&
     typeof record.createdAt === 'number' && Number.isFinite(record.createdAt)
+}
+
+/** Only the canonical, non-executing local plan may persist an unbound target. */
+function isLocalPlanRegistryRecord(record: Record<string, unknown>): boolean {
+  return record.providerId === '' && record.engine === 'openai' && record.permissionMode === 'default' &&
+    (record.status === 'starting' || record.status === 'idle' || record.status === 'error') &&
+    isRequiredSessionText(record.workspaceId) && isRequiredSessionText(record.goalId) &&
+    isRequiredSessionText(record.workItemId) && isUnroutedLocalPlan(record as unknown as SessionMeta)
 }
 
 function assertActiveSessionRegistryWritesAllowed(): void {

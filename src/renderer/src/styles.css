@@ -1266,6 +1266,7 @@ textarea {
 .sidebar-collapsed .brand-name,
 .sidebar-collapsed .sidebar-header-action,
 .sidebar-collapsed .sidebar-primary-nav,
+.sidebar-collapsed .work-os-primary-nav,
 .sidebar-collapsed .sidebar-search-wrap,
 .sidebar-collapsed .sidebar-scroll,
 .sidebar-collapsed .sidebar-resize-handle {
@@ -1284,6 +1285,33 @@ textarea {
   display: grid;
   gap: 2px;
   padding: 5px 8px 6px;
+}
+
+.work-os-primary-nav {
+  display: grid;
+  gap: 1px;
+  padding: 3px 8px 6px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.work-os-nav-item {
+  min-height: 29px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.work-os-nav-item.is-active {
+  color: var(--text);
+}
+
+.work-os-nav-icon {
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-dim);
+}
+
+.work-os-nav-item.is-active .work-os-nav-icon {
+  color: var(--accent);
 }
 
 .sidebar-nav-item {

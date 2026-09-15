@@ -74,3 +74,11 @@
     padding: 0 16px;
   }
 }
+
+.work-os-run-review-panel { max-width: 1080px; margin: 0 auto; }
+.work-os-run-list, .work-os-review-list { display: grid; gap: 10px; }
+.work-os-run-row, .work-os-review-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 14px; align-items: center; padding: 12px 14px; border: 1px solid var(--border-subtle, #dfe3e8); border-radius: 10px; background: var(--surface-raised, #fff); }
+.work-os-run-row > div, .work-os-review-row > div { display: flex; gap: 9px; align-items: center; min-width: 0; }
+.work-os-run-row strong, .work-os-review-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-os-run-row small, .work-os-review-row small { color: var(--text-secondary, #6b7280); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.work-os-run-row button, .work-os-review-row button { grid-column: 2; grid-row: 1 / span 2; }

@@ -127,13 +127,15 @@ function desiredWorkItem(
     projectId: version.binding.workspaceId!,
     goalId: parent.goalId,
     parentId: parent.id,
-    type: 'custom' as const,
+    businessLineId: parent.businessLineId ?? 'studio',
+    type: step.workItemType ?? 'custom',
+    ...(step.role === undefined ? {} : { role: step.role }),
     title: step.title,
     description: step.description || `计划步骤: ${step.id}`,
     dependencyIds: step.dependsOn.map((id) => ids.get(id)!),
     priority: 10_000 - index,
     status: 'backlog' as const,
-    acceptanceSpec: step.expectedArtifacts.map((artifact, artifactIndex) => ({
+    acceptanceSpec: step.acceptanceSpec ?? step.expectedArtifacts.map((artifact, artifactIndex) => ({
       id: `artifact-${artifactIndex + 1}`,
       criterion: `产出并提供证据：${artifact}`,
       required: true
@@ -173,7 +175,8 @@ function preflight(
   for (const entry of desired) {
     const item = existing.get(entry.id)
     if (!item) continue
-    if (item.projectId !== entry.projectId || item.goalId !== entry.goalId || item.parentId !== entry.parentId) {
+    if (item.projectId !== entry.projectId || item.goalId !== entry.goalId || item.parentId !== entry.parentId ||
+        (item.businessLineId ?? 'studio') !== entry.businessLineId) {
       throw new Error(`计划步骤 ${entry.title} 的 canonical WorkItem 归属冲突，已阻止审批`)
     }
     if (item.status === 'cancelled') {
@@ -198,6 +201,7 @@ function changedPatch(item: WorkItem, desired: ReturnType<typeof desiredWorkItem
   if (item.title !== desired.title) patch.title = desired.title
   if (item.description !== desired.description) patch.description = desired.description ?? ''
   if (item.type !== desired.type) patch.type = desired.type
+  if (item.role !== desired.role) patch.role = desired.role ?? null
   if (item.parentId !== desired.parentId) patch.parentId = desired.parentId
   if (!same(item.dependencyIds, desired.dependencyIds)) patch.dependencyIds = desired.dependencyIds
   if (item.priority !== desired.priority) patch.priority = desired.priority
@@ -222,6 +226,7 @@ async function verifyProjection(
     const actual = itemsById.get(expected.id)
     const mismatch = actual ? changedPatch(actual, expected) : undefined
     if (!actual || actual.projectId !== expected.projectId || actual.goalId !== expected.goalId ||
+      (actual.businessLineId ?? 'studio') !== expected.businessLineId ||
       actual.parentId !== expected.parentId || mismatch) {
       const fields = mismatch ? `（字段：${Object.keys(mismatch).join(', ')}）` : ''
       throw new Error(`计划步骤 ${step.title} 未完成 canonical 投影${fields}，已阻止审批`)

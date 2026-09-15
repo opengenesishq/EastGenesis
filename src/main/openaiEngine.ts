@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
 import { assertPersistedSessionExecutionAllowed } from './session-execution-ownership'
+import { isUnroutedLocalPlan } from './session-local-plan'
 import { documentAttachmentsToPrompt, sessionImageAttachmentsRoot } from './attachmentOps'
 import { TranscriptWriter } from './transcript'
 import {
@@ -39,6 +40,7 @@ import { frozenRetryAllows } from './model/native-recovery-session'
 import { nativeHttpRefusalEvidence } from './model/native-http-refusal'
 import { runtimeConversationReplay, validateRuntimeContinuationContext } from './session-runtime-continuation-context'
 import { rebuildOpenAiTextHistory } from './openai-text-history'
+import { persistContextPack, restoreContextPack } from './agent/context-pack-persistence'
 import { nativeRequestBudgetInput } from './model/native-request-budget'
 import { nativeTurnRejection } from './model/native-turn-rejection'
 import { boundedOpenAiRequestBody } from './model/native-output-limit'
@@ -213,16 +215,34 @@ export class OpenAIEngine implements Engine {
 
   /** resume 时从转录重建 chat 协议的多轮历史(仅文本;图片不回放) */
   private rebuildChatHistory(): void {
-    this.chatHistory = rebuildOpenAiTextHistory(this.transcript.read())
+    const entries = this.transcript.read()
+    const persisted = restoreContextPack(app.getPath('userData'), this.meta.id)
+    // Compression itself emits a post-boundary `meta` snapshot and the
+    // `context-compressed` hook after the durable pack write. Those runtime
+    // observations do not invalidate the pack; any conversational event after
+    // the boundary still forces a transcript rebuild so newer turns win.
+    const trailing = persisted
+      ? entries.filter((entry) => entry.seq > persisted.boundarySeq)
+      : []
+    const trailingRuntimeOnly = trailing.every((entry) =>
+      entry.event.kind === 'meta' ||
+      (entry.event.kind === 'hook-event' && entry.event.event === 'context-compressed'))
+    if (persisted && entries.at(-1)?.seq !== undefined && trailingRuntimeOnly) {
+      this.chatHistory = [{ role: 'system', content: `[早期对话摘要 · 由 CaoGen 自动压缩]\n${persisted.summary}` }, ...persisted.recent]
+      return
+    }
+    this.chatHistory = rebuildOpenAiTextHistory(entries)
   }
 
   async start(): Promise<void> {
     if (this.disposed) return
     this.setStatus('starting')
-    const auth = this.authConfig()
-    if (!auth.available && auth.authMode !== 'none') {
-      this.setStatus('error', this.missingKeyMessage())
-      return
+    if (!isUnroutedLocalPlan(this.meta)) {
+      const auth = this.authConfig()
+      if (!auth.available && auth.authMode !== 'none') {
+        this.setStatus('error', this.missingKeyMessage())
+        return
+      }
     }
     if (!this.meta.sdkSessionId) {
       this.meta.sdkSessionId = `openai-${randomUUID()}`
@@ -1269,6 +1289,15 @@ export class OpenAIEngine implements Engine {
       return null
     })
     if (!summary) return // 摘要失败:保持原样,下轮再试
+
+    const boundarySeq = this.transcript.readAll().at(-1)?.seq
+    if (!boundarySeq) return // 没有可持久化的账本边界时保持原样
+    persistContextPack(app.getPath('userData'), this.meta.id, {
+      sourceMessageCount: older.length,
+      boundarySeq,
+      summary,
+      recent
+    })
 
     this.chatHistory = [
       { role: 'system', content: `[早期对话摘要 · 由 CaoGen 自动压缩]\n${summary}` },

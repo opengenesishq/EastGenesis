@@ -469,6 +469,21 @@ async function enterStudio(page) {
   await page.waitForSelector('.app', { timeout: 30_000 })
   await page.waitForFunction(() => typeof window.agentDesk?.getProjectGoal === 'function', { timeout: 30_000 })
   await page.click('[data-experience-mode-option="studio"]')
+  await page.waitForSelector('[data-studio-view]', { visible: true, timeout: 30_000 })
+  // Studio now opens on the unified Work Inbox. ProjectWorkspaceStudio remains
+  // mounted behind its explicit Work tab, so a selector-only wait for a
+  // visible workspace would time out even though the renderer is healthy.
+  // Drive the same user-visible navigation path before exercising the Goal
+  // contract. This is a real renderer click; it does not bypass preload/main.
+  const workspaceVisible = await page.$eval('[data-project-workspace-studio]', (element) => {
+    const style = window.getComputedStyle(element)
+    const rect = element.getBoundingClientRect()
+    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+  }).catch(() => false)
+  if (!workspaceVisible) {
+    await page.waitForSelector('[data-studio-section-option="work"]', { visible: true, timeout: 15_000 })
+    await page.click('[data-studio-section-option="work"]')
+  }
   await page.waitForSelector('[data-project-workspace-studio]', { visible: true, timeout: 30_000 })
   await page.waitForFunction(
     () => document.querySelector('[data-project-workspace-studio]')?.getAttribute('aria-busy') === 'false',

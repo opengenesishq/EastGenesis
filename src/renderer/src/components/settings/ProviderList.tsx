@@ -15,6 +15,7 @@ import type {
   ProviderAuthorizationStatus,
   ProviderView
 } from '../../../../shared/types'
+import { summarizeProviderHealth } from '../../../../shared/provider-health-contract'
 import ProviderModelCapabilitySummary from '../ProviderModelCapabilitySummary'
 
 interface ProviderProbe {
@@ -416,6 +417,7 @@ function ProviderCredentialTag({ provider }: { provider: ProviderView }): React.
 function ProviderHealthDot({ health }: { health: ProviderHealthView | undefined }): React.JSX.Element | null {
   const t = useT()
   if (!health) return null
+  const check = summarizeProviderHealth(health)
   const title = health.circuitState === 'open'
     ? t('healthCircuitOpenTip', {
         error: health.recentFailures?.[0]?.message ?? health.lastError ?? '-'
@@ -432,15 +434,21 @@ function ProviderHealthDot({ health }: { health: ProviderHealthView | undefined 
         n: health.consecutiveFailures,
         error: health.recentFailures?.[0]?.message ?? health.lastError ?? '-'
       })
-  const statusClass = health.circuitState === 'open'
+  const statusClass = check.access === 'blocked'
     ? 'health-bad'
-    : health.circuitState === 'half_open'
+    : check.access === 'probe_only' || check.state === 'degraded'
       ? 'health-warn'
-      : health.healthy ? 'health-ok' : 'health-bad'
+      : 'health-ok'
   return (
     <span
       className={`health-dot ${statusClass}`}
       title={title}
+      role="img"
+      aria-label={title}
+      data-provider-health={health.providerId}
+      data-provider-circuit-state={health.circuitState}
+      data-provider-health-state={check.state}
+      data-provider-health-access={check.access}
     />
   )
 }

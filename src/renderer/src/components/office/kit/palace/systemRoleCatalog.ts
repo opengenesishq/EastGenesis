@@ -57,7 +57,7 @@ const commandHallAction: SystemRoleAction = {
   id: 'open_command_hall', label: '回到议政殿', labelEn: 'Open council hall', target: 'command_hall'
 }
 const summonCouncilAction: SystemRoleAction = {
-  id: 'summon_council', label: '召集议政', labelEn: 'Summon council', target: 'summon_council'
+  id: 'summon_council', label: '查看职责', labelEn: 'View responsibilities', target: 'summon_council'
 }
 
 /** Stable catalog for all authored central-hall governance roles. */

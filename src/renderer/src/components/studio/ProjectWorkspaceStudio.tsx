@@ -31,6 +31,7 @@ import { RemoteContinuationPanel } from './RemoteContinuationPanel'
 import { ProjectDeliveryWorkbench } from './ProjectDeliveryWorkbench'
 import ProjectPicker from './ProjectPicker'
 import { useStore } from '../../store'
+import TaskPlanWorkbench from '../experience/TaskPlanWorkbench'
 import type { ProjectWorkspaceFocus } from './projectWorkspaceNavigation'
 
 export interface ProjectWorkspaceStudioProps {
@@ -95,6 +96,9 @@ export function ProjectWorkspaceStudio({
   const [workspaceFocus, setWorkspaceFocus] = useState<ProjectWorkspaceFocus | undefined>(requestedFocus)
   const workspace = useWorkspaceSelection(active, initialProjectId, onProjectChange)
   useEffect(() => setWorkspaceFocus(requestedFocus), [requestedFocus])
+  useEffect(() => {
+    if (requestedFocus === 'goal') setForm('goal')
+  }, [requestedFocus])
   const contents = useProjectContents(active, activeProjectContentsId(workspace.selectedProject, workspace.selectedProjectId))
   const closeForm = useCallback(() => setForm(null), [])
   const actions = useStudioCreateActions({
@@ -106,8 +110,9 @@ export function ProjectWorkspaceStudio({
   const controls = useStudioEntityActions(contents.refreshContents)
 
   useEffect(() => {
+    if (requestedFocus === 'goal') return
     setForm((current) => current === 'project' ? current : null)
-  }, [workspace.selectedProjectId])
+  }, [requestedFocus, workspace.selectedProjectId])
   useEffect(() => {
     if (newProjectRequest > 0) setForm('project')
   }, [newProjectRequest])
@@ -147,7 +152,7 @@ export function ProjectWorkspaceStudio({
   return (
     <section className={rootClassName} aria-labelledby={titleId} aria-busy={loading} data-project-workspace-studio data-language={language} data-project-workspace-focus={workspaceFocus ?? ''}>
       {workspaceFocus && <div className="pws-navigation-notice" data-project-workspace-navigation-focus={workspaceFocus} data-project-workspace-navigation-work-item={requestedWorkItemId ?? ''} role="status">
-        {workspaceFocus === 'code' ? '代码工作区已定位到当前项目；绑定 Session 后可打开文件面板。' : workspaceFocus === 'diff' ? '差异审查已定位到当前项目；绑定 Session 后可打开差异面板。' : `工作区已定位到 WorkItem ${requestedWorkItemId ?? ''}。`}
+        {workspaceFocus === 'code' ? '代码工作区已定位到当前项目；绑定 Session 后可打开文件面板。' : workspaceFocus === 'diff' ? '差异审查已定位到当前项目；绑定 Session 后可打开差异面板。' : workspaceFocus === 'goal' ? '已打开目标契约创建表单；保存后再从 Work Inbox 安排执行。' : workspaceFocus === 'delivery' ? '已打开交付与验收区域；内容仅来自当前项目的 canonical Ledger。' : `工作区已定位到 WorkItem ${requestedWorkItemId ?? ''}。`}
       </div>}
       <StudioHeader
         titleId={titleId}
@@ -190,6 +195,7 @@ export function ProjectWorkspaceStudio({
         onWorkItemTransfer={controls.transferWorkItem}
         onViewChange={setView}
         project={workspace.selectedProject}
+        requestedFocus={workspaceFocus}
         requestedWorkItemId={requestedWorkItemId}
         starter={goalTaskStarter}
         view={view}
@@ -377,6 +383,7 @@ function ProjectContents({
   onViewChange,
   project,
   requestedWorkItemId,
+  requestedFocus,
   starter,
   view
 }: {
@@ -394,6 +401,7 @@ function ProjectContents({
   onWorkItemTransfer: (item: WorkItem, target: WorkItemOwner, reason: string, requestId: string) => Promise<void>
   onViewChange: (view: StudioView) => void
   project: ProjectWorkspace | null
+  requestedFocus?: ProjectWorkspaceFocus
   requestedWorkItemId?: string
   starter: GoalTaskStarterState
   view: StudioView
@@ -427,10 +435,12 @@ function ProjectContents({
             label={TEXT.deliverySection}
             description={TEXT.deliverySectionDescription}
             dataKey="delivery"
+            initialOpen={requestedFocus === 'delivery'}
           >
             <ProjectDeliveryWorkbench
               active={active}
               projectId={project.id}
+              requestedWorkItemId={requestedWorkItemId}
               refreshToken={contents.workItems.map((item) => `${item.id}:${item.revision}`).join('|')}
             />
           </ProgressiveProjectSection>
@@ -483,23 +493,33 @@ function ProgressiveProjectSection({
   children,
   dataKey,
   description,
+  initialOpen = false,
   label,
   onOpen
 }: {
   children: ReactNode
   dataKey: 'delivery' | 'supervisor' | 'collaboration'
   description: string
+  initialOpen?: boolean
   label: string
   onOpen?: () => void
 }): React.JSX.Element {
-  const [mounted, setMounted] = useState(false)
+  const [mounted, setMounted] = useState(initialOpen)
+  useEffect(() => {
+    if (initialOpen) setMounted(true)
+  }, [initialOpen])
   const handleToggle = (event: React.SyntheticEvent<HTMLDetailsElement>): void => {
-    if (!event.currentTarget.open || mounted) return
-    setMounted(true)
-    onOpen?.()
+    if (event.currentTarget.open) {
+      if (!mounted) {
+        setMounted(true)
+        onOpen?.()
+      }
+      return
+    }
+    if (mounted) setMounted(false)
   }
   return (
-    <details className="pws-advanced-section" data-project-advanced-section={dataKey} onToggle={handleToggle}>
+    <details className="pws-advanced-section" data-project-advanced-section={dataKey} open={mounted} onToggle={handleToggle}>
       <summary>
         <span className="pws-advanced-summary-copy">
           <strong>{label}</strong>
@@ -520,13 +540,21 @@ function GoalTaskStarter({
   state: GoalTaskStarterState
 }): React.JSX.Element {
   const [objective, setObjective] = useState('')
+  const [template, setTemplate] = useState<'auto' | 'product-launch'>('auto')
+  const language = useStore((state) => state.settings.language)
+  const english = language === 'en'
   const submit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
-    if (await state.start(projectId, objective)) setObjective('')
+    if (await state.start(projectId, objective, template)) setObjective('')
   }
   return (
+    <>
     <form className="pws-goal-task-starter" onSubmit={(event) => void submit(event)} data-goal-task-starter>
       <label className="pws-visually-hidden" htmlFor={`goal-task-${projectId}`}>{TEXT.goalTaskPlaceholder}</label>
+      <select className="input" aria-label={english ? 'Planning template' : '规划模板'} disabled={state.busy} value={template} onChange={(event) => setTemplate(event.target.value as 'auto' | 'product-launch')} data-goal-task-template>
+        <option value="auto">{english ? 'Automatic plan' : '自动规划'}</option>
+        <option value="product-launch">{english ? 'Product launch · four roles' : '产品发布 · 四岗位'}</option>
+      </select>
       <input
         id={`goal-task-${projectId}`}
         className="input"
@@ -544,6 +572,8 @@ function GoalTaskStarter({
       {state.error && <p className="pws-goal-task-error" role="alert">{state.error}</p>}
       {state.announcement && <p className="pws-goal-task-success" role="status">{state.announcement}</p>}
     </form>
+    {state.planSessionId && state.planProjectId === projectId && <TaskPlanWorkbench sessionId={state.planSessionId} strategy="plan" running={false} />}
+    </>
   )
 }
 

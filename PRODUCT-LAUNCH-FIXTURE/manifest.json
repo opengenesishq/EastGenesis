@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "kind": "caogen.product-launch-fixture",
+  "id": "product-launch-v2",
+  "title": "本周上线一个产品",
+  "businessLine": "产品发布府",
+  "goal": {
+    "statement": "在本周内形成一个可运行、可说明、可验收的产品发布包。",
+    "constraints": [
+      "使用脱敏输入和本地 fixture",
+      "未经用户批准不得执行外部发布或不可逆动作",
+      "每个成果必须关联 Evidence 和 Acceptance"
+    ],
+    "deliverables": ["运行页面", "使用说明", "测试证据", "Proof Pack"]
+  },
+  "roles": ["太子", "礼部", "工部", "都察院"],
+  "expectedWorkItems": [
+    "整理目标和验收标准",
+    "形成产品说明",
+    "实现最小运行页面",
+    "执行独立验证并生成 Proof Pack"
+  ],
+  "externalSideEffects": "approval_required"
+}

@@ -119,6 +119,7 @@ export interface GoalDraft {
   constraints: string
   successCriteria: string
   acceptance: string
+  deliverables: string
   forbiddenActions: string
   riskLevel: GoalRiskLevel
   dueDate: string
@@ -184,7 +185,7 @@ export const WORK_ITEM_TRANSITIONS: Record<WorkItemStatus, readonly WorkItemStat
 }
 
 export const EMPTY_GOAL_DRAFT: GoalDraft = {
-  title: '', objective: '', background: '', constraints: '', successCriteria: '', acceptance: '',
+  title: '', objective: '', background: '', constraints: '', successCriteria: '', acceptance: '', deliverables: '',
   forbiddenActions: '', riskLevel: 'medium', dueDate: '', budgetAmount: '', budgetCurrency: 'USD',
   budgetRuns: '', budgetConcurrentRuns: '', budgetTokens: ''
 }
@@ -208,8 +209,9 @@ export function goalDraftFromGoal(goal: Goal): GoalDraft {
     objective: goal.objective,
     background: goal.background ?? '',
     constraints: goal.constraints.join('\n'),
-    successCriteria: goal.successCriteria.join('\n'),
+    successCriteria: goal.successCriteria.filter((item) => !item.startsWith('交付物：')).join('\n'),
     acceptance: goal.acceptance.map((item) => item.criterion).join('\n'),
+    deliverables: goal.successCriteria.filter((item) => item.startsWith('交付物：')).map((item) => item.slice('交付物：'.length)).join('\n'),
     forbiddenActions: goal.forbiddenActions.join('\n'),
     riskLevel: goal.riskLevel,
     dueDate: dateInputValue(goal.dueAt),
@@ -249,7 +251,7 @@ function goalContractFromDraft(draft: GoalDraft, existingAcceptance: Goal['accep
     objective: draft.objective.trim(),
     background: optionalText(draft.background),
     constraints: splitLines(draft.constraints),
-    successCriteria: splitLines(draft.successCriteria),
+    successCriteria: [...splitLines(draft.successCriteria), ...splitLines(draft.deliverables).map((item) => `交付物：${item}`)],
     acceptance: acceptanceSpecs(draft.acceptance, 'goal', existingAcceptance),
     forbiddenActions: splitLines(draft.forbiddenActions),
     riskLevel: draft.riskLevel,

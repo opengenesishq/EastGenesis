@@ -1,0 +1,8 @@
+.office-role-work-items { margin-top: 10px; font-size: 12px; line-height: 1.5; }
+.office-role-work-items p { margin: 6px 0; }
+.office-role-work-items ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.office-role-work-items li { display: grid; gap: 3px; padding: 8px; border: 1px solid #c9bea9; border-radius: 6px; overflow-wrap: anywhere; }
+.office-role-work-items li button { justify-self: start; margin-top: 4px; }
+.office-role-work-items [role="alert"] { color: #923f34; }
+.office-role-selector { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.office-role-selector select { max-width: 70%; padding: 4px; color: inherit; background: #fffaf1; border: 1px solid #c9bea9; border-radius: 4px; }

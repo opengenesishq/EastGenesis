@@ -34,6 +34,8 @@ import type { BrowserNavigationEffectApi, BrowserViewState } from './browser-ope
 import type { MediaApi, ProviderMediaPricing } from './media-types'
 import type { SessionEntrypointApi } from './session-entrypoint-types'
 import type { AssistantSearchApi } from './assistant-search-types'
+import type { PalaceSceneBuilderApi } from './palace-scene-builder-types'
+export type * from './palace-scene-builder-types'
 export type * from './assistant-search-types'
 import type { NotificationConnectorInput, NotificationConnectorView } from './notification-connector-types'
 import type { ProviderApiKeyInput, ProviderApiKeyUpdateInput, ProviderCredentialPolicy, ProviderCredentialRoutingMode } from './provider-credential-routing-types'
@@ -2495,7 +2497,7 @@ export type MenuCommand =
   | { type: 'select-session'; index: number }
 
 /** 通过 contextBridge 暴露给渲染进程的 API */
-export interface AgentDeskApi extends WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, RemoteApi, MediaApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi {
+export interface AgentDeskApi extends WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, RemoteApi, MediaApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi, PalaceSceneBuilderApi {
   listPendingPermissions(sessionId: string): Promise<PermissionRequestInfo[]>
   getTranscript(sessionId: string): Promise<TranscriptEntry[]>
   suggestFiles(sessionId: string, query: string): Promise<string[]>

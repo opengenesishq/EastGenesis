@@ -1,10 +1,13 @@
-import type { EngineKind, SessionMeta, TranscriptEntry } from '../../shared/types'
+import { AUTO_MODEL, type EngineKind, type SessionMeta, type TranscriptEntry } from '../../shared/types'
 import { verifyConversationLedgerEntries } from '../transcript'
+import { isUnroutedLocalPlan } from '../session-local-plan'
 import { stableValueDigest } from './tool-idempotency'
 import type { WorkflowLedgerDatabase } from './workflow-ledger-db'
 import { setupConversationLedgerSchema } from './conversation-ledger-schema'
 
 const ARCHIVE_GENESIS_DIGEST = '0'.repeat(64)
+
+type ArchiveProviderBinding = 'provider' | 'unrouted-local-plan'
 
 export type ConversationLedgerArchiveReason =
   | 'initial'
@@ -23,6 +26,8 @@ export interface ConversationLedgerArchiveIdentity {
   workItemId?: string
   sourceCwd: string
   providerId: string
+  /** Omitted on legacy callers; they must still supply a real Provider identity. */
+  providerBinding?: ArchiveProviderBinding
   model: string
   engine?: EngineKind
   createdAt: number
@@ -76,6 +81,7 @@ interface StreamRow {
   workItemId?: string
   sourceCwd: string
   providerId: string
+  providerBinding: ArchiveProviderBinding
   model: string
   engine?: EngineKind
   currentGeneration: number
@@ -114,7 +120,8 @@ interface EventRow {
 export function conversationLedgerArchiveIdentity(
   meta: Pick<SessionMeta,
     'id' | 'sdkSessionId' | 'conversationForkSourceSdkSessionId' | 'projectId' | 'workspaceId' |
-    'goalId' | 'workItemId' | 'sourceCwd' | 'cwd' | 'providerId' | 'model' | 'engine' | 'createdAt'>,
+    'goalId' | 'workItemId' | 'sourceCwd' | 'cwd' | 'providerId' | 'model' | 'engine' | 'createdAt'> &
+    Partial<Pick<SessionMeta, 'taskStrategy' | 'routingScope' | 'parentSessionId' | 'permissionMode'>>,
   updatedAt = Date.now()
 ): ConversationLedgerArchiveIdentity | null {
   const sdkSessionId = meta.sdkSessionId?.trim()
@@ -129,6 +136,9 @@ export function conversationLedgerArchiveIdentity(
     workItemId: meta.workItemId,
     sourceCwd: meta.sourceCwd ?? meta.cwd,
     providerId: meta.providerId,
+    ...(meta.providerId === '' && meta.engine === 'openai' && meta.permissionMode === 'default' &&
+      isUnroutedLocalPlan({ ...meta, taskStrategy: meta.taskStrategy ?? 'view' })
+        ? { providerBinding: 'unrouted-local-plan' as const } : {}),
     model: meta.model,
     engine: meta.engine,
     createdAt: meta.createdAt,
@@ -496,8 +506,8 @@ function insertStream(
     `INSERT INTO conversation_ledger_streams(
        sdk_session_id, origin_session_id, current_session_id, source_sdk_session_id,
        project_id, workspace_id, goal_id, work_item_id, source_cwd,
-       provider_id, model, engine, current_generation, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       provider_id, provider_binding, model, engine, current_generation, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       identity.sdkSessionId,
       identity.currentSessionId,
@@ -509,6 +519,7 @@ function insertStream(
       identity.workItemId ?? null,
       identity.sourceCwd,
       identity.providerId,
+      identity.providerBinding ?? 'provider',
       identity.model,
       identity.engine ?? null,
       generation,
@@ -612,11 +623,12 @@ function updateStream(
 ): void {
   db.run(
     `UPDATE conversation_ledger_streams
-     SET current_session_id = ?, provider_id = ?, model = ?, engine = ?, current_generation = ?, updated_at = ?
+     SET current_session_id = ?, provider_id = ?, provider_binding = ?, model = ?, engine = ?, current_generation = ?, updated_at = ?
      WHERE sdk_session_id = ?`,
     [
       identity.currentSessionId,
       identity.providerId,
+      identity.providerBinding,
       identity.model,
       identity.engine ?? null,
       generation,
@@ -699,6 +711,8 @@ function archiveDigestFor(input: {
 }
 
 function normalizeIdentity(input: ConversationLedgerArchiveIdentity) {
+  const providerBinding = normalizeProviderBinding(input.providerBinding)
+  const providerId = archiveProviderId(input, providerBinding)
   return {
     sdkSessionId: requiredText(input.sdkSessionId, 'sdkSessionId'),
     currentSessionId: requiredText(input.currentSessionId, 'currentSessionId'),
@@ -708,7 +722,8 @@ function normalizeIdentity(input: ConversationLedgerArchiveIdentity) {
     goalId: optionalText(input.goalId),
     workItemId: optionalText(input.workItemId),
     sourceCwd: requiredText(input.sourceCwd, 'sourceCwd'),
-    providerId: requiredText(input.providerId, 'providerId'),
+    providerId,
+    providerBinding,
     model: input.model.trim(),
     engine: input.engine,
     createdAt: finiteTimestamp(input.createdAt, 'createdAt'),
@@ -716,11 +731,30 @@ function normalizeIdentity(input: ConversationLedgerArchiveIdentity) {
   }
 }
 
+function normalizeProviderBinding(value: unknown): ArchiveProviderBinding {
+  if (value === undefined || value === 'provider') return 'provider'
+  if (value === 'unrouted-local-plan') return value
+  throw new Error('Conversation Ledger provider binding is invalid')
+}
+
+function archiveProviderId(
+  input: Pick<ConversationLedgerArchiveIdentity, 'providerId' | 'engine' | 'model' | 'workspaceId' | 'goalId' | 'workItemId'>,
+  binding: ArchiveProviderBinding
+): string {
+  if (binding === 'provider') return requiredText(input.providerId, 'providerId')
+  if (input.providerId !== '' || input.engine !== 'openai' || input.model !== AUTO_MODEL ||
+      ![input.workspaceId, input.goalId, input.workItemId].every((id) => typeof id === 'string' && id.trim())) {
+    throw new Error('Conversation Ledger unrouted local plan identity is invalid')
+  }
+  return ''
+}
+
 function findStream(db: WorkflowLedgerDatabase, sdkSessionId: string): StreamRow | null {
+  const providerBindingColumn = archiveProviderBindingColumn(db)
   const stmt = db.prepare(
     `SELECT sdk_session_id, origin_session_id, current_session_id, source_sdk_session_id,
             project_id, workspace_id, goal_id, work_item_id, source_cwd,
-            provider_id, model, engine, current_generation, created_at, updated_at
+            provider_id, ${providerBindingColumn}, model, engine, current_generation, created_at, updated_at
      FROM conversation_ledger_streams WHERE sdk_session_id = ?`
   )
   try {
@@ -733,10 +767,11 @@ function findStream(db: WorkflowLedgerDatabase, sdkSessionId: string): StreamRow
 }
 
 function readStreams(db: WorkflowLedgerDatabase): StreamRow[] {
+  const providerBindingColumn = archiveProviderBindingColumn(db)
   const stmt = db.prepare(
     `SELECT sdk_session_id, origin_session_id, current_session_id, source_sdk_session_id,
             project_id, workspace_id, goal_id, work_item_id, source_cwd,
-            provider_id, model, engine, current_generation, created_at, updated_at
+            provider_id, ${providerBindingColumn}, model, engine, current_generation, created_at, updated_at
      FROM conversation_ledger_streams ORDER BY sdk_session_id`
   )
   const rows: StreamRow[] = []
@@ -746,6 +781,15 @@ function readStreams(db: WorkflowLedgerDatabase): StreamRow[] {
     stmt.free()
   }
   return rows
+}
+
+function archiveProviderBindingColumn(db: WorkflowLedgerDatabase): string {
+  // Cold-start readiness verifies the source before any schema migration.
+  // Legacy rows had no discriminator and must retain the provider-required
+  // decoder; never mutate a database merely to assess its integrity.
+  const columns = db.exec('PRAGMA table_info(conversation_ledger_streams)')[0]?.values ?? []
+  return columns.some((column) => column[1] === 'provider_binding')
+    ? 'provider_binding' : "'provider' AS provider_binding"
 }
 
 function requireGeneration(db: WorkflowLedgerDatabase, sdkSessionId: string, generation: number): GenerationRow {
@@ -796,6 +840,15 @@ function readEventRows(db: WorkflowLedgerDatabase, sdkSessionId: string, generat
 }
 
 function decodeStream(row: Record<string, unknown>): StreamRow {
+  const providerBinding = normalizeProviderBinding(row.provider_binding)
+  const providerId = archiveProviderId({
+    providerId: row.provider_id as string,
+    engine: row.engine as EngineKind,
+    model: row.model as string,
+    workspaceId: row.workspace_id as string,
+    goalId: row.goal_id as string,
+    workItemId: row.work_item_id as string
+  }, providerBinding)
   return {
     sdkSessionId: requiredText(row.sdk_session_id, 'stream.sdk_session_id'),
     originSessionId: requiredText(row.origin_session_id, 'stream.origin_session_id'),
@@ -806,7 +859,8 @@ function decodeStream(row: Record<string, unknown>): StreamRow {
     goalId: nullableText(row.goal_id, 'stream.goal_id'),
     workItemId: nullableText(row.work_item_id, 'stream.work_item_id'),
     sourceCwd: requiredText(row.source_cwd, 'stream.source_cwd'),
-    providerId: requiredText(row.provider_id, 'stream.provider_id'),
+    providerId,
+    providerBinding,
     model: text(row.model, 'stream.model'),
     engine: nullableText(row.engine, 'stream.engine') as EngineKind | undefined,
     currentGeneration: positiveInteger(row.current_generation, 'stream.current_generation'),

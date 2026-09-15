@@ -1,4 +1,4 @@
-export type ProjectWorkspaceFocus = 'code' | 'diff' | 'work-item'
+export type ProjectWorkspaceFocus = 'code' | 'diff' | 'work-item' | 'goal' | 'delivery'
 
 export interface ProjectWorkspaceNavigation {
   projectId: string

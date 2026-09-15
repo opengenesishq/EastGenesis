@@ -192,6 +192,9 @@ function GoalContractForm({
           <FormField id={`${baseId}-acceptance`} label={TEXT.acceptanceCriteria}>
             <textarea id={`${baseId}-acceptance`} className="input pws-textarea" rows={3} value={draft.acceptance} onChange={(event) => update('acceptance', event.target.value)} data-goal-field="acceptance" />
           </FormField>
+          <FormField id={`${baseId}-deliverables`} label={TEXT.deliverables}>
+            <textarea id={`${baseId}-deliverables`} className="input pws-textarea" rows={3} value={draft.deliverables} onChange={(event) => update('deliverables', event.target.value)} data-goal-field="deliverables" />
+          </FormField>
           <FormField id={`${baseId}-forbidden`} label={TEXT.forbiddenActions}>
             <textarea id={`${baseId}-forbidden`} className="input pws-textarea" rows={3} value={draft.forbiddenActions} onChange={(event) => update('forbiddenActions', event.target.value)} data-goal-field="forbidden" />
           </FormField>

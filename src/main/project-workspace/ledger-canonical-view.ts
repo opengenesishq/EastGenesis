@@ -30,7 +30,8 @@ import {
   normalizeAcceptanceResult,
   normalizeAcceptanceSpecs,
   normalizeContract,
-  normalizeOwner
+  normalizeOwner,
+  requiredId
 } from './codec'
 import {
   PROJECT_WORKSPACE_MIGRATION_EVENT_KIND,
@@ -366,6 +367,7 @@ function verifyWorkItemMapping(source: WorkItem, ledger: WorkflowWorkItemRecord)
     parentId: source.parentId,
     businessLineId: source.businessLineId,
     type: source.type,
+    ...(source.role === undefined ? {} : { role: source.role }),
     title: source.title,
     description: source.description,
     status: source.status,
@@ -464,6 +466,9 @@ function assertRichWorkItem(value: WorkItem, id: string): void {
   try {
     assertWorkItemIdentityShape(value, id)
     assertWorkItemStateShape(value, id)
+    if (value.role !== undefined && requiredId(value.role, `WorkItem ${id} role`) !== value.role) {
+      fail('RICH_SCHEMA_INVALID', `WorkItem ${id} role is not normalized`)
+    }
     verifyIdList(value.dependencyIds, `WorkItem ${id} dependencies`)
     verifyIdList(value.artifactRefs, `WorkItem ${id} Artifact references`)
     verifyIdList(value.runRefs, `WorkItem ${id} Run references`)

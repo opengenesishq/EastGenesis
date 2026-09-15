@@ -160,7 +160,7 @@ function TaskPlanMetadataEditor({ t, form, setForm, canEdit, current }: Metadata
       {current && (
         <label className="task-plan-field task-plan-field-wide">
           <span>{t('taskPlanChangeReason')}</span>
-          <input value={form.changeReason} disabled={!canEdit}
+          <input data-task-plan-change-reason="true" value={form.changeReason} disabled={!canEdit}
             onChange={(event) => update({ changeReason: event.target.value })} />
         </label>
       )}

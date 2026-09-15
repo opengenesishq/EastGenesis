@@ -13,11 +13,14 @@ import {
   writeFileSync
 } from 'node:fs'
 import path from 'node:path'
+import { isWorkItemType } from '../../shared/project-workspace-types'
+import { normalizeAcceptanceSpecs } from '../project-workspace/codec'
 import {
   TASK_PLAN_SCHEMA_VERSION,
   type TaskPlanApprovalEvent,
   type TaskPlanApprovalInput,
   type TaskPlanDraftInput,
+  type TaskPlanMissionSource,
   type TaskPlanExecutionAuthorization,
   type TaskPlanProjectionReceipt,
   type TaskPlanRiskLevel,
@@ -125,6 +128,7 @@ export class TaskPlanContractStore {
       acceptanceCriteria: draft.acceptanceCriteria,
       changeReason: draft.changeReason,
       source: draft.source,
+      ...(draft.missionSource ? { missionSource: draft.missionSource } : {}),
       createdBy,
       createdAt: now
     }
@@ -370,8 +374,19 @@ function normalizeDraft(input: TaskPlanDraftInput): Omit<TaskPlanVersion, 'schem
     riskLevel: riskLevel(input.riskLevel),
     acceptanceCriteria,
     changeReason: optionalText(input.changeReason, 1_000) ?? '',
-    source: source(input.source)
+    source: source(input.source),
+    ...(input.missionSource !== undefined ? { missionSource: normalizeMissionSource(input.missionSource) } : {})
   }
+}
+
+function normalizeMissionSource(input: TaskPlanMissionSource): TaskPlanMissionSource {
+  if (!input || typeof input !== 'object' || Array.isArray(input) ||
+      Object.keys(input).some((key) => !['goalRevision', 'inputDigest', 'missionDigest'].includes(key)) ||
+      !Number.isSafeInteger(input.goalRevision) || input.goalRevision < 1 ||
+      !/^[0-9a-f]{64}$/.test(input.inputDigest) || !/^[0-9a-f]{64}$/.test(input.missionDigest)) {
+    throw new Error('Mission 计划来源无效')
+  }
+  return { goalRevision: input.goalRevision, inputDigest: input.inputDigest, missionDigest: input.missionDigest }
 }
 
 function normalizeStep(input: TaskPlanDraftInput['steps'][number], index: number): TaskPlanStep {
@@ -384,8 +399,30 @@ function normalizeStep(input: TaskPlanDraftInput['steps'][number], index: number
     expectedArtifacts: stringList(input.expectedArtifacts, `步骤 ${index + 1} 产物`, 50, 2_000),
     dataEgress: stringList(input.dataEgress, `步骤 ${index + 1} 外发`, 50, 2_000),
     estimatedCostUsd: cost(input.estimatedCostUsd),
-    riskLevel: riskLevel(input.riskLevel)
+    riskLevel: riskLevel(input.riskLevel),
+    // Omit absent extensions so existing version and approval digests stay valid.
+    ...(input.role === undefined ? {} : { role: requiredId(input.role, '步骤岗位') }),
+    ...(input.executionRole === undefined ? {} : { executionRole: normalizeExecutionRole(input.executionRole) }),
+    ...(input.workItemType === undefined ? {} : { workItemType: normalizeStepWorkItemType(input.workItemType) }),
+    ...(input.acceptanceSpec === undefined ? {} : { acceptanceSpec: normalizeStepAcceptance(input.acceptanceSpec) })
   }
+}
+
+function normalizeExecutionRole(value: unknown): NonNullable<TaskPlanStep['executionRole']> {
+  if (typeof value !== 'string' || !['frontend', 'backend', 'qa', 'docs', 'devops', 'review', 'general'].includes(value)) {
+    throw new Error('计划步骤执行角色无效')
+  }
+  return value as NonNullable<TaskPlanStep['executionRole']>
+}
+
+function normalizeStepWorkItemType(value: unknown): NonNullable<TaskPlanStep['workItemType']> {
+  if (!isWorkItemType(value)) throw new Error('计划步骤 WorkItem 类型无效')
+  return value
+}
+
+function normalizeStepAcceptance(value: NonNullable<TaskPlanStep['acceptanceSpec']>): NonNullable<TaskPlanStep['acceptanceSpec']> {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 200) throw new Error('计划步骤验收条件必须为 1-200 项')
+  return normalizeAcceptanceSpecs(value, '计划步骤验收条件')
 }
 
 function assertStepGraph(steps: TaskPlanStep[]): void {
@@ -425,7 +462,8 @@ function planDigest(
     dataEgress: draft.dataEgress,
     estimatedCostUsd: draft.estimatedCostUsd,
     riskLevel: draft.riskLevel,
-    acceptanceCriteria: draft.acceptanceCriteria
+    acceptanceCriteria: draft.acceptanceCriteria,
+    ...(draft.missionSource ? { missionSource: draft.missionSource } : {})
   }
   return `sha256:${createHash('sha256').update(canonicalJson(material)).digest('hex')}`
 }
@@ -649,7 +687,8 @@ function planVersionMaterial(value: ReturnType<typeof normalizeDraft> | TaskPlan
     riskLevel: value.riskLevel,
     acceptanceCriteria: value.acceptanceCriteria,
     changeReason: value.changeReason,
-    source: value.source
+    source: value.source,
+    ...(value.missionSource ? { missionSource: value.missionSource } : {})
   }
 }
 

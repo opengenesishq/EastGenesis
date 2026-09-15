@@ -297,7 +297,7 @@ export const GATEWAY_ACTION_EFFECT_ENTRY_POLICIES = {
       'provider-profile-sync/choose-directory', 'provider-profile-sync/disconnect',
       'provider-profile-sync/webdav-save', 'provider-profile-sync/webdav-remove',
       'provider-profile-sync/s3-save', 'provider-profile-sync/s3-remove',
-      'studio-result/save', 'task-plan/approve', 'task-plan/create-version', 'task-plan/generate',
+      'studio-result/save', 'task-plan/approve', 'task-plan/create-version', 'task-plan/generate', 'task-plan/compile-mission',
       'task-plan/revoke', 'task-plan/strategy'
     ], LOCAL),
     policyGroup([

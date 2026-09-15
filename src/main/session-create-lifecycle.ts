@@ -8,7 +8,8 @@ import { getProject, touchProject } from './projects'
 import { getSettings } from './settings'
 import { listHistory } from './history'
 import { parseSessionConversationSource } from './session-conversation-source'
-import { getProvider, providerIsReady, resolveProviderEngine } from './providers'
+import { getProvider, listProviders, providerIsReady, resolveProviderEngine } from './providers'
+import { isUnroutedLocalPlan } from './session-local-plan'
 import { executeManagedWorktreeCreateEffect } from './ipc/worktree-operation-handlers'
 import { openProjectWorkspaceStore, type ProjectWorkspaceStore } from './project-workspace/store'
 import { executeInteractiveOperationEffect } from './task/operation-effect-gateway'
@@ -64,11 +65,15 @@ export function prepareSessionCreationDraft(
   const routingScope = sessionRoutingScope(opts, resumeHistory, parentMeta, selectedModel)
   opts.businessLineId = sessionBusinessLine({ opts, history: resumeHistory, parent: parentMeta, settings, resuming: historySource?.mode === 'resume' })
   const requestedProviderId = forking ? initialProviderId(opts, settings) : resumeHistory?.providerId ?? initialProviderId(opts, settings)
-  const initialRoute = !resumeHistory || forking ? resolveCreationModelRoute({
+  const taskStrategy = sessionTaskStrategy(opts, resumeHistory, parentMeta, settings, forking)
+  const localPlanOnly = !historySource && !parentMeta && input.taskStrategy === 'plan' &&
+    isUnroutedLocalPlan({ ...opts, taskStrategy, routingScope, model: selectedModel, providerId: requestedProviderId }) &&
+    !listProviders().some(providerIsReady)
+  const initialRoute = !localPlanOnly && (!resumeHistory || forking) ? resolveCreationModelRoute({
     opts: { ...opts, routingScope }, settings, driveMode, model: selectedModel, providerId: requestedProviderId
   }) : undefined
   const selectedProviderId = initialRoute?.providerId ?? requestedProviderId
-  const provider = explicitSessionProvider(selectedProviderId, selectedModel)
+  const provider = localPlanOnly ? undefined : explicitSessionProvider(selectedProviderId, selectedModel)
   const unassigned = sessionUnassigned(opts, resumeHistory, parentMeta)
   const domainOwnership = resolveSessionDomainOwnership(opts, resumeHistory, parentMeta, unassigned)
   const projectId = sessionProjectId(
@@ -77,8 +82,10 @@ export function prepareSessionCreationDraft(
   const baseMeta = createSessionDraftMeta({
     opts, resumeHistory, resumeWorktreeRecord, historyMode: historySource?.mode, driveMode, routingScope, projectId,
     ...domainOwnership, unassigned,
-    selectedModel, selectedProviderId, engine: resolveProviderEngine(provider),
-    taskStrategy: sessionTaskStrategy(opts, resumeHistory, parentMeta, settings, forking),
+    // The unrouted planning container initializes only local transcript state.
+    // Actual sends still have to acquire a valid Provider target at runtime.
+    selectedModel, selectedProviderId, engine: provider ? resolveProviderEngine(provider) : 'openai',
+    taskStrategy,
     defaultPermissionMode: drivePolicy.defaultPermissionMode
   })
   if (historySource?.mode === 'resume' && resumeHistory && resumeWorktreeRecord) {

@@ -101,12 +101,12 @@ const GOAL_PATCH_KEYS = new Set([
   'acceptanceResult', 'contract', 'createdBy'
 ])
 const WORK_ITEM_KEYS = new Set([
-  'id', 'projectId', 'goalId', 'parentId', 'businessLineId', 'type', 'title', 'description',
+  'id', 'projectId', 'goalId', 'parentId', 'businessLineId', 'type', 'role', 'title', 'description',
   'dependencyIds', 'priority', 'owner', 'status', 'dueAt', 'acceptanceSpec',
   'artifactRefs', 'runRefs', 'createdAt', 'updatedAt'
 ])
 const WORK_ITEM_PATCH_KEYS = new Set([
-  'title', 'description', 'type', 'parentId', 'dependencyIds', 'priority',
+  'title', 'description', 'type', 'role', 'parentId', 'dependencyIds', 'priority',
   'owner', 'dueAt', 'acceptanceSpec', 'artifactRefs', 'runRefs'
 ])
 const GOAL_TASK_KEYS = new Set(['requestId', 'projectId', 'objective', 'businessLineId'])

@@ -1,7 +1,7 @@
-import type { TaskPlanApprovalInput, TaskPlanDraftInput, TaskPlanGenerateInput } from '../../shared/types'
+import type { TaskPlanApprovalInput, TaskPlanDraftInput, TaskPlanGenerateInput, TaskPlanMissionCompileInput } from '../../shared/types'
 import { sessionManager } from '../sessionManager'
 
-type TaskPlanAction = 'strategy' | 'get' | 'generate' | 'create-version' | 'approve' | 'dispatch' | 'revoke'
+type TaskPlanAction = 'strategy' | 'get' | 'generate' | 'compile-mission' | 'create-version' | 'approve' | 'dispatch' | 'revoke'
 
 export function handleTaskPlanIpc(event: unknown, action: unknown, rawSessionId: unknown, payload: unknown) {
   if (!isTaskPlanAction(action)) throw new Error('任务计划操作无效')
@@ -10,6 +10,9 @@ export function handleTaskPlanIpc(event: unknown, action: unknown, rawSessionId:
   if (action === 'get') return sessionManager.getTaskPlan(sessionId)
   if (action === 'generate') {
     return sessionManager.generateTaskPlan(sessionId, payload as TaskPlanGenerateInput)
+  }
+  if (action === 'compile-mission') {
+    return sessionManager.compileMissionTaskPlan(sessionId, payload as TaskPlanMissionCompileInput)
   }
   if (action === 'create-version') {
     return sessionManager.createTaskPlanVersion(sessionId, payload as TaskPlanDraftInput)
@@ -35,6 +38,6 @@ function trustedActorId(event: unknown): string {
 }
 
 function isTaskPlanAction(value: unknown): value is TaskPlanAction {
-  return value === 'strategy' || value === 'get' || value === 'generate' || value === 'create-version' ||
+  return value === 'strategy' || value === 'get' || value === 'generate' || value === 'compile-mission' || value === 'create-version' ||
     value === 'approve' || value === 'dispatch' || value === 'revoke'
 }

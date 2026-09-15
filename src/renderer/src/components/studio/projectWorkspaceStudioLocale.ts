@@ -84,6 +84,7 @@ const ZH_TEXT = {
   constraints: '限制（每行一项）',
   successCriteria: '成功标准（每行一项）',
   acceptanceCriteria: '验收标准（每行一项）',
+  deliverables: '交付物（每行一项）',
   forbiddenActions: '禁止事项（每行一项）',
   risk: '风险等级',
   dueDate: '截止日期',

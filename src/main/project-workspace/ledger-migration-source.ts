@@ -184,6 +184,7 @@ export function buildProjectWorkspaceProjection(aggregate: WorkspaceAggregate): 
       parentId: source.parentId,
       businessLineId: source.businessLineId,
       type: source.type,
+      ...(source.role === undefined ? {} : { role: source.role }),
       title: source.title,
       description: source.description,
       status: source.status,

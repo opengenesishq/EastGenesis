@@ -1,7 +1,9 @@
 import type { Dispatch, SetStateAction } from 'react'
-import type { TaskPlanDraftInput, TaskPlanRiskLevel, TaskPlanVersion } from '../../../../shared/types'
+import type { TaskPlanDraftInput, TaskPlanRiskLevel, TaskPlanStepInput, TaskPlanVersion } from '../../../../shared/types'
 
-export interface StepForm {
+type StepContractFields = Pick<TaskPlanStepInput, 'role' | 'executionRole' | 'workItemType' | 'acceptanceSpec'>
+
+export interface StepForm extends StepContractFields {
   key: string
   id: string
   title: string
@@ -64,6 +66,7 @@ export function planFormFromVersion(version: TaskPlanVersion): PlanForm {
       id: step.id,
       title: step.title,
       description: step.description,
+      ...copyStepContractFields(step),
       dependsOn: step.dependsOn.join('\n'),
       expectedArtifacts: step.expectedArtifacts.join('\n'),
       dataEgress: step.dataEgress.join('\n'),
@@ -86,6 +89,7 @@ export function taskPlanDraftFromForm(form: PlanForm): TaskPlanDraftInput {
       id: step.id,
       title: step.title,
       description: step.description,
+      ...copyStepContractFields(step),
       dependsOn: lineList(step.dependsOn),
       expectedArtifacts: lineList(step.expectedArtifacts),
       dataEgress: lineList(step.dataEgress),
@@ -98,6 +102,18 @@ export function taskPlanDraftFromForm(form: PlanForm): TaskPlanDraftInput {
     riskLevel: form.riskLevel,
     acceptanceCriteria: lineList(form.acceptanceCriteria),
     changeReason: form.changeReason
+  }
+}
+
+// Keep structured fields on their own row, including when users reorder,
+// remove or rename steps. Clone acceptance entries so editing a form or draft
+// cannot mutate the stored version or another conversion's result.
+function copyStepContractFields(step: StepContractFields): StepContractFields {
+  return {
+    ...(step.role === undefined ? {} : { role: step.role }),
+    ...(step.executionRole === undefined ? {} : { executionRole: step.executionRole }),
+    ...(step.workItemType === undefined ? {} : { workItemType: step.workItemType }),
+    ...(step.acceptanceSpec === undefined ? {} : { acceptanceSpec: step.acceptanceSpec.map((entry) => ({ ...entry })) })
   }
 }
 

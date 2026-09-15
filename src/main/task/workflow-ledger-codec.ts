@@ -50,6 +50,7 @@ const WORKFLOW_EVENT_KINDS = new Set([
   'artifact.created',
   'acceptance.created',
   'acceptance.updated',
+  'acceptance.invalidated_by_change',
   'evidence.linked'
 ])
 

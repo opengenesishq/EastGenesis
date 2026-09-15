@@ -1,3 +1,6 @@
+import type { AcceptanceSpec, WorkItemType } from './project-workspace-types'
+import type { TaskDagRole } from './types'
+
 export const TASK_PLAN_SCHEMA_VERSION = 1 as const
 
 export type TaskStrategy = 'view' | 'plan' | 'execute'
@@ -14,6 +17,11 @@ export interface TaskPlanStepInput {
   dataEgress?: string[]
   estimatedCostUsd?: number | null
   riskLevel?: TaskPlanRiskLevel
+  /** Stable work role and runtime role are separate from user-editable prose. */
+  role?: string
+  executionRole?: TaskDagRole
+  workItemType?: WorkItemType
+  acceptanceSpec?: AcceptanceSpec[]
 }
 
 export interface TaskPlanDraftInput {
@@ -26,6 +34,18 @@ export interface TaskPlanDraftInput {
   acceptanceCriteria: string[]
   changeReason?: string
   source?: TaskPlanSource
+  /** Host-derived canonical inputs. Included in the plan digest when present. */
+  missionSource?: TaskPlanMissionSource
+}
+
+export interface TaskPlanMissionSource {
+  goalRevision: number
+  inputDigest: string
+  missionDigest: string
+}
+
+export interface TaskPlanMissionCompileInput {
+  expectedGoalRevision: number
 }
 
 export interface TaskPlanSessionBinding {
@@ -44,6 +64,10 @@ export interface TaskPlanStep {
   dataEgress: string[]
   estimatedCostUsd: number | null
   riskLevel: TaskPlanRiskLevel
+  role?: string
+  executionRole?: TaskDagRole
+  workItemType?: WorkItemType
+  acceptanceSpec?: AcceptanceSpec[]
 }
 
 export interface TaskPlanVersion {
@@ -61,6 +85,7 @@ export interface TaskPlanVersion {
   acceptanceCriteria: string[]
   changeReason: string
   source: TaskPlanSource
+  missionSource?: TaskPlanMissionSource
   createdBy: 'local-user' | 'agent'
   createdAt: number
 }
@@ -135,6 +160,7 @@ export interface TaskPlanApi {
   setTaskStrategy(sessionId: string, strategy: TaskStrategy): Promise<void>
   getTaskPlan(sessionId: string): Promise<TaskPlanStateView>
   generateTaskPlan(sessionId: string, input: TaskPlanGenerateInput): Promise<TaskPlanStateView>
+  compileMissionTaskPlan(sessionId: string, input: TaskPlanMissionCompileInput): Promise<TaskPlanStateView>
   createTaskPlanVersion(sessionId: string, draft: TaskPlanDraftInput): Promise<TaskPlanStateView>
   approveTaskPlan(sessionId: string, input: TaskPlanApprovalInput): Promise<TaskPlanStateView>
   dispatchApprovedTaskPlan(sessionId: string, input: TaskPlanApprovalInput): Promise<TaskPlanDispatchResult>

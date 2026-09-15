@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "revision": 2,
+  "sessions": {
+    "legacy-role-compat": {
+      "sessionId": "legacy-role-compat",
+      "versions": [
+        {
+          "schemaVersion": 1,
+          "id": "973316b7-2f2d-4628-9735-7149b90e7274",
+          "binding": {
+            "sessionId": "legacy-role-compat"
+          },
+          "version": 1,
+          "digest": "sha256:e10bd6c165a4ff2099d1efecb689603150f9f2de61b81f4266d61d53774fc0c9",
+          "objective": "Legacy approved plan",
+          "steps": [
+            {
+              "id": "legacy-qa",
+              "title": "QA test report",
+              "description": "Verify existing behavior",
+              "dependsOn": [],
+              "expectedArtifacts": [
+                "report"
+              ],
+              "dataEgress": [],
+              "estimatedCostUsd": null,
+              "riskLevel": "medium"
+            }
+          ],
+          "expectedArtifacts": [
+            "report"
+          ],
+          "dataEgress": [],
+          "estimatedCostUsd": null,
+          "riskLevel": "medium",
+          "acceptanceCriteria": [
+            "Review the report"
+          ],
+          "changeReason": "",
+          "source": "manual",
+          "createdBy": "local-user",
+          "createdAt": 1700000000000
+        }
+      ],
+      "approvalEvents": [
+        {
+          "schemaVersion": 1,
+          "id": "e0488721-3567-403a-8116-46e95815a0d1",
+          "sessionId": "legacy-role-compat",
+          "kind": "approved",
+          "version": 1,
+          "digest": "sha256:e10bd6c165a4ff2099d1efecb689603150f9f2de61b81f4266d61d53774fc0c9",
+          "actor": "local-user",
+          "actorId": "local-user",
+          "projection": {
+            "schemaVersion": 1,
+            "mode": "conversation",
+            "steps": [],
+            "projectedAt": 1700000000000
+          },
+          "occurredAt": 1700000000000
+        }
+      ]
+    }
+  }
+}

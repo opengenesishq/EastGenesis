@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { Download, FileCheck2, FileJson, GitCompareArrows, KeyRound, RotateCw, Save, ShieldCheck, ShieldOff, Upload, UserCheck, X } from 'lucide-react'
 import type {
   WorkflowAcceptanceRecord,
@@ -23,12 +23,15 @@ import {
 interface ProjectDeliveryWorkbenchProps {
   active: boolean
   projectId: string
+  /** Optional canonical WorkItem carried by a Work Inbox delivery handoff. */
+  requestedWorkItemId?: string
   refreshToken?: string
 }
 
 export function ProjectDeliveryWorkbench({
   active,
   projectId,
+  requestedWorkItemId,
   refreshToken = ''
 }: ProjectDeliveryWorkbenchProps): React.JSX.Element {
   useStore((state) => state.settings.language)
@@ -62,6 +65,22 @@ export function ProjectDeliveryWorkbench({
   useEffect(() => {
     if (active) void refresh()
   }, [active, refresh, refreshToken])
+
+  useLayoutEffect(() => {
+    if (!requestedWorkItemId || !projection) return
+    const targets = document.querySelectorAll<HTMLElement>(`[data-delivery-work-item-id="${CSS.escape(requestedWorkItemId)}"]`)
+    // A duplicated Acceptance identity is ambiguous; do not focus a guessed row.
+    if (targets.length !== 1) return
+    const target = targets[0]
+    target.dataset.deliveryNavigationTarget = 'true'
+    target.tabIndex = -1
+    target.focus({ preventScroll: true })
+    target.scrollIntoView({ block: 'center', inline: 'nearest' })
+    const timer = window.setTimeout(() => {
+      if (target.isConnected) delete target.dataset.deliveryNavigationTarget
+    }, 2_000)
+    return () => window.clearTimeout(timer)
+  }, [projection, requestedWorkItemId])
 
   const evidenceById = useMemo(
     () => new Map((projection?.evidence ?? []).map((record) => [record.evidenceId, record])),
@@ -163,7 +182,7 @@ export function ProjectDeliveryWorkbench({
   }, [])
 
   return (
-    <section className="pws-section pws-delivery-workbench" aria-labelledby={`delivery-${projectId}`} data-project-delivery-workbench>
+    <section className="pws-section pws-delivery-workbench" aria-labelledby={`delivery-${projectId}`} data-project-delivery-workbench data-delivery-requested-work-item={requestedWorkItemId ?? ''}>
       <div className="pws-section-header">
         <div className="pws-section-title">
           <h2 id={`delivery-${projectId}`}>{localized('交付与验收', 'Delivery and acceptance')}</h2>
@@ -233,7 +252,7 @@ export function ProjectDeliveryWorkbench({
               <section className="pws-delivery-subsection" aria-labelledby={`acceptance-${projectId}`}>
                 <h3 id={`acceptance-${projectId}`}>{localized('验收清单', 'Acceptance checklist')}</h3>
                 {projection.acceptances.length === 0 ? <p className="pws-delivery-empty">{localized('暂无 Acceptance', 'No Acceptance records')}</p> : projection.acceptances.map((acceptance) => (
-                  <div className="pws-delivery-acceptance" key={acceptance.id}>
+                  <div className="pws-delivery-acceptance" key={acceptance.id} data-delivery-work-item-id={acceptance.workItemId ?? ''}>
                     <WorkflowAcceptanceRow
                       acceptance={acceptance}
                       evidence={projection.evidence}

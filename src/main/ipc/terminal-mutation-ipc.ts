@@ -10,7 +10,7 @@ import {
 import { executeInteractiveOperationEffect } from '../task/operation-effect-gateway'
 
 export interface TerminalMutationIpcDependencies {
-  assertExecutionAuthorized(id: string, action: string): void
+  assertExecutionAuthorized(id: string, action: string): void | Promise<void>
   getSessionMeta(id: string): SessionMeta | undefined
   manager: TerminalEffectManager
 }
@@ -18,10 +18,10 @@ export interface TerminalMutationIpcDependencies {
 export function registerTerminalMutationIpc(dependencies: TerminalMutationIpcDependencies): void {
   ipcMain.handle(
     'terminals:start',
-    (_event, id: string, options?: { cols?: number; rows?: number; reuse?: boolean }) => {
+    async (_event, id: string, options?: { cols?: number; rows?: number; reuse?: boolean }) => {
       const session = dependencies.getSessionMeta(id)
       if (!session) return { ok: false, error: '会话不存在' }
-      dependencies.assertExecutionAuthorized(session.id, '启动终端')
+      await dependencies.assertExecutionAuthorized(session.id, '启动终端')
       return startTerminalWithEffect({
         sourceSessionId: session.id,
         projectId: session.projectId,
@@ -34,8 +34,8 @@ export function registerTerminalMutationIpc(dependencies: TerminalMutationIpcDep
     }
   )
 
-  ipcMain.handle('terminals:write', (_event, id: string, data: string) => {
-    authorizeExistingTerminalMutation(dependencies, id, '向终端写入输入')
+  ipcMain.handle('terminals:write', async (_event, id: string, data: string) => {
+    await authorizeExistingTerminalMutation(dependencies, id, '向终端写入输入')
     return writeTerminalWithEffect(
       dependencies.manager,
       id,
@@ -44,8 +44,8 @@ export function registerTerminalMutationIpc(dependencies: TerminalMutationIpcDep
     )
   })
 
-  ipcMain.handle('terminals:resize', (_event, id: string, cols: number, rows: number) => {
-    authorizeExistingTerminalMutation(dependencies, id, '调整终端尺寸')
+  ipcMain.handle('terminals:resize', async (_event, id: string, cols: number, rows: number) => {
+    await authorizeExistingTerminalMutation(dependencies, id, '调整终端尺寸')
     return resizeTerminalWithEffect(
       dependencies.manager,
       id,
@@ -55,17 +55,17 @@ export function registerTerminalMutationIpc(dependencies: TerminalMutationIpcDep
     )
   })
 
-  ipcMain.handle('terminals:close', (_event, id: string) => {
-    authorizeExistingTerminalMutation(dependencies, id, '关闭终端')
+  ipcMain.handle('terminals:close', async (_event, id: string) => {
+    await authorizeExistingTerminalMutation(dependencies, id, '关闭终端')
     return closeTerminalWithEffect(dependencies.manager, id, executeInteractiveOperationEffect)
   })
 }
 
-function authorizeExistingTerminalMutation(
+async function authorizeExistingTerminalMutation(
   dependencies: TerminalMutationIpcDependencies,
   terminalId: string,
   action: string
-): void {
+): Promise<void> {
   const sourceSessionId = dependencies.manager.get(terminalId)?.sessionId
-  if (sourceSessionId) dependencies.assertExecutionAuthorized(sourceSessionId, action)
+  if (sourceSessionId) await dependencies.assertExecutionAuthorized(sourceSessionId, action)
 }

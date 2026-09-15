@@ -14,6 +14,7 @@ import {
   linkWorkflowEvidence,
   projectGoal,
   projectWorkflowAcceptance,
+  invalidateWorkflowAcceptanceForChange,
   projectWorkItem,
   registerWorkflowArtifact,
   selectWorkflowLedger,
@@ -81,6 +82,7 @@ import {
   verifyWorkflowEvidence as verifyWorkflowEvidenceRecords
 } from './workflow-evidence-store'
 import {
+  findEventById,
   readAcceptances,
   readAndVerifyEvents,
   readArtifacts,
@@ -88,9 +90,16 @@ import {
 } from './workflow-ledger-query'
 import { assertWorkflowEvidenceEventCoverage } from './workflow-evidence-event-coverage'
 import {
+  readArtifactEdges,
   readArtifactLocations,
   verifyWorkflowArtifactGraph as verifyWorkflowArtifactGraphInDatabase
 } from './workflow-ledger-artifact-graph-query'
+import {
+  applyWorkflowAcceptanceRechecks,
+  buildWorkflowChangeImpactPlan,
+  type WorkflowChangeImpactInput,
+  type WorkflowChangeImpactPlan
+} from './workflow-change-impact'
 import {
   toWorkflowAcceptanceError,
   WorkflowAcceptanceGateError,
@@ -100,6 +109,80 @@ import { workflowArtifactAcceptanceIdentities } from './workflow-artifact-accept
 import { currentArtifactLineageLeafIdsByArtifact } from './artifact-lineage'
 
 export type WorkflowLedgerWriteOptions = WorkflowAcceptanceGateOptions
+
+export interface WorkflowChangeImpactCommitResult {
+  plan: WorkflowChangeImpactPlan
+  planEventId: string
+  acceptances: WorkflowAcceptanceRecord[]
+}
+
+/**
+ * Persist a prepared change impact plan and fence every affected Acceptance
+ * revision in one mutation-queue transaction. The plan itself is recorded
+ * as a system event; Acceptance writes use the dedicated invalidation API so
+ * the ordinary Acceptance state machine remains closed to regressions.
+ */
+export async function commitWorkflowChangeImpactPlan(
+  plan: WorkflowChangeImpactPlan,
+  rootDir?: string,
+  now = Date.now()
+): Promise<WorkflowChangeImpactCommitResult> {
+  if (!Number.isFinite(now)) throw new Error('change impact commit time must be finite')
+  return mutateTaskSnapshotDatabase(rootDir, (db) => commitWorkflowChangeImpactPlanInDatabase(db, plan, now))
+}
+
+function commitWorkflowChangeImpactPlanInDatabase(
+  db: Parameters<typeof setupWorkflowLedgerSchema>[0],
+  plan: WorkflowChangeImpactPlan,
+  now: number
+): WorkflowChangeImpactCommitResult {
+  const { planDigest, ...unsignedPlan } = plan
+  if (digest(unsignedPlan) !== planDigest) throw new Error('change impact plan digest is invalid')
+  setupWorkflowLedgerSchema(db)
+  const planEventId = `workflow:change-impact:${plan.planDigest}`
+  const existingPlanEvent = findEventById(db, planEventId)
+  if (existingPlanEvent) {
+    if (existingPlanEvent.kind !== 'workflow.change-impact.plan.created' || digest(existingPlanEvent.payload) !== digest(plan)) {
+      throw new Error(`change impact plan event ${planEventId} is immutable and conflicting`)
+    }
+    const replayAcceptances: WorkflowAcceptanceRecord[] = []
+    for (const recheck of plan.acceptanceRechecks) {
+      const acceptance = findWorkflowAcceptance(db, recheck.acceptanceId)
+      if (!acceptance) throw new Error(`change impact replay references missing acceptance ${recheck.acceptanceId}`)
+      if (acceptance.status !== recheck.nextStatus || acceptance.revision !== recheck.nextRevision) {
+        throw new Error(`acceptance ${acceptance.id} is inconsistent with committed change impact ${plan.planDigest}`)
+      }
+      replayAcceptances.push(acceptance)
+    }
+    return {
+      plan,
+      planEventId,
+      acceptances: replayAcceptances
+    }
+  }
+  appendWorkflowEvent(db, {
+    eventId: planEventId,
+    streamId: plan.projectId ? `project:${plan.projectId}` : `change-impact:${plan.planDigest}`,
+    entityType: 'system',
+    entityId: planEventId,
+    kind: 'workflow.change-impact.plan.created',
+    payload: { ...plan },
+    occurredAt: now,
+    correlationId: plan.projectId ?? plan.planDigest
+  }, plan.projectId ? { projectId: plan.projectId } : {})
+  const persisted: WorkflowAcceptanceRecord[] = []
+  for (const recheck of plan.acceptanceRechecks) {
+    const current = findWorkflowAcceptance(db, recheck.acceptanceId)
+    if (!current) throw new Error(`change impact plan references missing acceptance ${recheck.acceptanceId}`)
+    if (current.status !== recheck.previousStatus || current.revision !== recheck.previousRevision) {
+      throw new Error(`acceptance ${current.id} changed after impact plan`)
+    }
+    const [reset] = applyWorkflowAcceptanceRechecks([current], plan, now)
+    const updated = invalidateWorkflowAcceptanceForChange(db, reset, { caller: 'system', actorId: 'workflow-change-impact' })
+    persisted.push(updated)
+  }
+  return { plan, planEventId, acceptances: persisted }
+}
 
 // Keep the persisted/read-only names available from the main API facade for
 // maintenance callers that do not use the renderer-facing aliases below.
@@ -630,6 +713,45 @@ export async function saveWorkflowAcceptance(
       actorId: options.actorId
     })
   }
+}
+
+export interface ApplyPersistedWorkflowChangeImpactInput extends Pick<WorkflowChangeImpactInput, 'changedArtifactIds' | 'protectedArtifactIds' | 'manuallyModifiedArtifactIds'> {
+  projectId?: string
+  rootDir?: string
+  now?: number
+}
+
+/**
+ * Compute and persist a change-impact invalidation in one task database
+ * mutation. The planner remains pure, while this facade owns the atomic
+ * Workflow Ledger write of every affected Acceptance revision.
+ */
+export async function applyPersistedWorkflowChangeImpact(
+  input: ApplyPersistedWorkflowChangeImpactInput
+): Promise<{ plan: WorkflowChangeImpactPlan; acceptances: WorkflowAcceptanceRecord[] }> {
+  return mutateTaskSnapshotDatabase(input.rootDir, (db) => {
+    setupWorkflowLedgerSchema(db)
+    setupWorkflowEvidenceSchema(db)
+    verifyWorkflowArtifactGraphInDatabase(db)
+    const projectId = input.projectId?.trim() || undefined
+    const artifacts = readArtifacts(db).filter((record) => !projectId || record.projectId === projectId)
+    const edges = readArtifactEdges(db).filter((record) => !projectId || record.projectId === projectId)
+    const acceptances = readAcceptances(db).filter((record) => !projectId || record.projectId === projectId)
+    const evidenceLinks = readEvidenceLinks(db).filter((record) => !projectId || record.projectId === projectId)
+    const plan = buildWorkflowChangeImpactPlan({
+      projectId,
+      changedArtifactIds: input.changedArtifactIds,
+      protectedArtifactIds: input.protectedArtifactIds,
+      manuallyModifiedArtifactIds: input.manuallyModifiedArtifactIds,
+      artifacts,
+      edges,
+      acceptances,
+      evidenceLinks
+    })
+    const committed = commitWorkflowChangeImpactPlanInDatabase(db, plan, input.now ?? Date.now())
+    const persistedById = new Map(committed.acceptances.map((acceptance) => [acceptance.id, acceptance]))
+    return { plan, acceptances: acceptances.map((acceptance) => persistedById.get(acceptance.id) ?? acceptance) }
+  })
 }
 
 export async function createWorkflowEvidenceLink(

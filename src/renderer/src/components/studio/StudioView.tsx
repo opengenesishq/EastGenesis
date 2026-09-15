@@ -6,8 +6,13 @@ import { TEXT } from './projectWorkspaceStudioModel'
 import { useStore } from '../../store'
 import './studio-view.css'
 import { PROJECT_WORKSPACE_NAVIGATION_EVENT, takeProjectWorkspaceNavigation, type ProjectWorkspaceFocus } from './projectWorkspaceNavigation'
+import WorkInbox from './WorkInbox'
+import PalaceSceneBuilder from './PalaceSceneBuilder'
+import GoldenTasksPanel from './GoldenTasksPanel'
+import WorkOsRunReviewPanel from './WorkOsRunReviewPanel'
+import { STUDIO_SECTION_NAVIGATION_EVENT, takeStudioSectionNavigation, type StudioSectionTarget } from '../work-os-navigation'
 
-type StudioSection = 'work' | 'team'
+type StudioSection = 'inbox' | 'work' | 'team' | 'builder' | 'golden-tasks' | 'runs' | 'review'
 
 const EMPTY_CONTEXT: ProjectWorkspaceStudioContext = {
   project: null,
@@ -22,7 +27,10 @@ function StudioView({ active = true }: { active?: boolean }): React.JSX.Element 
   const initialProjectId = useStore((state) => state.preferredProjectWorkspaceId) ?? undefined
   const [workspaceNavigation, setWorkspaceNavigation] = useState<{ projectId: string; focus: ProjectWorkspaceFocus; workItemId?: string } | null>(null)
   const newProjectRequest = useStore((state) => state.studioNewProjectNonce)
-  const [section, setSection] = useState<StudioSection>('work')
+  // 0913: the first Studio surface is the unified Work Inbox. Project and
+  // team surfaces remain one click away and explicit project navigation still
+  // switches to the requested work item.
+  const [section, setSection] = useState<StudioSection>('inbox')
   const [context, setContext] = useState<ProjectWorkspaceStudioContext>(EMPTY_CONTEXT)
   const [workspaceActivated, setWorkspaceActivated] = useState(false)
 
@@ -55,8 +63,29 @@ function StudioView({ active = true }: { active?: boolean }): React.JSX.Element 
   useEffect(() => {
     if (!initialProjectId) return
     const next = takeProjectWorkspaceNavigation(initialProjectId)
-    if (next) setWorkspaceNavigation(next)
+    if (next) {
+      setWorkspaceNavigation(next)
+      setSection('work')
+    }
   }, [initialProjectId])
+  useEffect(() => {
+    const applySection = (target: StudioSectionTarget): void => {
+      setSection(target === 'inbox' ? 'inbox' : target === 'work' ? 'work' : target === 'runs' ? 'runs' : target === 'review' ? 'review' : 'team')
+    }
+    const onNavigation = (event: Event): void => {
+      const target = (event as CustomEvent<StudioSectionTarget>).detail
+      if (target === 'inbox' || target === 'work' || target === 'team' || target === 'runs' || target === 'review') {
+        // Consume the queued value as soon as a mounted Studio receives it;
+        // otherwise a later lazy remount could replay an old route.
+        takeStudioSectionNavigation()
+        applySection(target)
+      }
+    }
+    const pendingSection = takeStudioSectionNavigation()
+    if (pendingSection) applySection(pendingSection)
+    window.addEventListener(STUDIO_SECTION_NAVIGATION_EVENT, onNavigation)
+    return () => window.removeEventListener(STUDIO_SECTION_NAVIGATION_EVENT, onNavigation)
+  }, [])
 
   const project = context.project
   const projects = useMemo(() => project ? [{ id: project.id, name: project.name }] : [], [project])
@@ -67,6 +96,17 @@ function StudioView({ active = true }: { active?: boolean }): React.JSX.Element 
         aria-label={language === 'zh' ? '工作区表面' : 'Studio surfaces'}
         role="tablist"
       >
+        <button
+          type="button"
+          className={section === 'inbox' ? 'active' : ''}
+          aria-selected={section === 'inbox'}
+          aria-pressed={section === 'inbox'}
+          data-studio-section-option="inbox"
+          role="tab"
+          onClick={() => setSection('inbox')}
+        >
+          {language === 'zh' ? '工作收件箱' : 'Work Inbox'}
+        </button>
         <button
           type="button"
           className={section === 'work' ? 'active' : ''}
@@ -89,6 +129,50 @@ function StudioView({ active = true }: { active?: boolean }): React.JSX.Element 
         >
           {TEXT.digitalTeamSection}
         </button>
+        <button
+          type="button"
+          className={section === 'builder' ? 'active' : ''}
+          aria-selected={section === 'builder'}
+          aria-pressed={section === 'builder'}
+          data-studio-section-option="builder"
+          role="tab"
+          onClick={() => setSection('builder')}
+        >
+          {language === 'zh' ? '宫苑场景' : 'PalaceScene'}
+        </button>
+        <button
+          type="button"
+          className={section === 'runs' ? 'active' : ''}
+          aria-selected={section === 'runs'}
+          aria-pressed={section === 'runs'}
+          data-studio-section-option="runs"
+          role="tab"
+          onClick={() => setSection('runs')}
+        >
+          {language === 'zh' ? '运行' : 'Runs'}
+        </button>
+        <button
+          type="button"
+          className={section === 'review' ? 'active' : ''}
+          aria-selected={section === 'review'}
+          aria-pressed={section === 'review'}
+          data-studio-section-option="review"
+          role="tab"
+          onClick={() => setSection('review')}
+        >
+          {language === 'zh' ? '审查' : 'Review'}
+        </button>
+        <button
+          type="button"
+          className={section === 'golden-tasks' ? 'active' : ''}
+          aria-selected={section === 'golden-tasks'}
+          aria-pressed={section === 'golden-tasks'}
+          data-studio-section-option="golden-tasks"
+          role="tab"
+          onClick={() => setSection('golden-tasks')}
+        >
+          {language === 'zh' ? '黄金任务' : 'Golden Tasks'}
+        </button>
       </nav>
       <p className="studio-section-description">
         {language === 'zh'
@@ -96,6 +180,9 @@ function StudioView({ active = true }: { active?: boolean }): React.JSX.Element 
           : 'Start ordinary tasks directly. Arrange a team when independent work benefits from parallel execution.'}
       </p>
 
+      <div className="studio-section" hidden={section !== 'inbox'} aria-hidden={section !== 'inbox'}>
+        {section === 'inbox' && <WorkInbox active={active} />}
+      </div>
       <div className="studio-section" hidden={section !== 'work'} aria-hidden={section !== 'work'}>
         <ProjectWorkspaceStudio
           active={workspaceActivated}
@@ -114,6 +201,18 @@ function StudioView({ active = true }: { active?: boolean }): React.JSX.Element 
           workItems={context.workItems}
           assignedBy="user"
         /></Suspense>}
+      </div>
+      <div className="studio-section" hidden={section !== 'builder'} aria-hidden={section !== 'builder'}>
+        {section === 'builder' && <PalaceSceneBuilder active={active && section === 'builder'} />}
+      </div>
+      <div className="studio-section" hidden={section !== 'golden-tasks'} aria-hidden={section !== 'golden-tasks'}>
+        {section === 'golden-tasks' && <GoldenTasksPanel active={active && section === 'golden-tasks'} />}
+      </div>
+      <div className="studio-section" hidden={section !== 'runs'} aria-hidden={section !== 'runs'}>
+        {section === 'runs' && <WorkOsRunReviewPanel active={active && section === 'runs'} view="runs" />}
+      </div>
+      <div className="studio-section" hidden={section !== 'review'} aria-hidden={section !== 'review'}>
+        {section === 'review' && <WorkOsRunReviewPanel active={active && section === 'review'} view="review" />}
       </div>
     </div>
   )

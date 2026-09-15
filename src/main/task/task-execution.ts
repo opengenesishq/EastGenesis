@@ -224,7 +224,8 @@ export function reduceTaskExecutionEvent(
 
 export function recoverTaskExecutionState(current: TaskRunRecord, now = Date.now()): TaskRunRecord {
   const steps = (current.steps ?? []).map((step) =>
-    TERMINAL_STEP_STATUSES.has(step.status)
+    TERMINAL_STEP_STATUSES.has(step.status) ||
+    (step.status === 'recovering' && step.pendingPermissionRequestId === undefined)
       ? step
       : {
           ...step,

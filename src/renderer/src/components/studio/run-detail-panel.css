@@ -1,0 +1,129 @@
+.run-detail-panel {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--border-color, rgba(127, 127, 127, 0.24));
+  border-radius: 14px;
+  background: var(--surface-primary, rgba(255, 255, 255, 0.72));
+}
+
+.run-detail-header,
+.run-detail-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.run-detail-kicker,
+.run-detail-identity,
+.run-detail-muted,
+.run-detail-evidence small {
+  color: var(--text-secondary, #707070);
+  font-size: 12px;
+}
+
+.run-detail-header h2,
+.run-detail-card h3 {
+  margin: 4px 0;
+}
+
+.run-detail-identity {
+  display: block;
+}
+
+.run-detail-status,
+.run-detail-card-heading > span {
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: var(--surface-secondary, rgba(127, 127, 127, 0.12));
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.run-detail-nav {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid var(--border-color, rgba(127, 127, 127, 0.18));
+  padding-bottom: 8px;
+}
+
+.run-detail-nav button {
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.run-detail-nav button:disabled {
+  cursor: default;
+}
+
+.run-detail-nav button.run-detail-nav-active {
+  background: var(--surface-secondary, rgba(127, 127, 127, 0.14));
+  font-weight: 600;
+}
+
+.run-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.run-detail-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border-color, rgba(127, 127, 127, 0.18));
+  border-radius: 10px;
+}
+
+.run-detail-card dl {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.run-detail-card dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.run-detail-card dt {
+  color: var(--text-secondary, #707070);
+}
+
+.run-detail-card dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.run-detail-criteria,
+.run-detail-evidence ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
+.run-detail-blocker {
+  color: var(--status-danger, #b42318);
+  font-size: 13px;
+}
+
+.run-detail-evidence {
+  margin-top: 12px;
+  border-top: 1px solid var(--border-color, rgba(127, 127, 127, 0.14));
+  padding-top: 10px;
+}
+
+.run-detail-panel-empty {
+  color: var(--text-secondary, #707070);
+}
+
+@media (max-width: 860px) {
+  .run-detail-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -323,22 +323,25 @@ export function useProjectGoalTaskStart(refreshContents: () => Promise<void>): {
   busy: boolean
   error: string
   announcement: string
-  start: (projectId: string, objective: string) => Promise<boolean>
+  planSessionId: string | null
+  planProjectId: string | null
+  start: (projectId: string, objective: string, template?: 'auto' | 'product-launch') => Promise<boolean>
 } {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [announcement, setAnnouncement] = useState('')
+  const [compiledPlan, setCompiledPlan] = useState<{ sessionId: string; projectId: string } | null>(null)
   const locked = useRef(false)
   const retry = useRef<{ key: string; requestId: string; sessionId?: string } | null>(null)
 
-  const start = useCallback(async (projectId: string, rawObjective: string): Promise<boolean> => {
+  const start = useCallback(async (projectId: string, rawObjective: string, template: 'auto' | 'product-launch' = 'auto'): Promise<boolean> => {
     const objective = rawObjective.trim()
     if (!objective || locked.current) return false
     locked.current = true
     setBusy(true)
     setError('')
     setAnnouncement('')
-    const key = `${projectId}\0${objective}`
+    const key = `${projectId}\0${template}\0${objective}`
     if (retry.current?.key !== key) retry.current = { key, requestId: newGoalTaskRequestId() }
     try {
       const result = await window.agentDesk.createProjectGoalTask({
@@ -352,6 +355,7 @@ export function useProjectGoalTaskStart(refreshContents: () => Promise<void>): {
           workspaceId: projectId,
           goalId: result.goal.id,
           workItemId: result.workItem.id,
+          businessLineId: result.workItem.businessLineId,
           model: AUTO_MODEL,
           providerId: AUTO_PROVIDER_ID,
           routingScope: 'global',
@@ -361,8 +365,12 @@ export function useProjectGoalTaskStart(refreshContents: () => Promise<void>): {
         })
       retry.current.sessionId = sessionId
       useStore.getState().selectSession(sessionId)
-      const plan = await useStore.getState().generateTaskPlan(sessionId, { objective })
-      if (!plan?.currentVersion) throw new Error('工作流草案未生成，任务与会话已保留，可重试')
+      const plan = template === 'product-launch'
+        ? await useStore.getState().compileMissionTaskPlan(sessionId, { expectedGoalRevision: result.goal.revision })
+        : await useStore.getState().generateTaskPlan(sessionId, { objective })
+      if (!plan?.currentVersion) throw new Error(useStore.getState().taskPlanErrors[sessionId] || '工作流草案未生成，任务与会话已保留，可重试')
+      setCompiledPlan({ sessionId, projectId })
+      useStore.getState().openProjectWorkspace(projectId)
       retry.current = null
       setAnnouncement(TEXT.goalTaskStarted)
       return true
@@ -375,7 +383,7 @@ export function useProjectGoalTaskStart(refreshContents: () => Promise<void>): {
     }
   }, [refreshContents])
 
-  return { busy, error, announcement, start }
+  return { busy, error, announcement, planSessionId: compiledPlan?.sessionId ?? null, planProjectId: compiledPlan?.projectId ?? null, start }
 }
 
 function newGoalTaskRequestId(): string {

@@ -54,6 +54,15 @@ async function executeRemoteCommandOnce(rootDir: string, commandId: string): Pro
     if (!routine || routine.projectId !== claimed.envelope.scope.projectId) {
       return store.finishCommandExecution(commandId, { status: 'failed', error: 'Remote Routine is not available in the bound Project' })
     }
+    // A remote signed command is not an approval. Routines configured to bypass
+    // native permission checks must therefore fail closed on this control plane;
+    // they can only be started through the local approval-aware workbench.
+    if (routine.permissionMode === 'bypassPermissions') {
+      return store.finishCommandExecution(commandId, {
+        status: 'failed',
+        error: 'Remote routine requires local approval; bypassPermissions is not executable remotely'
+      })
+    }
     const run = await executeRoutine(join(rootDir, 'routines'), routine, {
       sendDelayMs: 0,
       workspaceRoot: rootDir,

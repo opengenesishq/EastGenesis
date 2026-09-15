@@ -53,6 +53,8 @@ import { useOfficeOperations } from './useOfficeOperations'
 import OfficeCommandStrip from './OfficeCommandStrip'
 import OfficeCommandPanel from './OfficeCommandPanel'
 import OfficeArchivePanel from './OfficeArchivePanel'
+import OfficeRoleWorkItems from './OfficeRoleWorkItems'
+import { openOfficeWorkItem } from './officeWorkItemNavigation'
 import OfficeOperationNotice from './OfficeOperationNotice'
 import { vendorKeyFor } from './kit/VendorSkins'
 import { buildOfficeModel, officeActivityForSessionId } from './model'
@@ -553,11 +555,11 @@ export default function OfficeView(): React.JSX.Element {
     selectCommandHall()
     setCouncilSummoned(true)
     setSelectedCommandStation('command_desk')
-    setCouncilReceipt(settings.language === 'zh' ? '已召集太子、内阁、东西厂与六部。选取职责查看相关事项，再从御案交办。' : 'Council convened. Select a responsibility to inspect work, then use the command desk to delegate.')
+    setCouncilReceipt(settings.language === 'zh' ? '已打开职责概览。选择角色查看现有任务；此操作不会发起智能体议事。' : 'Responsibility overview opened. Select a role to inspect existing tasks; this does not start an agent discussion.')
   }
   const dismissCouncil = (): void => {
     setCouncilSummoned(false)
-    setCouncilReceipt(settings.language === 'zh' ? '已散朝，工作继续。' : 'Council dismissed. Work continues.')
+    setCouncilReceipt(settings.language === 'zh' ? '已关闭职责概览。' : 'Responsibility overview closed.')
   }
   const focus = (id: string): void => {
     saveOfficeReturnContext({ businessView, selectedFacility })
@@ -1086,6 +1088,10 @@ export default function OfficeView(): React.JSX.Element {
             <button className="office-camera-button" data-office-command-hall onClick={selectCommandHall}>
               {settings.language === 'zh' ? '议政殿' : 'Council hall'}
             </button>
+            <button className="office-camera-button" data-office-role-coordination
+              aria-pressed={selectedSystemRole === 'taizi'} onClick={() => selectSystemRole('taizi')}>
+              {settings.language === 'zh' ? '协调事项' : 'Coordination'}
+            </button>
             <button className={`office-camera-button ${palaceCutaway ? 'active' : ''}`}
               data-office-palace-roof-toggle aria-pressed={palaceCutaway}
               onClick={() => setPalaceCutaway((value) => !value)}>
@@ -1153,8 +1159,8 @@ export default function OfficeView(): React.JSX.Element {
               <div className="office-signal-list">{station.capabilities.map((capability) => <div key={capability}><span>{settings.language === 'zh' ? '能力' : 'Capability'}</span><strong>{capability}</strong></div>)}</div>
               <button className="btn btn-primary btn-sm" type="button" data-office-command-station-action={station.action} onClick={() => activateCommandHallStation(station.id)}>{actionLabel}</button>
               {station.id === 'command_desk' && <>
-                <button className="btn btn-primary btn-sm" type="button" data-office-summon-council onClick={summonCouncil}>{settings.language === 'zh' ? '召集议政' : 'Summon council'}</button>
-                {councilSummoned && <button className="btn btn-ghost btn-sm" type="button" data-office-dismiss-council onClick={dismissCouncil}>{settings.language === 'zh' ? '散朝' : 'Dismiss council'}</button>}
+                <button className="btn btn-primary btn-sm" type="button" data-office-summon-council onClick={summonCouncil}>{settings.language === 'zh' ? '查看职责' : 'View responsibilities'}</button>
+                {councilSummoned && <button className="btn btn-ghost btn-sm" type="button" data-office-dismiss-council onClick={dismissCouncil}>{settings.language === 'zh' ? '关闭概览' : 'Close overview'}</button>}
                 {councilReceipt && <p role="status" data-office-council-receipt>{councilReceipt}</p>}
                 {councilSummoned && <ul data-office-council-participants>{SYSTEM_ROLES.map((role) => <li key={role.id}><button className="btn btn-ghost btn-sm" data-office-council-participant={role.id} onClick={() => selectSystemRole(role.id)}>{settings.language === 'zh' ? role.label : role.labelEn}</button></li>)}</ul>}
               </>}
@@ -1167,7 +1173,12 @@ export default function OfficeView(): React.JSX.Element {
               <div className="office-selection-kicker">{settings.language === 'zh' ? '议政殿角色' : 'Council role'}</div>
               <div className="office-selection-title" data-office-system-role-id={role.id}>{settings.language === 'zh' ? role.label : role.labelEn}</div>
               <div className="office-selection-meta"><span>{settings.language === 'zh' ? role.duty : role.dutyEn}</span><span data-office-system-role-anchor={role.anchor}>{role.anchor}</span></div>
-              <div className="office-signal-list"><div><span>{settings.language === 'zh' ? '数据来源' : 'Source'}</span><strong>{role.canonicalSource}</strong></div><div><span>{settings.language === 'zh' ? '状态' : 'Mode'}</span><strong>{settings.language === 'zh' ? '治理投影' : 'Governance projection'}</strong></div></div>
+              <OfficeRoleWorkItems roleId={role.id} workItems={projectSnapshot.workItems} projects={projectSnapshot.projects}
+                status={operationStatus.workItems} zh={settings.language === 'zh'} onSelectRole={selectSystemRole} onOpen={(item) => {
+                  saveOfficeReturnContext({ businessView, selectedFacility })
+                  try { openOfficeWorkItem(item, useStore.getState()) }
+                  catch (cause) { setOperationalNavigationError(cause instanceof Error ? cause.message : String(cause)) }
+                }} />
               {role.actions.map((action) => <button key={action.id} className="btn btn-primary btn-sm" type="button"
                 data-office-system-role-action={action.id} data-office-system-role-target={action.target}
                 onClick={() => activateSystemRole(role.id, action.id)}>{settings.language === 'zh' ? action.label : action.labelEn}</button>)}

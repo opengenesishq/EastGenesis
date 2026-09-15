@@ -120,6 +120,7 @@ import { listRoutineRuns } from './routines/routine-runner'
 import { reviewRoutineRun } from './routines/routine-review'
 import { listRoutineTemplates } from './routines/routine-templates'
 import { registerQuickbarIpc } from './quickbar'
+import { registerPalaceSceneBuilderIpc } from './ipc/palace-scene-builder-handlers'
 import type {
   BrowserBounds,
   BrowserPickResult,
@@ -288,7 +289,7 @@ function effectIntentDescription(snapshot: TaskSnapshotRecord, effect: EffectRec
 
 export function registerIpc(): void {
   configureMigrationOperationBackupRoot(migrationBackupRoot())
-  for (const register of [registerQuickbarIpc, registerTaskRecoveryIpc, registerWorkflowLedgerIpc, registerProjectWorkspaceIpc, registerDataRetentionIpc, registerDigitalWorkerIpc, registerSupervisorIpc, registerInteractiveMutationIpc, registerAppFeatureIpc, registerProviderGatewayIpc, registerFileIntelligenceIpc, registerPermissionGrantIpc]) register()
+  for (const register of [registerQuickbarIpc, registerTaskRecoveryIpc, registerWorkflowLedgerIpc, registerProjectWorkspaceIpc, registerDataRetentionIpc, registerDigitalWorkerIpc, registerSupervisorIpc, registerInteractiveMutationIpc, registerAppFeatureIpc, registerProviderGatewayIpc, registerFileIntelligenceIpc, registerPermissionGrantIpc, registerPalaceSceneBuilderIpc]) register()
   // Search adapters are resolved only by an explicit main-process factory. The
   // default production wiring therefore fails closed with no_credentials until
   // a provider-aware factory is intentionally supplied.
