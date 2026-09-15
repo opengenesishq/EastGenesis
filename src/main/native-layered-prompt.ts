@@ -1,9 +1,8 @@
-import { homedir } from 'node:os'
-import { resolve } from 'node:path'
 import type { SessionMeta } from '../shared/types'
 import type { StableMessagePayload } from './stable-message-payload'
 import { buildIdeDocumentContextPrompt } from './ide/ide-document-context'
 import { buildEffectiveMemoryPrompt } from './memory/memory-retriever'
+import { resolveMemoryRoot } from './memory/memory-root'
 import { buildDigitalWorkerMemoryPrompt } from './digital-worker/worker-memory'
 import { buildDigitalWorkerExecutionPrompt } from './digital-worker/worker-execution-prompt'
 import { getSettings } from './settings'
@@ -23,6 +22,8 @@ export async function augmentNativePayloadWithLayeredMemory(
     return { payload, hasMemoryContext: false }
   }
   const workerRoot = workerRootDir ?? process.env.CAOGEN_USER_DATA_DIR ?? ''
+  const projectRoot = meta.sourceCwd ?? meta.cwd
+  const projectId = meta.workspaceId
   const workerExecution = meta.digitalWorkerBinding?.kind === 'assigned'
     ? buildDigitalWorkerExecutionPrompt(workerRoot, meta)
     : ''
@@ -33,7 +34,6 @@ export async function augmentNativePayloadWithLayeredMemory(
   let memory = ''
   let ideDocumentContext = ''
   try {
-    const projectRoot = meta.sourceCwd ?? meta.cwd
     skillPrompt = buildSkillInvocationPrompt({
       enabled: getSettings().autoSkillLearningEnabled,
       projectRoot,
@@ -41,14 +41,18 @@ export async function augmentNativePayloadWithLayeredMemory(
       maxSkills: 2
     })
     memory = await buildEffectiveMemoryPrompt({
-      rootDir: process.env.CAOGEN_MEMORY_DIR || resolve(homedir(), '.caogen', 'memory'),
+      rootDir: resolveMemoryRoot(workerRoot),
       query: payload.text,
       projectRoot,
+      projectId,
       limit: 6
     })
     ideDocumentContext = buildIdeDocumentContextPrompt(meta.id)
   } catch (error) {
     console.error('[caogen] layered memory retrieval failed:', error)
+  }
+  if (projectId !== meta.workspaceId || projectRoot !== (meta.sourceCwd ?? meta.cwd)) {
+    throw new Error('任务所属项目在准备记忆上下文时变化，请重试')
   }
   // Retrieval awaits other stores. A reassignment, role update or permission
   // change during that work must not publish context from the earlier Worker.

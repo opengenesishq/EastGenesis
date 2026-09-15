@@ -5,6 +5,7 @@ export interface MemoryExtractionInput {
   rootDir: string
   text: string
   projectRoot?: string
+  projectId?: string
   source: string
   defaultLayer?: MemoryLayer
 }
@@ -30,7 +31,7 @@ export async function writeExtractedMemory(input: MemoryExtractionInput): Promis
   if (!input.projectRoot) return null
   const layer = input.defaultLayer ?? (input.projectRoot ? 'project' : 'user')
   const tags = inferTags(input.text)
-  return proposeMemoryDraft(input.projectRoot, input.rootDir, {
+  return proposeMemoryDraft({ projectRoot: input.projectRoot, projectId: input.projectId }, input.rootDir, {
     kind: `auto-extracted-${layer}`,
     title: summarizeMemoryTitle(input.text),
     body: input.text.trim(),

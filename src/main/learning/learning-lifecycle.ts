@@ -69,6 +69,9 @@ export async function createLearningDraft(
 
   return mutateLearningState(learningRoot, projectRoot, (state) => {
     const previous = safeInput.supersedes ? findRecord(state, safeInput.supersedes) : undefined
+    if (previous?.kind === 'memory' && previous.status !== 'active') {
+      throw new Error('Memory revision must start from the currently active version; refresh before revising')
+    }
     if (previous && previous.kind !== safeInput.kind) throw new Error('A learning revision must keep the same kind')
     if (previous && previous.project !== project) throw new Error('Learning project mismatch')
     if (previous && !sameWorkerScope(previous, workerScope)) {
@@ -189,6 +192,12 @@ export async function approveLearningDraft(
     const target = findRecord(state, recordId)
     if (target.status === 'active') return cloneRecord(target)
     if (target.status !== 'draft') throw invalidTransition(target, 'active')
+    if (target.kind === 'memory' && target.supersedes) {
+      const previous = findRecord(state, target.supersedes)
+      if (previous.status !== 'active' || previous.logicalId !== target.logicalId) {
+        throw new Error('Memory changed or was removed after this revision was proposed; refresh before approving')
+      }
+    }
     const now = timestamp()
     if (target.expiresAt && target.expiresAt <= now) {
       transition(state, target, 'expired', 'expired', actor, now, 'Draft expired before approval')

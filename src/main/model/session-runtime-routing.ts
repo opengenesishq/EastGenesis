@@ -14,6 +14,7 @@ import { buildModelProfiles } from './model-profile'
 import { captureSessionRouting } from '../routing-service/session-routing-capture'
 import { evaluateRoutingRuleSet } from './routing-policy/routing-policy-evaluator'
 import { readStoredRoutingState } from '../routing-settings/routing-settings-state'
+import { evaluateNativeExecutorCompatibility, type ExecutorCompatibilityRequirements } from './executor-compatibility'
 
 export type ResolvedSessionRoute = Extract<SessionRouteResult, { kind: 'routed' }>
 type RoutingSession = Pick<SessionMeta, 'id' | 'sdkSessionId' | 'createdAt' | 'providerId' | 'model' | 'routingScope' | 'engine' | 'driveMode' | 'costUsd' | 'budgetUsd' | 'cwd' | 'sourceCwd' | 'contextTokens' | 'businessLineId'>
@@ -31,11 +32,22 @@ export function resolveRuntimeSessionRoute(input: {
   const { meta, payload } = input
   const settings = settingsForCaoGenDrive(input.settings ?? getSettings(), meta.driveMode)
   const businessLine = meta.businessLineId ? requireBusinessLine(settings, meta.businessLineId) : undefined
-  const providers = filterBusinessLineModels(input.providers ?? listProviders(), businessLine).filter((provider) =>
+  const scopedProviders = filterBusinessLineModels(input.providers ?? listProviders(), businessLine).filter((provider) =>
     meta.routingScope !== 'provider' || provider.id === meta.providerId
   )
-  if (meta.model !== AUTO_MODEL) return validateFixedBusinessLineModel(meta, providers, businessLine)
+  const expectedEngine = input.allowAnyEngine ? undefined : meta.engine
+  if (meta.model !== AUTO_MODEL) return validateFixedBusinessLineModel(meta, payload, scopedProviders, businessLine, expectedEngine)
   if (meta.routingScope === 'fixed') throw new ModelRouteError('ROUTING_MANUAL_TARGET_UNAVAILABLE', '固定模型模式必须指定具体模型。')
+  // Incompatible executors must be excluded before ranking, so a healthy
+  // compatible candidate remains selectable rather than failing after choice.
+  const providers = scopedProviders.map((provider) => {
+    const profiles = buildModelProfiles({ providerId: provider.id, providerName: provider.name,
+      models: provider.models, modelProfiles: provider.advancedConfig?.modelProfiles, engine: provider.engine })
+    const models = profiles.filter((profile) => evaluateNativeExecutorCompatibility({ provider, profile, expectedEngine,
+      requirements: { requiresTools: true, requiresVision: Boolean(payload.images?.length) || businessLine?.requiredCapabilities?.includes('vision') }
+    }).compatible).map((profile) => profile.model)
+    return { ...provider, models }
+  }).filter((provider) => provider.models.length > 0)
   const history = input.history ?? listHistory()
   const monthly = calculateMonthlyBudgetSnapshot({ settings, history, currentSession: meta })
   const budget = nativeBudgetSnapshot(meta, { settings, history }, input.rootDir)
@@ -168,14 +180,22 @@ export function sessionBusinessLine(input: {
   return line.id
 }
 
-function validateFixedBusinessLineModel(meta: RoutingSession, providers: ReturnType<typeof listProviders>, line?: ReturnType<typeof requireBusinessLine>): undefined {
-  if (!line?.requiredCapabilities?.length) return undefined
+function validateFixedBusinessLineModel(meta: RoutingSession, payload: SendMessagePayload,
+  providers: ReturnType<typeof listProviders>, line?: ReturnType<typeof requireBusinessLine>, expectedEngine?: SessionMeta['engine']): undefined {
   const provider = providers.find((candidate) => candidate.id === meta.providerId)
-  const profile = provider && buildModelProfiles({ providerId: provider.id, providerName: provider.name,
-    models: provider.models, modelProfiles: provider.advancedConfig?.modelProfiles, engine: provider.engine
-  }).find((candidate) => candidate.model === meta.model)
-  const satisfies = profile && line.requiredCapabilities.every((capability) => capability === 'tools' ? profile.supportsTools : profile.supportsVision)
-  if (!satisfies) throw new ModelRouteError('ROUTING_MANUAL_TARGET_UNAVAILABLE', '指定模型不满足业务线所需能力')
+  if (!provider) throw new ModelRouteError('ROUTING_MANUAL_TARGET_UNAVAILABLE', '指定模型的连接不存在或已被业务线排除。')
+  let model: string
+  try { model = resolveProviderRuntimeTarget(provider, { appId: provider.engine, model: meta.model }).model }
+  catch { throw new ModelRouteError('ROUTING_MANUAL_TARGET_UNAVAILABLE', '指定模型的有效连接不可用。') }
+  const profile = buildModelProfiles({ providerId: provider.id, providerName: provider.name,
+    models: [model], modelProfiles: provider.advancedConfig?.modelProfiles, engine: provider.engine })[0]
+  const requirements: ExecutorCompatibilityRequirements = {
+    requiresTools: line?.requiredCapabilities?.includes('tools'),
+    requiresVision: Boolean(payload.images?.length) || line?.requiredCapabilities?.includes('vision')
+  }
+  const compatibility = evaluateNativeExecutorCompatibility({ provider, profile, requestedModel: meta.model, requirements, expectedEngine })
+  if (!compatibility.compatible) throw new ModelRouteError('ROUTING_MANUAL_TARGET_UNAVAILABLE',
+    [...compatibility.modelReasons, ...compatibility.executorReasons].join('；'))
   return undefined
 }
 

@@ -10,6 +10,7 @@ import {
 } from '../memoryStore'
 import { createTrustedUserLearningDecision } from '../learning/learning-security'
 import { verifyProductionProjectMutation } from '../project-aggregate/project-mutation-ingress'
+import { assertTrustedWorkflowLedgerSender } from './workflow-ledger-handlers'
 
 export interface ProjectMemoryIpcOptions {
   memoryRoot: () => string
@@ -17,22 +18,29 @@ export interface ProjectMemoryIpcOptions {
 }
 
 export function registerProjectMemoryIpc(options: ProjectMemoryIpcOptions): void {
-  ipcMain.handle('memory:read', (_event, sessionId: string) => {
+  ipcMain.handle('memory:read', (event, sessionId: string) => {
+    assertTrustedWorkflowLedgerSender(event)
     const target = options.targetForSession(sessionId)
     return target
       ? readProjectMemory(target, options.memoryRoot())
       : { projectHash: '', markdown: '', entries: [], drafts: [] }
   })
-  ipcMain.handle('memory:propose', (_event, sessionId: string, input: ProjectMemoryDraftInput) =>
-    verifiedMemoryMutation(options, sessionId, (target, root) => proposeMemoryDraft(target, root, input)))
-  ipcMain.handle('memory:accept', (_event, sessionId: string, draftId: string) =>
-    verifiedMemoryMutation(options, sessionId, (target, root) => acceptMemoryDraft(
+  ipcMain.handle('memory:propose', (event, sessionId: string, input: ProjectMemoryDraftInput) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return verifiedMemoryMutation(options, sessionId, (target, root) => proposeMemoryDraft(target, root, input))
+  })
+  ipcMain.handle('memory:accept', (event, sessionId: string, draftId: string) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return verifiedMemoryMutation(options, sessionId, (target, root) => acceptMemoryDraft(
       target, root, draftId, createTrustedUserLearningDecision('ipc:memory:accept')
-    )))
-  ipcMain.handle('memory:delete', (_event, sessionId: string, entryId: string) =>
-    verifiedMemoryMutation(options, sessionId, (target, root) => deleteMemoryEntry(
+    ))
+  })
+  ipcMain.handle('memory:delete', (event, sessionId: string, entryId: string) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return verifiedMemoryMutation(options, sessionId, (target, root) => deleteMemoryEntry(
       target, root, entryId, createTrustedUserLearningDecision('ipc:memory:delete')
-    )))
+    ))
+  })
 }
 
 async function verifiedMemoryMutation<T>(

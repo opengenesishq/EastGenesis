@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { writeDurableFile } from '../durable-file'
+import { acquireFileLock, enqueueMutation, releaseFileLock } from '../digital-worker/persistence'
 
 export type MemoryLayer = 'working' | 'project' | 'user'
 
@@ -23,6 +24,7 @@ export interface LayeredMemoryEntry {
 export interface MemoryWriteInput {
   layer: MemoryLayer
   projectRoot?: string
+  projectId?: string
   title: string
   body: string
   source: string
@@ -30,6 +32,7 @@ export interface MemoryWriteInput {
 }
 
 export interface MemoryUpdateInput {
+  expectedUpdatedAt?: string
   title?: string
   body?: string
   tags?: string[]
@@ -39,6 +42,7 @@ export interface MemoryUpdateInput {
 export interface MemorySearchInput {
   query: string
   projectRoot?: string
+  projectId?: string
   layers?: MemoryLayer[]
   includeArchived?: boolean
   limit?: number
@@ -61,100 +65,142 @@ export function memoryProjectHash(projectRoot: string): string {
   return createHash('sha256').update(`${HASH_NAMESPACE}\0${path.resolve(projectRoot)}`).digest('hex')
 }
 
-export async function addMemory(rootDir: string, input: MemoryWriteInput): Promise<LayeredMemoryEntry> {
-  const file = await readStore(rootDir)
-  const now = new Date().toISOString()
-  const entry: LayeredMemoryEntry = {
-    id: randomUUID(),
-    layer: input.layer,
-    ...(input.projectRoot ? { projectHash: memoryProjectHash(input.projectRoot) } : {}),
-    title: requireText(input.title, 'title'),
-    body: requireText(input.body, 'body'),
-    source: requireText(input.source, 'source'),
-    tags: [...new Set((input.tags ?? []).map((tag) => tag.trim()).filter(Boolean))].slice(0, 20),
-    createdAt: now,
-    updatedAt: now,
-    lastUsedAt: now,
-    vector: vectorize(`${input.title}\n${input.body}\n${(input.tags ?? []).join(' ')}`)
+export interface MemoryScope {
+  projectRoot?: string
+  projectId?: string
+}
+
+function scopeHash(scope: MemoryScope): string | undefined {
+  if (scope.projectId !== undefined) {
+    return createHash('sha256').update(`${HASH_NAMESPACE}\0project-id\0${requireText(scope.projectId, 'projectId')}`).digest('hex')
   }
-  file.entries.push(entry)
-  await writeStore(rootDir, file.entries)
-  return entry
+  return scope.projectRoot ? memoryProjectHash(scope.projectRoot) : undefined
+}
+
+function inScope(entry: LayeredMemoryEntry, scope: MemoryScope): boolean {
+  const projectHash = scopeHash(scope)
+  return entry.layer === 'user' || Boolean(projectHash && entry.projectHash === projectHash)
+}
+
+export async function addMemory(rootDir: string, input: MemoryWriteInput): Promise<LayeredMemoryEntry> {
+  const projectHash = scopeHash(input)
+  if (input.layer !== 'user' && !projectHash) throw new Error('项目与工作记忆必须绑定项目')
+  return mutateStore(rootDir, async () => {
+    const file = await readStore(rootDir)
+    const now = new Date().toISOString()
+    const entry: LayeredMemoryEntry = {
+      id: randomUUID(),
+      layer: input.layer,
+      ...(input.layer !== 'user' ? { projectHash } : {}),
+      title: requireText(input.title, 'title'),
+      body: requireText(input.body, 'body'),
+      source: requireText(input.source, 'source'),
+      tags: [...new Set((input.tags ?? []).map((tag) => tag.trim()).filter(Boolean))].slice(0, 20),
+      createdAt: now,
+      updatedAt: now,
+      lastUsedAt: now,
+      vector: vectorize(`${input.title}\n${input.body}\n${(input.tags ?? []).join(' ')}`)
+    }
+    file.entries.push(entry)
+    await writeStore(rootDir, file.entries)
+    return entry
+  })
 }
 
 export async function searchMemories(rootDir: string, input: MemorySearchInput): Promise<MemorySearchHit[]> {
-  const file = await readStore(rootDir)
-  const queryVector = vectorize(input.query)
-  const layers = new Set(input.layers ?? ['working', 'project', 'user'])
-  const projectHash = input.projectRoot ? memoryProjectHash(input.projectRoot) : undefined
-  const limit = clampLimit(input.limit)
-  const hits = file.entries
-    .filter((entry) => layers.has(entry.layer))
-    .filter((entry) => input.includeArchived || !entry.archivedAt)
-    .filter((entry) => entry.layer === 'user' || !projectHash || entry.projectHash === projectHash)
-    .map((entry) => ({ entry, score: cosine(queryVector, entry.vector) }))
-    .filter((hit) => hit.score > 0)
-    .sort((a, b) => b.score - a.score || b.entry.updatedAt.localeCompare(a.entry.updatedAt))
-    .slice(0, limit)
+  return mutateStore(rootDir, async () => {
+    const file = await readStore(rootDir)
+    const queryVector = vectorize(input.query)
+    const layers = new Set(input.layers ?? ['working', 'project', 'user'])
+    const limit = clampLimit(input.limit)
+    const hits = file.entries
+      .filter((entry) => layers.has(entry.layer))
+      .filter((entry) => input.includeArchived || !entry.archivedAt)
+      .filter((entry) => inScope(entry, input))
+      .map((entry) => ({ entry, score: cosine(queryVector, entry.vector) }))
+      .filter((hit) => hit.score > 0)
+      .sort((a, b) => b.score - a.score || b.entry.updatedAt.localeCompare(a.entry.updatedAt))
+      .slice(0, limit)
 
-  if (hits.length > 0) await touchMemories(rootDir, hits.map((hit) => hit.entry.id))
-  return hits
+    if (hits.length > 0) {
+      const now = new Date().toISOString()
+      for (const hit of hits) hit.entry.lastUsedAt = now
+      await writeStore(rootDir, file.entries)
+    }
+    return hits
+  })
 }
 
-export async function listMemories(rootDir: string): Promise<LayeredMemoryEntry[]> {
-  return (await readStore(rootDir)).entries
+export async function listMemories(rootDir: string, scope?: MemoryScope): Promise<LayeredMemoryEntry[]> {
+  return enqueueMutation(storePath(rootDir), async () => {
+    const entries = (await readStore(rootDir)).entries
+    return scope ? entries.filter((entry) => inScope(entry, scope)) : entries
+  })
 }
 
-export async function deleteMemory(rootDir: string, entryId: string): Promise<boolean> {
-  const file = await readStore(rootDir)
-  const next = file.entries.filter((entry) => entry.id !== entryId)
-  if (next.length === file.entries.length) return false
-  await writeStore(rootDir, next)
-  return true
+export async function deleteMemory(rootDir: string, entryId: string, scope?: MemoryScope): Promise<boolean> {
+  return mutateStore(rootDir, async () => {
+    const file = await readStore(rootDir)
+    const entry = file.entries.find((item) => item.id === entryId)
+    if (entry && scope && !inScope(entry, scope)) throw new Error('记忆不属于当前项目')
+    const next = file.entries.filter((entry) => entry.id !== entryId)
+    if (next.length === file.entries.length) return false
+    await writeStore(rootDir, next)
+    return true
+  })
 }
 
 export async function updateMemory(
   rootDir: string,
   entryId: string,
-  patch: MemoryUpdateInput
+  patch: MemoryUpdateInput,
+  scope?: MemoryScope
 ): Promise<LayeredMemoryEntry | null> {
-  const file = await readStore(rootDir)
-  const index = file.entries.findIndex((entry) => entry.id === entryId)
-  if (index === -1) return null
-  const current = file.entries[index]
-  const title = patch.title === undefined ? current.title : requireText(patch.title, 'title')
-  const body = patch.body === undefined ? current.body : requireText(patch.body, 'body')
-  const tags = patch.tags === undefined ? current.tags : normalizeTags(patch.tags)
-  const next: LayeredMemoryEntry = {
-    ...current,
-    title,
-    body,
-    tags,
-    updatedAt: new Date().toISOString(),
-    vector: vectorize(`${title}\n${body}\n${tags.join(' ')}`)
-  }
-  if (patch.archivedAt !== undefined) {
-    if (patch.archivedAt === null || patch.archivedAt.trim() === '') delete next.archivedAt
-    else next.archivedAt = patch.archivedAt
-  }
-  file.entries[index] = next
-  await writeStore(rootDir, file.entries)
-  return next
+  return mutateStore(rootDir, async () => {
+    const file = await readStore(rootDir)
+    const index = file.entries.findIndex((entry) => entry.id === entryId)
+    if (index === -1) return null
+    const current = file.entries[index]
+    if (scope && !inScope(current, scope)) throw new Error('记忆不属于当前项目')
+    if (patch.expectedUpdatedAt !== undefined && patch.expectedUpdatedAt !== current.updatedAt) {
+      throw new Error('记忆已被修改，请刷新后重新修订')
+    }
+    const title = patch.title === undefined ? current.title : requireText(patch.title, 'title')
+    const body = patch.body === undefined ? current.body : requireText(patch.body, 'body')
+    const tags = patch.tags === undefined ? current.tags : normalizeTags(patch.tags)
+    const next: LayeredMemoryEntry = {
+      ...current,
+      title,
+      body,
+      tags,
+      updatedAt: new Date(Math.max(Date.now(), Date.parse(current.updatedAt) + 1)).toISOString(),
+      vector: vectorize(`${title}\n${body}\n${tags.join(' ')}`)
+    }
+    if (patch.archivedAt !== undefined) {
+      if (patch.archivedAt === null || patch.archivedAt.trim() === '') delete next.archivedAt
+      else next.archivedAt = patch.archivedAt
+    }
+    file.entries[index] = next
+    await writeStore(rootDir, file.entries)
+    return next
+  })
 }
 
 export async function archiveStaleMemories(rootDir: string, olderThanDays = 90, now = Date.now()): Promise<number> {
-  const cutoff = now - olderThanDays * 24 * 60 * 60 * 1000
-  const file = await readStore(rootDir)
-  let archived = 0
-  const next = file.entries.map((entry) => {
-    if (entry.archivedAt) return entry
-    const lastUsed = Date.parse(entry.lastUsedAt)
-    if (!Number.isFinite(lastUsed) || lastUsed >= cutoff) return entry
-    archived++
-    return { ...entry, archivedAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }
+  return mutateStore(rootDir, async () => {
+    const cutoff = now - olderThanDays * 24 * 60 * 60 * 1000
+    const file = await readStore(rootDir)
+    let archived = 0
+    const next = file.entries.map((entry) => {
+      if (entry.archivedAt) return entry
+      const lastUsed = Date.parse(entry.lastUsedAt)
+      if (!Number.isFinite(lastUsed) || lastUsed >= cutoff) return entry
+      archived++
+      return { ...entry, archivedAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }
   })
   if (archived > 0) await writeStore(rootDir, next)
   return archived
+  })
 }
 
 export async function exportMemories(rootDir: string): Promise<string> {
@@ -162,12 +208,17 @@ export async function exportMemories(rootDir: string): Promise<string> {
   return JSON.stringify({ version: 1, entries }, null, 2)
 }
 
-async function touchMemories(rootDir: string, ids: string[]): Promise<void> {
-  const wanted = new Set(ids)
-  const file = await readStore(rootDir)
-  const now = new Date().toISOString()
-  const next = file.entries.map((entry) => (wanted.has(entry.id) ? { ...entry, lastUsedAt: now } : entry))
-  await writeStore(rootDir, next)
+async function mutateStore<T>(rootDir: string, operation: () => Promise<T>): Promise<T> {
+  const filePath = storePath(rootDir)
+  return enqueueMutation(filePath, async () => {
+    const lockPath = `${filePath}.lock`
+    const descriptor = acquireFileLock(lockPath)
+    try {
+      return await operation()
+    } finally {
+      releaseFileLock(lockPath, descriptor)
+    }
+  })
 }
 
 async function readStore(rootDir: string): Promise<MemoryFile> {
@@ -188,10 +239,15 @@ async function writeStore(rootDir: string, entries: LayeredMemoryEntry[]): Promi
 }
 
 function normalizeStore(value: unknown): MemoryFile {
-  if (!isRecord(value) || !Array.isArray(value.entries)) return { version: 1, entries: [] }
+  if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.entries) || !value.entries.every(isMemoryEntry)) {
+    throw new Error('Memory index is invalid; the original file was preserved')
+  }
+  if (new Set(value.entries.map((entry) => entry.id)).size !== value.entries.length) {
+    throw new Error('Memory index has duplicate identities; the original file was preserved')
+  }
   return {
     version: 1,
-    entries: value.entries.filter(isMemoryEntry)
+    entries: value.entries
   }
 }
 
@@ -203,15 +259,19 @@ function isMemoryEntry(value: unknown): value is LayeredMemoryEntry {
     typeof value.title === 'string' &&
     typeof value.body === 'string' &&
     typeof value.source === 'string' &&
+    typeof value.createdAt === 'string' && Number.isFinite(Date.parse(value.createdAt)) &&
+    typeof value.updatedAt === 'string' && Number.isFinite(Date.parse(value.updatedAt)) &&
+    typeof value.lastUsedAt === 'string' && Number.isFinite(Date.parse(value.lastUsedAt)) &&
+    (value.projectHash === undefined || typeof value.projectHash === 'string') &&
     Array.isArray(value.tags) &&
     value.tags.every((tag) => typeof tag === 'string') &&
-    isRecord(value.vector)
+    isRecord(value.vector) && Object.values(value.vector).every((item) => typeof item === 'number' && Number.isFinite(item))
   )
 }
 
 export function vectorize(text: string): Record<string, number> {
   const tokens = tokenize(text)
-  const vector: Record<string, number> = {}
+  const vector: Record<string, number> = Object.create(null)
   for (const token of tokens) vector[token] = (vector[token] ?? 0) + 1
   const length = Math.sqrt(Object.values(vector).reduce((sum, value) => sum + value * value, 0)) || 1
   for (const key of Object.keys(vector)) vector[key] = Number((vector[key] / length).toFixed(6))
@@ -226,7 +286,7 @@ function normalizeTags(value: string[]): string[] {
 export function cosine(left: Record<string, number>, right: Record<string, number>): number {
   let score = 0
   const keys = Object.keys(left)
-  for (const key of keys) score += (left[key] ?? 0) * (right[key] ?? 0)
+  for (const key of keys) score += left[key] * (Object.hasOwn(right, key) ? right[key] : 0)
   return Number(score.toFixed(6))
 }
 

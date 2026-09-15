@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LearningProjectSnapshot, LearningRecord } from '../../../shared/learning-types'
 
 type LearningDecisionAction = 'approve' | 'reject' | 'rollback' | 'revoke' | 'delete'
@@ -6,24 +6,42 @@ type LearningDecisionAction = 'approve' | 'reject' | 'rollback' | 'revoke' | 'de
 interface Props {
   sessionId: string
   refreshToken: number
+  onChanged?(): Promise<void>
 }
 
-export default function LearningApprovalPanel({ sessionId, refreshToken }: Props): React.JSX.Element {
+export default function LearningApprovalPanel(props: Props): React.JSX.Element {
+  return <ProjectLearningApprovalPanel key={props.sessionId} {...props} />
+}
+
+function ProjectLearningApprovalPanel({ sessionId, refreshToken, onChanged }: Props): React.JSX.Element {
+  const loadSequence = useRef(0)
+  const mounted = useRef(false)
   const [snapshot, setSnapshot] = useState<LearningProjectSnapshot | null>(null)
   const [actingId, setActingId] = useState<string | null>(null)
   const [error, setError] = useState('')
 
   const load = useCallback(async (): Promise<void> => {
+    if (!mounted.current) return
+    const sequence = ++loadSequence.current
+    setSnapshot(null)
     try {
-      setSnapshot(await window.agentDesk.listLearning(sessionId))
+      const result = await window.agentDesk.listLearning(sessionId)
+      if (!mounted.current || sequence !== loadSequence.current) return
+      setSnapshot(result)
       setError('')
     } catch (err) {
+      if (!mounted.current || sequence !== loadSequence.current) return
       setError(err instanceof Error ? err.message : String(err))
     }
   }, [sessionId])
 
   useEffect(() => {
+    mounted.current = true
     void load()
+    return () => {
+      mounted.current = false
+      loadSequence.current++
+    }
   }, [load, refreshToken])
 
   const decide = async (action: LearningDecisionAction, recordId: string): Promise<void> => {
@@ -35,7 +53,10 @@ export default function LearningApprovalPanel({ sessionId, refreshToken }: Props
       else if (action === 'rollback') await window.agentDesk.rollbackLearning(sessionId, recordId)
       else if (action === 'revoke') await window.agentDesk.revokeLearning(sessionId, recordId)
       else await window.agentDesk.deleteLearning(sessionId, recordId)
-      await load()
+      if (mounted.current) {
+        if (onChanged) await onChanged()
+        else await load()
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -130,7 +151,27 @@ export function LearningChangePreview({
   record: LearningRecord
   previous?: LearningRecord
 }): React.JSX.Element | null {
-  if (record.payload.type !== 'skill') return null
+  if (record.payload.type === 'memory') {
+    const prior = previous?.payload.type === 'memory' ? previous.payload : undefined
+    return (
+      <details className="learning-skill-preview">
+        <summary>查看记忆修订与来源</summary>
+        <div className="field-hint">来源: {record.source} · v{record.version} · {record.createdAt}</div>
+        {record.supersedes && <section className="learning-skill-version">
+          <div className="field-hint">上一版本 · {record.diff.previousDigest ?? '-'}</div>
+          <pre className="learning-skill-markdown" data-memory-before="true">
+            {prior ? `${prior.title}\n\n${prior.body}\n\n理由: ${prior.reason}` : '（上一版本记录不可用）'}
+          </pre>
+        </section>}
+        <section className="learning-skill-version">
+          <div className="field-hint">当前记录 · {record.digest}</div>
+          <pre className="learning-skill-markdown" data-memory-after="true">
+            {`${record.payload.title}\n\n${record.payload.body}\n\n理由: ${record.payload.reason}`}
+          </pre>
+        </section>
+      </details>
+    )
+  }
   const skill = record.payload
   const previousSkill = previous?.payload.type === 'skill' ? previous.payload : undefined
   const expectsPrevious = Boolean(record.supersedes)

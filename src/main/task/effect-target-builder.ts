@@ -66,6 +66,7 @@ interface EffectTargetInput {
   toolName: string
   toolInput: Record<string, unknown>
   cwd: string
+  officeSourceCwd?: string
 }
 
 interface BuiltEffectTarget {
@@ -98,7 +99,7 @@ async function buildFileEffectTarget(
 ): Promise<EffectTarget | undefined> {
   if (toolName === 'revise_office_artifact') return buildOfficeRevisionEffectTarget(input)
   if (isOfficeArtifactTool(toolName)) {
-    return buildOfficeArtifactEffectTarget(toolName, input.toolInput, input.cwd)
+    return buildOfficeArtifactEffectTarget(toolName, input.toolInput, input.cwd, input.officeSourceCwd)
   }
   if (toolName === 'write_file') {
     return context.fileWriteTarget(input.cwd, input.toolInput, observationOptions)

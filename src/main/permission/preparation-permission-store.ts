@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import type { PreparationPermissionMutation, PreparationPermissionView } from '../../shared/preparation-permission-types'
+import { PREPARATION_WRITE_TOOLS, type PreparationPermissionMutation, type PreparationPermissionView, type PreparationWriteTool } from '../../shared/preparation-permission-types'
 import type { SessionMeta } from '../../shared/types'
 import { writeDurableFileSync } from '../durable-file'
 
@@ -11,6 +11,8 @@ export interface PreparationPermissionRecord {
   sessionId: string
   revision: number
   status: 'granted' | 'revoked'
+  /** Legacy missing scope grants only write_file. */
+  allowedWriteTools?: readonly PreparationWriteTool[]
   /** Imported records retain evidence only; a local explicit grant collects destination ownership. */
   importedNeedsReauthorization?: true
   bindingDigest: string
@@ -18,7 +20,7 @@ export interface PreparationPermissionRecord {
   directoryIdentity: DirectoryIdentity
   grantedAt: number
   revokedAt?: number
-  events: { revision: number; status: 'granted' | 'revoked'; actorId: string; at: number }[]
+  events: { revision: number; status: 'granted' | 'revoked'; actorId: string; at: number; allowedWriteTools?: readonly PreparationWriteTool[] }[]
   digest: string
 }
 
@@ -37,25 +39,26 @@ export class PreparationPermissionStore {
     else if (meta.taskStrategy === 'view') unavailableReason = '查看策略不允许起草文件；请先明确选择规划或执行。'
     return { schemaVersion: 1, sessionId: record.sessionId, revision: record.revision, status: record.status,
       available: unavailableReason === undefined, directory: record.directory, unavailableReason,
-      grantedAt: record.grantedAt, revokedAt: record.revokedAt, allowedWriteTools: ['write_file'] }
+      grantedAt: record.grantedAt, revokedAt: record.revokedAt, allowedWriteTools: record.allowedWriteTools ?? ['write_file'] }
   }
 
   grant(meta: SessionMeta, raw: PreparationPermissionMutation, actorId: string): PreparationPermissionView {
     assertIdle(meta); assertActor(actorId)
     if (meta.taskStrategy === 'view') throw new Error('查看策略不能申请写入准备区；请先明确选择规划或执行。')
     const current = this.read(meta.id)
-    assertRevision(raw, current?.revision ?? 0)
+    assertRevision(raw, current?.revision ?? 0, true)
+    const allowedWriteTools = normalizeWriteTools(raw.allowedWriteTools ?? (current?.status === 'granted' ? current.allowedWriteTools : undefined) ?? ['write_file'])
     if (current && !current.importedNeedsReauthorization) this.assertCurrent(meta, current)
-    if (current?.status === 'granted') return this.get(meta)
+    if (current?.status === 'granted' && JSON.stringify(allowedWriteTools) === JSON.stringify(current.allowedWriteTools ?? ['write_file'])) return this.get(meta)
     const directory = this.directory(meta.id)
     const sourceCwd = realpathSync(meta.cwd)
     if (inside(sourceCwd, directory) || inside(directory, sourceCwd)) throw new Error('准备区必须与正式工作目录分离。')
     ensurePrivateDirectory(this.root, directory)
     const now = Date.now(), revision = (current?.revision ?? 0) + 1
     const record: Omit<PreparationPermissionRecord, 'digest'> = {
-      schemaVersion: 1, sessionId: meta.id, revision, status: 'granted', bindingDigest: bindingDigest(meta),
+      schemaVersion: 1, sessionId: meta.id, revision, status: 'granted', allowedWriteTools, bindingDigest: bindingDigest(meta),
       directory, directoryIdentity: directoryIdentity(directory), grantedAt: now,
-      events: [...(current?.events ?? []), { revision, status: 'granted', actorId, at: now }]
+      events: [...(current?.events ?? []), { revision, status: 'granted', actorId, at: now, allowedWriteTools }]
     }
     this.persist(record)
     return this.get(meta)
@@ -74,13 +77,16 @@ export class PreparationPermissionStore {
   }
 
   /** Read and validate the current durable revision again immediately before a write. */
-  assertWritable(meta: SessionMeta, revision: number, directory: string): void {
+  assertWritable(meta: SessionMeta, revision: number, directory: string, toolName = 'write_file'): void {
     const record = this.read(meta.id)
     if (!record || record.status !== 'granted' || record.revision !== revision || record.directory !== directory) {
       throw new Error('准备区授权已撤销或变更，旧操作不得继续写入。')
     }
     this.assertCurrent(meta, record)
     if (meta.taskStrategy === 'view') throw new Error('查看策略不允许写入准备区。')
+    if (!['read_file', 'view', 'list_dir'].includes(toolName) && !(record.allowedWriteTools ?? ['write_file']).includes(toolName as PreparationWriteTool)) {
+      throw new Error('此工具未适配当前准备区授权范围；请先明确开启对应的起草权限。')
+    }
   }
 
   private assertCurrent(meta: SessionMeta, record: PreparationPermissionRecord): void {
@@ -131,6 +137,12 @@ export function parsePreparationPermissionRecord(value: unknown, sessionId: stri
       !['granted', 'revoked'].includes(event.status) || typeof event.actorId !== 'string' || !event.actorId.startsWith('local-user:') || !Number.isFinite(event.at)) ||
     record.events.at(-1)?.status !== record.status) throw new Error('准备区授权记录损坏，已阻止使用。')
   sessionKey(sessionId)
+  if (record.allowedWriteTools !== undefined) normalizeWriteTools(record.allowedWriteTools)
+  for (const event of record.events) if (event.allowedWriteTools !== undefined) normalizeWriteTools(event.allowedWriteTools)
+  const lastGrant = [...record.events].reverse().find(event => event.status === 'granted')
+  if (JSON.stringify(record.allowedWriteTools ?? ['write_file']) !== JSON.stringify(lastGrant?.allowedWriteTools ?? ['write_file'])) {
+    throw new Error('准备区工具范围与最后授权事件不一致。')
+  }
   return record
 }
 
@@ -144,11 +156,17 @@ function directoryIdentity(directory: string): DirectoryIdentity {
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('准备区或正式目录不是实际目录。')
   return { device: info.dev.toString(), inode: info.ino.toString() }
 }
-function assertRevision(raw: PreparationPermissionMutation, current: number): void {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).some((key) => key !== 'expectedRevision') ||
+function assertRevision(raw: PreparationPermissionMutation, current: number, grant = false): void {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).some((key) => key !== 'expectedRevision' && !(grant && key === 'allowedWriteTools')) ||
     !Number.isSafeInteger(raw.expectedRevision) || raw.expectedRevision < 0 || raw.expectedRevision !== current) {
     throw new Error('准备区授权版本已变化，请刷新当前授权后重试。')
   }
+}
+function normalizeWriteTools(value: unknown): PreparationWriteTool[] {
+  if (!Array.isArray(value) || !value.length || new Set(value).size !== value.length || value.some(tool => !PREPARATION_WRITE_TOOLS.includes(tool))) {
+    throw new Error('准备区工具范围无效。')
+  }
+  return PREPARATION_WRITE_TOOLS.filter(tool => value.includes(tool))
 }
 function assertIdle(meta: SessionMeta): void {
   if (meta.status === 'running' || meta.status === 'starting') throw new Error('请先暂停并等待当前操作结束，再变更准备区授权。')

@@ -36,6 +36,8 @@ export interface PrepareEffectExecutionInput {
   rootDir?: string
   sessionId: string
   cwd: string
+  /** Host-owned source context for isolated Office drafts; never supplied by tool arguments. */
+  officeSourceCwd?: string
   toolUseId: string
   toolName: string
   toolInput: Record<string, unknown>
@@ -78,7 +80,8 @@ export async function prepareEffectExecution(
       sessionId: input.sessionId,
       toolName: input.toolName,
       toolInput: input.toolInput,
-      cwd: input.cwd
+      cwd: input.cwd,
+      officeSourceCwd: input.officeSourceCwd
     })
     // The inventory is the policy authority for native tool entrypoints. An
     // opaque/delegated/direct-user entry must stay opaque even when its target
@@ -117,7 +120,8 @@ export async function markEffectExecutionStarted(
         sessionId: input.sessionId,
         toolName: input.toolName,
         toolInput: input.toolInput,
-        cwd: input.cwd
+        cwd: input.cwd,
+        officeSourceCwd: input.officeSourceCwd
       })
     } catch (error) {
       const reason = `执行前无法重新验证效果目标:${error instanceof Error ? error.message : String(error)}`

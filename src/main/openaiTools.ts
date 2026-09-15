@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto'
-import { assertPreparationToolScope, resolvePreparationToolScope, type PreparationToolPermission } from './permission/preparation-tool-scope'
+import { assertPreparationToolScope, isPreparationTool, resolvePreparationToolScope, type PreparationToolPermission } from './permission/preparation-tool-scope'
 import { withDataLifecycleMutation } from './data-lifecycle/data-lifecycle-mutation-lock'
 import { assertPreparationSessionNotDeleted } from './permission/preparation-permission-lifecycle'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { extname, resolve } from 'node:path'
 import {
   runLocalCommand,
@@ -49,6 +48,7 @@ import { resolveExistingProjectPathSync, resolveWritableProjectPathSync } from '
 import { OPENAI_PERMISSION_READ_ONLY_TOOLS } from './task/tool-idempotency'
 import { SkillManager } from './skill/skill-manager'
 import { searchMemories, type MemoryLayer } from './memory/memory-manager'
+import { resolveMemoryRoot } from './memory/memory-root'
 import { proposeModelMemoryDraft } from './learning/memory-tool-adapter'
 import {
   builtinMcpServerTemplates,
@@ -821,9 +821,6 @@ function memoryLayersArg(value: unknown): MemoryLayer[] | undefined {
 function recordArg(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {}
 }
-function memoryRoot(): string {
-  return process.env.CAOGEN_MEMORY_DIR || resolve(homedir(), '.caogen', 'memory')
-}
 
 function authorizedMcpConfigArg(
   args: Record<string, unknown>,
@@ -959,10 +956,10 @@ export async function executeCodingTool(
   options: ToolExecutionOptions = {}
 ): Promise<ToolExecResult> {
   if (options.preparationPermission) {
-    if (!['write_file', 'read_file', 'view', 'list_dir'].includes(name) || !options.sessionMeta || !options.userDataRoot) {
+    if (!isPreparationTool(name) || !options.sessionMeta || !options.userDataRoot) {
       return { ok: false, output: '此工具未适配独立准备区权限。' }
     }
-    try { assertPreparationToolScope(options.sessionMeta, { cwd, preparation: options.preparationPermission }, options.userDataRoot) }
+    try { assertPreparationToolScope(options.sessionMeta, { cwd, preparation: options.preparationPermission }, options.userDataRoot, name) }
     catch (error) { return { ok: false, output: error instanceof Error ? error.message : String(error) } }
   }
   try {
@@ -1187,16 +1184,18 @@ export async function executeCodingTool(
         return { ok: true, output: clip(JSON.stringify({ status: 'confirmed', executionPlan, body: skill.body }, null, 2)) }
       }
       case 'memory_search': {
-        const hits = await searchMemories(memoryRoot(), {
+        const hits = await searchMemories(resolveMemoryRoot(options.userDataRoot), {
           query: stringArg(args, 'query'),
-          projectRoot: cwd,
+          projectRoot: options.sessionMeta?.sourceCwd ?? options.sessionMeta?.cwd ?? cwd,
+          projectId: options.sessionMeta?.workspaceId,
           layers: memoryLayersArg(args.layers),
           limit: numberArg(args.limit)
         })
         return { ok: true, output: clip(JSON.stringify({ hits }, null, 2)) }
       }
       case 'memory_add': {
-        const entry = await proposeModelMemoryDraft(cwd, args)
+        const entry = await proposeModelMemoryDraft(options.sessionMeta?.sourceCwd ?? options.sessionMeta?.cwd ?? cwd, args,
+          { projectId: options.sessionMeta?.workspaceId, userDataRoot: options.userDataRoot })
         return { ok: true, output: clip(JSON.stringify(entry, null, 2)) }
       }
       case 'mcp_discover': {

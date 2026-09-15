@@ -121,6 +121,7 @@ export async function buildEffectDescriptor(input: {
   toolName: string
   toolInput: Record<string, unknown>
   cwd: string
+  officeSourceCwd?: string
 }, observationOptions: EffectFileObservationOptions = {}): Promise<EffectDescriptor> {
   const { toolName, target } = await buildEffectTarget(
     input,

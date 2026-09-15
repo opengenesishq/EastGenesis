@@ -90,6 +90,15 @@ export function assertFrozenRunRequestTarget(input: {
   const target = policy.qualifiedTargets.find((candidate) =>
     candidate.providerId === input.providerId && candidate.model === input.model && candidate.protocol === input.protocol)
   if (!target) throw new FrozenRoutingPolicyError('POLICY_CONFLICT', 'Provider request target is outside the Run frozen routing domain.')
+  const isRequested = (candidate: { providerId: string; model: string; protocol: FrozenNativeProtocol }) =>
+    candidate.providerId === input.providerId && candidate.model === input.model && candidate.protocol === input.protocol
+  // Qualification is capability evidence, not permission to fail over. The
+  // recovery controller still owns retry reason/count checks; this final gate
+  // independently prevents a mutable Session from widening the target domain.
+  if (!isRequested(policy.initialTarget) && (policy.effectivePolicy.failure.kind !== 'retry_allowed_targets' ||
+      !policy.retryTargets.some(isRequested))) {
+    throw new FrozenRoutingPolicyError('POLICY_CONFLICT', 'Provider request target is qualified but not authorized by the Run retry policy.')
+  }
   if (target.connectionIdentity.generationId !== input.connectionIdentity.generationId ||
       target.connectionIdentity.revision !== input.connectionIdentity.revision) {
     throw new FrozenRoutingPolicyError('POLICY_CONFLICT', 'Provider connection identity changed after routing was frozen.')

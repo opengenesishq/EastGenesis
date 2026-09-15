@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { lstat, mkdir, open, readFile, rm } from 'node:fs/promises'
 import { existsSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, extname, join } from 'node:path'
+import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { Document, HeadingLevel, Packer, Paragraph } from 'docx'
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
@@ -125,9 +125,10 @@ export async function describeOfficeArtifactReplayTarget(
 export async function buildOfficeArtifactEffectTarget(
   toolName: string,
   input: Record<string, unknown>,
-  cwd: string
+  cwd: string,
+  sourceCwd = cwd
 ): Promise<Extract<EffectTarget, { kind: 'office_artifact' }>> {
-  const plan = await planOfficeArtifact(toolName, input, cwd)
+  const plan = await planOfficeArtifact(toolName, input, cwd, sourceCwd)
   const state = await lstat(plan.workspacePath).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return null
     throw error
@@ -158,12 +159,17 @@ export async function executeOfficeArtifactTool(
   input: Record<string, unknown>,
   cwd: string,
   target: EffectTarget | undefined,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  context: {
+    sourceCwd?: string
+    assertWriteAuthorized?: () => void
+    withWriteAccess?: (commit: () => Promise<GeneratedOfficeArtifact>) => Promise<GeneratedOfficeArtifact>
+  } = {}
 ): Promise<GeneratedOfficeArtifact> {
   if (!target || target.kind !== 'office_artifact') {
     throw new Error('Office 生成缺少已冻结的 Effect target')
   }
-  const plan = await planOfficeArtifact(toolName, input, cwd)
+  const plan = await planOfficeArtifact(toolName, input, cwd, context.sourceCwd ?? cwd)
   assertOfficePlanMatchesTarget(plan, target)
   const expected = requiredOfficeOutputIdentity(target)
   assertRootIdentity(plan.rootPath, target.rootIdentity)
@@ -176,32 +182,42 @@ export async function executeOfficeArtifactTool(
   }
   if (signal?.aborted) throw new Error('Office 生成已中断，文件尚未写入')
 
-  await mkdir(dirname(plan.workspacePath), { recursive: true, mode: 0o700 })
-  const refreshed = await resolveWritableProjectPath(cwd, plan.workspacePath)
-  if (refreshed.root !== target.rootPath || refreshed.relativePath !== target.relativePath) {
-    throw new Error('Office 输出目录在审批后发生变化')
-  }
-  assertRootIdentity(refreshed.root, target.rootIdentity)
+  const commit = async (): Promise<GeneratedOfficeArtifact> => {
+    context.assertWriteAuthorized?.()
+    // Source files can change while rendering or waiting for a lifecycle write.
+    assertOfficePlanMatchesTarget(await planOfficeArtifact(toolName, input, cwd, context.sourceCwd ?? cwd), target)
+    await mkdir(dirname(plan.workspacePath), { recursive: true, mode: 0o700 })
+    const refreshed = await resolveWritableProjectPath(cwd, plan.workspacePath)
+    if (refreshed.root !== target.rootPath || refreshed.relativePath !== target.relativePath) {
+      throw new Error('Office 输出目录在审批后发生变化')
+    }
+    assertRootIdentity(refreshed.root, target.rootIdentity)
 
-  const handle = await open(refreshed.fullPath, 'wx', 0o600)
-  try {
-    await handle.writeFile(bytes)
-    await handle.sync()
-  } catch (error) {
-    await handle.close().catch(() => undefined)
-    await rm(refreshed.fullPath, { force: true }).catch(() => undefined)
-    throw error
+    context.assertWriteAuthorized?.()
+    if (signal?.aborted) throw new Error('Office 生成已中断，文件尚未写入')
+    const handle = await open(refreshed.fullPath, 'wx', 0o600)
+    try {
+      context.assertWriteAuthorized?.()
+      if (signal?.aborted) throw new Error('Office 生成已中断，文件尚未写入')
+      await handle.writeFile(bytes)
+      await handle.sync()
+    } catch (error) {
+      await handle.close().catch(() => undefined)
+      await rm(refreshed.fullPath, { force: true }).catch(() => undefined)
+      throw error
+    }
+    await handle.close()
+    return {
+      path: refreshed.fullPath,
+      sha256: generated.sha256,
+      bytes: generated.bytes,
+      mediaType: plan.mediaType,
+      artifactKind: plan.spec.artifactKind,
+      title: plan.title,
+      sourceRefs: plan.sourceRefs
+    }
   }
-  await handle.close()
-  return {
-    path: refreshed.fullPath,
-    sha256: generated.sha256,
-    bytes: generated.bytes,
-    mediaType: plan.mediaType,
-    artifactKind: plan.spec.artifactKind,
-    title: plan.title,
-    sourceRefs: plan.sourceRefs
-  }
+  return context.withWriteAccess ? context.withWriteAccess(commit) : commit()
 }
 
 export async function reconcileOfficeArtifactEffectTarget(
@@ -277,14 +293,15 @@ export async function reconcileOfficeArtifactEffectTarget(
 async function planOfficeArtifact(
   toolName: string,
   input: Record<string, unknown>,
-  cwd: string
+  cwd: string,
+  sourceCwd: string
 ): Promise<OfficeArtifactPlan> {
   if (!isOfficeArtifactTool(toolName)) throw new Error(`未知 Office 工具: ${toolName}`)
   const title = requiredText(input.title, 'title', 240)
   const output = await resolveWritableProjectPath(cwd, requiredText(input.path, 'path', 1_024))
   const artifactKind = officeArtifactKind(toolName)
   assertExtension(output.fullPath, artifactKind)
-  const sourceSnapshots = await canonicalSourceSnapshots(cwd, input.source_refs)
+  const sourceSnapshots = await canonicalSourceSnapshots(sourceCwd, input.source_refs, cwd)
   const sourceRefs = sourceSnapshots.map((snapshot) => snapshot.path)
   const spec = artifactKind === 'document'
     ? normalizeDocumentSpec(input)
@@ -388,12 +405,17 @@ function normalizeCellValue(value: unknown, label: string): OfficeCellValue {
   throw new Error(`${label}.result 必须是字符串、数字或布尔值`)
 }
 
-async function canonicalSourceSnapshots(cwd: string, value: unknown): Promise<OfficeSourceSnapshot[]> {
+async function canonicalSourceSnapshots(cwd: string, value: unknown, draftCwd: string): Promise<OfficeSourceSnapshot[]> {
   if (value === undefined) return []
   if (!Array.isArray(value) || value.length > 200) throw new Error('source_refs 必须是最多 200 项的路径数组')
   const snapshots: OfficeSourceSnapshot[] = []
   for (let index = 0; index < value.length; index += 1) {
-    const source = await resolveExistingProjectPath(cwd, requiredText(value[index], `source_refs[${index}]`, 1_024))
+    const raw = requiredText(value[index], `source_refs[${index}]`, 1_024)
+    // Relative refs remain attached to the original task. Only explicit draft
+    // paths select the isolated root; a failed path check never expands scope.
+    const rel = relative(resolve(draftCwd), resolve(raw))
+    const fromDraft = isAbsolute(raw) && (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)))
+    const source = await resolveExistingProjectPath(fromDraft ? draftCwd : cwd, raw)
     if (snapshots.some((snapshot) => snapshot.path === source.fullPath)) continue
     const state = await lstat(source.fullPath)
     if (!state.isFile()) throw new Error(`source_refs[${index}] 必须指向普通文件`)

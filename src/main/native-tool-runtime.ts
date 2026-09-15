@@ -3,7 +3,7 @@ import { officeRevisionToolGate } from './office-revision/intent'
 import { finalizeOfficeRevisionToolResult } from './office-revision/producer'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
-import { assertPreparationToolScope, resolvePreparationToolScope, type PreparationToolScope } from './permission/preparation-tool-scope'
+import { assertPreparationToolScope, isPreparationWriteTool, resolvePreparationToolScope, type PreparationToolScope } from './permission/preparation-tool-scope'
 import { settingsForCaoGenDrive } from './model/drive'
 import { getSettings } from './settings'
 import { EDIT_TOOLS, executeCodingTool, type ToolExecResult } from './openaiTools'
@@ -142,7 +142,7 @@ export class NativeToolRuntime {
     if (!isSideEffectingToolCall(name, input)) return null
     if (name === 'revise_office_artifact') return describeOfficeRevisionReplay(this.meta.id, input)
     if (isOfficeArtifactTool(name)) {
-      const target = await describeOfficeArtifactReplayTarget(input, this.meta.cwd)
+      const target = await describeOfficeArtifactReplayTarget(input, resolvePreparationToolScope(this.meta, name, input, app.getPath('userData')).cwd)
       return { targetDigest: effectReplayTargetDigest(target) }
     }
     const descriptor = await buildEffectDescriptor({
@@ -197,7 +197,7 @@ export class NativeToolRuntime {
         effectScope
       )
     }
-    if (preflight.executionScope.preparation && name === 'write_file') {
+    if (preflight.executionScope.preparation && isPreparationWriteTool(name)) {
       this.auditGateDecision('allow', 'user', name, input, '用户已授权当前隔离准备区写入。', policy.risk.level, policy.risk.reasons)
       return { allow: true }
     }
@@ -308,7 +308,7 @@ export class NativeToolRuntime {
     let executionScope: PreparationToolScope
     try {
       executionScope = capturedScope ?? resolvePreparationToolScope(this.meta, name, input, app.getPath('userData'))
-      assertPreparationToolScope(this.meta, executionScope, app.getPath('userData'))
+      assertPreparationToolScope(this.meta, executionScope, app.getPath('userData'), name)
     } catch (error) { return { allow: false, message: error instanceof Error ? error.message : String(error) } }
     const workerPolicyError = officeRevisionToolGate(this.meta.id, name, input) ?? digitalWorkerToolPolicyError(this.meta, name, input, app.getPath('userData'))
     if (workerPolicyError) return { allow: false, message: workerPolicyError }
@@ -330,7 +330,7 @@ export class NativeToolRuntime {
 
     const readOnlyCall = isReadOnlyToolCall(name, input)
     const strategyDecision = decideTaskStrategyTool(this.meta.taskStrategy, name, input)
-    if (!strategyDecision.allow && !(executionScope.preparation && name === 'write_file' && this.meta.taskStrategy !== 'view')) {
+    if (!strategyDecision.allow && !(executionScope.preparation && isPreparationWriteTool(name) && this.meta.taskStrategy !== 'view')) {
       this.auditGateDecision(
         'deny',
         'task-strategy',
@@ -407,6 +407,7 @@ export class NativeToolRuntime {
     const effectInput: PrepareEffectExecutionInput = {
       sessionId: this.meta.id,
       cwd: preflight.executionScope.cwd,
+      officeSourceCwd: preflight.executionScope.preparation ? this.meta.cwd : undefined,
       toolUseId,
       toolName: name,
       toolInput: input
@@ -567,7 +568,7 @@ export class NativeToolRuntime {
       '操作在外部执行前已中断'
     )
     if (interruptedBeforeStart) return interruptedBeforeStart
-    try { assertPreparationToolScope(this.meta, executionScope, app.getPath('userData')) }
+    try { assertPreparationToolScope(this.meta, executionScope, app.getPath('userData'), name) }
     catch (error) { return this.settlePermissionDenial(effectHandle, { allow: false, message: error instanceof Error ? error.message : String(error) }) }
     const startFailure = await this.markEffectStarted(effectHandle, effectInput)
     if (startFailure) return startFailure

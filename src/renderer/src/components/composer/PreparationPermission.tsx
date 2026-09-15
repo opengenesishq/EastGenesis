@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { PreparationPermissionView } from '../../../../shared/preparation-permission-types'
+import { PREPARATION_WRITE_TOOLS, type PreparationPermissionView } from '../../../../shared/preparation-permission-types'
 import { useStore } from '../../store'
 import './preparation-permission.css'
 
@@ -34,14 +34,14 @@ export default function PreparationPermission({ sessionId, running }: {
     window.addEventListener(CHANGED, changed)
     return () => { active = false; generation.current++; window.removeEventListener(CHANGED, changed) }
   }, [sessionId, running])
-  const mutate = async (): Promise<void> => {
+  const mutate = async (expand = false): Promise<void> => {
     if (!view || busy) return
     setBusy(true); setError('')
     try {
       const options = { expectedRevision: view.revision }
-      const result = view.status === 'granted'
+      const result = view.status === 'granted' && !expand
         ? await window.agentDesk.revokePreparationPermission(sessionId, options)
-        : await window.agentDesk.grantPreparationPermission(sessionId, options)
+        : await window.agentDesk.grantPreparationPermission(sessionId, { ...options, allowedWriteTools: PREPARATION_WRITE_TOOLS })
       if (current.current === sessionId) setPermission(result)
       window.dispatchEvent(new CustomEvent(CHANGED, { detail: sessionId }))
     } catch (cause) {
@@ -51,10 +51,15 @@ export default function PreparationPermission({ sessionId, running }: {
   return <details className="preparation-permission" data-preparation-session={sessionId} data-preparation-status={view?.status ?? 'loading'}>
     <summary>{zh ? '文件准备区' : 'File preparation area'} · {view?.status === 'granted'
       ? (zh ? '已开启' : 'Enabled') : view?.status === 'revoked' ? (zh ? '已撤权' : 'Revoked') : (zh ? '未开启' : 'Not enabled')}</summary>
-    <p>{zh ? '允许在当前任务的独立目录起草文件。修改项目文件、运行命令和对外操作仍遵循任务授权。'
-      : 'Draft files in a directory for this task. Project edits, commands, and external actions follow the task’s authorization.'}</p>
+    <p>{zh ? '开启后可在当前任务的独立目录起草文本、Word、Excel、PowerPoint 和 PDF，Office 草稿每次生成新文件以保留版本。修改项目文件、运行命令和对外操作仍遵循任务授权。'
+      : 'Draft text, Word, Excel, PowerPoint and PDF files in this task’s directory. Office drafts use new filenames to preserve versions. Project edits, commands and external actions follow the task’s authorization.'}</p>
     {view?.directory && <code className="preparation-directory">{view.directory}</code>}
     {view?.unavailableReason && <p>{view.unavailableReason}</p>}
+    {view?.status === 'granted' && !PREPARATION_WRITE_TOOLS.every(tool => view.allowedWriteTools.includes(tool)) && <>
+      <p>{zh ? '当前授权仅包含部分起草工具，尚未开启完整 Office 起草。' : 'The current grant covers only some draft tools. Full Office drafting is not enabled.'}</p>
+      <button type="button" className="btn btn-ghost btn-sm" disabled={busy || running || strategy === 'view'}
+        onClick={() => void mutate(true)}>{zh ? '允许 Office 起草' : 'Allow Office drafting'}</button>
+    </>}
     <button type="button" className="btn btn-ghost btn-sm" disabled={!view || busy || (view.status !== 'granted' && (strategy === 'view' || running))}
       onClick={() => void mutate()}>{view?.status === 'granted' ? (zh ? '撤销准备权限' : 'Revoke preparation access')
         : (zh ? '允许起草文件' : 'Allow file preparation')}</button>

@@ -1105,6 +1105,9 @@ export interface ProjectMemoryEntry {
   reason: string
   createdAt: string
   updatedAt: string
+  version?: number
+  supersedes?: string
+  digest?: string
 }
 export interface ProjectMemoryDraft extends ProjectMemoryEntry {
   status: 'draft'
@@ -1115,6 +1118,7 @@ export interface ProjectMemoryDraftInput {
   body: string
   source: string
   reason: string
+  supersedes?: string
 }
 export interface ReadProjectMemoryResult {
   projectHash: string
@@ -1150,6 +1154,7 @@ export interface LayeredMemoryWriteInput {
 }
 
 export interface LayeredMemoryUpdateInput {
+  expectedUpdatedAt?: string
   title?: string
   body?: string
   tags?: string[]
@@ -2699,15 +2704,15 @@ export interface AgentDeskApi extends PreparationPermissionApi, SessionInputApi,
   proposeMemoryDraft(sessionId: string, input: ProjectMemoryDraftInput): Promise<ProjectMemoryDraft>
   acceptMemoryDraft(sessionId: string, draftId: string): Promise<ProjectMemoryEntry>
   deleteMemoryEntry(sessionId: string, entryId: string): Promise<{ id: string; deleted: boolean; deletedFrom: Array<'confirmed' | 'drafts'> }>
-  listLayeredMemories(): Promise<LayeredMemoryEntry[]>
+  listLayeredMemories(sessionId?: string): Promise<LayeredMemoryEntry[]>
   searchLayeredMemories(
     sessionId: string | undefined,
     input: LayeredMemorySearchInput
   ): Promise<LayeredMemorySearchHit[]>
   archiveLayeredMemories(olderThanDays?: number): Promise<number>
   exportLayeredMemories(): Promise<string>
-  updateLayeredMemory(entryId: string, input: LayeredMemoryUpdateInput): Promise<LayeredMemoryEntry | null>
-  deleteLayeredMemory(entryId: string): Promise<boolean>
+  updateLayeredMemory(entryId: string, input: LayeredMemoryUpdateInput, sessionId?: string): Promise<LayeredMemoryEntry | null>
+  deleteLayeredMemory(entryId: string, sessionId?: string): Promise<boolean>
   pickDirectory(): Promise<string | null>
   pathForFile(file: File): string
   quickbarGetState(): Promise<QuickbarState>

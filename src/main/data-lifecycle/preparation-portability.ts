@@ -7,6 +7,7 @@ import { parsePreparationPermissionRecord, type PreparationPermissionRecord } fr
 import { projectAggregateCanonicalJson, projectAggregateDigest, assertNoCredentialMaterial } from '../project-aggregate/codec'
 import { writeDurableFileSync } from '../durable-file'
 import { assertPreparationPath, permissionTemporaryFiles, preparationDraftFiles, preparationPaths } from './preparation-data-files'
+import { assertPreparationFileContent } from './preparation-file-content'
 
 type Context = Pick<ProjectAggregatePortableRuntime, 'sessionIds' | 'sessionHistory' | 'activeSessions' | 'sessionCreationJournal'> &
   Partial<Pick<ProjectAggregatePortableRuntime, 'taskSnapshots'>>
@@ -95,11 +96,9 @@ export function validateProjectPreparation(projectId: string, slice: ProjectPrep
       paths.add(path)
       const bytes = Buffer.from(file.data, 'base64')
       if (bytes.toString('base64') !== file.data || bytes.length !== file.sizeBytes || `sha256:${hashBytes(bytes)}` !== file.digest) fail('draft content digest mismatch')
-      // write_file produces UTF-8 text. Do not bury credential material in base64 archives.
-      if (Buffer.from(bytes.toString('utf8')).compare(bytes) !== 0) fail('preparation draft is not UTF-8 text')
-      assertNoCredentialMaterial(bytes.toString('utf8'))
       totalBytes += bytes.length; totalFiles++
       if (totalBytes > MAX_BYTES || totalFiles > MAX_FILES) fail('preparation slice exceeds portable limits')
+      assertPreparationFileContent(path, bytes)
     }
   }
 }

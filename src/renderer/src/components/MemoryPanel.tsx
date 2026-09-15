@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   LayeredMemoryEntry,
   ProjectMemoryDraft,
@@ -35,7 +35,13 @@ interface Props {
  * 直接调用 window.agentDesk.*(与 SettingsModal 的迁移/健康检查同风格),
  * 无需经 store。所有 IPC 在 acting 期间禁用按钮避免并发竞态。
  */
-export default function MemoryPanel({ sessionId, onClose, initialForm }: Props): React.JSX.Element {
+export default function MemoryPanel(props: Props): React.JSX.Element {
+  return <ProjectMemoryPanel key={props.sessionId} {...props} />
+}
+
+function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.JSX.Element {
+  const loadSequence = useRef(0)
+  const mounted = useRef(false)
   const [data, setData] = useState<ReadProjectMemoryResult | null>(null)
   const [learningRefreshToken, setLearningRefreshToken] = useState(0)
   const [layered, setLayered] = useState<LayeredMemoryEntry[]>([])
@@ -43,33 +49,45 @@ export default function MemoryPanel({ sessionId, onClose, initialForm }: Props):
   const [error, setError] = useState('')
   const [acting, setActing] = useState(false)
   const [editingLayeredId, setEditingLayeredId] = useState<string | null>(null)
-  const [layeredDraft, setLayeredDraft] = useState({ title: '', body: '' })
+  const [layeredDraft, setLayeredDraft] = useState({ title: '', body: '', expectedUpdatedAt: '' })
 
   const [showForm, setShowForm] = useState(false)
+  const [revising, setRevising] = useState<ProjectMemoryEntry | null>(null)
   const [form, setForm] = useState({ ...EMPTY_FORM })
   const [reviewForm, setReviewForm] = useState({ ...EMPTY_REVIEW_FORM })
   const [reviewNotice, setReviewNotice] = useState('')
 
   const load = useCallback(async (): Promise<void> => {
+    if (!mounted.current) return
+    const sequence = ++loadSequence.current
     setLoading(true)
+    setData(null)
+    setLayered([])
     setError('')
     try {
       const [result, layeredEntries] = await Promise.all([
         window.agentDesk.readProjectMemory(sessionId),
-        window.agentDesk.listLayeredMemories()
+        window.agentDesk.listLayeredMemories(sessionId)
       ])
+      if (!mounted.current || sequence !== loadSequence.current) return
       setData(result)
       setLayered(layeredEntries)
       setLearningRefreshToken((value) => value + 1)
     } catch (err) {
+      if (!mounted.current || sequence !== loadSequence.current) return
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setLoading(false)
+      if (mounted.current && sequence === loadSequence.current) setLoading(false)
     }
   }, [sessionId])
 
   useEffect(() => {
+    mounted.current = true
     void load()
+    return () => {
+      mounted.current = false
+      loadSequence.current++
+    }
   }, [load])
 
   useEffect(() => {
@@ -91,9 +109,11 @@ export default function MemoryPanel({ sessionId, onClose, initialForm }: Props):
         title: form.title.trim(),
         body: form.body.trim(),
         source: 'user',
-        reason: form.reason.trim()
+        reason: form.reason.trim(),
+        supersedes: revising?.id
       })
       setForm({ ...EMPTY_FORM })
+      setRevising(null)
       setShowForm(false)
       await load()
     } catch (err) {
@@ -131,17 +151,19 @@ export default function MemoryPanel({ sessionId, onClose, initialForm }: Props):
 
   const startLayeredEdit = (entry: LayeredMemoryEntry): void => {
     setEditingLayeredId(entry.id)
-    setLayeredDraft({ title: entry.title, body: entry.body })
+    setLayeredDraft({ title: entry.title, body: entry.body, expectedUpdatedAt: entry.updatedAt })
   }
 
   const saveLayered = async (entry: LayeredMemoryEntry): Promise<void> => {
     setActing(true)
     setError('')
     try {
-      await window.agentDesk.updateLayeredMemory(entry.id, {
+      const updated = await window.agentDesk.updateLayeredMemory(entry.id, {
         title: layeredDraft.title.trim(),
-        body: layeredDraft.body.trim()
-      })
+        body: layeredDraft.body.trim(),
+        expectedUpdatedAt: layeredDraft.expectedUpdatedAt
+      }, sessionId)
+      if (!updated) throw new Error('记忆已被删除，请刷新后继续')
       setEditingLayeredId(null)
       await load()
     } catch (err) {
@@ -155,7 +177,7 @@ export default function MemoryPanel({ sessionId, onClose, initialForm }: Props):
     setActing(true)
     setError('')
     try {
-      await window.agentDesk.deleteLayeredMemory(entryId)
+      await window.agentDesk.deleteLayeredMemory(entryId, sessionId)
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -254,7 +276,11 @@ export default function MemoryPanel({ sessionId, onClose, initialForm }: Props):
           <button
             className="btn btn-ghost btn-sm"
             disabled={acting}
-            onClick={() => setShowForm((v) => !v)}
+            onClick={() => {
+              setRevising(null)
+              setForm({ ...EMPTY_FORM })
+              setShowForm((v) => !v)
+            }}
           >
             {showForm ? '取消' : '添加记忆'}
           </button>
@@ -266,7 +292,7 @@ export default function MemoryPanel({ sessionId, onClose, initialForm }: Props):
         </div>
       </div>
       <p className="settings-hint">
-        记忆按项目隔离,采纳后写入项目记忆文件,供后续会话读取。草稿需确认后生效。
+        记忆按项目隔离，修订草稿确认后生效。记忆提供上下文，不授予工具权限。
       </p>
 
       <div className="memory-group">
@@ -353,6 +379,7 @@ export default function MemoryPanel({ sessionId, onClose, initialForm }: Props):
 
       {showForm && (
         <div className="memory-form" data-memory-form="true">
+          {revising && <div className="field-hint">修订 v{revising.version} · {revising.source}。确认新版本前，当前版本继续生效。</div>}
           <label className="field-label">类型</label>
           <input
             className="input input-block"
@@ -395,7 +422,7 @@ export default function MemoryPanel({ sessionId, onClose, initialForm }: Props):
               disabled={acting}
               onClick={() => void propose()}
             >
-              {acting ? '提交中…' : '提交草稿'}
+              {acting ? '提交中…' : revising ? '提交修订草稿' : '提交草稿'}
             </button>
           </div>
         </div>
@@ -420,6 +447,7 @@ export default function MemoryPanel({ sessionId, onClose, initialForm }: Props):
                         <span className="migrate-kind">{d.kind}</span>
                       </div>
                       <div className="provider-row-sub memory-body">{d.body}</div>
+                      <div className="field-hint">来源: {d.source}{d.version ? ` · v${d.version}` : ''} · {d.updatedAt}</div>
                       {d.reason && <div className="field-hint">理由:{d.reason}</div>}
                     </div>
                     <div className="provider-row-actions">
@@ -458,8 +486,18 @@ export default function MemoryPanel({ sessionId, onClose, initialForm }: Props):
                         <span className="migrate-kind">{m.kind}</span>
                       </div>
                       <div className="provider-row-sub memory-body">{m.body}</div>
+                      <div className="field-hint">来源: {m.source}{m.version ? ` · v${m.version}` : ''} · {m.updatedAt}</div>
                     </div>
                     <div className="provider-row-actions">
+                      {m.version && <button
+                        className="btn btn-ghost btn-sm"
+                        disabled={acting}
+                        onClick={() => {
+                          setRevising(m)
+                          setForm({ kind: m.kind, title: m.title, body: m.body, reason: m.reason })
+                          setShowForm(true)
+                        }}
+                      >修订</button>}
                       <button
                         className="btn btn-ghost btn-sm"
                         disabled={acting}
@@ -474,7 +512,7 @@ export default function MemoryPanel({ sessionId, onClose, initialForm }: Props):
             )}
           </div>
 
-          <LearningApprovalPanel sessionId={sessionId} refreshToken={learningRefreshToken} />
+          <LearningApprovalPanel sessionId={sessionId} refreshToken={learningRefreshToken} onChanged={load} />
 
           <div className="memory-group">
             <h4 className="settings-h3">分层记忆 · {layered.length}</h4>

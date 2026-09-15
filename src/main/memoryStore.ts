@@ -10,7 +10,7 @@ import {
   listLearningProject
 } from './learning/learning-lifecycle'
 import { requireTrustedUserLearningActor, type TrustedLearningDecision } from './learning/learning-security'
-import { learningProjectHash, resolveDefaultLearningRoot } from './learning/learning-store'
+import { learningProjectHash } from './learning/learning-store'
 import { projectLearningNamespace } from './project-aggregate/project-memory-adapter'
 import { writeDurableFile } from './durable-file'
 
@@ -23,6 +23,9 @@ export interface ProjectMemoryEntry {
   reason: string
   createdAt: string
   updatedAt: string
+  version?: number
+  supersedes?: string
+  digest?: string
 }
 
 const LEGACY_MEMORY_ENTRY_SCHEMA_VERSION = 1 as const
@@ -38,6 +41,7 @@ export interface ProjectMemoryDraftInput {
   body: string
   source: string
   reason: string
+  supersedes?: string
 }
 
 export interface ReadProjectMemoryResult {
@@ -64,6 +68,8 @@ export interface ProjectMemoryTarget {
   projectRoot: string
   /** Canonical ProjectWorkspace identity. New Learning records use this when present. */
   projectId?: string
+  /** Explicit compatibility/migration view; canonical runtime reads do not inherit a shared cwd. */
+  includeLegacyPathMemory?: boolean
 }
 
 export type ProjectMemoryTargetInput = string | ProjectMemoryTarget
@@ -73,6 +79,7 @@ interface ResolvedProjectMemoryTarget {
   learningProjectRoot: string
   projectHash: string
   legacyProjectHash: string
+  includeLegacyPathMemory: boolean
 }
 
 type MemoryBucket = 'confirmed' | 'drafts'
@@ -91,11 +98,11 @@ export async function readProjectMemory(
   const root = normalizeMemoryRoot(memoryRoot)
   const target = resolveProjectMemoryTarget(project)
   const projectDir = projectMemoryDir(root, target.legacyProjectHash)
-  const learningRoot = await learningRootForMemoryRoot(target.projectRoot, root)
+  const learningRoot = learningRootForMemoryRoot(root)
   const [learningProjects, legacyEntries, legacyDrafts] = await Promise.all([
     Promise.all(memoryLearningRoots(target).map((projectRoot) => listLearningProject(projectRoot, learningRoot))),
-    readBucket<ProjectMemoryEntry>(path.join(projectDir, 'confirmed'), 'confirmed'),
-    readBucket<ProjectMemoryDraft>(path.join(projectDir, 'drafts'), 'drafts')
+    target.includeLegacyPathMemory ? readBucket<ProjectMemoryEntry>(path.join(projectDir, 'confirmed'), 'confirmed') : [],
+    target.includeLegacyPathMemory ? readBucket<ProjectMemoryDraft>(path.join(projectDir, 'drafts'), 'drafts') : []
   ])
   const entries = mergeById(
     learningProjects.flatMap((learning) => learning.active.filter(isProjectMemoryRecord).map(memoryEntryFromRecord)),
@@ -124,18 +131,18 @@ export async function proposeMemoryDraft(
   const target = resolveProjectMemoryTarget(project)
   const record = await createLearningDraft(
     target.learningProjectRoot,
-    await learningRootForMemoryRoot(target.projectRoot, root), {
-    kind: 'memory',
-    source: normalizeRequiredText(input.source, 'source'),
-    confidence: context.confidence,
-    supersedes: context.supersedes,
-    payload: {
-      type: 'memory',
-      memoryKind: normalizeRequiredText(input.kind, 'kind'),
-      title: normalizeRequiredText(input.title, 'title'),
-      body: normalizeRequiredText(input.body, 'body'),
-      reason: normalizeRequiredText(input.reason, 'reason')
-    }
+    learningRootForMemoryRoot(root), {
+      kind: 'memory',
+      source: normalizeRequiredText(input.source, 'source'),
+      confidence: context.confidence,
+      supersedes: context.supersedes ?? input.supersedes,
+      payload: {
+        type: 'memory',
+        memoryKind: normalizeRequiredText(input.kind, 'kind'),
+        title: normalizeRequiredText(input.title, 'title'),
+        body: normalizeRequiredText(input.body, 'body'),
+        reason: input.reason?.trim() || '用户提出的项目记忆'
+      }
     }, { actor: context.actor })
   if (!isMemoryRecord(record)) throw new Error('Created learning draft is not a Memory record')
   return memoryDraftFromRecord(record)
@@ -152,14 +159,15 @@ export async function acceptMemoryDraft(
   const root = normalizeMemoryRoot(memoryRoot)
   const target = resolveProjectMemoryTarget(project)
   const projectDir = projectMemoryDir(root, target.legacyProjectHash)
-  const learningRoot = await learningRootForMemoryRoot(target.projectRoot, root)
+  const learningRoot = learningRootForMemoryRoot(root)
   let recordRoot = target.learningProjectRoot
   let record = await getLearningRecord(recordRoot, learningRoot, id)
-  if (!record && recordRoot !== target.projectRoot) {
+  if (!record && target.includeLegacyPathMemory && recordRoot !== target.projectRoot) {
     recordRoot = target.projectRoot
     record = await getLearningRecord(recordRoot, learningRoot, id)
   }
   if (!record) {
+    if (!target.includeLegacyPathMemory) throw new Error('项目记忆草稿不存在')
     const draftPath = entryJsonPath(projectDir, 'drafts', id)
     const draft = parseDraft(await readFile(draftPath, 'utf8'), draftPath).entry
     recordRoot = target.learningProjectRoot
@@ -183,7 +191,7 @@ export async function acceptMemoryDraft(
   if (!isMemoryRecord(record)) throw new Error('Learning draft is not a Memory record')
   const accepted = await approveLearningDraft(recordRoot, learningRoot, record.id, authority as TrustedLearningDecision)
   if (!isMemoryRecord(accepted)) throw new Error('Approved learning record is not a Memory record')
-  await removeEntryFiles(projectDir, 'drafts', id)
+  if (target.includeLegacyPathMemory) await removeEntryFiles(projectDir, 'drafts', id)
   return memoryEntryFromRecord(accepted)
 }
 
@@ -198,7 +206,7 @@ export async function deleteMemoryEntry(
   const root = normalizeMemoryRoot(memoryRoot)
   const target = resolveProjectMemoryTarget(project)
   const projectDir = projectMemoryDir(root, target.legacyProjectHash)
-  const learningRoot = await learningRootForMemoryRoot(target.projectRoot, root)
+  const learningRoot = learningRootForMemoryRoot(root)
   const deletedFrom: Array<'confirmed' | 'drafts'> = []
 
   for (const projectRoot of memoryLearningRoots(target)) {
@@ -210,8 +218,10 @@ export async function deleteMemoryEntry(
     await deleteLearningRecord(projectRoot, learningRoot, id, authority as TrustedLearningDecision)
   }
 
-  if (await removeEntryFiles(projectDir, 'confirmed', id) && !deletedFrom.includes('confirmed')) deletedFrom.push('confirmed')
-  if (await removeEntryFiles(projectDir, 'drafts', id) && !deletedFrom.includes('drafts')) deletedFrom.push('drafts')
+  if (target.includeLegacyPathMemory) {
+    if (await removeEntryFiles(projectDir, 'confirmed', id) && !deletedFrom.includes('confirmed')) deletedFrom.push('confirmed')
+    if (await removeEntryFiles(projectDir, 'drafts', id) && !deletedFrom.includes('drafts')) deletedFrom.push('drafts')
+  }
 
   return {
     id,
@@ -232,20 +242,20 @@ function resolveProjectMemoryTarget(input: ProjectMemoryTargetInput): ResolvedPr
     projectRoot,
     learningProjectRoot,
     projectHash: learningProjectHash(learningProjectRoot),
-    legacyProjectHash: learningProjectHash(projectRoot)
+    legacyProjectHash: learningProjectHash(projectRoot),
+    includeLegacyPathMemory: !projectId || candidate.includeLegacyPathMemory === true
   }
 }
 
 function memoryLearningRoots(target: ResolvedProjectMemoryTarget): string[] {
-  return target.learningProjectRoot === target.projectRoot
+  return target.learningProjectRoot === target.projectRoot || !target.includeLegacyPathMemory
     ? [target.learningProjectRoot]
     : [target.learningProjectRoot, target.projectRoot]
 }
 
-async function learningRootForMemoryRoot(projectRoot: string, memoryRoot: string): Promise<string> {
-  if (process.env.CAOGEN_USER_DATA_DIR || process.type === 'browser') {
-    return resolveDefaultLearningRoot(projectRoot)
-  }
+function learningRootForMemoryRoot(memoryRoot: string): string {
+  // Both stores belong to the profile selected by the caller, even when another
+  // profile happens to be configured in the process environment.
   return path.join(path.dirname(memoryRoot), 'learning')
 }
 
@@ -268,7 +278,10 @@ function memoryEntryFromRecord(record: LearningRecord & { payload: MemoryLearnin
     source: record.source,
     reason: record.payload.reason,
     createdAt: record.createdAt,
-    updatedAt: record.updatedAt
+    updatedAt: record.updatedAt,
+    version: record.version,
+    supersedes: record.supersedes,
+    digest: record.digest
   }
 }
 

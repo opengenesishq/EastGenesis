@@ -435,15 +435,15 @@ const api: AgentDeskApi = {
     ipcRenderer.invoke('memory:accept', sessionId, draftId),
   deleteMemoryEntry: (sessionId: string, entryId: string) =>
     ipcRenderer.invoke('memory:delete', sessionId, entryId),
-  listLayeredMemories: () => ipcRenderer.invoke('memory:layeredList'),
+  listLayeredMemories: (sessionId?: string) => ipcRenderer.invoke('memory:layeredList', sessionId),
   searchLayeredMemories: (sessionId: string | undefined, input: LayeredMemorySearchInput) =>
     ipcRenderer.invoke('memory:layeredSearch', sessionId, input),
   archiveLayeredMemories: (olderThanDays?: number) =>
     ipcRenderer.invoke('memory:layeredArchive', olderThanDays),
   exportLayeredMemories: () => ipcRenderer.invoke('memory:layeredExport'),
-  updateLayeredMemory: (entryId: string, input: LayeredMemoryUpdateInput) =>
-    ipcRenderer.invoke('memory:layeredUpdate', entryId, input),
-  deleteLayeredMemory: (entryId: string) => ipcRenderer.invoke('memory:layeredDelete', entryId),
+  updateLayeredMemory: (entryId: string, input: LayeredMemoryUpdateInput, sessionId?: string) =>
+    ipcRenderer.invoke('memory:layeredUpdate', entryId, input, sessionId),
+  deleteLayeredMemory: (entryId: string, sessionId?: string) => ipcRenderer.invoke('memory:layeredDelete', entryId, sessionId),
   pickDirectory: () => ipcRenderer.invoke('dialog:pickDirectory'),
   pathForFile: (file: File) => webUtils.getPathForFile(file),
   quickbarGetState: () => ipcRenderer.invoke('quickbar:getState'),

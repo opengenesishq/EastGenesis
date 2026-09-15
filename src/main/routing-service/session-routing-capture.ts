@@ -14,6 +14,7 @@ import { nativeBudgetSnapshot } from '../model/native-request-budget'
 import { settingsForCaoGenDrive, driveRouteTuning, driveRiskAtLeast } from '../model/drive'
 import { resolveProviderRuntimeTarget } from '../provider/providerRuntimeTarget'
 import { isLocalProviderUrl } from '../model/routing-expert-policy'
+import { evaluateNativeExecutorCompatibility } from '../model/executor-compatibility'
 
 /** Main-owned capture used by canonical Session previews and first Run binding. */
 export function captureSessionRouting(input: { meta: SessionMeta; prompt: string; payload?: Pick<SendMessagePayload, 'images' | 'documents'> }): {
@@ -107,9 +108,8 @@ function buildTargetEligibility(
     } catch (error) {
       reasons.push(`Provider endpoint binding is unavailable: ${error instanceof Error ? error.message : String(error)}`)
     }
-    if (task.requiresTools && !entry.profile.supportsTools) reasons.push('Model does not declare tool calling capability.')
-    if (task.requiresVision && !entry.profile.supportsVision) reasons.push('Model does not declare vision capability.')
-    if (entry.profile.contextWindowTokens < task.minContextTokens) reasons.push(`Model context window is below ${task.minContextTokens} tokens.`)
+    const compatibility = evaluateNativeExecutorCompatibility({ provider: entry.provider, profile: entry.profile, requirements: task })
+    reasons.push(...compatibility.modelReasons, ...compatibility.executorReasons)
     const connectionFingerprint = identities.get(entry.provider.id)
     if (!connectionFingerprint) reasons.push('Provider connection identity is unavailable.')
     return { target: entry.target, allowed: reasons.length === 0, reasons,

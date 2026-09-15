@@ -519,6 +519,7 @@ export function registerIpc(): void {
         rootDir: memoryRoot(),
         text: payload.text,
         projectRoot,
+        projectId: sessionMeta.workspaceId,
         source: 'session:auto-extract',
         defaultLayer: projectRoot ? 'project' : 'user'
       }).catch((error) => {
@@ -907,32 +908,52 @@ export function registerIpc(): void {
     const meta = sessionManager.get(sessionId)?.meta
     return meta ? (meta.sourceCwd ?? meta.cwd) : null
   }
+  const memoryTargetFor = (sessionId: string) => {
+    const meta = sessionManager.get(sessionId)?.meta
+    return meta ? { projectRoot: meta.sourceCwd ?? meta.cwd, projectId: meta.workspaceId } : null
+  }
+  const memoryScopeFor = (sessionId?: string): { projectRoot?: string; projectId?: string } => {
+    if (sessionId === undefined) return {}
+    const scope = memoryTargetFor(sessionId)
+    if (!scope) throw new Error('会话不存在，请先打开原始任务。')
+    return scope
+  }
   registerProjectMemoryIpc({
     memoryRoot,
-    targetForSession: (sessionId) => {
-      const meta = sessionManager.get(sessionId)?.meta
-      return meta ? { projectRoot: meta.sourceCwd ?? meta.cwd, projectId: meta.workspaceId } : null
-    }
+    targetForSession: memoryTargetFor
   })
 
-  registerLearningIpc({ projectRootFor })
+  registerLearningIpc({ projectRootFor, targetForSession: memoryTargetFor, userDataRoot: () => app.getPath('userData') })
 
-  ipcMain.handle('memory:layeredList', () => listMemories(memoryRoot()))
-  ipcMain.handle('memory:layeredSearch', (_e, sessionId: string | undefined, input: MemorySearchInput) => {
-    const projectRoot = sessionId ? projectRootFor(sessionId) : null
+  ipcMain.handle('memory:layeredList', (event, sessionId?: string) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return listMemories(memoryRoot(), memoryScopeFor(sessionId))
+  })
+  ipcMain.handle('memory:layeredSearch', (event, sessionId: string | undefined, input: MemorySearchInput) => {
+    assertTrustedWorkflowLedgerSender(event)
+    const scope = memoryScopeFor(sessionId)
     return searchMemories(memoryRoot(), {
       ...(input ?? {}),
-      projectRoot: projectRoot ?? input?.projectRoot
+      projectRoot: scope.projectRoot,
+      projectId: scope.projectId
     })
   })
-  ipcMain.handle('memory:layeredArchive', (_e, olderThanDays?: number) =>
-    archiveStaleMemories(memoryRoot(), olderThanDays)
-  )
-  ipcMain.handle('memory:layeredExport', () => exportMemories(memoryRoot()))
-  ipcMain.handle('memory:layeredUpdate', (_e, entryId: string, input: MemoryUpdateInput) =>
-    updateLayeredMemoryEntry(memoryRoot(), entryId, input ?? {})
-  )
-  ipcMain.handle('memory:layeredDelete', (_e, entryId: string) => deleteLayeredMemoryEntry(memoryRoot(), entryId))
+  ipcMain.handle('memory:layeredArchive', (event, olderThanDays?: number) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return archiveStaleMemories(memoryRoot(), olderThanDays)
+  })
+  ipcMain.handle('memory:layeredExport', (event) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return exportMemories(memoryRoot())
+  })
+  ipcMain.handle('memory:layeredUpdate', (event, entryId: string, input: MemoryUpdateInput, sessionId?: string) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return updateLayeredMemoryEntry(memoryRoot(), entryId, input ?? {}, memoryScopeFor(sessionId))
+  })
+  ipcMain.handle('memory:layeredDelete', (event, entryId: string, sessionId?: string) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return deleteLayeredMemoryEntry(memoryRoot(), entryId, memoryScopeFor(sessionId))
+  })
 
   ipcMain.handle(
     'providers:fetchModels',

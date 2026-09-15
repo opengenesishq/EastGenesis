@@ -14,6 +14,7 @@ import { assertFrozenRunRequestTarget, frozenRoutingPolicyForRun } from '../task
 import { getProviderConnectionIdentity } from '../providers'
 import type { FrozenNativeProtocol, FrozenRunRoutingPolicyV1 } from '../../shared/frozen-routing-types'
 import type { RoutingRetryReason } from '../../shared/routing-policy-types'
+import { resolveNativeExecutorProtocol } from './executor-compatibility'
 
 export type FrozenRetryProjection = Readonly<Pick<FrozenRunRoutingPolicyV1, 'initialTarget' | 'retryTargets' | 'effectivePolicy'>>
 export type NativeSessionRecoveryContext = Pick<NativeRecoveryCheck, 'anchor' | 'currentRequiredCapabilities'> & { initialExpertPolicy: RoutingExpertPolicy; frozenRetry?: FrozenRetryProjection }
@@ -90,7 +91,7 @@ export function assertNativeSessionRecoveryTarget(meta: SessionMeta, target: Nat
   // created the canonical binding.  A canonical Run, once present, is always
   // checked below and cannot silently fall back to mutable SessionMeta.
   if (!frozen) return
-  const protocol = nativeProtocolForProvider(provider)
+  const protocol = resolveNativeExecutorProtocol(provider, target.model)
   try {
     assertFrozenRunRequestTarget({ run, providerId: target.providerId, model: target.model, protocol,
       connectionIdentity: getProviderConnectionIdentity(target.providerId) })
@@ -98,12 +99,6 @@ export function assertNativeSessionRecoveryTarget(meta: SessionMeta, target: Nat
     if (error instanceof ModelRouteError) throw error
     throw new ModelRouteError('ROUTING_MANUAL_TARGET_UNAVAILABLE', error instanceof Error ? error.message : String(error))
   }
-}
-
-function nativeProtocolForProvider(provider: ProviderView): FrozenNativeProtocol {
-  return provider.engine === 'anthropic' ? 'anthropic.messages'
-    : provider.engine === 'gemini' ? 'google.generative-language'
-    : provider.openaiProtocol === 'responses' ? 'openai.responses' : 'openai.chat-completions'
 }
 
 export function resolveOpenAiSessionTurnRoute(meta: SessionMeta, payload: SendMessagePayload, fixedModel: string) {

@@ -29,8 +29,8 @@ export function registerPreparationPermissionIpc(): void {
           const result = store[operation](meta, input, `local-user:webcontents-${event.sender.id}`)
           writeSessionAuditLog({ ...meta, taskStrategy: 'plan' }, {
             action: operation === 'grant' ? 'allow' : 'deny', source: 'user', toolName: 'preparation_permission',
-            input: { operation, revision: result.revision, directory: result.directory },
-            message: operation === 'grant' ? '用户授权独立准备区 write_file。' : '用户撤销独立准备区写入授权。'
+            input: { operation, revision: result.revision, directory: result.directory, allowedWriteTools: result.allowedWriteTools },
+            message: operation === 'grant' ? `用户授权独立准备区 ${result.allowedWriteTools.join('、')}。` : '用户撤销独立准备区写入授权。'
           })
           return result
         })

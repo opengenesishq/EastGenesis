@@ -16,6 +16,7 @@ import { createLegacyRoutingDecisionView } from '../model/session-routing'
 import { getBusinessLines } from '../../shared/business-line-types'
 import { providerAllowedByRoutingExpertPolicy, isLocalProviderUrl } from '../model/routing-expert-policy'
 import { resolveProviderRuntimeTarget } from '../provider/providerRuntimeTarget'
+import { resolveNativeExecutorProtocol } from '../model/executor-compatibility'
 
 /** Build the immutable native text policy from the already trusted session route. */
 export function frozenPolicyForSessionRun(
@@ -63,6 +64,7 @@ export function frozenPolicyForSessionRun(
     const line = getBusinessLines(settings).find((item) => item.id === meta.businessLineId)
     if (!line?.enabled) return undefined
     if (!provider.ready) return undefined
+    resolveRuntimeSessionRoute({ meta, payload, settings, providers: [provider], allowAnyEngine: true })
     try {
       const runtimeTarget = resolveProviderRuntimeTarget(provider, { appId: provider.engine, model: meta.model })
       if (!providerAllowedByRoutingExpertPolicy(provider, settings.routingExpertPolicy, runtimeTarget)) return undefined
@@ -170,14 +172,15 @@ export function frozenPolicyForSessionRun(
           baseStrategy: getSettings().schedulerStrategy, baseStrategySource: { kind: 'global' },
           userIntent: meta.routingScope === 'provider' ? { kind: 'provider', providerId: provider.id } : { kind: 'global' },
           effectivePolicy: { selection: { kind: 'global_auto' }, strategy: getSettings().schedulerStrategy, failure: legacyFailover },
-          initialTarget: { providerId: provider.id, model: route.model, protocol }, qualifiedTargets, retryTargets,
+          initialTarget: { providerId: provider.id, model: route.model, protocol }, qualifiedTargets,
+          retryTargets: legacyFailover.kind === 'retry_allowed_targets' ? retryTargets : [],
           hardBounds: { requiredCapabilities: [...(line.requiredCapabilities ?? []), ...(route.recoveryTask?.requiresTools ? ['tools' as const] : []), ...(route.recoveryTask?.requiresVision ? ['vision' as const] : [])], minContextTokens: Math.max(1, route.recoveryTask?.minContextTokens ?? meta.contextTokens ?? 1), allowedProviderIds: [...settings.routingExpertPolicy.allowedProviderIds], locality: settings.routingExpertPolicy.locality === 'local_only' ? 'local_only' : 'any', ...freezeExpertConstraints(settings.routingExpertPolicy) }
         })
       } catch { return undefined }
     }
     return undefined
   }
-  const capture = captureSessionRouting({ meta, prompt: payload.text })
+  const capture = captureSessionRouting({ meta, prompt: payload.text, payload })
   const result = evaluateRoutingRuleSet({ rules: { kind: 'saved', value: stored.ruleSet }, context: capture.context, snapshots: capture.snapshots })
   if (result.status !== 'ready') return undefined
   const route = resolveRouteForEvaluation(meta, payload, result.initialTarget, result)
@@ -197,6 +200,10 @@ function prepareFrozenContinuationRoute(
   const target = policy.initialTarget
   const provider = listProviders().find((item) => item.id === target.providerId)
   if (!provider) throw new Error(`冻结路由目标 ${target.providerId} 不再可用。`)
+  // A continuation preserves its target, but new input still has to fit that
+  // target (for example, adding an image to a text-only conversation).
+  resolveRuntimeSessionRoute({ meta: { ...meta, providerId: target.providerId, model: target.model, routingScope: 'fixed' },
+    payload, settings: getSettings(), providers: [provider], allowAnyEngine: true })
   let route: ResolvedSessionRoute | undefined
   try {
     route = resolveRuntimeSessionRoute({
@@ -264,7 +271,7 @@ function resolveRouteForEvaluation(meta: SessionMeta, payload: SendMessagePayloa
 function targetProtocol(target: { providerId: string; model: string }): FrozenNativeProtocol {
   const provider = listProviders().find((item) => item.id === target.providerId)
   if (!provider) throw new Error('Provider unavailable')
-  return provider.engine === 'anthropic' ? 'anthropic.messages' : provider.engine === 'gemini' ? 'google.generative-language' : provider.openaiProtocol === 'responses' ? 'openai.responses' : 'openai.chat-completions'
+  return resolveNativeExecutorProtocol(provider, target.model)
 }
 
 /**
