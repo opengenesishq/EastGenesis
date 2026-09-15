@@ -318,6 +318,8 @@ async function main() {
       // Scope interactions to the visible workspace, never the hidden copy.
       const workbench = `[data-work-inbox-intake] [data-task-plan-session="${sessionId}"]`
       const originalVersion = plan.currentVersion
+      await waitForVisible(page, `${workbench} [data-task-plan-review]`)
+      await clickVisible(page, 'Adjust generated plan', `${workbench} [data-task-plan-edit]`)
       await clickVisible(page, 'Edit Mission step title', `${workbench} [data-task-plan-step-title="0"]`)
       await page.keyboard.press('End')
       await page.type(`${workbench} [data-task-plan-step-title="0"]`, '（本地验证）')

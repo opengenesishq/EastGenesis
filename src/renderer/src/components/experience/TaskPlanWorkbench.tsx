@@ -15,12 +15,14 @@ interface TaskPlanWorkbenchProps {
   sessionId: string
   strategy: 'view' | 'plan' | 'execute'
   running: boolean
+  compact?: boolean
 }
 
 export default function TaskPlanWorkbench({
   sessionId,
   strategy,
-  running
+  running,
+  compact = false
 }: TaskPlanWorkbenchProps): React.JSX.Element | null {
   const t = useT()
   const state = useStore((store) => store.taskPlans[sessionId])
@@ -38,7 +40,9 @@ export default function TaskPlanWorkbench({
   const workbenchRef = useRef<HTMLElement>(null)
   const [loadedVersionId, setLoadedVersionId] = useState<string>()
   const [form, setForm] = useState(emptyPlanForm)
+  const [editing, setEditing] = useState(false)
   const current = state?.currentVersion
+  const declaredEgress = [...new Set([...(current?.dataEgress ?? []), ...(current?.steps.flatMap((step) => step.dataEgress) ?? [])])]
 
   useEffect(() => {
     if (!running) void refresh(sessionId)
@@ -75,7 +79,10 @@ export default function TaskPlanWorkbench({
 
   const save = async (): Promise<void> => {
     const plan = await createVersion(sessionId, taskPlanDraftFromForm(form))
-    if (plan?.currentVersion) setLoadedVersionId(plan.currentVersion.id)
+    if (plan?.currentVersion) {
+      setLoadedVersionId(plan.currentVersion.id)
+      setEditing(false)
+    }
   }
   const approveCurrent = async (): Promise<boolean> => {
     if (!current) return false
@@ -104,12 +111,32 @@ export default function TaskPlanWorkbench({
       {state?.approvalStatus === 'approved' && state.projection && (
         <div className={`task-plan-projection task-plan-projection-${state.projection.mode}`}
           data-task-plan-projection={state.projection.mode}>
-          {state.projection.mode === 'canonical'
+          {compact ? t('taskPlanApproved') : state.projection.mode === 'canonical'
             ? `${t('taskPlanCanonicalProjection')} · ${state.projection.steps.length} WorkItems`
             : t('taskPlanConversationProjection')}
         </div>
       )}
-      {expanded && (
+      {expanded && compact && current && !editing && <div className="task-plan-review" data-task-plan-review>
+        <p className="task-plan-review-objective">{current.objective}</p>
+        <ol>{current.steps.map((step) => <li key={step.id}>{step.title}</li>)}</ol>
+        {current.expectedArtifacts.length > 0 && <p><strong>{t('taskPlanArtifacts')}：</strong>{current.expectedArtifacts.join('、')}</p>}
+        <p><strong>{t('taskPlanAcceptance')}：</strong>{current.acceptanceCriteria.join('；')}</p>
+        <p><strong>{t('taskPlanDataEgress')}：</strong>{declaredEgress.length ? declaredEgress.join('；') : t('taskPlanEgressUndeclared')}</p>
+        <p><strong>{t('taskPlanRisk')}：</strong>{t(({ low: 'taskPlanRiskLow', medium: 'taskPlanRiskMedium', high: 'taskPlanRiskHigh', critical: 'taskPlanRiskCritical' } as const)[current.riskLevel])}</p>
+        <p><strong>{t('taskPlanCost')}：</strong>{current.estimatedCostUsd === null ? t('taskPlanCostUnknown') : `USD ${current.estimatedCostUsd}`}</p>
+        {error && <p className="task-plan-error" role="alert">{error}</p>}
+        <div className="task-plan-actions">
+          <button type="button" className="btn" data-task-plan-edit disabled={running || busy}
+            onClick={() => setEditing(true)}>{t('taskPlanAdjust')}</button>
+          {state?.approvalStatus === 'approved'
+            ? <button type="button" className="btn" data-task-plan-revoke="true" disabled={running || busy} onClick={revokeCurrent}>{t('taskPlanRevoke')}</button>
+            : <button type="button" className="btn" data-task-plan-approve="true" disabled={strategy !== 'plan' || running || busy}
+                onClick={() => void approveCurrent()}>{t('taskPlanApprove')}</button>}
+          <button type="button" className="btn btn-primary" data-task-plan-approve-execute="true" disabled={strategy !== 'plan' || running || busy}
+            onClick={() => void approveAndExecute()}>{t('taskPlanApproveExecute')}</button>
+        </div>
+      </div>}
+      {expanded && (!compact || !current || editing) && (
         <TaskPlanEditor
           t={t}
           form={form}

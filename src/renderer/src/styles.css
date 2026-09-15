@@ -2549,6 +2549,18 @@ textarea {
   padding: 6px 18px 14px 50px;
 }
 
+.task-plan-review {
+  display: grid;
+  gap: 10px;
+  padding: 12px 18px 16px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.task-plan-review p { margin: 0; }
+.task-plan-review ol { margin: 0; padding-left: 24px; }
+.task-plan-review li + li { margin-top: 6px; }
+.task-plan-review-objective { font-weight: 600; }
+
 .task-plan-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

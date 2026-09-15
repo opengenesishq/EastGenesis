@@ -13,6 +13,7 @@ export default function GoalTaskStarter({ projectId, state }: {
   state: ReturnType<typeof useProjectGoalTaskStart>
 }): React.JSX.Element {
   const id = useId()
+  const session = useStore((store) => state.planSessionId ? store.sessions[state.planSessionId]?.meta : undefined)
   const storage = useRef<Storage>()
   if (!storage.current) { try { storage.current = window.localStorage } catch { /* typing remains available */ } }
   const draftKey = `goal-intake:${projectId ?? 'personal'}`
@@ -62,7 +63,9 @@ export default function GoalTaskStarter({ projectId, state }: {
           {localized('连接与设置', 'Connections and settings')}
         </button>
       </div>}
-      {state.announcement && <p className="pws-goal-task-success" role="status">{state.announcement}</p>}
+      {state.announcement && <p className="pws-goal-task-success" role="status">{state.planSessionId
+        ? localized('计划已生成，可查看、调整或继续这个任务。', 'Plan created. Review, adjust, or continue this task.')
+        : state.announcement}</p>}
     </form>
     {!projectId && <PersonalTaskRecoveryPanel refreshKey={state.busy} storageKey="caogen.work-inbox.personal-submission.v1" />}
     {state.planSessionId && state.planProjectId === (projectId ?? null) && <>
@@ -73,7 +76,8 @@ export default function GoalTaskStarter({ projectId, state }: {
         useStore.getState().setStudioSurface('session')
         useStore.getState().setShowNewSession(false)
       }}>{localized('继续这个任务', 'Continue this task')}</button>
-      <TaskPlanWorkbench sessionId={state.planSessionId} strategy="plan" running={false} />
+      <TaskPlanWorkbench sessionId={state.planSessionId} strategy={session?.taskStrategy ?? 'plan'}
+        running={session?.status === 'running' || session?.status === 'starting'} compact />
     </>}
   </>
 }
