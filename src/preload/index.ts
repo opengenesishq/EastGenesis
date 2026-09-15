@@ -33,6 +33,7 @@ import type {
 } from '../shared/types'
 import { resolveTaskDagFinalization } from './task-dag-finalization'
 import { workflowLedgerApi } from './workflow-ledger'
+import { preparationPermissionApi } from './preparation-permission'
 import { projectWorkspaceApi } from './project-workspace'
 import { remoteContinuationApi } from './remote-continuation'
 import { dataRetentionApi } from './data-retention'
@@ -50,8 +51,11 @@ import { mediaApi } from './media'
 import { sessionEntrypointApi } from './session-entrypoints'
 import { assistantSearchApi } from './assistant-search'
 import { palaceSceneBuilderApi } from './palace-scene-builder'
+import { sessionInputApi } from './session-input'
 
 const api: AgentDeskApi = {
+  ...preparationPermissionApi,
+  ...sessionInputApi,
   ...sessionEntrypointApi,
   ...assistantSearchApi,
   ...palaceSceneBuilderApi,

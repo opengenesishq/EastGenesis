@@ -302,22 +302,23 @@ async function main() {
       const plan = await page.evaluate((id) => window.agentDesk.getTaskPlan(id), sessionId)
       assertCondition(plan.approvalStatus === 'pending' && plan.currentVersion?.source === 'genesis', 'Mission did not create a pending genesis plan')
       assertCondition(plan.currentVersion.steps.length === 4, 'Mission plan must contain four role steps')
-      for (const role of ['礼部', '工部', '文书', '都察院']) {
-        assertCondition(plan.currentVersion.steps.some((step) => step.title.includes(role)), `Mission plan missing ${role}`)
+      const cabinet = plan.currentVersion.institutionTemplate?.templateId === 'cabinet-six-ministries'
+      const expected = {
+        research: { label: cabinet ? '翰林院' : '礼部', institution: 'hanlinyuan', executionRole: 'general', type: 'research', dependsOn: [] },
+        build: { label: '工部', institution: 'gongbu', executionRole: 'general', type: 'coding', dependsOn: ['research'] },
+        document: { label: cabinet ? '礼部' : '文书', institution: 'libu_ritual', executionRole: 'docs', type: 'documentation', dependsOn: ['research'] },
+        verify: { label: '都察院', institution: 'duchayuan', executionRole: 'qa', type: 'testing', dependsOn: ['build', 'document'] }
       }
-      const roles = Object.fromEntries(['礼部', '工部', '文书', '都察院'].map((role) => [role, plan.currentVersion.steps.find((step) => step.title.includes(role))]))
-      const dependencies = { 礼部: [], 工部: [roles.礼部.id], 文书: [roles.礼部.id], 都察院: [roles.工部.id, roles.文书.id] }
-      const semantics = {
-        礼部: { role: 'research', executionRole: 'general', type: 'research' },
-        工部: { role: 'build', executionRole: 'general', type: 'coding' },
-        文书: { role: 'document', executionRole: 'docs', type: 'documentation' },
-        都察院: { role: 'verify', executionRole: 'qa', type: 'testing' }
-      }
-      for (const [role, step] of Object.entries(roles)) {
-        assert.deepEqual([...step.dependsOn].sort(), [...dependencies[role]].sort(), `Mission ${role} has the wrong dependencies`)
-        assert.deepEqual({ role: step.role, executionRole: step.executionRole, type: step.workItemType }, semantics[role], `Mission ${role} lost its structured role or work type`)
+      const roles = Object.fromEntries(plan.currentVersion.steps.map((step) => [step.role, step]))
+      for (const [role, semantics] of Object.entries(expected)) {
+        const step = roles[role]
+        assertCondition(step?.title.includes(semantics.label), `Mission plan missing ${semantics.label}`)
+        assert.deepEqual([...step.dependsOn].sort(), semantics.dependsOn.map((dependency) => roles[dependency].id).sort(), `Mission ${role} has the wrong dependencies`)
+        assert.deepEqual({ role: step.role, executionRole: step.executionRole, type: step.workItemType }, { role, executionRole: semantics.executionRole, type: semantics.type }, `Mission ${role} lost its structured role or work type`)
         assertCondition(step.acceptanceSpec?.length > 0, `Mission ${role} has no per-step acceptance criteria`)
+        if (cabinet) assertCondition(step.institution?.id === semantics.institution, `Mission ${role} lost its institution binding`)
       }
+      recordCheck('Mission roles follow the project institution template', cabinet ? 'cabinet template and responsibilities frozen in plan version' : 'legacy institution identities retained')
       const binding = plan.currentVersion.binding
       const pendingItems = await page.evaluate(() => window.agentDesk.listProjectWorkItems('fixture-runs-review-project'))
       // Other Goals may materialize repair WorkItems while the workspace loads.
@@ -346,7 +347,7 @@ async function main() {
       const edited = await page.evaluate((id) => window.agentDesk.getTaskPlan(id), sessionId)
       assertCondition(edited.currentVersion.steps[0].title !== originalVersion.steps[0].title, 'UI edit did not change the saved title')
       for (let index = 0; index < originalVersion.steps.length; index += 1) {
-        for (const field of ['id', 'role', 'executionRole', 'workItemType', 'acceptanceSpec', 'dependsOn']) {
+        for (const field of ['id', 'role', 'executionRole', 'workItemType', 'acceptanceSpec', 'dependsOn', 'institution']) {
           assert.deepEqual(edited.currentVersion.steps[index][field], originalVersion.steps[index][field], `UI save changed step ${index} field ${field}`)
         }
       }
@@ -382,6 +383,8 @@ async function main() {
       mkdirSync(outputDir, { recursive: true })
       await page.screenshot({ path: missionScreenshot, fullPage: false })
       report.missionScreenshot = path.relative(repoRoot, missionScreenshot)
+      const queuedInput = await page.evaluate((id) => window.agentDesk.queueSessionInput(id, crypto.randomUUID(), { text: '第二页补来源（队列保存检查）' }), sessionId)
+      assertCondition(queuedInput.sessionId === sessionId && queuedInput.goalId === binding.goalId && queuedInput.workItemId === binding.workItemId && queuedInput.phase === 'queued', 'Supplement queue lost canonical task identity')
       const sessionsBeforeContinue = await page.evaluate(() => window.agentDesk.listSessions())
       await clickVisible(page, 'Continue original task', '[data-work-inbox-intake] [data-goal-task-continue]')
       await waitForVisible(page, '[data-studio-surface="session"] .composer-input')
@@ -392,6 +395,19 @@ async function main() {
       assertCondition(sameSession?.goalId === binding.goalId && sameSession?.workItemId === binding.workItemId, 'Continue task lost canonical ownership')
       report.missionCompilation.continuedSessionId = sessionId
       recordCheck('Continue opens the original task conversation', 'same Session Goal and WorkItem; visible Composer; no dispatch')
+      const supplementPanel = '#studio-projection-panel-session section[aria-label="当前任务的补充要求"]'
+      await waitForVisible(page, supplementPanel)
+      assertCondition((await page.$eval(supplementPanel, (node) => node.textContent)).includes(queuedInput.payload.text), 'Saved supplement is missing from the task UI')
+      await clickVisible(page, 'Withdraw saved task supplement', `${supplementPanel} .composer-pending-actions button:nth-child(2)`)
+      await page.waitForFunction(async (id, requestId) => (await window.agentDesk.listSessionInputs(id)).some((record) => record.id === requestId && record.phase === 'cancelled'), { timeout: 10_000 }, sessionId, queuedInput.id)
+      recordCheck('Saved task supplement is visible and can be withdrawn', 'production IPC, durable same-task queue and actual renderer click; no dispatch')
+      report.sessionSupplement = { sessionId, requestId: queuedInput.id, phase: 'cancelled', dispatched: false }
+      const sessionComposer = '#studio-projection-panel-session .composer-input'
+      await page.type(sessionComposer, '换一个更快的模型')
+      await clickVisible(page, 'Natural language model control', '#studio-projection-panel-session .composer-send')
+      await waitForVisible(page, '#studio-projection-panel-session select[aria-label="选择后续使用的模型"]')
+      assertCondition((await page.evaluate(() => window.agentDesk.listSessions())).length === sessionsAfterContinue.length, 'Model control created a task')
+      recordCheck('Natural language model request opens the current task selector', 'no automatic model change or dispatch')
       await clickVisible(page, 'Return to project surfaces', '[data-studio-projection-tab="workspace"]')
     }
     if (args.fixture === 'plan-confirmation') {

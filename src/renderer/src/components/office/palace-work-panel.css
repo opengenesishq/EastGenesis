@@ -1,0 +1,23 @@
+.palace-action-menu { position: relative; }
+.palace-action-menu > summary { display: flex; align-items: center; list-style: none; }
+.palace-action-menu > summary::-webkit-details-marker { display: none; }
+.palace-action-menu > div { position: absolute; top: 32px; right: 0; z-index: 15; min-width: 180px; display: grid; gap: 4px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-raised); box-shadow: 0 8px 24px #0003; }
+.palace-work-panel { position: absolute; inset: 58px 12px 12px; z-index: 14; overflow: auto; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-raised); color: var(--text); box-shadow: 0 18px 48px #0004; }
+.palace-work-panel > header, .palace-work-panel > header > div, .palace-work-panel > nav, .palace-work-shortcuts, .palace-work-summary, .palace-work-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.palace-work-panel > header { justify-content: space-between; }
+.palace-work-panel > header h2 { margin: 0; font-size: 18px; }
+.palace-work-panel > nav { margin: 12px 0; }
+.palace-work-panel p { font-size: 13px; line-height: 1.6; }
+.palace-work-freshness, .palace-work-identity { color: var(--text-dim); overflow-wrap: anywhere; }
+.palace-work-selector { display: flex; align-items: center; gap: 10px; margin: 12px 0; font-size: 13px; }
+.palace-work-selector select { min-width: 0; max-width: 65%; border: 1px solid var(--border); background: var(--bg); color: var(--text); padding: 6px; border-radius: 6px; }
+.palace-work-row { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.palace-work-row > div { flex: 1; min-width: 160px; overflow-wrap: anywhere; }
+.palace-work-row p { margin: 4px 0 0; }
+.palace-work-summary > span { border: 1px solid var(--border); padding: 7px 10px; border-radius: 6px; font-size: 13px; }
+.palace-work-surface { min-height: 300px; height: min(650px, 65vh); display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: auto; }
+.palace-work-surface > .chat, .palace-work-surface > .file-panel { height: 100%; min-height: 0; }
+.palace-raw-records { padding: 12px; }
+.palace-raw-records pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.palace-raw-records details { border-bottom: 1px solid var(--border); padding: 8px 0; }
+@media (max-width: 640px) { .palace-work-panel { inset: 52px 8px 8px; padding: 12px; } .palace-work-selector { flex-wrap: wrap; } .palace-work-selector select { max-width: 100%; } }

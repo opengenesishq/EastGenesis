@@ -1,0 +1,13 @@
+.pws-institutions { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--border-color, #d9d9d9); border-radius: 8px; }
+.pws-institutions h3, .pws-institutions p { margin: 0; }
+.pws-institutions header, .pws-institution-preview, .pws-institution-preview label { display: grid; gap: 8px; }
+.pws-institutions header span, .pws-institutions p { font-size: 13px; line-height: 1.6; }
+.pws-institutions > button, .pws-institution-preview > button { justify-self: start; }
+.pws-institution-preview select { max-width: 100%; padding: 7px; color: inherit; background: var(--bg-secondary, transparent); border: 1px solid var(--border-color, #d9d9d9); border-radius: 6px; }
+.pws-institution-preview dl { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 3fr); gap: 8px 16px; margin: 4px 0; font-size: 13px; line-height: 1.6; }
+.pws-institution-preview dd { margin: 0; overflow-wrap: anywhere; }
+.pws-institution-table { overflow-x: auto; margin-top: 10px; }
+.pws-institution-table table { width: 100%; text-align: left; border-collapse: collapse; font-size: 13px; }
+.pws-institution-table th, .pws-institution-table td { padding: 8px; border-bottom: 1px solid var(--border-color, #d9d9d9); vertical-align: top; }
+.pws-institution-table small { display: block; font-weight: normal; overflow-wrap: anywhere; opacity: 0.7; }
+@media (max-width: 560px) { .pws-institution-preview dl { grid-template-columns: 1fr; gap: 4px; } .pws-institution-preview dd { margin-bottom: 8px; } }

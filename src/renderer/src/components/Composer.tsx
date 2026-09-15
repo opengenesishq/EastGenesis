@@ -17,7 +17,14 @@ import {
 } from './experience/projectedComposerCommands'
 import { useComposerSubmission } from './composer/useComposerSubmission'
 import { useSessionComposerDraft } from './composer/useSessionComposerDraft'
+import { useSessionInputs } from './composer/useSessionInputs'
+import { sessionInputIntent } from './composer/session-input-intent'
+import SessionInputQueue from './composer/SessionInputQueue'
+import SessionModelPicker from './composer/SessionModelPicker'
+import PreparationPermission from './composer/PreparationPermission'
+import './composer/session-inputs.css'
 import { useAutosizeTextarea } from './useAutosizeTextarea'
+import { COMPOSER_DRAFTS_DELETED_EVENT, isDeletedComposerDraft } from '../store/composer-draft-persistence'
 
 interface Mention {
   start: number
@@ -112,6 +119,7 @@ export default function Composer({ running }: { running: boolean }): React.JSX.E
   const updateSettings = useStore((s) => s.updateSettings)
   const setModel = useStore((s) => s.setModel)
   const theme = useStore((s) => s.settings.theme)
+  const zh = useStore((s) => s.settings.language === 'zh')
   const activeId = useStore((s) => s.activeId)
   const [text, setText] = useSessionComposerDraft(activeId)
   const activeSession = useStore((s) => (s.activeId ? s.sessions[s.activeId] : undefined))
@@ -137,8 +145,15 @@ export default function Composer({ running }: { running: boolean }): React.JSX.E
   const [ocrBusyId, setOcrBusyId] = useState<string | null>(null)
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
   const [dragActive, setDragActive] = useState(false)
+  const [modelRequestSessionId, setModelRequestSessionId] = useState<string | null>(null)
+  const currentSessionId = useRef(activeId)
+  currentSessionId.current = activeId
   const attachments = activeId ? attachmentsBySession[activeId] ?? [] : []
   const documents = activeId ? documentsBySession[activeId] ?? [] : []
+  const sessionInputs = useSessionInputs(activeId, running)
+  const hasPendingInputs = !sessionInputs.ready || sessionInputs.records.some((record) => record.phase !== 'applied' && record.phase !== 'cancelled')
+  const localInput = sessionInputIntent(text, attachments.length > 0 || documents.length > 0) !== 'message'
+  const localSubmission = localInput || running || hasPendingInputs
   const outbound = useComposerOutboundPreview(activeId, activeSession?.meta, text, attachments, documents)
   useAutosizeTextarea(textareaRef, text)
 
@@ -149,6 +164,21 @@ export default function Composer({ running }: { running: boolean }): React.JSX.E
   useEffect(() => {
     documentAttachmentDrafts = documentsBySession
   }, [documentsBySession])
+
+  useEffect(() => {
+    const clear = (): void => {
+      for (const [id, items] of Object.entries(imageAttachmentDrafts)) {
+        if (!isDeletedComposerDraft(id)) continue
+        for (const item of items) if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
+        delete imageAttachmentDrafts[id]
+      }
+      for (const id of Object.keys(documentAttachmentDrafts)) if (isDeletedComposerDraft(id)) delete documentAttachmentDrafts[id]
+      setAttachmentsBySession({ ...imageAttachmentDrafts })
+      setDocumentsBySession({ ...documentAttachmentDrafts })
+    }
+    window.addEventListener(COMPOSER_DRAFTS_DELETED_EVENT, clear)
+    return () => window.removeEventListener(COMPOSER_DRAFTS_DELETED_EVENT, clear)
+  }, [])
 
   // 拉取文件建议(mention 变化时)
   useEffect(() => {
@@ -247,18 +277,33 @@ export default function Composer({ running }: { running: boolean }): React.JSX.E
     documentOnlyPrompt: t('documentOnlyPrompt'),
     slashCommands,
     runSlashCommand,
-    sendMessage,
-    onAccepted: () => {
-      setText('')
-      setMention(null)
-      setSuggestions([])
-      clearAttachments()
+    sendMessage: (payload) => hasPendingInputs ? sessionInputs.queue(payload) : sendMessage(payload, activeId ?? undefined),
+    queueMessage: sessionInputs.queue,
+    runLocalControl: async (text) => {
+      const intent = sessionInputIntent(text)
+      if (intent === 'message') return false
+      if (!activeId) throw new Error('请先选择当前任务')
+      if (intent === 'pause') await useStore.getState().interrupt(activeId)
+      if (intent === 'palace') useStore.getState().setView('office')
+      if (intent === 'model') setModelRequestSessionId(activeId)
+      return true
     },
-    onError: (message) => setAttachmentError(message || null)
+    onAccepted: () => {
+      // This setter is bound to the submitted Session, including after navigation.
+      setText('')
+      clearAttachments()
+      if (currentSessionId.current === activeId) {
+        setMention(null)
+        setSuggestions([])
+      }
+    },
+    onError: (message) => {
+      if (currentSessionId.current === activeId) setAttachmentError(message || null)
+    }
   })
 
   const submit = async (): Promise<void> => {
-    if (outbound.rejectBlockedSend()) return
+    if (!localSubmission && outbound.rejectBlockedSend()) return
     await submitWithHelper()
   }
 
@@ -560,6 +605,14 @@ export default function Composer({ running }: { running: boolean }): React.JSX.E
         }}
       />
       {attachmentError && <div className="composer-error">{attachmentError}</div>}
+      {activeId && <PreparationPermission key={activeId} sessionId={activeId} running={running} />}
+      <SessionInputQueue
+        zh={zh}
+        records={sessionInputs.records} running={running} busy={sessionInputs.busy} error={sessionInputs.error}
+        onApply={sessionInputs.apply} onCancel={sessionInputs.cancel} onRefresh={sessionInputs.refresh}
+      />
+      {modelRequestSessionId && modelRequestSessionId === activeId && <SessionModelPicker
+        key={activeId} sessionId={activeId} onClose={() => setModelRequestSessionId(null)} />}
       <OutboundContextPreview manifest={outbound.manifest} error={outbound.error} />
       <div className="composer-row">
         <input
@@ -588,7 +641,7 @@ export default function Composer({ running }: { running: boolean }): React.JSX.E
         <textarea
           ref={textareaRef}
           className="composer-input"
-          placeholder={running ? t('composerRunningPlaceholder') : t('composerPlaceholder')}
+          placeholder={running ? zh ? '补充要求会保存到当前任务；也可以说“暂停这个任务”' : 'Additions are saved to this task. You can also say “pause this task”.' : t('composerPlaceholder')}
           value={text}
           rows={1}
           onChange={(e) => {
@@ -604,10 +657,10 @@ export default function Composer({ running }: { running: boolean }): React.JSX.E
         />
         <button
           className="btn btn-primary composer-send"
-          aria-label={uploadingAttachment ? '添加中' : t('send')}
-          title={uploadingAttachment ? '添加中' : t('send')}
+          aria-label={uploadingAttachment ? zh ? '添加中' : 'Adding' : running && !localInput ? zh ? '保存补充要求' : 'Save addition' : t('send')}
+          title={uploadingAttachment ? zh ? '添加中' : 'Adding' : running && !localInput ? zh ? '保存补充要求' : 'Save addition' : t('send')}
           onClick={() => void submit()}
-          disabled={sendDisabled || outbound.sendDisabled(false)}
+          disabled={sendDisabled || (!localSubmission && outbound.sendDisabled(false))}
         >
           {uploadingAttachment
             ? <LoaderCircle className="composer-send-spinner" size={17} aria-hidden="true" />

@@ -3,7 +3,7 @@ import type { SessionMeta, SendMessagePayload } from '../../shared/types'
 import { AUTO_MODEL } from '../../shared/types'
 import { listProviders, getProviderConnectionIdentity } from '../providers'
 import { getHealth } from '../providerHealth'
-import { getModelStat, reliabilityScore } from '../modelStats'
+import { captureModelRouteScoringSignal } from '../model/model-router'
 import { buildModelProfiles, inferTaskProfile } from '../model/model-profile'
 import type { RoutingEvaluationSnapshots, TrustedRoutingContext } from '../model/routing-policy/evaluator-types'
 import { buildRoutingCatalog } from '../model/routing-policy/evaluator-catalog'
@@ -41,14 +41,16 @@ export function captureSessionRouting(input: { meta: SessionMeta; prompt: string
       riskLevel: driveRiskAtLeast(task.riskLevel, tuning.riskFloor) }
   }
   const budget = nativeBudgetSnapshot(input.meta, { settings })
-  const identities = new Map(providers.map((provider) => [provider.id, JSON.stringify(getProviderConnectionIdentity(provider.id))]))
+  const connectionIdentities = Object.fromEntries(providers.map((provider) => [provider.id, getProviderConnectionIdentity(provider.id)]))
+  const identities = new Map(providers.map((provider) => [provider.id, JSON.stringify(connectionIdentities[provider.id])]))
   const catalog = buildRoutingCatalog(providers)
   const remaining = [budget.sessionRemainingUsd, budget.monthlyRemainingUsd].filter((value): value is number => value !== undefined)
   const snapshots: RoutingEvaluationSnapshots = { providers, expertPolicy: settings.routingExpertPolicy,
     budget: remaining.length === 0 ? undefined : { remainingUsd: Math.min(...remaining), hardLimit: true },
     targetEligibility: buildTargetEligibility(catalog, task, settings.routingExpertPolicy, identities),
     providerHealth: Object.fromEntries(providers.map((provider) => { const health = getHealth(provider.id); return [provider.id, { healthy: health.healthy, circuitState: health.circuitState, latencyEmaMs: health.latencyEmaMs }] })),
-    scoringSignals: profiles.map((profile) => ({ providerId: profile.providerId, model: profile.model, reliability: reliabilityScore(profile.model), latencyEmaMs: getModelStat(profile.model)?.latencyEmaMs })) }
+    connectionIdentities,
+    scoringSignals: profiles.map((profile) => captureModelRouteScoringSignal(profile, { providers, connectionIdentities })) }
   return { context, snapshots, authority: { kind: 'session', sessionId: input.meta.id, revision: 0,
     businessLineId: line.id,
     providerId: input.meta.providerId, model: input.meta.model,
@@ -67,7 +69,8 @@ export function captureNewTaskRouting(input: {
     models: provider.models, modelProfiles: provider.advancedConfig?.modelProfiles, engine: provider.engine }))
   const task = inferTaskProfile({ prompt: input.context.originalPrompt,
     strategy: input.context.baseStrategy, requiresTools: input.context.task.requiresTools })
-  const identities = new Map(providers.map((provider) => [provider.id, JSON.stringify(getProviderConnectionIdentity(provider.id))]))
+  const connectionIdentities = Object.fromEntries(providers.map((provider) => [provider.id, getProviderConnectionIdentity(provider.id)]))
+  const identities = new Map(providers.map((provider) => [provider.id, JSON.stringify(connectionIdentities[provider.id])]))
   const catalog = buildRoutingCatalog(providers)
   const budget = nativeBudgetSnapshot({
     id: '', sdkSessionId: undefined, createdAt: Date.now(), costUsd: 0,
@@ -78,7 +81,8 @@ export function captureNewTaskRouting(input: {
     budget: remaining.length === 0 ? undefined : { remainingUsd: Math.min(...remaining), hardLimit: true },
     targetEligibility: buildTargetEligibility(catalog, task, settings.routingExpertPolicy, identities),
     providerHealth: Object.fromEntries(providers.map((provider) => { const health = getHealth(provider.id); return [provider.id, { healthy: health.healthy, circuitState: health.circuitState, latencyEmaMs: health.latencyEmaMs }] })),
-    scoringSignals: profiles.map((profile) => ({ providerId: profile.providerId, model: profile.model, reliability: reliabilityScore(profile.model), latencyEmaMs: getModelStat(profile.model)?.latencyEmaMs })) }
+    connectionIdentities,
+    scoringSignals: profiles.map((profile) => captureModelRouteScoringSignal(profile, { providers, connectionIdentities })) }
   return { context: input.context, snapshots,
     authority: { ...(typeof input.authority === 'object' && input.authority ? input.authority : {}), kind: 'new_task',
       connectionIdentities: Object.fromEntries(identities) } }

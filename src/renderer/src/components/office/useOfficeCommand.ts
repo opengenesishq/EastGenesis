@@ -5,16 +5,24 @@ import { createPersonalTaskSubmissionClient, type PersonalTaskSubmissionRecovery
 import { useStore } from '../../store'
 import { publishOfficeActionFeedback } from './OfficeActionFeedback'
 import { submitOfficeSessionInstruction } from './office-session-commands'
+import { useSessionInputs } from '../composer/useSessionInputs'
+import { sessionInputIntent } from '../composer/session-input-intent'
+import { useSessionComposerDraft } from '../composer/useSessionComposerDraft'
 
 export type OfficeCommandTarget = { kind: 'session'; id: string; title: string } |
   { kind: 'business'; id: string; title: string } | { kind: 'unavailable'; id: string; title: string }
 
 export function useOfficeCommand(target: OfficeCommandTarget, zh: boolean) {
-  const [text, setText] = useState('')
+  const sessionId = target.kind === 'session' ? target.id : null
+  const sessionStatus = useStore((state) => sessionId ? state.sessions[sessionId]?.meta.status : undefined)
+  const running = sessionStatus === 'running' || sessionStatus === 'starting'
+  const sessionInputs = useSessionInputs(sessionId, running)
+  const [text, setText] = useSessionComposerDraft(sessionId ?? `office-command:${target.kind}:${target.id}`)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState(false)
   const [lastSessionId, setLastSessionId] = useState<string | null>(null)
+  const [modelRequestSessionId, setModelRequestSessionId] = useState<string | null>(null)
   const [pending, setPending] = useState<PersonalTaskSubmissionRecovery[]>([])
   const inFlight = useRef(false)
   const current = useRef({ text, target })
@@ -56,9 +64,28 @@ export function useOfficeCommand(target: OfficeCommandTarget, zh: boolean) {
         businessLineId: target.id, providerId: AUTO_PROVIDER_ID, model: AUTO_MODEL, routingScope: 'global' })
       return handleReceipt(result.receipt, result.pendingCleanupError)
     }
-    await submitOfficeSessionInstruction(target.id, text.trim(), zh)
+    const intent = sessionInputIntent(text)
+    if (intent === 'model') {
+      setModelRequestSessionId(target.id)
+      return true
+    }
+    if (intent === 'palace') {
+      setMessage(zh ? '当前已在故宫，任务保持原状态。' : 'You are in the Palace. The task keeps its current state.')
+      return true
+    }
+    if (intent === 'pause') {
+      await useStore.getState().interrupt(target.id)
+      setLastSessionId(target.id)
+      setMessage(zh ? '已请求暂停当前任务，可核对进度后继续。' : 'Pause requested for this task. Review its progress before continuing.')
+      return true
+    }
+    const queued = running || !sessionInputs.ready || sessionInputs.records.some((record) => record.phase !== 'applied' && record.phase !== 'cancelled')
+    if (queued) await sessionInputs.queue({ text: text.trim() })
+    else await submitOfficeSessionInstruction(target.id, text.trim(), zh)
     setLastSessionId(target.id)
-    setMessage(zh ? '补充要求已提交，执行结果将在同一任务更新。' : 'Instruction submitted; this task will report its outcome.')
+    setMessage(queued
+      ? (zh ? '补充要求已保存到当前任务，本轮结束或暂停后可继续应用。' : 'Instruction saved to this task. Apply it after the current turn ends or pauses.')
+      : (zh ? '补充要求已提交，执行结果将在同一任务更新。' : 'Instruction submitted; this task will report its outcome.'))
     return true
   }
   const send = async (retryId?: string): Promise<void> => {
@@ -72,7 +99,8 @@ export function useOfficeCommand(target: OfficeCommandTarget, zh: boolean) {
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : String(cause)); setError(true) }
     finally { inFlight.current = false; setBusy(false); void recover() }
   }
-  return { text, setText, busy, message, error, lastSessionId, pending, recover, send }
+  return { text, setText, busy, message, error, lastSessionId, pending, recover, send, sessionInputs, running,
+    modelRequestSessionId, closeModelPicker: () => setModelRequestSessionId(null) }
 }
 
 function receiptMessage(receipt: PersonalTaskSubmissionView, zh: boolean): string {

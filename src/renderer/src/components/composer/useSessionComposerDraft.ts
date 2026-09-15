@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
-import { readComposerDraft, writeComposerDraft } from '../../store/composer-draft-persistence'
+import { COMPOSER_DRAFTS_DELETED_EVENT, isDeletedComposerDraft, readComposerDraft, writeComposerDraft } from '../../store/composer-draft-persistence'
 
 interface SessionDraftState {
   sessionId: string | null
@@ -19,12 +19,20 @@ export function useSessionComposerDraft(sessionId: string | null): [string, Disp
     setDraft({ sessionId, text: readComposerDraft(storage, sessionId) })
   }, [draft.sessionId, sessionId, storage])
 
+  useEffect(() => {
+    const clear = (): void => {
+      if (sessionId && isDeletedComposerDraft(sessionId)) setDraft({ sessionId, text: '' })
+    }
+    window.addEventListener(COMPOSER_DRAFTS_DELETED_EVENT, clear)
+    return () => window.removeEventListener(COMPOSER_DRAFTS_DELETED_EVENT, clear)
+  }, [sessionId])
+
   const setText = useCallback<Dispatch<SetStateAction<string>>>((action) => {
     setDraft((current) => {
       const base = current.sessionId === sessionId
         ? current.text
         : readComposerDraft(storage, sessionId)
-      const next = typeof action === 'function' ? action(base) : action
+      const next = sessionId && isDeletedComposerDraft(sessionId) ? '' : typeof action === 'function' ? action(base) : action
       writeComposerDraft(storage, sessionId, next)
       return { sessionId, text: next }
     })

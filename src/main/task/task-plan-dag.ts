@@ -8,6 +8,7 @@ import type {
   TaskPlanRiskLevel,
   TaskPlanVersion
 } from '../../shared/types'
+import { institutionResponsibilityLines } from './task-plan-institutions'
 
 const DEFAULT_ARTIFACT = '可审查的任务产物、变更摘要与验收证据'
 const PROVIDER_EGRESS = '已选 Provider：目标、必要项目上下文与上游步骤结果'
@@ -93,6 +94,7 @@ function taskFromPlanStep(
       `当前步骤：${step.title}`,
       ...(step.role ? [`岗位：${step.role}`] : []),
       ...(step.workItemType ? [`任务类型：${step.workItemType}`] : []),
+      ...institutionResponsibilityLines(version, step.institution),
       `步骤说明：${step.description || '按已批准计划完成该步骤'}`,
       `依赖步骤：${step.dependsOn.join(', ') || '无'}`,
       `预期产物：${expectedArtifacts.join('；') || DEFAULT_ARTIFACT}`,

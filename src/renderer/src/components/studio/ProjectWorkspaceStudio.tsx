@@ -12,6 +12,7 @@ import { ProjectInbox } from './ProjectInbox'
 import { ProjectPortfolioView } from './ProjectPortfolioView'
 import { ProjectSupervisorView } from './ProjectSupervisorView'
 import ProjectWorkspaceLifecycle from './ProjectWorkspaceLifecycle'
+import ProjectInstitutionSettings from './ProjectInstitutionSettings'
 import {
   projectKindLabel,
   TEXT,
@@ -258,6 +259,7 @@ function ProjectDetails({
       <ProjectPortfolioView active={active} refreshToken={refreshToken} onSelectProject={onSelectProject} />
       {remoteContinuationEnabled && <RemoteContinuationPanel active={active} projectId={projectId} />}
       <ProjectWorkspaceLifecycle project={project} refreshContents={refreshContents} refreshProjects={refreshProjects} />
+      <ProjectInstitutionSettings project={project} refreshProjects={refreshProjects} />
     </div>}
   </details>
 }

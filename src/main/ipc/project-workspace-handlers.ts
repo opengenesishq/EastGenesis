@@ -22,6 +22,7 @@ import {
   type GoalPatch,
   type MutationOptions,
   type ProjectGoalTaskInput,
+  type ProjectGoalTaskPrepareInput,
   type ProjectSquadCreateInput,
   type ProjectSquadInput,
   type ProjectSquadMemberInput,
@@ -50,6 +51,7 @@ import {
   type WorkItemReorderPlacement
 } from '../../shared/project-workspace-types'
 import { createProjectGoalTask } from '../project-workspace/goal-task-service'
+import { prepareProjectGoalTask } from '../project-workspace/goal-submission-runtime'
 import { createWorkItemTransferService } from '../project-workspace/work-item-transfer-service'
 import { LOCAL_USER_ACTOR } from '../project-workspace/work-item-authorization'
 import { assertTrustedWorkflowLedgerSender } from './workflow-ledger-handlers'
@@ -83,11 +85,11 @@ import type { ProjectDependencyInput, ProjectMilestoneInput, ProjectMilestonePat
 
 const WORKSPACE_KEYS = new Set([
   'id', 'name', 'kind', 'ownerId', 'resources', 'rulesRef',
-  'budgetPolicy', 'permissionPolicy', 'retentionPolicy', 'createdAt', 'updatedAt'
+  'budgetPolicy', 'permissionPolicy', 'retentionPolicy', 'institutionTemplate', 'createdAt', 'updatedAt'
 ])
 const WORKSPACE_PATCH_KEYS = new Set([
   'name', 'kind', 'ownerId', 'resources', 'rulesRef',
-  'budgetPolicy', 'permissionPolicy', 'retentionPolicy'
+  'budgetPolicy', 'permissionPolicy', 'retentionPolicy', 'institutionTemplate'
 ])
 const GOAL_KEYS = new Set([
   'id', 'projectId', 'title', 'objective', 'background', 'constraints',
@@ -110,6 +112,7 @@ const WORK_ITEM_PATCH_KEYS = new Set([
   'owner', 'dueAt', 'acceptanceSpec', 'artifactRefs', 'runRefs'
 ])
 const GOAL_TASK_KEYS = new Set(['requestId', 'projectId', 'objective', 'businessLineId'])
+const GOAL_PREPARATION_KEYS = new Set([...GOAL_TASK_KEYS, 'template', 'legacySessionId', 'legacyCreationClaimed'])
 const PROJECT_TEMPLATE_APPLY_KEYS = new Set(['requestId', 'projectId', 'templateId'])
 const PROJECT_KNOWLEDGE_SEARCH_KEYS = new Set(['projectId', 'query', 'limit'])
 const PROJECT_DEPENDENCY_KEYS = new Set(['id', 'fromProjectId', 'toProjectId', 'fromWorkItemId', 'toWorkItemId', 'label'])
@@ -145,7 +148,7 @@ const PROJECT_WORKSPACE_MUTATIONS = new Set([
   'comments:create', 'comments:update', 'comments:delete',
   'sharedApprovals:create', 'sharedApprovals:decide', 'sharedApprovals:revoke',
   'collaborationInbox:mark',
-  'goalTask:create', 'connectors:mutate', 'knowledge:search'
+  'goalTask:create', 'goalTask:prepare', 'connectors:mutate', 'knowledge:search'
 ])
 const WORKSPACE_ID_MUTATIONS = new Set(['update', 'archive', 'restore', 'delete', 'purge'])
 const PROJECT_INPUT_MUTATIONS = new Set([
@@ -279,6 +282,10 @@ const PROJECT_WORKSPACE_HANDLERS: Record<string, ProjectWorkspaceHandler> = {
   )),
   'goalTask:create': (rawInput) => createProjectGoalTask(
     normalizeInput<ProjectGoalTaskInput>(rawInput, GOAL_TASK_KEYS, 'goal task'),
+    app.getPath('userData')
+  ),
+  'goalTask:prepare': (rawInput) => prepareProjectGoalTask(
+    normalizeInput<ProjectGoalTaskPrepareInput>(rawInput, GOAL_PREPARATION_KEYS, 'goal preparation'),
     app.getPath('userData')
   ),
   'workItems:update': (rawId, rawPatch, rawOptions) => updateWorkItem(rawId, rawPatch, rawOptions),
@@ -427,6 +434,7 @@ export function registerProjectWorkspaceIpc(): void {
     const handler = PROJECT_WORKSPACE_HANDLERS[action]
     if (!handler) throw new Error(`project workspace action is not supported: ${action}`)
     const mutation = PROJECT_WORKSPACE_MUTATIONS.has(action)
+    if (action === 'goalTask:prepare') await sessionManager.whenInitialized()
     const invoke = async () => {
       const result = await handler(...args)
       if (mutation) await verifyProjectWorkspaceMutation(action, args, result)
@@ -459,7 +467,7 @@ function workspaceMutationProjectId(action: string, args: unknown[], result: unk
   if (PROJECT_INPUT_MUTATIONS.has(action)) {
     return isRecord(args[0]) ? optionalString(args[0].projectId) : undefined
   }
-  if (action === 'goalTask:create') {
+  if (action === 'goalTask:create' || action === 'goalTask:prepare') {
     return isRecord(args[0]) ? optionalString(args[0].projectId) : undefined
   }
   return undefined

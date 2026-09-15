@@ -31,15 +31,20 @@ import {
   assertPortableProjectTestEvidence,
   collectOwnedProjectTestEvidencePaths
 } from './project-test-evidence'
+import {
+  assertProjectSubmissionReceiptsImportable, collectProjectSubmissionReceipts,
+  importProjectSubmissionReceipts, validateProjectSubmissionReceipts, verifyProjectSubmissionReceipts
+} from './submission-receipt-portability'
 
 export type ProjectSessionPortableSlice = Pick<ProjectAggregatePortableRuntime,
   'sessionIds' | 'sdkSessionIds' | 'sessionHistory' | 'activeSessions' |
-  'sessionCreationJournal' | 'taskPlans' | 'sessionFiles'>
+  'sessionCreationJournal' | 'taskPlans' | 'sessionFiles' | 'submissionReceipts'>
 
 export function collectProjectSessionPortableSlice(
   rootDir: string,
   projectId: string,
-  knownSessionIds: readonly string[]
+  knownSessionIds: readonly string[],
+  taskSnapshots: readonly unknown[] = []
 ): ProjectSessionPortableSlice {
   const root = requiredRoot(rootDir)
   const project = requiredId(projectId, 'projectId')
@@ -51,6 +56,9 @@ export function collectProjectSessionPortableSlice(
   const sessionCreationJournal = creationRecords(root).filter((record) => matchesSessionOrProject(record, sessionIds, project))
   const taskPlans = projectTaskPlans(root, project, sessionIds)
   const sessionFiles = collectOwnedFiles(root, project, sessionIds, sdkSessionIds)
+  const submissionReceipts = collectProjectSubmissionReceipts(root, project, {
+    sessionIds: [...sessionIds], sessionFiles, sessionHistory, activeSessions, sessionCreationJournal, taskPlans, taskSnapshots
+  })
   return {
     sessionIds: [...sessionIds].sort(),
     sdkSessionIds: [...sdkSessionIds].sort(),
@@ -58,7 +66,8 @@ export function collectProjectSessionPortableSlice(
     activeSessions: activeSessions.sort(byRecordIdentity),
     sessionCreationJournal: sessionCreationJournal.sort(byRecordIdentity),
     taskPlans,
-    sessionFiles
+    sessionFiles,
+    submissionReceipts
   }
 }
 
@@ -76,6 +85,7 @@ export function validateProjectSessionPortableSlice(
   ])
   validateTaskPlans(value.taskPlans, sessionIds)
   validateSessionFiles(value.sessionFiles, project, sessionIds, sdkSessionIds)
+  validateProjectSubmissionReceipts(project, value.submissionReceipts, value)
 }
 
 function validateSessionRecords(
@@ -144,6 +154,7 @@ export function assertProjectSessionPortableSliceImportable(
   ].sort()
   if (conflicts.length > 0) throw new Error(`Project import Session identity conflict: ${conflicts.join(', ')}`)
   for (const file of slice.sessionFiles) assertExistingFileCompatible(root, file)
+  assertProjectSubmissionReceiptsImportable(root, projectId, slice.submissionReceipts, slice)
 }
 
 export function importProjectSessionPortableSlice(
@@ -153,6 +164,7 @@ export function importProjectSessionPortableSlice(
 ): void {
   validateProjectSessionPortableSlice(projectId, slice)
   const root = requiredRoot(rootDir)
+  assertProjectSubmissionReceiptsImportable(root, projectId, slice.submissionReceipts, slice)
   mergeDocument(
     join(root, 'sessions.json'),
     historyRecords(root),
@@ -180,6 +192,7 @@ export function importProjectSessionPortableSlice(
     }
     writeDurableFileSync(target, decodeBase64(file.data), { mode: 0o600, replace: false })
   }
+  importProjectSubmissionReceipts(root, projectId, slice.submissionReceipts, slice)
 }
 
 export function verifyProjectSessionPortableSlice(
@@ -188,13 +201,15 @@ export function verifyProjectSessionPortableSlice(
   slice: ProjectSessionPortableSlice
 ): void {
   validateProjectSessionPortableSlice(projectId, slice)
-  const target = collectProjectSessionPortableSlice(rootDir, projectId, slice.sessionIds)
+  const target = collectProjectSessionPortableSlice(rootDir, projectId, slice.sessionIds,
+    (slice as ProjectAggregatePortableRuntime).taskSnapshots ?? [])
   assertSame(target.sessionHistory, slice.sessionHistory, 'Session history')
   assertSame(target.activeSessions, slice.activeSessions, 'Active Session')
   assertSame(target.sessionCreationJournal, slice.sessionCreationJournal, 'Session creation journal')
   assertSame(target.taskPlans, slice.taskPlans, 'Task Plan')
   const expectedPaths = new Set(slice.sessionFiles.map((file) => file.path))
   assertSame(target.sessionFiles.filter((file) => expectedPaths.has(file.path)), slice.sessionFiles, 'Session files')
+  verifyProjectSubmissionReceipts(rootDir, projectId, slice.submissionReceipts, slice)
 }
 
 function collectOwnedFiles(

@@ -8,6 +8,8 @@ import type {
 import type { BusinessLineDefinition } from '../../shared/business-line-types'
 import type { TaskPlanDraftInput, TaskPlanRiskLevel, TaskPlanStepInput } from '../../shared/task-plan-types'
 import type { TaskDagRole } from '../../shared/types'
+import { projectInstitutionTemplate, type ProjectInstitutionTemplateRef } from '../../shared/project-institution-template'
+import { bindTaskPlanInstitutions } from './task-plan-institutions'
 
 export interface MissionCompilerMaterial {
   id: string
@@ -25,6 +27,7 @@ export interface MissionCompilerInput {
   businessLineId?: string
   businessLineName?: string
   now?: number
+  institutionTemplate?: ProjectInstitutionTemplateRef
 }
 
 export interface MissionDependency {
@@ -41,6 +44,7 @@ export interface MissionCompilation {
   workItems: readonly WorkflowWorkItemRecord[]
   dependencies: readonly MissionDependency[]
   acceptances: readonly WorkflowAcceptanceRecord[]
+  institutionTemplate?: ProjectInstitutionTemplateRef
 }
 
 /**
@@ -126,7 +130,7 @@ export function missionCompilationToTaskPlanDraft(compilation: MissionCompilatio
     ...compilation.acceptances.flatMap((acceptance) => acceptance.criteria),
   ])
 
-  return {
+  return bindTaskPlanInstitutions({
     objective: compilation.goal.objective.trim(),
     steps,
     expectedArtifacts,
@@ -136,7 +140,7 @@ export function missionCompilationToTaskPlanDraft(compilation: MissionCompilatio
     acceptanceCriteria,
     changeReason: `Mission Compiler 编译摘要：${compilation.digest}`,
     source: 'genesis'
-  }
+  }, compilation.institutionTemplate)
 }
 
 const ROLE_TEMPLATES = [
@@ -157,7 +161,13 @@ export function compileMission(input: MissionCompilerInput): MissionCompilation 
   if (!Number.isFinite(now)) throw new Error('now must be finite')
   const businessLineId = input.businessLineId?.trim() || `business-line:mission-${slug(goalId)}`
   const businessLineName = input.businessLineName?.trim() || '产品发布府'
-  const seed = { projectId, goalId, objective, constraints, deliverables, materials, businessLineId, businessLineName }
+  const template = projectInstitutionTemplate(input.institutionTemplate)
+  const institutionTemplate = template.ref.templateId === 'cabinet-six-ministries' ? template.ref : undefined
+  const roleTemplates = institutionTemplate ? ROLE_TEMPLATES.map((role) => ({
+    ...role, label: role.id === 'research' ? '翰林院' : role.id === 'document' ? '礼部' : role.label
+  })) : ROLE_TEMPLATES
+  const seed = { projectId, goalId, objective, constraints, deliverables, materials, businessLineId, businessLineName,
+    ...(institutionTemplate ? { institutionTemplate } : {}) }
   const missionDigest = digest(canonicalJson(seed))
   const line: BusinessLineDefinition = {
     schemaVersion: 1, id: businessLineId, origin: 'custom', name: businessLineName,
@@ -168,7 +178,7 @@ export function compileMission(input: MissionCompilerInput): MissionCompilation 
     schemaVersion: 1, id: goalId, projectId, title: objective.slice(0, 80), objective,
     status: 'waiting_approval', revision: 1, source: 'explicit', createdAt: now, updatedAt: now,
   }
-  const workItems = ROLE_TEMPLATES.map((role) => ({
+  const workItems = roleTemplates.map((role) => ({
     schemaVersion: 1 as const, id: `work-item:${missionDigest.slice(0, 20)}:${role.id}`, projectId, goalId,
     type: role.type, title: `${role.label}：${deliverables.join('、')}`.slice(0, 240),
     description: `${role.purpose}。目标：${objective}`.slice(0, 2000), role: role.id,
@@ -187,7 +197,9 @@ export function compileMission(input: MissionCompilerInput): MissionCompilation 
     criteria: [`${item.title} 产出可追溯并符合目标约束`, ...constraints], status: 'pending' as const,
     evidenceRefs: [], revision: 1, createdAt: now, updatedAt: now,
   }))
-  return { schemaVersion: 1, digest: missionDigest, businessLine: line, goal, roles: ROLE_TEMPLATES.map(({ id, label, purpose }) => ({ id, label, purpose })), workItems, dependencies, acceptances }
+  return { schemaVersion: 1, digest: missionDigest, businessLine: line, goal,
+    roles: roleTemplates.map(({ id, label, purpose }) => ({ id, label, purpose })), workItems, dependencies, acceptances,
+    ...(institutionTemplate ? { institutionTemplate: { ...institutionTemplate } } : {}) }
 }
 
 function required(value: string, field: string): string {

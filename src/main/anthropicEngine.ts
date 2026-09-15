@@ -1,3 +1,4 @@
+import { preparationPermissionSystemPrompt } from './permission/preparation-tool-scope'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
 import { assertPersistedSessionExecutionAllowed } from './session-execution-ownership'
@@ -464,7 +465,7 @@ export class AnthropicEngine implements Engine {
     const request = this.dependencies.applyRuntimeToRequest({
       model: target.model,
       maxTokens: DEFAULT_MAX_TOKENS,
-      system: taskStrategySystemAppend(this.meta.taskStrategy, projectContext),
+      system: taskStrategySystemAppend(this.meta.taskStrategy, projectContext, preparationPermissionSystemPrompt(this.meta, app.getPath('userData'))),
       messages: [...this.history, ...turnMessages],
       tools: ANTHROPIC_CODING_TOOLS,
       extraBody: target.credentialProvider.advancedConfig?.request?.body

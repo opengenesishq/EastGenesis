@@ -109,7 +109,7 @@ assert(runDetailSource.includes('onRecover?:'), 'Run detail must accept a parent
 assert(runDetailSource.includes('data-run-recover'), 'Run detail must expose a recovery action control')
 assert(runDetailSource.includes('data-run-recovery-result="completed"'), 'Run detail must expose the parent-owned recovery completion result')
 assert(inboxSource.includes('resolveRunRecoverySnapshotId'), 'Work Inbox must resolve snapshot identity through the fail-closed helper')
-assert(inboxSource.includes('recoverTaskSnapshot(snapshotId)'), 'Work Inbox must invoke the existing local task recovery action')
+assert(inboxSource.includes('recoverTaskSnapshot(snapshotId, { activate: false })'), 'Work Inbox must invoke local recovery without navigating away from the result')
 assert(inboxSource.includes('await refresh()'), 'Work Inbox must refresh canonical Run state after local recovery')
 
 const failed = projectRunDetail(input('failed', acceptance('failed'), []), 'run/run-1/recovery')

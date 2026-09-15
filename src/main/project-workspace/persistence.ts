@@ -12,6 +12,7 @@ import type {
 import { PROJECT_WORKSPACE_SCHEMA_VERSION } from '../../shared/project-workspace-types'
 import { canonicalJson, clone, digest, redact } from './codec'
 import { ProjectWorkspaceError } from './errors'
+import { isProjectInstitutionTemplateRef } from '../../shared/project-institution-template'
 
 const STORE_FILE_NAME = 'project-workspace.json'
 const LOCK_FILE_SUFFIX = '.lock'
@@ -72,6 +73,11 @@ function assertState(value: unknown): asserts value is ProjectWorkspaceState {
   for (const field of ['squads', 'members', 'invitations', 'comments', 'sharedApprovals', 'inboxReceipts'] as const) {
     if (candidate[field] !== undefined && !Array.isArray(candidate[field])) {
       throw new ProjectWorkspaceError('corrupt_store', `project workspace store ${field} is invalid`)
+    }
+  }
+  for (const workspace of candidate.workspaces!) {
+    if (workspace.institutionTemplate !== undefined && !isProjectInstitutionTemplateRef(workspace.institutionTemplate)) {
+      throw new ProjectWorkspaceError('unsupported_schema', `workspace ${workspace.id} institution template is unsupported`)
     }
   }
 }

@@ -1,7 +1,7 @@
 import { AUTO_MODEL, type AgentEvent, type AppSettings, type CreateSessionOptions, type HistoryEntry, type SessionMeta, type SendMessagePayload, type CaoGenDriveMode } from '../../shared/types'
 import { getBusinessLines, resolveBusinessLineId } from '../../shared/business-line-types'
 import { getRoutingSettingsBoundary, getSettings } from '../settings'
-import { listProviders } from '../providers'
+import { listProviders, getProviderConnectionIdentity } from '../providers'
 import { listHistory } from '../history'
 import { calculateMonthlyBudgetSnapshot } from './monthly-budget'
 import { settingsForCaoGenDrive } from './drive'
@@ -43,6 +43,10 @@ export function resolveRuntimeSessionRoute(input: {
   const result = resolveSessionModelRoute({
     ...routingSettings(settings), enabled: true, currentModel: meta.model,
     providerId: meta.providerId, providers, engine: meta.engine,
+    connectionIdentities: Object.fromEntries(providers.flatMap((provider) => {
+      try { return [[provider.id, getProviderConnectionIdentity(provider.id)]] }
+      catch { return [] } // Missing trusted identity cannot borrow legacy model-name observations.
+    })),
     // Runtime instances own protocol-specific replay state; cross-engine switching requires a new instance.
     allowAnyEngine: input.allowAnyEngine === true,
     driveMode: meta.driveMode, payload, businessLineStrategy: businessLine?.routingPreference,

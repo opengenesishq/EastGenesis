@@ -3,6 +3,8 @@ import type { TaskPlanStateView } from '../../../../shared/types'
 import { useT } from '../../i18n'
 import { useStore } from '../../store'
 import TaskPlanEditor from './TaskPlanEditor'
+import TaskPlanInstitutions from './TaskPlanInstitutions'
+import PreparationPermission from '../composer/PreparationPermission'
 import { DisclosureChevron } from '../DisclosureChevron'
 import { TASK_PLAN_NAVIGATION_EVENT, takeTaskPlanNavigation } from './task-plan-navigation'
 import {
@@ -108,6 +110,8 @@ export default function TaskPlanWorkbench({
         expanded={expanded}
         onToggle={() => setExpanded((value) => !value)}
       />
+      {expanded && current && <TaskPlanInstitutions version={current} />}
+      {expanded && <PreparationPermission key={sessionId} sessionId={sessionId} running={running} />}
       {state?.approvalStatus === 'approved' && state.projection && (
         <div className={`task-plan-projection task-plan-projection-${state.projection.mode}`}
           data-task-plan-projection={state.projection.mode}>

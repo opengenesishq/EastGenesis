@@ -1,5 +1,6 @@
 import type { AcceptanceSpec, WorkItemType } from './project-workspace-types'
 import type { TaskDagRole } from './types'
+import type { ProjectInstitutionTemplateRef } from './project-institution-template'
 
 export const TASK_PLAN_SCHEMA_VERSION = 1 as const
 
@@ -7,6 +8,13 @@ export type TaskStrategy = 'view' | 'plan' | 'execute'
 export type TaskPlanRiskLevel = 'low' | 'medium' | 'high' | 'critical'
 export type TaskPlanSource = 'manual' | 'genesis'
 export type TaskPlanApprovalEventKind = 'approved' | 'revoked' | 'superseded'
+
+/** Responsibility assigned to a plan step, not an Agent identity or a permission grant. */
+export interface TaskPlanInstitutionResponsibility {
+  id: string
+  label: string
+  duty: string
+}
 
 export interface TaskPlanStepInput {
   id: string
@@ -22,6 +30,7 @@ export interface TaskPlanStepInput {
   executionRole?: TaskDagRole
   workItemType?: WorkItemType
   acceptanceSpec?: AcceptanceSpec[]
+  institution?: TaskPlanInstitutionResponsibility
 }
 
 export interface TaskPlanDraftInput {
@@ -36,6 +45,8 @@ export interface TaskPlanDraftInput {
   source?: TaskPlanSource
   /** Host-derived canonical inputs. Included in the plan digest when present. */
   missionSource?: TaskPlanMissionSource
+  /** Frozen with each step's responsibility and covered by the approval digest. */
+  institutionTemplate?: ProjectInstitutionTemplateRef
 }
 
 export interface TaskPlanMissionSource {
@@ -68,6 +79,7 @@ export interface TaskPlanStep {
   executionRole?: TaskDagRole
   workItemType?: WorkItemType
   acceptanceSpec?: AcceptanceSpec[]
+  institution?: TaskPlanInstitutionResponsibility
 }
 
 export interface TaskPlanVersion {
@@ -86,6 +98,7 @@ export interface TaskPlanVersion {
   changeReason: string
   source: TaskPlanSource
   missionSource?: TaskPlanMissionSource
+  institutionTemplate?: ProjectInstitutionTemplateRef
   createdBy: 'local-user' | 'agent'
   createdAt: number
 }

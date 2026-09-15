@@ -12,7 +12,9 @@ import { assertBusinessLineTaskStrategy } from '../business-line-execution-polic
 import { TaskPlanContractStore } from './task-plan-contract-store'
 import { TaskPlanCanonicalProjector } from './task-plan-canonical-projection'
 import { reconcileTaskPlanLedger, syncTaskPlanLedger } from './task-plan-ledger'
-import { buildCanonicalMissionTaskPlan } from './mission-task-plan'
+import { buildCanonicalMissionTaskPlan, enrichCanonicalTaskPlanInstitutions } from './mission-task-plan'
+import { openProjectWorkspaceStore } from '../project-workspace/store'
+import { bindTaskPlanInstitutions } from './task-plan-institutions'
 
 export class TaskPlanSessionCoordinator {
   private readonly store: TaskPlanContractStore
@@ -58,11 +60,9 @@ export class TaskPlanSessionCoordinator {
     const session = this.requireSession(id)
     this.assertIdle(session.meta, '修改计划')
     if (session.meta.taskStrategy !== 'plan') throw new Error('请先切换到规划，再创建计划版本。')
-    const next = this.store.createVersion(binding(session.meta), {
+    return this.persistEnrichedVersion(id, session, {
       ...draft, source: 'manual', missionSource: this.store.get(id).currentVersion?.missionSource
-    }, 'local-user')
-    await syncTaskPlanLedger(this.userDataRoot(), next)
-    return next
+    }, 'local-user', true)
   }
 
   async createAgentVersion(id: string, draft: TaskPlanDraftInput): Promise<TaskPlanStateView> {
@@ -70,14 +70,12 @@ export class TaskPlanSessionCoordinator {
     const session = this.requireSession(id)
     if (session.meta.taskStrategy !== 'plan') throw new Error('Genesis 只能在规划策略中生成计划版本。')
     const current = this.store.get(id).currentVersion
-    const next = this.store.createVersion(binding(session.meta), {
+    return this.persistEnrichedVersion(id, session, {
       ...draft,
       changeReason: current ? (draft.changeReason?.trim() || 'Genesis 重新生成结构化计划') : draft.changeReason,
       source: 'genesis',
       missionSource: current?.missionSource
-    }, 'agent')
-    await syncTaskPlanLedger(this.userDataRoot(), next)
-    return next
+    }, 'agent', false)
   }
 
   async createGeneratedVersion(id: string, draft: TaskPlanDraftInput): Promise<TaskPlanStateView> {
@@ -93,9 +91,25 @@ export class TaskPlanSessionCoordinator {
       await syncTaskPlanLedger(this.userDataRoot(), state)
       return state
     }
-    const next = this.store.createVersion(binding(session.meta), { ...draft, source: 'genesis', missionSource: undefined }, 'agent')
-    await syncTaskPlanLedger(this.userDataRoot(), next)
-    return next
+    return this.persistEnrichedVersion(id, session, { ...draft, source: 'genesis', missionSource: undefined }, 'agent', true)
+  }
+
+  private async persistEnrichedVersion(id: string, session: Engine, draft: TaskPlanDraftInput,
+    actor: 'local-user' | 'agent', requireIdle: boolean): Promise<TaskPlanStateView> {
+    this.approvalsInFlight.add(id)
+    const originalBinding = binding(session.meta)
+    try {
+      const previous = this.store.get(id).currentVersion
+      const enriched = previous && previous.institutionTemplate === undefined
+        ? bindTaskPlanInstitutions(draft)
+        : await enrichCanonicalTaskPlanInstitutions(session.meta, draft, this.userDataRoot())
+      if (JSON.stringify(originalBinding) !== JSON.stringify(binding(session.meta))) throw new Error('计划所属任务在保存时变化')
+      if (requireIdle) this.assertIdle(session.meta, '保存计划')
+      if (session.meta.taskStrategy !== 'plan') throw new Error('保存计划前请保持规划策略')
+      const next = this.store.createVersion(originalBinding, enriched, actor)
+      await syncTaskPlanLedger(this.userDataRoot(), next)
+      return next
+    } finally { this.approvalsInFlight.delete(id) }
   }
 
   async compileMission(id: string, input: TaskPlanMissionCompileInput): Promise<TaskPlanStateView> {
@@ -254,10 +268,18 @@ export class TaskPlanSessionCoordinator {
   }
 
   private async assertMissionSourceCurrent(meta: SessionMeta, version: TaskPlanVersion): Promise<void> {
+    if (version.institutionTemplate) {
+      const workspace = meta.workspaceId ? await (await openProjectWorkspaceStore(this.userDataRoot())).getWorkspace(meta.workspaceId) : undefined
+      if (!workspace || workspace.status !== 'active' ||
+          workspace.institutionTemplate?.templateId !== version.institutionTemplate.templateId ||
+          workspace.institutionTemplate?.templateVersion !== version.institutionTemplate.templateVersion) {
+        throw new Error('计划机构模板与项目当前版本不一致，请重新生成并确认计划')
+      }
+    }
     if (!version.missionSource) return
     const current = await buildCanonicalMissionTaskPlan(meta, {
       expectedGoalRevision: version.missionSource.goalRevision
-    }, this.userDataRoot())
+    }, this.userDataRoot(), { legacyInstitutions: version.institutionTemplate === undefined })
     if (current.missionSource?.inputDigest !== version.missionSource.inputDigest) {
       throw new Error('Mission 的目标、资料或策略已变化，请重新生成并确认计划')
     }

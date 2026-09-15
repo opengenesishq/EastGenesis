@@ -26,6 +26,7 @@ import {
   resolveModelAttemptReconciliation
 } from './model-attempt-reconciliation'
 import { mutateTaskSnapshotDatabase, readTaskSnapshotDatabase } from './task-snapshot'
+import { scheduleModelRouteObservationRefresh } from '../model/acceptance-quality-feedback'
 
 export function startPersistedModelAttempt(
   input: ModelAttemptStartInput,
@@ -34,12 +35,14 @@ export function startPersistedModelAttempt(
   return mutateTaskSnapshotDatabase(rootDir, (db) => startInDatabase(db, input))
 }
 
-export function completePersistedModelAttempt(
+export async function completePersistedModelAttempt(
   attemptId: string,
   input: ModelAttemptCompleteInput,
   rootDir?: string
 ): Promise<ModelAttemptRecord> {
-  return mutateTaskSnapshotDatabase(rootDir, (db) => completeInDatabase(db, attemptId, input))
+  const result = await mutateTaskSnapshotDatabase(rootDir, (db) => completeInDatabase(db, attemptId, input))
+  scheduleModelRouteObservationRefresh(rootDir)
+  return result
 }
 
 export function getPersistedModelAttempt(

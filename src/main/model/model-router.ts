@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
-import { getModelStat, reliabilityScore } from '../modelStats'
+import type { ProviderConnectionIdentity } from '../../shared/provider-connection-identity'
 import type { ProviderView, SchedulerStrategy } from '../../shared/types'
 import { getAcceptanceQualitySignal } from './acceptance-quality-signal'
+import { getRouteObservationSignal, routeObservationIdentity, routeObservationKey, type RouteObservationIdentity } from './route-observation-signal'
 import { eligibleRouteProfiles, selectConstrainedCandidate } from './model-route-constraints'
 import {
   buildModelProfiles,
@@ -54,6 +55,8 @@ export interface ModelRouteRequest extends TaskProfileInput {
   excludedModels?: string[]
   crossValidation?: CrossValidationRequest
   providerHealth?: Record<string, ModelRouteHealthInput>
+  /** Main-owned current connection identities. Missing identity means no historical scoring. */
+  connectionIdentities?: Readonly<Record<string, ProviderConnectionIdentity>>
 }
 
 /** Explicit, non-secret observations captured by main before a pure evaluation. */
@@ -63,6 +66,7 @@ export interface ModelRouteScoringSignal {
   reliability: number
   latencyEmaMs?: number
   acceptanceQuality?: { score: number; samples: number }
+  observationIdentity?: RouteObservationIdentity
 }
 
 export interface ModelRouteSnapshotInput {
@@ -94,6 +98,7 @@ export interface ModelRouteCandidate {
   latencyEmaMs?: number
   scoreBreakdown: ModelRouteScoreBreakdown
   reasons: string[]
+  observationIdentity?: RouteObservationIdentity
 }
 
 export interface CrossValidationPlan {
@@ -137,7 +142,7 @@ function routeEligibleProfiles(input: {
 }): ModelRouteDecision {
   const { request, task, sourceProfiles } = input
   const candidates = sourceProfiles.map((profile) => scoreCandidate(profile, task,
-    request.providerHealth?.[profile.providerId], scoringSignal(profile, input.scoringSignals)))
+    request.providerHealth?.[profile.providerId], scoringSignal(profile, request, input.scoringSignals)))
   const rankedCandidates = rankCandidates(candidates, task.strategy)
   const choice = selectConstrainedCandidate(rankedCandidates, request.budget, request.manualOverride)
   const primary = rankedCandidates[0]
@@ -212,7 +217,8 @@ function scoreCandidate(
     0,
     100
   )
-  const latencyEmaMs = signal.latencyEmaMs ?? providerHealth?.latencyEmaMs
+  // Provider health gates stay provider-wide; their latency is not a model sample.
+  const latencyEmaMs = signal.latencyEmaMs
   const speed = speedScore(profile.latency, latencyEmaMs)
   const cost = costScore(profile.cost.tier, estimatedCostUsd)
   const health = healthScore(providerHealth)
@@ -248,19 +254,37 @@ function scoreCandidate(
       health,
       composite
     },
-    reasons
+    reasons,
+    observationIdentity: signal.observationIdentity
   }
 }
 
-function scoringSignal(profile: ModelProfile, snapshot?: readonly ModelRouteScoringSignal[]): ModelRouteScoringSignal {
-  if (snapshot === undefined) return {
+export function captureModelRouteScoringSignal(profile: ModelProfile,
+  request: Pick<ModelRouteRequest, 'providers' | 'connectionIdentities'>): ModelRouteScoringSignal {
+  const provider = request.providers.find((item) => item.id === profile.providerId)
+  const identity = provider && routeObservationIdentity(provider, profile.model, request.connectionIdentities?.[provider.id])
+  const signal = identity && getRouteObservationSignal(identity)
+  return {
     providerId: profile.providerId, model: profile.model,
-    reliability: reliabilityScore(profile.model), latencyEmaMs: getModelStat(profile.model)?.latencyEmaMs,
-    acceptanceQuality: getAcceptanceQualitySignal(profile.providerId, profile.model)
+    reliability: signal?.reliability ?? 0.5, latencyEmaMs: signal?.latencyEmaMs,
+    acceptanceQuality: identity ? getAcceptanceQualitySignal(identity.providerId, identity.model, identity) : undefined,
+    observationIdentity: identity
   }
+}
+
+function scoringSignal(profile: ModelProfile, request: ModelRouteRequest,
+  snapshot?: readonly ModelRouteScoringSignal[]): ModelRouteScoringSignal {
+  if (snapshot === undefined) return captureModelRouteScoringSignal(profile, request)
   const rows = snapshot.filter((row) => row.providerId === profile.providerId && row.model === profile.model)
   if (rows.length !== 1) throw new Error('An exact scoring snapshot row is required for each target')
   const row = rows[0]
+  const provider = request.providers.find((item) => item.id === profile.providerId)
+  const expected = provider && routeObservationIdentity(provider, profile.model, request.connectionIdentities?.[provider.id])
+  if (expected ? !row.observationIdentity || routeObservationKey(row.observationIdentity) !== routeObservationKey(expected)
+    : row.observationIdentity !== undefined) throw new Error('Scoring snapshot connection identity differs from its target')
+  if (!expected && (row.reliability !== 0.5 || row.latencyEmaMs !== undefined || row.acceptanceQuality !== undefined)) {
+    throw new Error('Scoring snapshot observations require a trusted connection identity')
+  }
   if (!Number.isFinite(row.reliability) || row.reliability < 0 || row.reliability > 1) throw new Error('Invalid reliability snapshot')
   assertOptionalScoringSignal(row)
   return row
@@ -382,6 +406,7 @@ function candidateDigestValue(candidate: ModelRouteCandidate): Record<string, un
     score: candidate.score,
     estimatedCostUsd: candidate.estimatedCostUsd,
     latencyEmaMs: candidate.latencyEmaMs ?? null,
+    observationIdentity: candidate.observationIdentity ?? null,
     scoreBreakdown: candidate.scoreBreakdown
   }
 }

@@ -17,10 +17,12 @@ import type {
   ProjectCollaborationInboxReceipt
 } from '../../shared/project-workspace-types'
 import { isProjectWorkspaceKind, PROJECT_WORKSPACE_SCHEMA_VERSION } from '../../shared/project-workspace-types'
+import { DEFAULT_PROJECT_INSTITUTION_TEMPLATE, projectInstitutionTemplate } from '../../shared/project-institution-template'
 import {
   clone,
   digest,
   normalizeResources,
+  normalizeInstitutionTemplate,
   optionalId,
   optionalText,
   redact,
@@ -80,6 +82,17 @@ export class WorkspaceRepository {
         allowDeleted: true
       })
       this.persistence.assertEntityRevision(workspace.revision, options, 'workspace')
+      if (patch.institutionTemplate !== undefined) {
+        const next = normalizeInstitutionTemplate(patch.institutionTemplate)
+        const current = projectInstitutionTemplate(workspace.institutionTemplate).ref
+        if (current.templateId !== next.templateId && (
+          state.goals.some((goal) => goal.projectId === id) ||
+          state.workItems.some((item) => item.projectId === id)
+        )) {
+          throw new ProjectWorkspaceError('institution_migration_preview_only',
+            '已有任务的项目保留原机构模板；当前可预览迁移，或为新任务新建内阁项目。')
+        }
+      }
       applyWorkspacePatch(workspace, patch)
       workspace.updatedAt = now
       workspace.revision += 1
@@ -203,6 +216,7 @@ function buildWorkspace(input: ProjectWorkspaceInput, id: string, now: number): 
     budgetPolicy: sanitizePolicy(input.budgetPolicy),
     permissionPolicy: sanitizePolicy(input.permissionPolicy),
     retentionPolicy: sanitizePolicy(input.retentionPolicy),
+    institutionTemplate: normalizeInstitutionTemplate(input.institutionTemplate === undefined ? DEFAULT_PROJECT_INSTITUTION_TEMPLATE : input.institutionTemplate),
     createdAt,
     updatedAt: timestamp(input.updatedAt, 'workspace updatedAt', createdAt),
     revision: 1
@@ -225,6 +239,7 @@ function applyWorkspacePatch(workspace: ProjectWorkspace, patch: ProjectWorkspac
   if (patch.budgetPolicy !== undefined) workspace.budgetPolicy = sanitizePolicy(patch.budgetPolicy)
   if (patch.permissionPolicy !== undefined) workspace.permissionPolicy = sanitizePolicy(patch.permissionPolicy)
   if (patch.retentionPolicy !== undefined) workspace.retentionPolicy = sanitizePolicy(patch.retentionPolicy)
+  if (patch.institutionTemplate !== undefined) workspace.institutionTemplate = normalizeInstitutionTemplate(patch.institutionTemplate)
 }
 
 function buildManifestBody(

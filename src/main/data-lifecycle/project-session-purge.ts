@@ -33,6 +33,10 @@ import {
   countOwnedProjectTestEvidence,
   purgeOwnedProjectTestEvidence
 } from './project-test-evidence'
+import {
+  countProjectSubmissionReceipts, countSessionSubmissionReceipts, listProjectSubmissionSessionIds,
+  purgeProjectSubmissionReceipts, purgeSessionSubmissionReceipts
+} from './submission-receipt-files'
 
 export interface ProjectSessionInventory {
   sessionIds: string[]
@@ -65,6 +69,7 @@ export function collectProjectSessionInventory(
     ...sessionCreationArrayDocument(join(root, 'session-creation-journal.json'))
   ]
   const sessionIds = collectProjectSessionIds(records, project, knownSessionIds)
+  for (const sessionId of listProjectSubmissionSessionIds(root, project)) sessionIds.add(sessionId)
   addDescendantSessions(records, sessionIds)
   const sdkSessionIds = collectSdkSessionIds(records, sessionIds)
   for (const sdkSessionId of knownSdkSessionIds) {
@@ -136,6 +141,7 @@ export function purgeProjectSessionData(
   removedRecords.taskPlans = purgeTaskPlanSessions(join(root, 'task-plans', 'task-plan-contracts.json'), sessionIds, project)
 
   const removedPaths: string[] = []
+  removedPaths.push(...purgeProjectSubmissionReceipts(root, project, sessionIds))
   for (const sessionId of sessionIds) {
     const component = sessionFileComponent(sessionId)
     if (!component) continue
@@ -183,6 +189,7 @@ export function scanProjectSessionResiduals(
   const sessionIds = new Set(knownSessionIds)
   const sdkSessionIds = new Set(knownSdkSessionIds)
   const counts: Record<string, number> = {
+    ...countProjectSubmissionReceipts(root, project, sessionIds),
     history: historyArrayDocument(join(root, 'sessions.json')).filter((record) => matchesSessionOrProject(record, sessionIds, project)).length,
     activeSessions: activeSessionArrayDocument(join(root, 'active-sessions.json')).filter((record) => matchesSessionOrProject(record, sessionIds, project)).length,
     sessionCreationJournal: sessionCreationArrayDocument(join(root, 'session-creation-journal.json')).filter((record) => matchesSessionOrProject(record, sessionIds, project)).length,
@@ -281,6 +288,7 @@ export function purgeStandaloneSessionFiles(
   const component = safeComponent(sessionId, 'sessionId')
   const sdkComponent = safeComponent(sdkSessionId, 'sdkSessionId')
   const removedPaths: string[] = []
+  removedPaths.push(...purgeSessionSubmissionReceipts(root, sessionId))
   for (const target of [
     join(root, 'attachments', component),
     join(root, 'browser-annotations', component),
@@ -307,6 +315,7 @@ export function scanStandaloneSessionResiduals(
   const sdkComponent = safeComponent(sdkSessionId, 'sdkSessionId')
   const taskPlans = new TaskPlanContractStore(() => root)
   const counts: Record<string, number> = {
+    ...countSessionSubmissionReceipts(root, sessionId),
     history: historyArrayDocument(join(root, 'sessions.json')).filter((record) =>
       matchesStandaloneSession(record, sessionId, sdkSessionId)).length,
     activeSessions: activeSessionArrayDocument(join(root, 'active-sessions.json')).filter((record) =>

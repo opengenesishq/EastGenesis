@@ -1,3 +1,5 @@
+import { routeObservationKey, type RouteObservationIdentity } from './route-observation-signal'
+
 export interface AcceptanceQualitySignal {
   providerId: string
   model: string
@@ -14,9 +16,10 @@ let snapshot = new Map<string, AcceptanceQualitySignal>()
 /** Request-path reads are synchronous and never touch Electron or the database. */
 export function getAcceptanceQualitySignal(
   providerId: string,
-  model: string
+  model: string,
+  identity?: RouteObservationIdentity
 ): AcceptanceQualitySignal | undefined {
-  return snapshot.get(acceptanceQualitySignalKey(providerId, model))
+  return snapshot.get(identity ? routeObservationKey(identity) : acceptanceQualitySignalKey(providerId, model))
 }
 
 export function publishAcceptanceQualitySnapshot(

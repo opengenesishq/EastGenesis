@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { assertPreparationToolScope, type PreparationToolPermission } from './permission/preparation-tool-scope'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { extname, resolve } from 'node:path'
@@ -100,6 +101,7 @@ export interface ToolExecResult {
   producedArtifacts?: ToolProducedArtifactDescriptor[]
 }
 export interface ToolExecutionOptions {
+  preparationPermission?: PreparationToolPermission
   signal?: AbortSignal
   sandboxMode?: SandboxMode
   chinaMirrorEnabled?: boolean
@@ -954,6 +956,13 @@ export async function executeCodingTool(
   cwd: string,
   options: ToolExecutionOptions = {}
 ): Promise<ToolExecResult> {
+  if (options.preparationPermission) {
+    if (!['write_file', 'read_file', 'view', 'list_dir'].includes(name) || !options.sessionMeta || !options.userDataRoot) {
+      return { ok: false, output: '此工具未适配独立准备区权限。' }
+    }
+    try { assertPreparationToolScope(options.sessionMeta, { cwd, preparation: options.preparationPermission }, options.userDataRoot) }
+    catch (error) { return { ok: false, output: error instanceof Error ? error.message : String(error) } }
+  }
   try {
     if (options.signal?.aborted) return { ok: false, output: '操作已中断' }
     const contextBound = executeContextBoundTool(name, args, cwd, options)
@@ -1302,7 +1311,15 @@ async function localFileWrite(
   options: ToolExecutionOptions,
   guard?: LocalFileWritePrecondition
 ): Promise<LocalCommandResult> {
+  const assertPreparation = () => {
+    if (!options.preparationPermission) return
+    if (!options.sessionMeta || !options.userDataRoot || !guard) throw new Error('准备区写入缺少当前任务、授权或冻结 Effect。')
+    assertPreparationToolScope(options.sessionMeta, { cwd, preparation: options.preparationPermission }, options.userDataRoot)
+  }
+  assertPreparation()
   return writeTextFileLocally({
+    beforeGuardedCommit: assertPreparation,
+    assertWriteAuthorized: assertPreparation,
     cwd,
     targetPath,
     content,

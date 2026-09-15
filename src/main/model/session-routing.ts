@@ -14,6 +14,7 @@ import type {
 import { routeModel } from './model-router'
 import { ModelRouteError } from './model-route-error'
 import type { ManualModelOverride } from './model-router'
+import type { ProviderConnectionIdentity } from '../../shared/provider-connection-identity'
 import { inferTaskProfile, type TaskProfile } from './model-profile'
 import { driveModeLabel, driveRiskAtLeast, driveRouteTuning } from './drive'
 import { applyRoutingExpertPolicy } from './routing-expert-policy'
@@ -30,6 +31,7 @@ export interface SessionRouteInput {
   currentModel: string
   providerId: string
   providers: ProviderView[]
+  connectionIdentities?: Readonly<Record<string, ProviderConnectionIdentity>>
   engine?: EngineKind
   /** 仅用于会话创建前的首次选路;已运行会话不得跨引擎热切换。 */
   allowAnyEngine?: boolean
@@ -113,6 +115,7 @@ export function resolveSessionModelRoute(input: SessionRouteInput): SessionRoute
   })
   const decision = routeModel({
     providers,
+    connectionIdentities: input.connectionIdentities,
     prompt,
     attachments,
     contextTokens: input.estimatedContextTokens,

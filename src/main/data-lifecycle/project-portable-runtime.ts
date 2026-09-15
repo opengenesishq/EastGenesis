@@ -60,6 +60,7 @@ import {
   collectProjectExternalFileManifests,
   validateProjectExternalFileManifests
 } from './project-external-file-manifest'
+import { validateSubmissionReceiptBindings } from './submission-receipt-portability'
 
 const QUERY_LIMIT = 500
 const PORTABLE_RUNTIME_ARRAY_FIELDS = [
@@ -112,7 +113,8 @@ export async function collectProjectPortableRuntime(
     ...aggregate.workflow.runs.map((run) => run.sessionId),
     ...taskSnapshots.map((snapshot) => snapshot.sessionId)
   ])].sort()
-  const sessions = collectProjectSessionPortableSlice(rootDir, projectId, sessionIds)
+  const sessions = collectProjectSessionPortableSlice(rootDir, projectId, sessionIds, taskSnapshots)
+  validateSubmissionReceiptBindings(sessions.submissionReceipts, aggregate)
   const [artifactBlobs, artifactSourceFiles] = await Promise.all([
     collectArtifactBlobs(rootDir, artifactSlice.lifecycles, artifactSlice.purges),
     collectArtifactSourceFiles(artifactSlice.lifecycles, artifactSlice.purges)
@@ -143,6 +145,7 @@ export function validateProjectPortableRuntime(
   const { runtimeDigest, ...body } = runtime
   if (projectAggregateDigest(body) !== runtimeDigest) throw new Error('Project import runtime digest mismatch')
   validateProjectSessionPortableSlice(bundle.projectId, runtime)
+  validateSubmissionReceiptBindings(runtime.submissionReceipts, bundle.aggregate)
   const runIds = new Set(bundle.aggregate.workflow.runs.map((run) => run.id))
   const sessionIds = uniqueIds(runtime.sessionIds, 'runtime sessionId')
   validateTaskSnapshots(runtime.taskSnapshots, bundle.projectId, runIds, sessionIds)

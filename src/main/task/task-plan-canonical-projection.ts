@@ -9,6 +9,7 @@ import {
 } from '../../shared/task-plan-types'
 import { openProjectWorkspaceCommandService } from '../project-workspace/command-service'
 import { createProjectWorkspaceReadService } from '../project-workspace/canonical-read-service'
+import { institutionResponsibilityLines } from './task-plan-institutions'
 
 const IMMUTABLE_STATUSES = new Set(['running', 'waiting_approval', 'blocked', 'verifying', 'done', 'failed', 'cancelled'])
 const CANCELLABLE_UNSTARTED_STATUSES = new Set(['backlog', 'ready'])
@@ -131,7 +132,7 @@ function desiredWorkItem(
     type: step.workItemType ?? 'custom',
     ...(step.role === undefined ? {} : { role: step.role }),
     title: step.title,
-    description: step.description || `计划步骤: ${step.id}`,
+    description: [step.description || `计划步骤: ${step.id}`, ...institutionResponsibilityLines(version, step.institution)].join('\n'),
     dependencyIds: step.dependsOn.map((id) => ids.get(id)!),
     priority: 10_000 - index,
     status: 'backlog' as const,

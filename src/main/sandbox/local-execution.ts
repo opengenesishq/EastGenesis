@@ -45,6 +45,8 @@ export interface LocalFileWriteOptions {
   signal?: AbortSignal
   expectedFile?: LocalFileWritePrecondition
   beforeGuardedCommit?: () => Promise<void> | void
+  /** Synchronous authority check immediately before each filesystem mutation. */
+  assertWriteAuthorized?: () => void
   beforeGuardedPathVerificationRead?: (
     phase: 'precondition' | 'postcondition',
     targetPath: string
@@ -268,13 +270,16 @@ async function writeGuardedTextFileOnHost(options: LocalFileWriteOptions): Promi
       () => options.beforeGuardedPathVerificationRead?.('precondition', options.targetPath)
     )
     const output = Buffer.from(options.content, 'utf8')
+    options.assertWriteAuthorized?.()
     await handle.truncate(0)
     let offset = 0
     while (offset < output.length) {
+      options.assertWriteAuthorized?.()
       const written = await handle.write(output, offset, output.length - offset, offset)
       if (written.bytesWritten <= 0) throw new Error('guarded file write made no progress')
       offset += written.bytesWritten
     }
+    options.assertWriteAuthorized?.()
     await handle.truncate(output.length)
     await handle.sync()
     const after = await handle.stat({ bigint: true })
@@ -307,6 +312,7 @@ async function writeAbsentTextFileOnHost(options: LocalFileWriteOptions): Promis
   const noFollow = process.platform !== 'win32' && typeof constants.O_NOFOLLOW === 'number'
     ? constants.O_NOFOLLOW
     : 0
+  options.assertWriteAuthorized?.()
   const handle = await open(
     tempPath,
     constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow,
@@ -317,6 +323,7 @@ async function writeAbsentTextFileOnHost(options: LocalFileWriteOptions): Promis
     let offset = 0
     while (offset < output.length) {
       if (options.signal?.aborted) throw new Error('操作已中断')
+      options.assertWriteAuthorized?.()
       const written = await handle.write(output, offset, output.length - offset, offset)
       if (written.bytesWritten <= 0) throw new Error('guarded file write made no progress')
       offset += written.bytesWritten
@@ -329,6 +336,7 @@ async function writeAbsentTextFileOnHost(options: LocalFileWriteOptions): Promis
     await verifyGuardedParentPath(guardedParent)
     await verifyAbsentFilePrecondition(options.targetPath)
     try {
+      options.assertWriteAuthorized?.()
       await link(tempPath, options.targetPath)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') {

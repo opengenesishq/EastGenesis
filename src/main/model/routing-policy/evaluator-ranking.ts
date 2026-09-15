@@ -29,6 +29,7 @@ export function rankQualifiedCatalog(input: RankingInput): {
 
 function score(input: RankingInput, entries: RoutingCatalogEntry[], selected: RoutingCatalogEntry | undefined, useBudget: boolean): ModelRouteDecision {
   const request: ModelRouteRequest = { ...input.request,
+    connectionIdentities: input.snapshots.connectionIdentities,
     budget: useBudget ? input.snapshots.budget : undefined,
     manualOverride: selected ? { providerId: selected.provider.id, model: selected.profile.model,
       reason: input.requiredInitial ? 'Explicit fixed/preferred target after hard intersection.' : 'prefer_local within the hard-qualified set.' } : undefined }

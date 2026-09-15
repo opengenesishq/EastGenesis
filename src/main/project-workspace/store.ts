@@ -48,7 +48,7 @@ import type { ProjectWorkspaceBeforeCommit } from './persistence'
 import type { DeleteOptions, LeaseOptions, ListOptions } from './repository-types'
 import { WorkItemRepository } from './work-item-repository'
 import { WorkspaceRepository } from './workspace-repository'
-import { canonicalJson as canonicalProjectJson } from './codec'
+import { canonicalJson as canonicalProjectJson, normalizeInstitutionTemplate } from './codec'
 import { ProjectCollaborationRepository } from './collaboration-repository'
 
 export { canonicalJson } from './codec'
@@ -110,6 +110,9 @@ export class ProjectWorkspaceStore {
     events: ProjectWorkspaceState['events']
   }): Promise<{ revision: number; projectId: string }> {
     return this.persistence.read().then((current) => {
+      // Import keeps missing legacy refs missing, and rejects unknown versions
+      // before they could make the whole workspace store unreadable.
+      if (input.workspace.institutionTemplate !== undefined) normalizeInstitutionTemplate(input.workspace.institutionTemplate)
       const projectId = input.workspace.id
       const existingSlice = projectWorkspaceImportSlice(current, projectId)
       if (existingSlice.workspace) {

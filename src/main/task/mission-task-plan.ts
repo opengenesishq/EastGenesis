@@ -6,12 +6,32 @@ import { createProjectWorkspaceReadService } from '../project-workspace/canonica
 import { openProjectWorkspaceStore } from '../project-workspace/store'
 import { compileMission, missionCompilationToTaskPlanDraft } from './mission-compiler'
 import { digest } from './workflow-ledger-codec'
+import { bindTaskPlanInstitutions } from './task-plan-institutions'
+
+/** Host-owned enrichment: preserve the generated step count and existing runtime roles. */
+export async function enrichCanonicalTaskPlanInstitutions(
+  meta: Pick<SessionMeta, 'workspaceId' | 'goalId' | 'workItemId'>,
+  draft: TaskPlanDraftInput,
+  rootDir: string
+): Promise<TaskPlanDraftInput> {
+  if (!meta.workspaceId) return bindTaskPlanInstitutions(draft)
+  const store = await openProjectWorkspaceStore(rootDir)
+  const workspace = await store.getWorkspace(meta.workspaceId)
+  if (!workspace || workspace.status !== 'active') throw new Error('计划所属项目不存在或不可用')
+  if (workspace.institutionTemplate?.templateId !== 'cabinet-six-ministries') return bindTaskPlanInstitutions(draft)
+  const parent = meta.workItemId ? await createProjectWorkspaceReadService(rootDir, 'canonical').getWorkItem(meta.workItemId) : undefined
+  if (!parent || parent.projectId !== meta.workspaceId || (meta.goalId !== undefined && parent.goalId !== meta.goalId)) {
+    throw new Error('机构计划与当前项目任务归属不一致')
+  }
+  return bindTaskPlanInstitutions(draft, workspace.institutionTemplate)
+}
 
 /** Read host-owned inputs only. Compilation never opens resources or starts a Runtime. */
 export async function buildCanonicalMissionTaskPlan(
   meta: Pick<SessionMeta, 'workspaceId' | 'goalId' | 'workItemId' | 'businessLineId'>,
   input: TaskPlanMissionCompileInput,
-  rootDir: string
+  rootDir: string,
+  options: { legacyInstitutions?: boolean } = {}
 ): Promise<TaskPlanDraftInput> {
   if (!input || typeof input !== 'object' || Array.isArray(input) ||
       Object.keys(input).some((key) => key !== 'expectedGoalRevision') ||
@@ -43,6 +63,8 @@ export async function buildCanonicalMissionTaskPlan(
   assertSameBusinessLine(meta.businessLineId, businessLineId)
   assertActiveBusinessLine(businessLineId, rootDir)
   const contract = goal.contract
+  const institutionTemplate = !options.legacyInstitutions && workspace.institutionTemplate?.templateId === 'cabinet-six-ministries'
+    ? workspace.institutionTemplate : undefined
   const constraints = [...new Set([
     '计划须由用户确认；编译不执行任务，不授予外发或工具权限',
     ...contract.constraints,
@@ -66,7 +88,8 @@ export async function buildCanonicalMissionTaskPlan(
     deliverables: deliverables.length ? deliverables : ['目标要求的成果和可核验交付证据'],
     materials,
     businessLineId,
-    businessLineName: '产品发布府'
+    businessLineName: '产品发布府',
+    ...(institutionTemplate ? { institutionTemplate } : {})
   })
   const draft = missionCompilationToTaskPlanDraft(mission)
   return {
@@ -98,7 +121,8 @@ export async function buildCanonicalMissionTaskPlan(
       inputDigest: digest({
         workspaceId, goalId, workItemId, businessLineId, goalRevision: goal.revision,
         contract, resources: workspace.resources, rulesRef: workspace.rulesRef,
-        budgetPolicy: workspace.budgetPolicy, permissionPolicy: workspace.permissionPolicy
+        budgetPolicy: workspace.budgetPolicy, permissionPolicy: workspace.permissionPolicy,
+        ...(institutionTemplate ? { institutionTemplate } : {})
       })
     }
   }

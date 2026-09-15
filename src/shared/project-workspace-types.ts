@@ -1,4 +1,5 @@
 import type { BusinessLineBinding } from './business-line-types'
+import type { TaskPlanStateView } from './task-plan-types'
 /**
  * ProjectWorkspace is deliberately independent from the legacy path-centric
  * Project type. A workspace may have no resources at all; resources are
@@ -369,6 +370,8 @@ export interface ProjectWorkspace {
   budgetPolicy?: Record<string, unknown>
   permissionPolicy?: Record<string, unknown>
   retentionPolicy?: Record<string, unknown>
+  /** Missing on pre-template projects: preserve legacy identities and configuration. */
+  institutionTemplate?: import('./project-institution-template').ProjectInstitutionTemplateRef
   createdAt: number
   updatedAt: number
   archivedAt?: number
@@ -387,6 +390,8 @@ export interface ProjectWorkspaceInput {
   budgetPolicy?: Record<string, unknown>
   permissionPolicy?: Record<string, unknown>
   retentionPolicy?: Record<string, unknown>
+  /** New workspaces default to cabinet-six-ministries v1 when omitted. */
+  institutionTemplate?: import('./project-institution-template').ProjectInstitutionTemplateRef
   createdAt?: number
   updatedAt?: number
 }
@@ -400,6 +405,7 @@ export interface ProjectWorkspacePatch {
   budgetPolicy?: Record<string, unknown>
   permissionPolicy?: Record<string, unknown>
   retentionPolicy?: Record<string, unknown>
+  institutionTemplate?: import('./project-institution-template').ProjectInstitutionTemplateRef
 }
 
 export interface Goal {
@@ -1015,6 +1021,18 @@ export interface ProjectGoalTaskResult {
   recovered: boolean
 }
 
+export interface ProjectGoalTaskPrepareInput extends ProjectGoalTaskInput {
+  template: 'auto' | 'product-launch'
+  /** Recovery hints from the old renderer journal; never authority to create an ID. */
+  legacySessionId?: string
+  legacyCreationClaimed?: boolean
+}
+
+export interface ProjectGoalTaskPrepared extends ProjectGoalTaskResult {
+  sessionId: string
+  plan: TaskPlanStateView
+}
+
 export interface ProjectWorkspaceTemplateResourceSuggestion {
   kind: ProjectResourceKind
   label: string
@@ -1115,6 +1133,7 @@ export interface ProjectWorkspaceApi {
   getProjectWorkItem(id: string): Promise<WorkItem | undefined>
   createProjectWorkItem(input: WorkItemInput, options?: MutationOptions): Promise<WorkItem>
   createProjectGoalTask(input: ProjectGoalTaskInput): Promise<ProjectGoalTaskResult>
+  prepareProjectGoalTask(input: ProjectGoalTaskPrepareInput): Promise<ProjectGoalTaskPrepared>
   updateProjectWorkItem(id: string, patch: WorkItemPatch, options?: MutationOptions): Promise<WorkItem>
   transferProjectWorkItem(input: WorkItemTransferInput): Promise<WorkItemTransferResult>
   reorderProjectWorkItem(id: string, targetId: string, placement: WorkItemReorderPlacement, options?: MutationOptions): Promise<WorkItem>

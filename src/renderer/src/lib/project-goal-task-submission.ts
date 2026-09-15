@@ -1,4 +1,4 @@
-import type { ProjectGoalTaskInput, ProjectGoalTaskResult, SessionMeta, TaskPlanStateView } from '../../../shared/types'
+import type { ProjectGoalTaskPrepareInput, ProjectGoalTaskPrepared } from '../../../shared/types'
 
 export type GoalPlanningTemplate = 'auto' | 'product-launch'
 export interface ProjectGoalDraft {
@@ -13,11 +13,7 @@ interface PendingGoal extends ProjectGoalDraft {
 }
 type DraftStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 export interface ProjectGoalSubmissionHost {
-  createGoal(input: ProjectGoalTaskInput): Promise<ProjectGoalTaskResult>
-  listSessions(): Promise<SessionMeta[]>
-  createSession(result: ProjectGoalTaskResult): Promise<string>
-  getPlan(sessionId: string): Promise<TaskPlanStateView | undefined>
-  generatePlan(sessionId: string, goal: ProjectGoalTaskResult, template: GoalPlanningTemplate): Promise<TaskPlanStateView | undefined>
+  prepare(input: ProjectGoalTaskPrepareInput): Promise<ProjectGoalTaskPrepared>
 }
 const STORAGE_KEY = 'caogen.project-goal-submissions.v1'
 const inFlight = new WeakMap<DraftStorage, Map<string, Promise<{ sessionId: string; requestId: string }>>>()
@@ -65,35 +61,25 @@ export function createProjectGoalSubmissionClient(storage: DraftStorage, host: P
   }
 
   async function run(pending: PendingGoal): Promise<{ sessionId: string; requestId: string }> {
-    const result = await host.createGoal({ requestId: pending.requestId, projectId: pending.projectId, objective: pending.objective })
+    const result = await host.prepare({
+      requestId: pending.requestId, projectId: pending.projectId, objective: pending.objective, template: pending.template,
+      legacySessionId: pending.sessionId, legacyCreationClaimed: pending.sessionCreationClaimed
+    })
     if (result.requestId !== pending.requestId || result.goal.projectId !== pending.projectId ||
         result.workItem.projectId !== pending.projectId || result.workItem.goalId !== result.goal.id) {
       throw new Error('任务回执与原提交身份不一致，已停止创建会话。')
     }
-    const sessions = await host.listSessions()
-    const matches = sessions.filter((session) => session.workspaceId === result.goal.projectId &&
-      session.goalId === result.goal.id && session.workItemId === result.workItem.id && !session.parentSessionId)
-    if (matches.length > 1) throw new Error('该任务存在多个会话，请从原任务选择要继续的会话。')
-    let sessionId = pending.sessionId ?? matches[0]?.id
-    if (sessionId && !matches.some((session) => session.id === sessionId)) {
-      throw new Error('原任务会话暂不可用，请先从历史恢复；提交记录已保留。')
+    const { sessionId, plan } = result
+    if (!sessionId || (pending.sessionId && pending.sessionId !== sessionId) || !plan?.currentVersion) {
+      throw new Error('任务会话回执无效，原提交身份已保留。')
     }
-    if (!sessionId) {
-      if (pending.sessionCreationClaimed) throw new Error('原会话创建结果尚未核实，请先从任务历史恢复，已阻止重复创建。')
-      pending.sessionCreationClaimed = true
-      save(pending)
-      sessionId = await host.createSession(result)
-    }
-    pending.sessionId = sessionId
-    save(pending)
-    const existing = await host.getPlan(sessionId)
-    const plan = existing?.currentVersion ? existing : await host.generatePlan(sessionId, result, pending.template)
-    if (!plan?.currentVersion) throw new Error('计划尚未生成，目标、输入与会话已保留；连接模型后可重试原提交。')
     const binding = plan.currentVersion.binding
     if (binding.sessionId !== sessionId || binding.workspaceId !== result.goal.projectId ||
         binding.goalId !== result.goal.id || binding.workItemId !== result.workItem.id) {
       throw new Error('计划与原任务身份不一致，已停止提交。')
     }
+    pending.sessionId = sessionId
+    save(pending)
     return { sessionId, requestId: pending.requestId }
   }
 }

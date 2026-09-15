@@ -17,6 +17,7 @@ import { loadVideoStudioView } from './studio/loadVideoStudioView'
 import { resolveSelectedBusinessLine } from '../../../shared/business-line-types'
 import BusinessLineWorkbench from './business-lines/BusinessLineWorkbench'
 import { WORK_OS_NAVIGATION_EVENT, requestStudioSectionNavigation, type WorkOsNavigationTarget } from './work-os-navigation'
+import { requestTaskPlanNavigation } from './experience/task-plan-navigation'
 
 const StudioView = lazy(loadStudioView)
 const VideoStudioView = lazy(loadVideoStudioView)
@@ -241,9 +242,25 @@ export default function AppListView({
 function TaskWorkspaceNavigation({ mode, surface, language, onChange }: {
   mode: ExperienceMode; surface: StudioProjectionSurface; language: 'zh' | 'en'; onChange(surface: StudioProjectionSurface): void
 }): React.JSX.Element | null {
+  const activeId = useStore((state) => state.activeId)
+  const session = useStore((state) => activeId ? state.sessions[activeId] : undefined)
+  const openPanel = useStore((state) => state.openPanel)
+  const setView = useStore((state) => state.setView)
   if (mode !== 'studio' || surface === 'workspace') return null
-  return <div className="task-workspace-navigation">
+  const zh = language === 'zh'
+  return <nav className="task-workspace-navigation" aria-label={zh ? '当前任务工作区' : 'Current task workspace'} data-task-workspace-session={activeId ?? ''}>
     <button type="button" className="btn btn-secondary btn-sm" onClick={() => onChange('workspace')}>{language === 'zh' ? '返回项目' : 'Back to projects'}</button>
-    {surface === 'result' && <button type="button" className="btn btn-secondary btn-sm" onClick={() => onChange('session')}>{language === 'zh' ? '继续任务' : 'Continue task'}</button>}
-  </div>
+    {session && <>
+      <span className="task-workspace-current-title" title={session.meta.title}>{session.meta.title}</span>
+      <button type="button" className="btn btn-ghost btn-sm" aria-pressed={surface === 'session'} onClick={() => onChange('session')}>{zh ? '对话' : 'Conversation'}</button>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={() => { onChange('session'); openPanel('files') }}>{zh ? '文件' : 'Files'}</button>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={() => { onChange('session'); openPanel('diff') }}>{zh ? '代码与变更' : 'Code and changes'}</button>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
+        onChange('session')
+        requestTaskPlanNavigation(session.meta.id)
+      }}>{zh ? '计划与审批' : 'Plan and approvals'}{session.pendingPermissions.length ? ` (${session.pendingPermissions.length})` : ''}</button>
+      <button type="button" className="btn btn-ghost btn-sm" aria-pressed={surface === 'result'} onClick={() => onChange('result')}>{zh ? '进度与成果' : 'Progress and results'}</button>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setView('office')}>{zh ? '去故宫' : 'Palace'}</button>
+    </>}
+  </nav>
 }

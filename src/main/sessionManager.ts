@@ -119,6 +119,7 @@ import { redactSensitiveValue } from './security/secret-redaction'
 import { TaskPlanSessionCoordinator } from './task/task-plan-session-coordinator'
 import { SessionStartCoordinator } from './session-start-coordinator'
 import { approvedTaskPlanToDag, taskDagToPlanDraft } from './task/task-plan-dag'
+import { unresolvedImportedSessionInputReason } from './data-lifecycle/submission-receipt-files'
 import { ModelCrossValidationRuntime } from './model/cross-validation-runtime'
 import type {
   AgentEvent,
@@ -1031,6 +1032,12 @@ class SessionManager {
   ): Promise<boolean> {
     let session = this.sessions.get(id)
     if (!session) return false
+    try {
+      const unresolvedInput = unresolvedImportedSessionInputReason(app.getPath('userData'), id)
+      if (unresolvedInput) return this.rejectBeforeRun(session, unresolvedInput)
+    } catch (cause) {
+      return this.rejectBeforeRun(session, `导入任务的补充要求无法核对：${cause instanceof Error ? cause.message : String(cause)}`)
+    }
     if (!await this.taskPlans.authorizeSend(session)) return false
     const currentRun = this.taskRuns.get(id)
     const sendGateError = managedSessionSendGateError(this.taskSnapshotReplay.blocksOrdinarySend(id, options),

@@ -15,12 +15,14 @@ import {
 import path from 'node:path'
 import { isWorkItemType } from '../../shared/project-workspace-types'
 import { normalizeAcceptanceSpecs } from '../project-workspace/codec'
+import { isProjectInstitutionTemplateRef, projectInstitutionTemplate, type ProjectInstitutionTemplateRef } from '../../shared/project-institution-template'
 import {
   TASK_PLAN_SCHEMA_VERSION,
   type TaskPlanApprovalEvent,
   type TaskPlanApprovalInput,
   type TaskPlanDraftInput,
   type TaskPlanMissionSource,
+  type TaskPlanInstitutionResponsibility,
   type TaskPlanExecutionAuthorization,
   type TaskPlanProjectionReceipt,
   type TaskPlanRiskLevel,
@@ -129,6 +131,7 @@ export class TaskPlanContractStore {
       changeReason: draft.changeReason,
       source: draft.source,
       ...(draft.missionSource ? { missionSource: draft.missionSource } : {}),
+      ...(draft.institutionTemplate ? { institutionTemplate: draft.institutionTemplate } : {}),
       createdBy,
       createdAt: now
     }
@@ -364,6 +367,7 @@ function normalizeDraft(input: TaskPlanDraftInput): Omit<TaskPlanVersion, 'schem
   }
   const steps = input.steps.map((step, index) => normalizeStep(step, index))
   assertStepGraph(steps)
+  const institutionTemplate = normalizePlanInstitutionTemplate(input.institutionTemplate, steps)
   const acceptanceCriteria = stringList(input.acceptanceCriteria, 'Acceptance', 200, 2_000, true)
   return {
     objective,
@@ -375,7 +379,8 @@ function normalizeDraft(input: TaskPlanDraftInput): Omit<TaskPlanVersion, 'schem
     acceptanceCriteria,
     changeReason: optionalText(input.changeReason, 1_000) ?? '',
     source: source(input.source),
-    ...(input.missionSource !== undefined ? { missionSource: normalizeMissionSource(input.missionSource) } : {})
+    ...(input.missionSource !== undefined ? { missionSource: normalizeMissionSource(input.missionSource) } : {}),
+    ...(institutionTemplate ? { institutionTemplate } : {})
   }
 }
 
@@ -404,8 +409,32 @@ function normalizeStep(input: TaskPlanDraftInput['steps'][number], index: number
     ...(input.role === undefined ? {} : { role: requiredId(input.role, '步骤岗位') }),
     ...(input.executionRole === undefined ? {} : { executionRole: normalizeExecutionRole(input.executionRole) }),
     ...(input.workItemType === undefined ? {} : { workItemType: normalizeStepWorkItemType(input.workItemType) }),
-    ...(input.acceptanceSpec === undefined ? {} : { acceptanceSpec: normalizeStepAcceptance(input.acceptanceSpec) })
+    ...(input.acceptanceSpec === undefined ? {} : { acceptanceSpec: normalizeStepAcceptance(input.acceptanceSpec) }),
+    ...(input.institution === undefined ? {} : { institution: normalizeStepInstitution(input.institution) })
   }
+}
+
+function normalizeStepInstitution(value: TaskPlanInstitutionResponsibility): TaskPlanInstitutionResponsibility {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).some((key) => !['id', 'label', 'duty'].includes(key))) throw new Error('计划步骤机构职责无效')
+  return {
+    id: requiredId(value.id, '计划步骤机构 ID'),
+    label: requiredText(value.label, '计划步骤机构名称', 200),
+    duty: requiredText(value.duty, '计划步骤机构职责', 2_000)
+  }
+}
+
+function normalizePlanInstitutionTemplate(value: ProjectInstitutionTemplateRef | undefined, steps: TaskPlanStep[]): ProjectInstitutionTemplateRef | undefined {
+  if (value === undefined) {
+    if (steps.some((step) => step.institution !== undefined)) throw new Error('计划机构职责缺少模板版本')
+    return undefined
+  }
+  if (!isProjectInstitutionTemplateRef(value)) throw new Error('计划机构模板版本无效')
+  const roles = projectInstitutionTemplate(value).roles
+  if (steps.some((step) => !step.institution || !roles.some((role) => role.id === step.institution!.id))) {
+    throw new Error('计划步骤机构职责与模板不匹配')
+  }
+  return { ...value }
 }
 
 function normalizeExecutionRole(value: unknown): NonNullable<TaskPlanStep['executionRole']> {
@@ -463,7 +492,8 @@ function planDigest(
     estimatedCostUsd: draft.estimatedCostUsd,
     riskLevel: draft.riskLevel,
     acceptanceCriteria: draft.acceptanceCriteria,
-    ...(draft.missionSource ? { missionSource: draft.missionSource } : {})
+    ...(draft.missionSource ? { missionSource: draft.missionSource } : {}),
+    ...(draft.institutionTemplate ? { institutionTemplate: draft.institutionTemplate } : {})
   }
   return `sha256:${createHash('sha256').update(canonicalJson(material)).digest('hex')}`
 }
@@ -688,7 +718,8 @@ function planVersionMaterial(value: ReturnType<typeof normalizeDraft> | TaskPlan
     acceptanceCriteria: value.acceptanceCriteria,
     changeReason: value.changeReason,
     source: value.source,
-    ...(value.missionSource ? { missionSource: value.missionSource } : {})
+    ...(value.missionSource ? { missionSource: value.missionSource } : {}),
+    ...(value.institutionTemplate ? { institutionTemplate: value.institutionTemplate } : {})
   }
 }
 

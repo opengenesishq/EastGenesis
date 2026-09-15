@@ -16,6 +16,14 @@ import type {
 } from '../../shared/project-workspace-types'
 import { isGoalRiskLevel } from '../../shared/project-workspace-types'
 import { ProjectWorkspaceError } from './errors'
+import { isProjectInstitutionTemplateRef, type ProjectInstitutionTemplateRef } from '../../shared/project-institution-template'
+
+export function normalizeInstitutionTemplate(value: unknown): ProjectInstitutionTemplateRef {
+  if (!isProjectInstitutionTemplateRef(value)) {
+    throw new ProjectWorkspaceError('invalid_input', 'project institution template or version is invalid')
+  }
+  return { schemaVersion: 1, templateId: value.templateId, templateVersion: 1 }
+}
 
 export function clone<T>(value: T): T {
   if (value === undefined) return value

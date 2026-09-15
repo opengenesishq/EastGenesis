@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { interruptSession } from './store/session-interrupt'
+import { clearDeletedTaskLocalData } from './store/task-local-data-cleanup'
 import { AUTO_MODEL, CAOGEN_DRIVE_POLICIES } from '../../shared/types'
 import { DIRECT_SUBAGENT_LIMIT_MESSAGE, MAX_DIRECT_SUBAGENT_TASKS } from '../../shared/agent-capacity-policy'
 import {
@@ -1953,7 +1954,8 @@ export const useStore = create<AppStore>((set, get) => {
   },
 
   async deleteHistoryEntry(id) {
-    await window.agentDesk.deleteHistory(id)
+    const deleted = await window.agentDesk.deleteHistory(id)
+    if (deleted) clearDeletedTaskLocalData([id])
     const history = await window.agentDesk.listHistory()
     set({ history })
   },

@@ -1,0 +1,13 @@
+.composer-pending-inputs {
+  margin: 6px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.composer-pending-input + .composer-pending-input { border-top: 1px solid var(--border); margin-top: 8px; }
+.composer-pending-input p { margin: 7px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.composer-pending-actions { display: flex; gap: 8px; }
+.composer-pending-inputs select { margin: 6px; max-width: 100%; }

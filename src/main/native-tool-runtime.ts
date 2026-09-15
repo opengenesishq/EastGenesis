@@ -3,6 +3,7 @@ import { officeRevisionToolGate } from './office-revision/intent'
 import { finalizeOfficeRevisionToolResult } from './office-revision/producer'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
+import { assertPreparationToolScope, resolvePreparationToolScope, type PreparationToolScope } from './permission/preparation-tool-scope'
 import { settingsForCaoGenDrive } from './model/drive'
 import { getSettings } from './settings'
 import { EDIT_TOOLS, executeCodingTool, type ToolExecResult } from './openaiTools'
@@ -64,6 +65,7 @@ type NativeToolPreflightDecision =
       guiDecision: GuiPermissionDecision
       toolCapabilityDecision: ToolCapabilityDecision
       idempotency: ToolIdempotencyDecision
+      executionScope: PreparationToolScope
     }
 
 interface PendingPermission {
@@ -147,7 +149,7 @@ export class NativeToolRuntime {
       sessionId: this.meta.id,
       toolName: name,
       toolInput: input,
-      cwd: this.meta.cwd
+      cwd: resolvePreparationToolScope(this.meta, name, input, app.getPath('userData')).cwd
     })
     return { targetDigest: effectReplayTargetDigest(descriptor.target) }
   }
@@ -164,12 +166,13 @@ export class NativeToolRuntime {
     name: string,
     input: Record<string, unknown>,
     toolUseId: string,
-    effectHandle?: EffectExecutionHandle | null
+    effectHandle?: EffectExecutionHandle | null,
+    executionScope?: PreparationToolScope
   ): Promise<NativeToolPermissionDecision> {
     const effectScope = effectHandle?.target && effectHandle.targetDigest
       ? permissionEffectScope(effectHandle.target, effectHandle.targetDigest)
       : undefined
-    const preflight = this.preflightToolGate(name, input, toolUseId, effectHandle?.targetDigest)
+    const preflight = this.preflightToolGate(name, input, toolUseId, effectHandle?.targetDigest, executionScope)
     if (!preflight.allow) return preflight
     const { policy, readOnlyCall, guiDecision, toolCapabilityDecision, idempotency } = preflight
 
@@ -193,6 +196,10 @@ export class NativeToolRuntime {
         policy.risk.level,
         effectScope
       )
+    }
+    if (preflight.executionScope.preparation && name === 'write_file') {
+      this.auditGateDecision('allow', 'user', name, input, '用户已授权当前隔离准备区写入。', policy.risk.level, policy.risk.reasons)
+      return { allow: true }
     }
     if (guiDecision.kind === 'allow') {
       this.auditGateDecision('allow', 'policy', name, input, guiDecision.reason,
@@ -295,12 +302,18 @@ export class NativeToolRuntime {
     name: string,
     input: Record<string, unknown>,
     toolUseId: string,
-    effectTargetDigest?: string
+    effectTargetDigest?: string,
+    capturedScope?: PreparationToolScope
   ): NativeToolPreflightDecision {
+    let executionScope: PreparationToolScope
+    try {
+      executionScope = capturedScope ?? resolvePreparationToolScope(this.meta, name, input, app.getPath('userData'))
+      assertPreparationToolScope(this.meta, executionScope, app.getPath('userData'))
+    } catch (error) { return { allow: false, message: error instanceof Error ? error.message : String(error) } }
     const workerPolicyError = officeRevisionToolGate(this.meta.id, name, input) ?? digitalWorkerToolPolicyError(this.meta, name, input, app.getPath('userData'))
     if (workerPolicyError) return { allow: false, message: workerPolicyError }
     const settings = settingsForCaoGenDrive(getSettings(), this.meta.driveMode)
-    const policy = evaluateToolPermission(settings, { toolName: name, input, cwd: this.meta.cwd })
+    const policy = evaluateToolPermission(settings, { toolName: name, input, cwd: executionScope.cwd })
     if (policy.kind === 'deny') {
       writeSessionAuditLog(this.meta, {
         action: 'deny',
@@ -317,7 +330,7 @@ export class NativeToolRuntime {
 
     const readOnlyCall = isReadOnlyToolCall(name, input)
     const strategyDecision = decideTaskStrategyTool(this.meta.taskStrategy, name, input)
-    if (!strategyDecision.allow) {
+    if (!strategyDecision.allow && !(executionScope.preparation && name === 'write_file' && this.meta.taskStrategy !== 'view')) {
       this.auditGateDecision(
         'deny',
         'task-strategy',
@@ -344,7 +357,7 @@ export class NativeToolRuntime {
     }
     const guiDecision = decideGuiPermission(name, input, settings, {
       sessionId: this.meta.id,
-      cwd: this.meta.cwd
+      cwd: executionScope.cwd
     })
     if (guiDecision.kind === 'deny') {
       this.auditGateDecision('deny', 'policy', name, input, guiDecision.reason,
@@ -355,12 +368,12 @@ export class NativeToolRuntime {
     }
     const toolCapabilityDecision = decideToolCapabilityPermission(name, input, {
       sessionId: this.meta.id,
-      cwd: this.meta.cwd,
+      cwd: executionScope.cwd,
       effectTargetDigest
     })
     const idempotency = taskRuntimeRegistry.evaluateTool({
       sessionId: this.meta.id,
-      cwd: this.meta.cwd,
+      cwd: executionScope.cwd,
       toolName: name,
       toolInput: input,
       toolUseId
@@ -377,7 +390,7 @@ export class NativeToolRuntime {
       )
       return { allow: false, message: idempotency.reason }
     }
-    return { allow: true, policy, readOnlyCall, guiDecision, toolCapabilityDecision, idempotency }
+    return { allow: true, policy, readOnlyCall, guiDecision, toolCapabilityDecision, idempotency, executionScope }
   }
 
   async executeToolWithPermission(
@@ -393,7 +406,7 @@ export class NativeToolRuntime {
     }
     const effectInput: PrepareEffectExecutionInput = {
       sessionId: this.meta.id,
-      cwd: this.meta.cwd,
+      cwd: preflight.executionScope.cwd,
       toolUseId,
       toolName: name,
       toolInput: input
@@ -408,7 +421,7 @@ export class NativeToolRuntime {
     )
     if (interruptedBeforeGate) return interruptedBeforeGate
 
-    const gate = await this.awaitToolPermission(name, input, toolUseId, effectHandle)
+    const gate = await this.awaitToolPermission(name, input, toolUseId, effectHandle, preflight.executionScope)
     if (!gate.allow) {
       return this.settlePermissionDenial(effectHandle, gate)
     }
@@ -418,7 +431,7 @@ export class NativeToolRuntime {
       '操作在审批后、外部执行前已中断'
     )
     if (interruptedAfterGate) return interruptedAfterGate
-    return this.executeAllowedTool(name, input, effectHandle, effectInput, signal)
+    return this.executeAllowedTool(name, input, effectHandle, effectInput, preflight.executionScope, signal)
   }
 
   private async prepareToolEffect(effectInput: PrepareEffectExecutionInput): Promise<PreparedEffect> {
@@ -440,10 +453,11 @@ export class NativeToolRuntime {
     name: string,
     input: Record<string, unknown>,
     toolUseId: string,
-    effectHandle: EffectExecutionHandle
+    effectHandle: EffectExecutionHandle,
+    executionScope: PreparationToolScope
   ): Promise<NativeToolPermissionDecision> {
     try {
-      return await this.gateTool(name, input, toolUseId, effectHandle)
+      return await this.gateTool(name, input, toolUseId, effectHandle, executionScope)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       await cancelEffectExecution(effectHandle, `权限判断异常，未执行:${message}`).catch(() => undefined)
@@ -489,7 +503,7 @@ export class NativeToolRuntime {
 
   private auditGateDecision(
     action: 'allow' | 'deny' | 'ask',
-    source: 'policy' | 'permission-mode' | 'task-strategy' | 'idempotency',
+    source: 'policy' | 'permission-mode' | 'task-strategy' | 'idempotency' | 'user',
     toolName: string,
     input: Record<string, unknown>,
     message: string,
@@ -543,6 +557,7 @@ export class NativeToolRuntime {
     input: Record<string, unknown>,
     effectHandle: EffectExecutionHandle,
     effectInput: PrepareEffectExecutionInput,
+    executionScope: PreparationToolScope,
     signal?: AbortSignal
   ): Promise<NativeToolExecutionResult> {
     const settings = settingsForCaoGenDrive(getSettings(), this.meta.driveMode)
@@ -552,6 +567,8 @@ export class NativeToolRuntime {
       '操作在外部执行前已中断'
     )
     if (interruptedBeforeStart) return interruptedBeforeStart
+    try { assertPreparationToolScope(this.meta, executionScope, app.getPath('userData')) }
+    catch (error) { return this.settlePermissionDenial(effectHandle, { allow: false, message: error instanceof Error ? error.message : String(error) }) }
     const startFailure = await this.markEffectStarted(effectHandle, effectInput)
     if (startFailure) return startFailure
     const interruptedAfterStart = await this.cancelIfAborted(
@@ -562,7 +579,8 @@ export class NativeToolRuntime {
     if (interruptedAfterStart) return interruptedAfterStart
     let exec: ToolExecResult
     try {
-      exec = await executeCodingTool(name, input, this.meta.cwd, {
+      exec = await executeCodingTool(name, input, executionScope.cwd, {
+        preparationPermission: executionScope.preparation,
         signal,
         sandboxMode: settings.sandboxMode,
         chinaMirrorEnabled: settings.chinaEcosystemMirrorEnabled,
@@ -594,7 +612,7 @@ export class NativeToolRuntime {
     const executionPolicy = evaluateToolPermission(settings, {
       toolName: name,
       input,
-      cwd: this.meta.cwd
+      cwd: executionScope.cwd
     })
     writeSessionAuditLog(this.meta, {
       action: 'execute',

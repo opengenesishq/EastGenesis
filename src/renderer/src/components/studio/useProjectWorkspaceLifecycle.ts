@@ -9,6 +9,7 @@ import type {
   ProjectWorkspacePatch
 } from '../../../../shared/types'
 import { errorText, TEXT, type ProjectLifecycleMutation } from './projectWorkspaceStudioModel'
+import { clearDeletedTaskLocalData } from '../../store/task-local-data-cleanup'
 
 interface LifecycleOptions {
   project: ProjectWorkspace
@@ -283,7 +284,10 @@ function useProjectStatusMutations({
   const purgeProject = useCallback(() => run(
     'purge',
     () => window.agentDesk.purgeProjectWorkspace(project.id, { expectedRevision: project.revision }),
-    async () => refreshProjects(),
+    async (result) => {
+      clearDeletedTaskLocalData(result.sessionIds, result.projectId)
+      await refreshProjects()
+    },
     TEXT.purgeProject
   ), [project.id, project.revision, refreshProjects, run])
   return { archiveProject, restoreProject, softDeleteProject, purgeProject }

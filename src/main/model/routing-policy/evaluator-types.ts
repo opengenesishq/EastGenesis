@@ -3,6 +3,7 @@ import type { TaskProfile, TaskProfileInput, ModelProfile } from '../model-profi
 import type { ModelRouterBudget, ModelRouteCandidate, ModelRouteDecision, ModelRouteHealthInput } from '../model-router'
 import type { RoutingDiagnostic, RoutingRuleFields, RoutingRuleSource, RoutingSelection, RoutingFailurePolicy, RoutingTargetRef, RoutingUserIntent } from '../../../shared/routing-policy-types'
 import type { ModelRouteScoringSignal } from '../model-router'
+import type { ProviderConnectionIdentity } from '../../../shared/provider-connection-identity'
 import type {
   ProviderCapabilityCard,
   ProviderCapabilityCardState,
@@ -37,6 +38,7 @@ export interface RoutingEvaluationSnapshots {
   targetEligibility: readonly TargetHardEligibility[]
   providerHealth: Record<string, ModelRouteHealthInput>
   scoringSignals: readonly ModelRouteScoringSignal[]
+  connectionIdentities?: Readonly<Record<string, ProviderConnectionIdentity>>
 }
 
 export type RoutingRuleSourceInput =

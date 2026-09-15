@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type {
   DocumentAttachmentView,
   ImageAttachmentView,
@@ -18,30 +18,41 @@ interface ComposerSubmissionOptions {
   slashCommands: CommandDescriptor[]
   runSlashCommand(command: CommandDescriptor): void
   sendMessage(input: SendMessagePayload): Promise<void>
+  queueMessage?(input: SendMessagePayload): Promise<void>
+  runLocalControl?(text: string): Promise<boolean>
   onAccepted(): void
   onError(message: string): void
 }
 
 export function useComposerSubmission(options: ComposerSubmissionOptions) {
   const [sending, setSending] = useState(false)
+  const inFlight = useRef(false)
 
   const submit = async (): Promise<void> => {
-    if (options.running || sending) return
+    if (inFlight.current || sending) return
     const trimmed = options.text.trim()
     if (!trimmed && options.attachments.length === 0 && options.documents.length === 0) return
-    const normalized = trimmed.toLowerCase()
-    const slash = options.slashCommands.find((command) => command.title.toLowerCase() === normalized)
-    if (slash && options.attachments.length === 0 && options.documents.length === 0) {
-      options.runSlashCommand(slash)
-      return
-    }
     const images = options.attachments.map<ImageAttachmentView>(
       ({ name: _name, previewUrl: _previewUrl, ...image }) => image
     )
     setSending(true)
+    inFlight.current = true
     options.onError('')
     try {
-      await options.sendMessage({
+      if (options.attachments.length === 0 && options.documents.length === 0) {
+        if (await options.runLocalControl?.(trimmed)) {
+          options.onAccepted()
+          return
+        }
+        const slash = options.slashCommands.find((command) => command.title.toLowerCase() === trimmed.toLowerCase())
+        if (slash) {
+          options.runSlashCommand(slash)
+          return
+        }
+      }
+      const send = options.running ? options.queueMessage : options.sendMessage
+      if (!send) throw new Error('任务仍在运行，请等待本轮完成')
+      await send({
         text: trimmed || (options.documents.length > 0 ? options.documentOnlyPrompt : ''),
         images,
         documents: options.documents
@@ -50,13 +61,14 @@ export function useComposerSubmission(options: ComposerSubmissionOptions) {
     } catch (error) {
       options.onError(error instanceof Error ? error.message : String(error))
     } finally {
+      inFlight.current = false
       setSending(false)
     }
   }
 
   return {
     attachmentsDisabled: options.uploadingAttachment || sending,
-    sendDisabled: options.running || sending || options.uploadingAttachment ||
+    sendDisabled: sending || options.uploadingAttachment ||
       (!options.text.trim() && options.attachments.length === 0 && options.documents.length === 0),
     submit
   }

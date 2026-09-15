@@ -5,7 +5,6 @@ import { useStore } from '../../store'
 import { getBusinessLines, resolveBusinessLineId, resolveSelectedBusinessLine } from '../../../../shared/business-line-types'
 import { requestBusinessLineTaskNavigation } from '../business-lines/businessLineTaskNavigation'
 import { requestBusinessLineSurfaceNavigation } from '../business-lines/businessLineTaskNavigation'
-import { requestTaskPlanNavigation } from '../experience/task-plan-navigation'
 import { buildBusinessFacilities } from './businessFacilities'
 import { businessInteriorPositions } from './officeGridLayout'
 import { officeWalkers } from './officeWalkers'
@@ -52,6 +51,9 @@ import { summarizeOfficeBusiness, summarizeOfficeCosts, summarizeOfficeExecution
 import { useOfficeOperations } from './useOfficeOperations'
 import OfficeCommandStrip from './OfficeCommandStrip'
 import OfficeCommandPanel from './OfficeCommandPanel'
+import PalaceActionMenu from './PalaceActionMenu'
+import PalaceWorkPanel from './PalaceWorkPanel'
+import type { PalaceAction, PalaceActionContext } from './palaceActions'
 import OfficeArchivePanel from './OfficeArchivePanel'
 import OfficeRoleWorkItems from './OfficeRoleWorkItems'
 import { openOfficeWorkItem } from './officeWorkItemNavigation'
@@ -181,6 +183,8 @@ export default function OfficeView(): React.JSX.Element {
   const [authoredRoleFigureCount, setAuthoredRoleFigureCount] = useState(0)
   const [councilReceipt, setCouncilReceipt] = useState('')
   const [archiveOpen, setArchiveOpen] = useState(false)
+  const [palaceAction, setPalaceAction] = useState<Exclude<PalaceAction, 'edict'> | null>(null)
+  const [palaceActionContext, setPalaceActionContext] = useState<PalaceActionContext>()
   const [archiveLedger, setArchiveLedger] = useState<WorkflowLedgerRendererSelection | null>(null)
   const [archiveEvidence, setArchiveEvidence] = useState<WorkflowEvidenceRecord[]>([])
   const [archiveLedgerError, setArchiveLedgerError] = useState('')
@@ -607,19 +611,17 @@ export default function OfficeView(): React.JSX.Element {
       input?.focus()
     })
   }
-  /** Open the real session surface that owns TaskPlanWorkbench. */
-  const openTaskPlanWorkbench = (): void => {
-    const targetId = activeId && sessions[activeId] ? activeId : businessIds.find((id) => Boolean(sessions[id]))
-    if (targetId) {
-      saveOfficeReturnContext({ businessView, selectedFacility })
-      requestTaskPlanNavigation(targetId)
-      selectSession(targetId)
-      setView('list')
+  const openPalaceAction = (action: PalaceAction, context?: PalaceActionContext): void => {
+    setArchiveOpen(false)
+    setOperationalNavigationError('')
+    setPalaceActionContext(context)
+    if (context?.sessionId && sessions[context.sessionId]) selectSession(context.sessionId)
+    if (action === 'edict') {
+      setPalaceAction(null)
+      focusOfficeCommandInput()
       return
     }
-    // With no canonical session there is no plan to inspect yet; preserve the
-    // command flow by starting a real task in the selected business line.
-    void createInCurrentBusinessLine()
+    setPalaceAction(action)
   }
   /** Results are session-scoped; never open an unbound result panel. */
   const openBoundResult = (lineId?: string): void => {
@@ -654,10 +656,8 @@ export default function OfficeView(): React.JSX.Element {
     }
   }
   const openRecoverySurface = (approval = false): void => {
-    const permissionSession = approval ? ids.find((id) => sessions[id].pendingPermissions.length > 0) : undefined
-    if (permissionSession) selectSession(permissionSession)
+    if (approval) { openPalaceAction('approve'); return }
     saveOfficeReturnContext({ businessView, selectedFacility })
-    setView('list')
     useStore.getState().setShowTaskRecovery(true)
   }
   const selectSystemRole = (id: SystemRoleId): void => {
@@ -676,7 +676,7 @@ export default function OfficeView(): React.JSX.Element {
     const role = systemRoleById(id)
     const action = role?.actions.find((item) => item.id === actionId)
     if (!action) return
-    if (action.target === 'new_task') { void createInCurrentBusinessLine(); return }
+    if (action.target === 'new_task') { openPalaceAction('edict'); return }
     if (action.target === 'summon_council') { summonCouncil(); return }
     if (action.target === 'incident_watch') { selectCameraPreset('incidents'); return }
     if (action.target === 'results') {
@@ -729,7 +729,7 @@ export default function OfficeView(): React.JSX.Element {
     const station = commandHallStationById(id)
     if (!station) return
     if (station.action === 'command') { selectCommandHall(); focusOfficeCommandInput(); return }
-    if (station.action === 'new_task') { openTaskPlanWorkbench(); return }
+    if (station.action === 'new_task') { openPalaceAction('council'); return }
     if (station.action === 'results') {
       openBoundResult()
       return
@@ -845,6 +845,8 @@ export default function OfficeView(): React.JSX.Element {
     <div className="office">
       {operationalNavigationError && <p role="alert" data-office-navigation-error>{operationalNavigationError}</p>}
       <OfficeOperationNotice statuses={operationStatus} zh={settings.language === 'zh'} />
+      {palaceAction && <PalaceWorkPanel key={`${palaceAction}:${palaceActionContext?.sessionId ?? ''}:${palaceActionContext?.projectId ?? ''}:${palaceActionContext?.workItemId ?? ''}:${palaceActionContext?.roleId ?? ''}`} action={palaceAction} initialContext={palaceActionContext}
+        onClose={() => setPalaceAction(null)} onAction={openPalaceAction} onEdict={() => openPalaceAction('edict')} />}
       {archiveOpen && <OfficeArchivePanel
         sessions={ids.map((id) => ({
           id,
@@ -1072,6 +1074,7 @@ export default function OfficeView(): React.JSX.Element {
             agentSelected={cameraPreset === 'agent'} session={activeOfficeSession} actor={selectedActor}
             onOpenSession={focus} onOpenActor={openOperationalActor} />
           <div className="office-camera-strip no-drag" data-office-camera-preset-controls={CAMERA_PRESETS.length}>
+            <PalaceActionMenu zh={settings.language === 'zh'} onAction={openPalaceAction} />
             {CAMERA_PRESETS.map((preset) => (
               <button
                 key={preset}
@@ -1099,11 +1102,11 @@ export default function OfficeView(): React.JSX.Element {
             </button>
           </div>
           {cameraPreset !== 'facilities' && activeOfficeSession && activeOfficeId && activeOfficeActivity && (
-            <OfficeAgentSelectionPanel activity={activeOfficeActivity} model={activeOfficeModel} session={activeOfficeSession} signal={activeOfficeSignal}
+              <OfficeAgentSelectionPanel activity={activeOfficeActivity} model={activeOfficeModel} session={activeOfficeSession} signal={activeOfficeSignal}
               onOpenResults={() => { focus(activeOfficeId); useStore.getState().openPanel('result') }}
               role={activeOfficeRole}
               providerName={providerNameOf(activeOfficeSession.meta.providerId) || activeOfficeSignal?.routing?.providerName}
-              openButton={<button className="btn btn-primary btn-sm" aria-label={t('officeOpenSession')} title={t('officeOpenSession')} data-office-open-session={activeOfficeId} onClick={() => focus(activeOfficeId)}>{t('officeOpenSession')}</button>} />
+              openButton={<><button className="btn btn-primary btn-sm" data-palace-audience-session={activeOfficeId} onClick={() => openPalaceAction('audience', { sessionId: activeOfficeId })}>{settings.language === 'zh' ? '单独召见' : 'Meet in palace'}</button><button className="btn btn-ghost btn-sm" aria-label={t('officeOpenSession')} title={t('officeOpenSession')} data-office-open-session={activeOfficeId} onClick={() => focus(activeOfficeId)}>{t('officeOpenSession')}</button></>} />
           )}
           {cameraPreset === 'facilities' && selectedFacilitySpec && !selectedBusinessStation && (
             <div className="office-facility-panel no-drag" data-office-facility-panel={selectedFacilitySpec.key}>
@@ -1150,8 +1153,8 @@ export default function OfficeView(): React.JSX.Element {
             const station = commandHallStationById(selectedCommandStation)
             if (!station) return null
             const actionLabel = settings.language === 'zh'
-              ? station.action === 'command' ? '回到总控案' : station.action === 'new_task' ? '提交新任务' : station.action === 'approval' ? '打开审批/恢复中心' : station.action === 'results' ? '打开成果档案' : station.action === 'recovery' ? '打开恢复中心' : '进入异常巡核'
-              : station.action === 'command' ? 'Focus command desk' : station.action === 'new_task' ? 'Submit new task' : station.action === 'approval' ? 'Open approval/recovery' : station.action === 'results' ? 'Open results' : station.action === 'recovery' ? 'Open recovery' : 'Open incident watch'
+              ? station.action === 'command' ? '回到总控案' : station.action === 'new_task' ? '复核任务方案' : station.action === 'approval' ? '批阅奏折与交付' : station.action === 'results' ? '打开成果档案' : station.action === 'recovery' ? '打开恢复中心' : '进入异常巡核'
+              : station.action === 'command' ? 'Focus command desk' : station.action === 'new_task' ? 'Review task plan' : station.action === 'approval' ? 'Review approvals and delivery' : station.action === 'results' ? 'Open results' : station.action === 'recovery' ? 'Open recovery' : 'Open incident watch'
             return <div className="office-facility-panel no-drag" data-office-command-station-panel={station.id}>
               <div className="office-selection-kicker">{settings.language === 'zh' ? '中央议政殿工位' : 'Council station'}</div>
               <div className="office-selection-title" data-office-command-station-id={station.id}>{station.label}</div>
@@ -1160,6 +1163,7 @@ export default function OfficeView(): React.JSX.Element {
               <button className="btn btn-primary btn-sm" type="button" data-office-command-station-action={station.action} onClick={() => activateCommandHallStation(station.id)}>{actionLabel}</button>
               {station.id === 'command_desk' && <>
                 <button className="btn btn-primary btn-sm" type="button" data-office-summon-council onClick={summonCouncil}>{settings.language === 'zh' ? '查看职责' : 'View responsibilities'}</button>
+                <button className="btn btn-ghost btn-sm" type="button" data-palace-council-review onClick={() => openPalaceAction('council')}>{settings.language === 'zh' ? '召集议事 / 复核方案' : 'Council / review plan'}</button>
                 {councilSummoned && <button className="btn btn-ghost btn-sm" type="button" data-office-dismiss-council onClick={dismissCouncil}>{settings.language === 'zh' ? '关闭概览' : 'Close overview'}</button>}
                 {councilReceipt && <p role="status" data-office-council-receipt>{councilReceipt}</p>}
                 {councilSummoned && <ul data-office-council-participants>{SYSTEM_ROLES.map((role) => <li key={role.id}><button className="btn btn-ghost btn-sm" data-office-council-participant={role.id} onClick={() => selectSystemRole(role.id)}>{settings.language === 'zh' ? role.label : role.labelEn}</button></li>)}</ul>}
@@ -1173,6 +1177,8 @@ export default function OfficeView(): React.JSX.Element {
               <div className="office-selection-kicker">{settings.language === 'zh' ? '议政殿角色' : 'Council role'}</div>
               <div className="office-selection-title" data-office-system-role-id={role.id}>{settings.language === 'zh' ? role.label : role.labelEn}</div>
               <div className="office-selection-meta"><span>{settings.language === 'zh' ? role.duty : role.dutyEn}</span><span data-office-system-role-anchor={role.anchor}>{role.anchor}</span></div>
+              <button className="btn btn-ghost btn-sm" type="button" data-palace-institution-patrol={role.id}
+                onClick={() => openPalaceAction('patrol', { roleId: role.id })}>{settings.language === 'zh' ? '巡视机构任务' : 'Inspect institution work'}</button>
               <OfficeRoleWorkItems roleId={role.id} workItems={projectSnapshot.workItems} projects={projectSnapshot.projects}
                 status={operationStatus.workItems} zh={settings.language === 'zh'} onSelectRole={selectSystemRole} onOpen={(item) => {
                   saveOfficeReturnContext({ businessView, selectedFacility })

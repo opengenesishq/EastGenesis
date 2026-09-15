@@ -1,4 +1,6 @@
 import type { ModelAttemptRecord } from '../../shared/model-attempt-types'
+import { attemptObservationIdentity, deriveRouteObservationSnapshot } from './route-observation-feedback'
+import { publishRouteObservationSnapshot, routeObservationKey } from './route-observation-signal'
 import type {
   WorkflowAcceptanceRecord,
   WorkflowArtifactRecord,
@@ -33,6 +35,7 @@ let queuedRefreshRoot: string | undefined
 export function configureAcceptanceQualityFeedback(rootDir: string): void {
   configuredRootDir = rootDir
   publishAcceptanceQualitySnapshot(new Map())
+  publishRouteObservationSnapshot(new Map())
   scheduleAcceptanceQualityFeedbackRefresh(rootDir)
 }
 
@@ -46,7 +49,15 @@ export function refreshAcceptanceQualityFeedback(rootDir = configuredRootDir): P
     return activeRefresh
   }
   activeRefresh = rebuildSnapshot(rootDir)
-    .then(publishAcceptanceQualitySnapshot)
+    .then(({ acceptance, observations }) => {
+      publishAcceptanceQualitySnapshot(acceptance)
+      publishRouteObservationSnapshot(observations)
+    })
+    .catch((error) => {
+      publishAcceptanceQualitySnapshot(new Map())
+      publishRouteObservationSnapshot(new Map())
+      throw error
+    })
     .finally(() => {
       activeRefresh = null
       if (queuedRefreshRoot !== undefined) {
@@ -64,17 +75,25 @@ export function scheduleAcceptanceQualityFeedbackRefresh(rootDir = configuredRoo
   })
 }
 
-async function rebuildSnapshot(rootDir: string | undefined): Promise<Map<string, AcceptanceQualitySignal>> {
+/** Only the configured application ledger feeds request-path observations. */
+export function scheduleModelRouteObservationRefresh(rootDir?: string): void {
+  if (configuredRootDir && (rootDir === undefined || rootDir === configuredRootDir)) {
+    scheduleAcceptanceQualityFeedbackRefresh(configuredRootDir)
+  }
+}
+
+async function rebuildSnapshot(rootDir: string | undefined) {
   return readTaskSnapshotDatabase(rootDir, (db) => {
     verifyModelAttemptLedger(db)
-    return deriveAcceptanceQualitySnapshot({
+    const input = {
       acceptances: readAcceptances(db),
       artifacts: readArtifacts(db),
       evidence: readAllWorkflowEvidenceForIntegrity(db),
       evidenceLinks: readEvidenceLinks(db),
       runs: readRuns(db),
       attempts: readRawModelAttempts(db)
-    })
+    }
+    return { acceptance: deriveAcceptanceQualitySnapshot(input), observations: deriveRouteObservationSnapshot(input) }
   })
 }
 
@@ -89,6 +108,7 @@ function deriveAcceptanceQualitySnapshot(input: {
   const artifactsById = new Map(input.artifacts.map((artifact) => [artifact.id, artifact]))
   const evidenceById = new Map(input.evidence.map((record) => [record.evidenceId, record]))
   const attemptsByRun = groupAttemptsByRun(input.attempts)
+  const runsById = new Map(input.runs.map((run) => [run.id, run]))
   const result = new Map<string, AcceptanceQualitySignal>()
 
   for (const acceptance of input.acceptances) {
@@ -105,6 +125,8 @@ function deriveAcceptanceQualitySnapshot(input: {
       for (const attempt of attemptsByRun.get(runId) ?? []) {
         if (attempt.status !== 'succeeded') continue
         creditedModels.set(acceptanceQualitySignalKey(attempt.providerId, attempt.model), attempt)
+        const identity = attemptObservationIdentity(attempt, runsById.get(runId))
+        if (identity) creditedModels.set(routeObservationKey(identity), attempt)
       }
     }
     for (const [key, identity] of creditedModels) {

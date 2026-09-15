@@ -3,6 +3,9 @@ import type { ProviderConnectionBinding } from './provider-connection-identity'
 export type * from './task-runtime-types'
 import type { OfficeRevisionApi } from './office-revision-types'
 import type { SendMessagePayload } from './message-payload-types'
+import type { SessionInputApi } from './session-input-types'
+import type { PreparationPermissionApi } from './preparation-permission-types'
+export type * from './preparation-permission-types'
 export type { SendMessagePayload } from './message-payload-types'
 export type * from './office-revision-types'
 /** 主进程、预加载与渲染进程共享的编译期类型。 */
@@ -1798,6 +1801,8 @@ export type AgentEvent =
       kind: 'user-message'
       text: string
       messageId?: string
+      /** Digest of the original text, attachment versions and typed intent for durable send reconciliation. */
+      payloadDigest?: string
       attachments?: UserMessageAttachmentView[]
     }
   | {
@@ -2497,7 +2502,7 @@ export type MenuCommand =
   | { type: 'select-session'; index: number }
 
 /** 通过 contextBridge 暴露给渲染进程的 API */
-export interface AgentDeskApi extends WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, RemoteApi, MediaApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi, PalaceSceneBuilderApi {
+export interface AgentDeskApi extends PreparationPermissionApi, SessionInputApi, WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, RemoteApi, MediaApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi, PalaceSceneBuilderApi {
   listPendingPermissions(sessionId: string): Promise<PermissionRequestInfo[]>
   getTranscript(sessionId: string): Promise<TranscriptEntry[]>
   suggestFiles(sessionId: string, query: string): Promise<string[]>
@@ -2558,7 +2563,7 @@ export interface AgentDeskApi extends WorkflowLedgerApi, ProjectWorkspaceApi, Pr
   setHistoryArchived(id: string, archived: boolean): Promise<void>
   setHistoryPinned(id: string, pinned: boolean): Promise<void>
   renameHistory(id: string, title: string): Promise<void>
-  deleteHistory(id: string): Promise<void>
+  deleteHistory(id: string): Promise<boolean>
   getSettings(): Promise<AppSettings>
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>
   getRoutingRuleSet(): Promise<import('./routing-policy-types').RoutingRuleReadResult>

@@ -41,6 +41,10 @@ export default function StudioResultPanel({
   standalone = false,
   onOpenSessionSurface
 }: StudioResultPanelProps): React.JSX.Element {
+  return <BoundStudioResultPanel key={sessionId ?? 'empty'} sessionId={sessionId} standalone={standalone} onOpenSessionSurface={onOpenSessionSurface} />
+}
+
+function BoundStudioResultPanel({ sessionId, standalone, onOpenSessionSurface }: StudioResultPanelProps): React.JSX.Element {
   const language = useStore((state) => state.settings.language)
   const openDiffPanel = useStore((state) => state.openDiffPanel)
   const openFilesPanel = useStore((state) => state.openFilesPanel)
@@ -144,8 +148,11 @@ function useStudioResult(sessionId: string | null, labels: Labels, language: 'zh
   const [error, setError] = useState<string>()
   const [message, setMessage] = useState<string>()
   const refreshTimer = useRef<number | undefined>()
+  const refreshRequest = useRef(0)
+  useEffect(() => () => { refreshRequest.current++ }, [])
   const savedLabel = labels.saved
   const refresh = useCallback(async (): Promise<void> => {
+    const request = ++refreshRequest.current
     if (!sessionId) {
       setSnapshot(undefined)
       setError(undefined)
@@ -154,11 +161,12 @@ function useStudioResult(sessionId: string | null, labels: Labels, language: 'zh
     setLoading(true)
     setError(undefined)
     try {
-      setSnapshot(await window.agentDesk.getStudioResultSnapshot(sessionId))
+      const snapshot = await window.agentDesk.getStudioResultSnapshot(sessionId)
+      if (request === refreshRequest.current) setSnapshot(snapshot)
     } catch (cause) {
-      setError(errorMessage(cause))
+      if (request === refreshRequest.current) setError(errorMessage(cause))
     } finally {
-      setLoading(false)
+      if (request === refreshRequest.current) setLoading(false)
     }
   }, [sessionId])
   useEffect(() => {

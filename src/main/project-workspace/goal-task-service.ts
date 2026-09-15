@@ -29,7 +29,7 @@ export async function createProjectGoalTask(
   rootDir?: string,
   options: ProjectGoalTaskCreationOptions = {}
 ): Promise<ProjectGoalTaskResult> {
-  const input = normalizeInput(rawInput)
+  const input = normalizeProjectGoalTaskInput(rawInput)
   const ids = goalTaskIds(input.projectId, input.requestId)
   const reads = createProjectWorkspaceReadService(rootDir, 'canonical')
   const workspace = await (await openProjectWorkspaceStore(rootDir)).getWorkspace(input.projectId)
@@ -94,7 +94,7 @@ export function goalTaskIds(projectId: string, requestId: string): { goalId: str
   return { goalId: `goal-${digest}`, workItemId: `work-item-${digest}` }
 }
 
-function normalizeInput(input: ProjectGoalTaskInput): ProjectGoalTaskInput {
+export function normalizeProjectGoalTaskInput(input: ProjectGoalTaskInput): ProjectGoalTaskInput {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('goal task input must be an object')
   const requestId = requiredText(input.requestId, 'requestId', 200)
   const projectId = requiredText(input.projectId, 'projectId', 200)

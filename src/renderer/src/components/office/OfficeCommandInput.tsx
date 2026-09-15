@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { BusinessLineDefinition } from '../../../../shared/business-line-types'
 import { useOfficeCommand, type OfficeCommandTarget } from './useOfficeCommand'
+import SessionInputQueue from '../composer/SessionInputQueue'
+import SessionModelPicker from '../composer/SessionModelPicker'
+import '../composer/session-inputs.css'
 import './office-command.css'
 
 type Command = ReturnType<typeof useOfficeCommand>
@@ -45,6 +48,12 @@ export default function OfficeCommandInput({ lines, defaultLineId, selectedSessi
       <CommandCompose command={command} target={target} zh={zh} />
     </form>
     <CommandFeedback command={command} target={target} zh={zh} onOpenTask={onOpenTask} onOpenSession={onOpenSession} />
+    {target.kind === 'session' && command.modelRequestSessionId === target.id && <SessionModelPicker
+      key={target.id} sessionId={target.id} onClose={command.closeModelPicker} />}
+    {target.kind === 'session' && <SessionInputQueue zh={zh}
+      records={command.sessionInputs.records} running={command.running} busy={command.sessionInputs.busy}
+      error={command.sessionInputs.error} onApply={command.sessionInputs.apply}
+      onCancel={command.sessionInputs.cancel} onRefresh={command.sessionInputs.refresh} />}
     <CommandPending command={command} zh={zh} />
   </section>
 }

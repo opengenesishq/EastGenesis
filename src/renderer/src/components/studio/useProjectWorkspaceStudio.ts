@@ -361,24 +361,11 @@ export function useProjectGoalTaskStart(refreshContents: () => Promise<void>): {
         return true
       }
       const client = createProjectGoalSubmissionClient(window.localStorage, {
-        createGoal: (input) => window.agentDesk.createProjectGoalTask(input),
-        listSessions: () => window.agentDesk.listSessions(),
-        createSession: async (result) => (await window.agentDesk.createSession({
-          cwd: '', workspaceId: projectId, goalId: result.goal.id, workItemId: result.workItem.id,
-          businessLineId: result.workItem.businessLineId, model: AUTO_MODEL, providerId: AUTO_PROVIDER_ID,
-          routingScope: 'global', initialPrompt: objective, taskStrategy: 'plan', title: result.workItem.title
-        })).id,
-        getPlan: (sessionId) => window.agentDesk.getTaskPlan(sessionId),
-        generatePlan: async (sessionId, result, selectedTemplate) => {
-          const plan = selectedTemplate === 'product-launch'
-            ? await useStore.getState().compileMissionTaskPlan(sessionId, { expectedGoalRevision: result.goal.revision })
-            : await useStore.getState().generateTaskPlan(sessionId, { objective })
-          if (!plan?.currentVersion) throw new Error(useStore.getState().taskPlanErrors[sessionId] || '计划尚未生成，输入与任务已保留，可重试。')
-          return plan
-        }
+        prepare: (input) => window.agentDesk.prepareProjectGoalTask(input)
       })
       const { sessionId, requestId } = await client.submit({ projectId, objective, template })
       if (!await useStore.getState().syncSession(sessionId)) throw new Error('原任务已保存，会话尚未载入，请重试打开。')
+      await useStore.getState().refreshTaskPlan(sessionId)
       setCompiledPlan({ sessionId, projectId })
       // Failed projection refresh must not turn a confirmed plan into a new submission.
       await refreshContents().catch(() => undefined)
