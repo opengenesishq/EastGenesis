@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkflowLedgerRendererSelection } from '../../../../shared/types'
 import { useStore } from '../../store'
 import { localized } from './projectWorkspaceStudioLocale'
@@ -12,7 +12,7 @@ import { requestProjectWorkspaceNavigation } from './projectWorkspaceNavigation'
 import RunDetailPanel from './RunDetailPanel'
 import { createRunDetailRoute, parseRunDetailRoute, resolveRunRecoverySnapshotId } from '../../../../shared/run-detail-projection'
 import { requestTaskPlanNavigation } from '../experience/task-plan-navigation'
-import TaskPlanWorkbench from '../experience/TaskPlanWorkbench'
+import { resolveInboxTaskDestination } from './workInboxTaskNavigation'
 import GoalTaskStarter from './GoalTaskStarter'
 import { useProjectGoalTaskStart } from './useProjectWorkspaceStudio'
 
@@ -25,6 +25,7 @@ export default function WorkInbox({ active }: { active: boolean }): React.JSX.El
   const [intakeProjectId, setIntakeProjectId] = useState<string | null>(null)
   const recoverTaskSnapshot = useStore((state) => state.recoverTaskSnapshot)
   const selectSession = useStore((state) => state.selectSession)
+  const syncSession = useStore((state) => state.syncSession)
   const setStudioSurface = useStore((state) => state.setStudioSurface)
   const setExperienceMode = useStore((state) => state.setExperienceMode)
   const setShowNewSession = useStore((state) => state.setShowNewSession)
@@ -35,7 +36,66 @@ export default function WorkInbox({ active }: { active: boolean }): React.JSX.El
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [selectedRunRoute, setSelectedRunRoute] = useState<string | null>(null)
-  const [selectedPlanSessionId, setSelectedPlanSessionId] = useState<string | null>(null)
+  const [openingTaskId, setOpeningTaskId] = useState<string | null>(null)
+  const [navigationError, setNavigationError] = useState('')
+  const taskNavigation = useRef(0)
+  useEffect(() => {
+    setOpeningTaskId(null)
+    if (!active) taskNavigation.current += 1
+    return () => { taskNavigation.current += 1 }
+  }, [active])
+  const openTask = useCallback(async (item: CrossProjectWorkInboxItem, focus: 'task' | 'plan'): Promise<void> => {
+    const request = ++taskNavigation.current
+    const state = useStore.getState()
+    const navigationKey = () => {
+      const current = useStore.getState()
+      return JSON.stringify([current.activeId, current.view, current.experienceMode, current.studioSurface,
+        current.studioSessionNavigationNonce, current.showSettings, current.showTaskRecovery, current.showNewSession])
+    }
+    const initialNavigation = navigationKey()
+    const current = () => request === taskNavigation.current && navigationKey() === initialNavigation
+    setOpeningTaskId(item.id)
+    setNavigationError('')
+    try {
+      const target = await resolveInboxTaskDestination(item, {
+        readLedger: scope => window.agentDesk.listWorkflowLedger(scope),
+        listSessions: () => window.agentDesk.listSessions()
+      })
+      if (!current()) return
+      if (!target.sessionId) {
+        if (target.runId) setSelectedRunRoute(createRunDetailRoute(target.runId))
+        setNavigationError(target.reason === 'identity_conflict'
+          ? localized('任务归属发生冲突，请刷新并核对执行记录。', 'Task ownership conflicts. Refresh and review the execution record.')
+          : localized('原任务会话尚未载入。可核对下方执行记录，或打开恢复中心继续。', 'The original task session is unavailable. Review its execution below or open Recovery.'))
+        return
+      }
+      if (!await syncSession(target.sessionId)) {
+        if (current()) setNavigationError(localized('原任务会话已关闭，请从恢复中心继续。', 'The original session has closed. Continue from Recovery.'))
+        return
+      }
+      if (!current()) return
+      const meta = useStore.getState().sessions[target.sessionId]?.meta
+      if (!meta || meta.status === 'closed' || !target.binding || meta.workspaceId !== target.binding.workspaceId ||
+        meta.goalId !== target.binding.goalId || meta.workItemId !== target.binding.workItemId) {
+        setNavigationError(localized('任务会话已变化，请刷新后重新打开。', 'The task session changed. Refresh and open it again.'))
+        return
+      }
+      // Queue the plan before changing surfaces; the real session workbench
+      // consumes it after mounting. No duplicate approval UI lives in Inbox.
+      if (focus === 'plan') requestTaskPlanNavigation(target.sessionId)
+      selectSession(target.sessionId)
+      state.setView('list')
+      setExperienceMode('studio')
+      setStudioSurface('workspace')
+      setShowNewSession(false)
+      state.setShowTaskRecovery(false)
+      setSelectedRunRoute(null)
+    } catch (cause) {
+      if (current()) setNavigationError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      if (request === taskNavigation.current) setOpeningTaskId(null)
+    }
+  }, [selectSession, setExperienceMode, setShowNewSession, setStudioSurface, syncSession])
   const refresh = useCallback(async (): Promise<void> => {
     setLoading(true)
     setError('')
@@ -117,6 +177,9 @@ export default function WorkInbox({ active }: { active: boolean }): React.JSX.El
         <GoalTaskStarter key={intakeProject?.id ?? 'personal'} projectId={intakeProject?.id} state={goalStarter} />
       </div>
       {error && <p className="pws-inbox-error" role="alert">{error}</p>}
+      {navigationError && <div className="pws-inbox-error" role="alert">{navigationError}
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => useStore.getState().setShowTaskRecovery(true)}>{localized('打开恢复中心', 'Open Recovery')}</button>
+      </div>}
       {!loading && !error && projection?.total === 0 && <p className="pws-inbox-empty">{localized('暂无工作项', 'No work items')}</p>}
       {projection && projection.total > 0 && <div className="pws-inbox-lanes" data-cross-project-inbox-total={projection.total}>
         {CROSS_PROJECT_WORK_INBOX_LANE_ORDER.map((lane) => {
@@ -125,18 +188,11 @@ export default function WorkInbox({ active }: { active: boolean }): React.JSX.El
           return <details key={lane} className="pws-inbox-lane" open>
             <summary>{laneLabel(lane)} <span>({laneItems.length})</span></summary>
             <div className="pws-inbox-list" role="list" data-cross-project-inbox-lane={lane}>
-              {laneItems.slice(0, 50).map((item) => <CrossProjectInboxRow key={item.id} item={item} onOpenDelivery={item.lane === 'ready_for_delivery' && item.projectId ? () => openDelivery(item.projectId!, item.workItemId) : undefined} onOpenRun={item.runId ? () => setSelectedRunRoute(createRunDetailRoute(item.runId!)) : undefined} onOpenPlan={item.runId ? () => {
-                const run = ledger?.runs.items.find((candidate) => candidate.id === item.runId)
-                if (!run?.sessionId) return
-                selectSession(run.sessionId)
-                // The TaskPlan workbench is owned by the real session surface.
-                // Switch there before dispatching the durable navigation request.
-                setExperienceMode('studio')
-                setStudioSurface('workspace')
-                setShowNewSession(false)
-                setSelectedPlanSessionId(run.sessionId)
-                requestTaskPlanNavigation(run.sessionId!)
-              } : undefined} onOpen={() => {
+              {laneItems.slice(0, 50).map((item) => <CrossProjectInboxRow key={item.id} item={item} opening={openingTaskId === item.id}
+                onOpenTask={item.workItemId || item.runId ? () => void openTask(item, 'task') : undefined}
+                onOpenDelivery={item.lane === 'ready_for_delivery' && item.projectId ? () => openDelivery(item.projectId!, item.workItemId) : undefined}
+                onOpenRun={item.runId ? () => setSelectedRunRoute(createRunDetailRoute(item.runId!)) : undefined}
+                onOpenPlan={item.workItemId || item.runId ? () => void openTask(item, 'plan') : undefined} onOpen={() => {
                 if (!item.projectId || !item.projectAvailable) return
                 requestProjectWorkspaceNavigation(item.projectId, 'work-item', item.workItemId)
                 openProjectWorkspace(item.projectId)
@@ -145,7 +201,6 @@ export default function WorkInbox({ active }: { active: boolean }): React.JSX.El
           </details>
         })}
       </div>}
-      {selectedPlanSessionId && <TaskPlanWorkbench sessionId={selectedPlanSessionId} strategy="plan" running={false} />}
       {projection && ledger && selectedRunRoute && <div className="cross-project-run-detail-wrap">
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSelectedRunRoute(null)}>关闭 Run 详情</button>
         <RunDetailPanel
@@ -161,14 +216,15 @@ export default function WorkInbox({ active }: { active: boolean }): React.JSX.El
   )
 }
 
-function CrossProjectInboxRow({ item, onOpen, onOpenPlan, onOpenRun, onOpenDelivery }: { item: CrossProjectWorkInboxItem; onOpen: () => void; onOpenPlan?: () => void; onOpenRun?: () => void; onOpenDelivery?: () => void }): React.JSX.Element {
+function CrossProjectInboxRow({ item, opening, onOpen, onOpenTask, onOpenPlan, onOpenRun, onOpenDelivery }: { item: CrossProjectWorkInboxItem; opening: boolean; onOpen: () => void; onOpenTask?: () => void; onOpenPlan?: () => void; onOpenRun?: () => void; onOpenDelivery?: () => void }): React.JSX.Element {
   return <article className="pws-inbox-row" role="listitem" data-inbox-state={item.lane} data-project-id={item.projectId ?? ''} data-work-item-id={item.workItemId ?? ''}>
     <span className={`pws-inbox-state pws-inbox-state-${item.lane}`}>{laneLabel(item.lane)}</span>
     <span className="pws-inbox-copy"><strong>{item.title}</strong><span>{item.projectName}{item.detail ? ` · ${item.detail}` : ''}</span></span>
     <time dateTime={new Date(item.updatedAt).toISOString()}>{formatInboxTime(item.updatedAt)}</time>
+    {onOpenTask && <button type="button" className="btn btn-primary btn-sm" disabled={opening} onClick={onOpenTask} data-inbox-action="open-task">{opening ? localized('打开中…', 'Opening…') : localized('打开任务', 'Open task')}</button>}
     <button type="button" className="btn btn-ghost btn-sm" disabled={!item.projectAvailable} onClick={onOpen}>{localized('打开项目', 'Open project')}</button>
     {onOpenDelivery && <button type="button" className="btn btn-ghost btn-sm" disabled={!item.projectAvailable} onClick={onOpenDelivery} data-inbox-action="open-delivery">{localized('打开交付验收', 'Open delivery')}</button>}
-    {onOpenPlan && <button type="button" className="btn btn-ghost btn-sm" data-inbox-action="open-plan" onClick={onOpenPlan}>{localized('打开计划', 'Open plan')}</button>}
+    {onOpenPlan && <button type="button" className="btn btn-ghost btn-sm" disabled={opening} data-inbox-action="open-plan" onClick={onOpenPlan}>{localized('打开计划', 'Open plan')}</button>}
     {onOpenRun && <button type="button" className="btn btn-ghost btn-sm" onClick={onOpenRun} data-inbox-action="open-run">{localized('打开 Run', 'Open Run')}</button>}
   </article>
 }
