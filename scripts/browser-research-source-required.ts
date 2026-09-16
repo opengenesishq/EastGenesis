@@ -17,6 +17,8 @@ import { decideTaskStrategyTool } from '../src/main/task/task-strategy'
 import { isReadOnlyToolCall, isSideEffectingToolCall } from '../src/main/task/tool-idempotency'
 import { isLimitedFileExecutionReadOnlyCall } from '../src/main/permission/limited-file-execution-policy'
 import { classifyToolCapabilities } from '../src/main/permission/tool-capabilities'
+import { buildEffectDescriptor } from '../src/main/task/effect-reconciler'
+import { prepareEffectExecution, markEffectExecutionStarted, completeEffectExecution } from '../src/main/task/effect-runtime'
 
 export async function run(_stage: string, root: string) {
   const projectId = 'research-project', goalId = 'research-goal', workItemId = 'research-work'
@@ -141,6 +143,72 @@ export async function run(_stage: string, root: string) {
       assert.equal(isSideEffectingToolCall('browser_read', {}), false)
       assert.equal(isLimitedFileExecutionReadOnlyCall('browser_read', {}), true)
       assert.deepEqual(classifyToolCapabilities('browser_read', {}), ['browser', 'network'])
+    })
+    const browserInput = (toolName: string, toolInput: Record<string, unknown>, toolUseId: string) => ({
+      sessionId: meta.id, cwd: root, rootDir: root, toolName, toolInput, toolUseId
+    })
+    const descriptor = (toolName: string, toolInput: Record<string, unknown>) => buildEffectDescriptor(browserInput(toolName, toolInput, 'descriptor'))
+    const wc = (owner.contentView.children[0] as WebContentsView).webContents
+    const loaded = async () => {
+      if (wc.isLoadingMainFrame()) await new Promise<void>(resolve => wc.once('did-stop-loading', () => resolve()))
+    }
+    html = '<html><body data-clicks="0"><input id="recipient"><button id="send" onclick="document.body.dataset.clicks=String(Number(document.body.dataset.clicks)+1)">Send</button></body></html>'
+    await browserViewManager.navigate(meta.id, pageUrl)
+    await loaded()
+    await check('browser approval binds one page; same-URL replacement abandons its prepared effect', async () => {
+      const input = browserInput('browser_click', { selector: '#send' }, 'approved-before-reload')
+      const handle = await prepareEffectExecution(input)
+      assert(handle)
+      const approved = taskRuntimeRegistry.get(meta.id)!.effects!.find(effect => effect.id === handle.effectId)!
+      assert.equal(approved.target.kind, 'unsupported')
+      assert(approved.target.kind === 'unsupported' && approved.target.browserPage)
+      assert(!JSON.stringify(approved.target).includes(pageUrl), 'raw URL must not enter the effect target')
+      await browserViewManager.navigate(meta.id, pageUrl)
+      await loaded()
+      await assert.rejects(markEffectExecutionStarted(handle, input), /目标或输入已变化/)
+      assert.equal(taskRuntimeRegistry.get(meta.id)!.effects!.find(effect => effect.id === handle.effectId)!.status, 'abandoned')
+      await assert.rejects(executeBrowserTool('browser_click', input.toolInput, meta.id, { ...context('stale-page'), effectTarget: approved.target }), /原审批失效/)
+      assert.equal(await wc.executeJavaScript('document.body.dataset.clicks'), '0')
+    })
+    await check('approved click, typing and DOM script execute through their original opaque effect', async () => {
+      for (const [toolName, toolInput] of [
+        ['browser_click', { selector: '#send' }],
+        ['browser_type', { selector: '#recipient', text: 'approved recipient' }],
+        ['browser_evaluate', { script: "document.body.dataset.reviewed = 'yes'" }]
+      ] as const) {
+        const input = browserInput(toolName, toolInput, `execute-${toolName}`)
+        const handle = await prepareEffectExecution(input)
+        assert(handle)
+        await markEffectExecutionStarted(handle, input)
+        const effect = taskRuntimeRegistry.get(meta.id)!.effects!.find(effect => effect.id === handle.effectId)!
+        const result = await executeBrowserTool(toolName, toolInput, meta.id, { ...context(input.toolUseId), effectTarget: effect.target })
+        assert.equal(result.ok, true)
+        assert.equal((await completeEffectExecution(handle, result))?.status, 'confirmed')
+      }
+      assert.equal(await wc.executeJavaScript('document.body.dataset.clicks'), '1')
+      assert.equal(await wc.executeJavaScript('document.querySelector("#recipient").value'), 'approved recipient')
+      assert.equal(await wc.executeJavaScript('document.body.dataset.reviewed'), 'yes')
+      await assert.rejects(executeBrowserTool('browser_click', { selector: '#send' }, meta.id, context('unbound')), /缺少已审批的页面版本/)
+    })
+    await check('navigation after the main-process check is rejected inside the actual mutation script', async () => {
+      const target = (await descriptor('browser_click', { selector: '#send' })).target
+      const original = wc.executeJavaScriptInIsolatedWorld.bind(wc)
+      wc.executeJavaScriptInIsolatedWorld = async (...args) => { await wc.loadURL(pageUrl); await loaded(); return original(...args) }
+      try { await assert.rejects(executeBrowserTool('browser_click', { selector: '#send' }, meta.id, { ...context('action-race'), effectTarget: target }), /原审批失效|Script failed to execute/) }
+      finally { wc.executeJavaScriptInIsolatedWorld = original }
+      assert.equal(await wc.executeJavaScript('document.body.dataset.clicks'), '0')
+    })
+    await check('page-authored properties cannot forge the isolated document binding', async () => {
+      const target = (await descriptor('browser_type', { selector: '#recipient', text: 'old page' })).target
+      assert(target.kind === 'unsupported' && target.browserPage)
+      const originalToken = target.browserPage.documentToken
+      await wc.loadURL(pageUrl)
+      await loaded()
+      await wc.executeJavaScript(`window.__caogenApprovedDocumentV1=${JSON.stringify(originalToken)}`)
+      const next = await browserViewManager.captureMutationPage(meta.id)
+      assert.notEqual(next.documentToken, originalToken)
+      await assert.rejects(executeBrowserTool('browser_type', { selector: '#recipient', text: 'old page' }, meta.id, { ...context('forged'), effectTarget: target }), /原审批失效/)
+      assert.equal(await wc.executeJavaScript('document.querySelector("#recipient").value'), '')
     })
     assert.equal((await verifyPersistedWorkflowLedger(root)).valid, true)
     console.log(`Browser research source: ${passed}/${passed} passed; physical Electron DOM, canonical stores, no network or Provider calls.`)

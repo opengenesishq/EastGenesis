@@ -1,5 +1,5 @@
 import { app, BrowserWindow, WebContentsView, shell } from 'electron'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
@@ -20,8 +20,15 @@ import { DEFAULT_BROWSER_URL, normalizeBrowserNavigationUrl } from './browserNav
 import { readBrowserPageSource, type BrowserPageSource } from './browser/browser-page-source'
 import { isBrowserSearchPage, searchBrowserPage } from './browser/browser-search-page'
 import type { SearchAdapterResult } from './search/search-broker'
+import type { EffectTarget } from '../shared/effect-types'
+
+type BrowserMutationPage = NonNullable<Extract<EffectTarget, { kind: 'unsupported' }>['browserPage']>
+const MUTATION_WORLD_ID = 1003
+const DOCUMENT_TOKEN_KEY = '__caogenApprovedDocumentV1'
+function urlDigest(url: string): string { return createHash('sha256').update(url, 'utf8').digest('hex') }
 
 interface BrowserRecord {
+  viewId: string
   sessionId: string
   view: WebContentsView
   owner: BrowserWindow
@@ -82,6 +89,7 @@ class BrowserViewManager {
     owner.contentView.addChildView(view)
 
     const record: BrowserRecord = {
+      viewId: randomUUID(),
       sessionId,
       view,
       owner,
@@ -118,14 +126,29 @@ class BrowserViewManager {
     return { ...record.state }
   }
 
-  async click(sessionId: string, selector: string): Promise<void> {
+  async captureMutationPage(sessionId: string): Promise<BrowserMutationPage> {
     const record = this.requireRecord(sessionId)
-    await record.view.webContents.executeJavaScript(clickSelectorScript(selector), true)
+    const wc = record.view.webContents
+    if (wc.isLoadingMainFrame()) throw new Error('页面仍在加载，请完成后重新审批浏览器操作。')
+    const revision = record.navigationRevision, url = wc.getURL()
+    const token = await wc.executeJavaScriptInIsolatedWorld(MUTATION_WORLD_ID, [{ code: `(() => {
+      const key = ${JSON.stringify(DOCUMENT_TOKEN_KEY)};
+      if (!Object.prototype.hasOwnProperty.call(globalThis, key)) Object.defineProperty(globalThis, key, { value: ${JSON.stringify(randomUUID())} });
+      return globalThis[key];
+    })()` }])
+    if (this.records.get(sessionId) !== record || wc.isDestroyed() || wc.isLoadingMainFrame() || wc.getURL() !== url ||
+      record.navigationRevision !== revision || typeof token !== 'string' || !/^[a-f0-9-]{36}$/.test(token)) {
+      throw new Error('读取审批目标时浏览器页面已变化，请重新审批。')
+    }
+    return { viewId: record.viewId, navigationRevision: revision, urlDigest: urlDigest(url), documentToken: token }
   }
 
-  async typeText(sessionId: string, selector: string, text: string): Promise<void> {
-    const record = this.requireRecord(sessionId)
-    await record.view.webContents.executeJavaScript(typeTextScript(selector, text), true)
+  async click(sessionId: string, selector: string, approvedPage: BrowserMutationPage): Promise<void> {
+    await this.executeApprovedMutation(sessionId, clickSelectorScript(selector), approvedPage)
+  }
+
+  async typeText(sessionId: string, selector: string, text: string, approvedPage: BrowserMutationPage): Promise<void> {
+    await this.executeApprovedMutation(sessionId, typeTextScript(selector, text), approvedPage)
   }
 
   async screenshot(sessionId: string, selector?: string): Promise<string | undefined> {
@@ -141,9 +164,26 @@ class BrowserViewManager {
     await record.view.webContents.executeJavaScript(waitForSelectorScript(selector, timeoutMs), true)
   }
 
-  async evaluate(sessionId: string, script: string): Promise<unknown> {
+  async evaluate(sessionId: string, script: string, approvedPage: BrowserMutationPage): Promise<unknown> {
+    return this.executeApprovedMutation(sessionId, script, approvedPage)
+  }
+
+  private async executeApprovedMutation(sessionId: string, script: string, approvedPage: BrowserMutationPage): Promise<unknown> {
     const record = this.requireRecord(sessionId)
-    return record.view.webContents.executeJavaScript(script, true)
+    const wc = record.view.webContents
+    const url = wc.getURL()
+    if (!approvedPage || typeof approvedPage.documentToken !== 'string' || !/^[a-f0-9-]{36}$/.test(approvedPage.documentToken) ||
+      approvedPage.viewId !== record.viewId || approvedPage.navigationRevision !== record.navigationRevision ||
+      approvedPage.urlDigest !== urlDigest(url) || wc.isLoadingMainFrame()) throw new Error('浏览器页面已变化，原审批失效；请重新查看并审批。')
+    // The document token is isolated from page-authored JS. Check it in the
+    // same script that performs the action, closing the navigation race after
+    // the main-process check, including replacement at the very same URL.
+    return wc.executeJavaScriptInIsolatedWorld(MUTATION_WORLD_ID, [{ code: `(() => {
+      if (globalThis[${JSON.stringify(DOCUMENT_TOKEN_KEY)}] !== ${JSON.stringify(approvedPage.documentToken)} || location.href !== ${JSON.stringify(url)}) {
+        throw new Error('浏览器页面已变化，原审批失效；请重新查看并审批。');
+      }
+      return (0, eval)(${JSON.stringify(script)});
+    })()` }], true)
   }
 
   async readPage(sessionId: string): Promise<BrowserPageSource> {

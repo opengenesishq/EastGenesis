@@ -543,6 +543,13 @@ export type EffectTarget =
   | {
       kind: 'unsupported'
       toolName: string
+      /** Opaque browser mutations still bind approval to one live document. */
+      browserPage?: {
+        viewId: string
+        navigationRevision: number
+        urlDigest: string
+        documentToken: string
+      }
     }
 
 export interface EffectRecord {

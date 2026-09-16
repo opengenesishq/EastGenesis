@@ -1,5 +1,6 @@
 import type { ToolDefinition, ToolExecResult } from './tool-types'
 import { readSessionBrowserResearchSource, type BrowserResearchContext } from '../../task/browser-research-source'
+import type { EffectTarget } from '../../../shared/effect-types'
 
 export const BROWSER_TOOLS: ToolDefinition[] = [
   {
@@ -76,7 +77,7 @@ export const BROWSER_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'browser_evaluate',
-      description: '在当前页面执行 JavaScript 表达式并返回 JSON 化结果。',
+      description: '在当前页面的隔离环境执行 JavaScript 表达式并返回 JSON 化结果。可访问 DOM，不可访问页面脚本变量；审批绑定当前页面，页面变化后需重新审批。',
       parameters: {
         type: 'object',
         properties: { script: { type: 'string' } },
@@ -107,7 +108,7 @@ export async function executeBrowserTool(
   name: string,
   args: Record<string, unknown>,
   sessionId?: string,
-  context: BrowserResearchContext = {}
+  context: BrowserResearchContext & { effectTarget?: EffectTarget } = {}
 ): Promise<ToolExecResult> {
   if (name === 'browser_automation_status') return browserAutomationStatus()
   if (!sessionId) return { ok: false, output: '浏览器工具需要 sessionId。' }
@@ -124,11 +125,11 @@ export async function executeBrowserTool(
       return { ok: true, output: JSON.stringify(state, null, 2) }
     }
     case 'browser_click': {
-      await browserViewManager.click(sessionId, requireString(args.selector, 'selector'))
+      await browserViewManager.click(sessionId, requireString(args.selector, 'selector'), approvedBrowserPage(name, context.effectTarget))
       return { ok: true, output: `已点击 ${args.selector}` }
     }
     case 'browser_type': {
-      await browserViewManager.typeText(sessionId, requireString(args.selector, 'selector'), requireString(args.text, 'text'))
+      await browserViewManager.typeText(sessionId, requireString(args.selector, 'selector'), requireString(args.text, 'text'), approvedBrowserPage(name, context.effectTarget))
       return { ok: true, output: `已填写 ${args.selector}` }
     }
     case 'browser_screenshot': {
@@ -164,12 +165,19 @@ export async function executeBrowserTool(
       return { ok: true, output: `已等待到 ${args.selector}` }
     }
     case 'browser_evaluate': {
-      const result = await browserViewManager.evaluate(sessionId, requireString(args.script, 'script'))
+      const result = await browserViewManager.evaluate(sessionId, requireString(args.script, 'script'), approvedBrowserPage(name, context.effectTarget))
       return { ok: true, output: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }
     }
     default:
       return { ok: false, output: `未知浏览器工具: ${name}` }
   }
+}
+
+function approvedBrowserPage(name: string, target?: EffectTarget) {
+  if (target?.kind !== 'unsupported' || target.toolName !== name || !target.browserPage) {
+    throw new Error('浏览器操作缺少已审批的页面版本；请重新查看并审批。')
+  }
+  return target.browserPage
 }
 
 async function browserAutomationStatus(): Promise<ToolExecResult> {
