@@ -14,6 +14,7 @@ import RunDetailPanel from '../studio/RunDetailPanel'
 import { ProjectDeliveryWorkbench } from '../studio/ProjectDeliveryWorkbench'
 import OfficeSessionActions from './OfficeSessionActions'
 import PalaceInstitutionWorkItem from './PalaceInstitutionWorkItem'
+import { preparePalaceTaskNavigation } from './palaceTaskNavigation'
 import './palace-work-panel.css'
 
 const ChatView = lazy(() => import('../ChatView'))
@@ -42,6 +43,9 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
   const [deliveryOpen, setDeliveryOpen] = useState(action === 'approve' || action === 'desk')
   const [sessionId, setSessionId] = useState(initialContext ? initialContext.sessionId ?? '' : activeId ?? '')
   const [runRoute, setRunRoute] = useState<string>()
+  const [openingTaskId, setOpeningTaskId] = useState<string>()
+  const [navigationError, setNavigationError] = useState('')
+  const taskNavigation = useRef(0)
   const sessionIds = Object.keys(sessions)
   const data = usePalaceWorkData(sessionIds)
   // Embedded ChatView/FilePanel use activeId. Mount them only when it matches
@@ -56,7 +60,7 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
     return [...byId.values()]
   }, [])
   const patrolItems = palaceInstitutionWorkItems(roleId, data.items, data.plans)
-  useEffect(() => { panel.current?.focus() }, [])
+  useEffect(() => { panel.current?.focus(); return () => { taskNavigation.current++ } }, [])
   const openWorkItem = (item: Pick<WorkItem, 'id' | 'projectId'>): void => {
     useStore.getState().openProjectWorkspace(item.projectId)
     requestProjectWorkspaceNavigation(item.projectId, 'work-item', item.id)
@@ -77,17 +81,41 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
     await data.refresh()
   }
   const openInboxItem = (item: CrossProjectWorkInboxItem): void => {
+    taskNavigation.current++
+    setOpeningTaskId(undefined)
     if (item.runId) setRunRoute(createRunDetailRoute(item.runId))
     else if (item.workItemId && item.projectId) openWorkItem({ id: item.workItemId, projectId: item.projectId })
   }
-  const openApprovalItem = (item: CrossProjectWorkInboxItem): void => {
-    const runSessionId = data.ledger?.runs.items.find((run) => run.id === item.runId)?.sessionId
-    const sessionId = runSessionId && sessions[runSessionId] ? runSessionId
-      : item.workItemId && item.projectId
-        ? sessionIds.find((id) => sessions[id].meta.workItemId === item.workItemId && sessions[id].meta.workspaceId === item.projectId)
-        : undefined
-    if (sessionId) selectSession(sessionId)
-    onAction('approve', { ...(sessionId ? { sessionId } : {}), projectId: item.projectId, workItemId: item.workItemId })
+  const openInboxTask = async (item: CrossProjectWorkInboxItem, nextAction: 'study' | 'approve'): Promise<void> => {
+    const request = ++taskNavigation.current
+    const navigationKey = (): string => {
+      const state = useStore.getState()
+      return JSON.stringify([state.activeId, state.view, state.experienceMode, state.studioSurface,
+        state.studioSessionNavigationNonce, state.showSettings, state.showTaskRecovery, state.showNewSession])
+    }
+    const initialNavigation = navigationKey()
+    const current = (): boolean => request === taskNavigation.current && navigationKey() === initialNavigation
+    setOpeningTaskId(item.id); setNavigationError('')
+    try {
+      const target = await preparePalaceTaskNavigation(item, {
+        readLedger: scope => window.agentDesk.listWorkflowLedger(scope),
+        listSessions: () => window.agentDesk.listSessions(),
+        syncSession: id => useStore.getState().syncSession(id),
+        session: id => useStore.getState().sessions[id]?.meta,
+        current
+      })
+      if (!target || !current()) return
+      if (!target.sessionId) {
+        if (target.runId) { setRunRoute(createRunDetailRoute(target.runId)); void data.refresh() }
+        setNavigationError(target.reason === 'identity_conflict'
+          ? (zh ? '任务执行或归属已变化，请刷新后重新打开当前任务。' : 'The task execution or ownership changed. Refresh and open the current task again.')
+          : (zh ? '原任务会话已不可用，请核对执行记录或从恢复中心继续。' : 'The original task session is unavailable. Review its execution or continue from Recovery.'))
+        return
+      }
+      onAction(nextAction, { sessionId: target.sessionId, projectId: target.binding?.workspaceId, workItemId: target.binding?.workItemId })
+    } catch (cause) {
+      if (current()) setNavigationError(cause instanceof Error ? cause.message : String(cause))
+    } finally { if (request === taskNavigation.current) setOpeningTaskId(undefined) }
   }
   const contextModes = ['audience', 'study', 'inspect', 'council', 'approve'].includes(action)
   const overviewModes = ['court', 'urgent', 'desk'].includes(action)
@@ -108,6 +136,8 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
       ? `${zh ? '记录更新时间' : 'Records updated'} ${new Date(data.updatedAt).toLocaleTimeString()}` : (zh ? '尚无读取结果' : 'No records loaded')}
       {data.error && <span role="alert"> · {zh ? '刷新失败，旧记录仅供参考：' : 'Refresh failed; showing previous records: '}{data.error}</span>}</p>
     {data.unavailablePlans > 0 && <p role="status">{zh ? `${data.unavailablePlans} 个任务方案暂未读取，机构汇总可能不完整。` : `${data.unavailablePlans} task plans could not be loaded; institution totals may be incomplete.`}</p>}
+    {navigationError && <p role="alert" data-palace-navigation-error>{navigationError} <button type="button" className="btn btn-ghost btn-sm"
+      onClick={() => { taskNavigation.current++; useStore.getState().setShowTaskRecovery(true) }}>{zh ? '打开恢复中心' : 'Open Recovery'}</button></p>}
 
     {action === 'desk' && <div className="palace-work-shortcuts">
       <button type="button" className="btn btn-primary" onClick={onEdict}>{zh ? '下旨 / 继续当前任务' : 'Give an instruction / continue work'}</button>
@@ -118,7 +148,8 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
       <div className="palace-work-summary">{Object.entries(inbox.lanes).map(([lane, value]) => <span key={lane}>{laneLabel(lane, zh)} <strong>{value.items.length}</strong></span>)}</div>
       <p>{zh ? '与现代工作台显示相同任务和状态。' : 'Shows the same tasks and states as the modern workspace.'}</p>
       <InboxRows items={inbox.items.filter((item) => action !== 'urgent' || ['needs_confirmation', 'blocked', 'ready_for_delivery'].includes(item.lane))}
-        zh={zh} onOpen={openInboxItem} onApprovals={openApprovalItem} />
+        zh={zh} openingTaskId={openingTaskId} onOpen={openInboxItem} onTask={item => void openInboxTask(item, 'study')}
+        onApprovals={item => void openInboxTask(item, 'approve')} />
     </>}
     {action === 'urgent' && <div>{sessionIds.filter((id) => sessions[id].pendingPermissions.length > 0).map((id) => <button key={id} className="btn" onClick={() => onAction('approve', { sessionId: id, projectId: sessions[id].meta.workspaceId, workItemId: sessions[id].meta.workItemId })}>
       {sessions[id].meta.title} · {sessions[id].pendingPermissions.length} {zh ? '项授权待办' : 'pending permissions'}</button>)}</div>}
@@ -180,11 +211,12 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
   </section>
 }
 
-function InboxRows({ items, zh, onOpen, onApprovals }: { items: CrossProjectWorkInboxItem[]; zh: boolean; onOpen(item: CrossProjectWorkInboxItem): void; onApprovals(item: CrossProjectWorkInboxItem): void }): React.JSX.Element {
+function InboxRows({ items, zh, openingTaskId, onOpen, onTask, onApprovals }: { items: CrossProjectWorkInboxItem[]; zh: boolean; openingTaskId?: string; onOpen(item: CrossProjectWorkInboxItem): void; onTask(item: CrossProjectWorkInboxItem): void; onApprovals(item: CrossProjectWorkInboxItem): void }): React.JSX.Element {
   return <div>{items.length === 0 && <p>{zh ? '当前没有相关待办。' : 'No matching work items.'}</p>}{items.map((item) => <article key={item.id} className="palace-work-row" data-palace-inbox-item={item.id}>
     <div><strong>{item.title}</strong><p>{item.projectName} · {laneLabel(item.lane, zh)} · {item.detail}</p></div>
     <button className="btn btn-ghost btn-sm" onClick={() => onOpen(item)}>{zh ? '查看记录' : 'View records'}</button>
-    {item.lane === 'needs_confirmation' && <button className="btn btn-primary btn-sm" onClick={() => onApprovals(item)}>{zh ? '批奏折' : 'Review approval'}</button>}
+    {(item.workItemId || item.runId) && <button type="button" className="btn btn-ghost btn-sm" data-palace-inbox-task={item.id} disabled={Boolean(openingTaskId)} onClick={() => onTask(item)}>{openingTaskId === item.id ? (zh ? '正在打开…' : 'Opening…') : (zh ? '继续当前任务' : 'Continue task')}</button>}
+    {item.lane === 'needs_confirmation' && <button type="button" className="btn btn-primary btn-sm" data-palace-inbox-approval={item.id} disabled={Boolean(openingTaskId)} onClick={() => onApprovals(item)}>{zh ? '批奏折' : 'Review approval'}</button>}
   </article>)}</div>
 }
 
