@@ -9,7 +9,7 @@ import { DEFAULT_PROJECT_INSTITUTION_TEMPLATE, LEGACY_PROJECT_INSTITUTION_TEMPLA
 import { openProjectWorkspaceStore } from '../src/main/project-workspace/store'
 import { openProjectWorkspaceCommandService } from '../src/main/project-workspace/command-service'
 import { createProjectWorkspaceReadService } from '../src/main/project-workspace/canonical-read-service'
-import { readGoalInstitutionContext, resolveGoalInstitutionTemplate } from '../src/main/project-workspace/institution-goal-binding'
+import { projectInstitutionContext, readGoalInstitutionContext, resolveGoalInstitutionTemplate } from '../src/main/project-workspace/institution-goal-binding'
 import { TaskPlanSessionCoordinator } from '../src/main/task/task-plan-session-coordinator'
 import { TaskPlanContractStore } from '../src/main/task/task-plan-contract-store'
 import { approvedTaskPlanToDag } from '../src/main/task/task-plan-dag'
@@ -17,6 +17,8 @@ import { buildCanonicalMissionTaskPlan, enrichCanonicalTaskPlanInstitutions } fr
 import { buildTaskSnapshot, listTaskRuns, saveTaskSnapshot } from '../src/main/task/task-snapshot'
 import { createTaskRun } from '../src/main/task/task-run'
 import { listPersistedWorkflowLedger } from '../src/main/task/workflow-ledger-api'
+import { SYSTEM_ROLES, systemRolesForTemplate } from '../src/renderer/src/components/office/kit/palace/systemRoleCatalog'
+import { palaceInstitutionWorkItems } from '../src/renderer/src/components/office/palaceActions'
 
 const root = mkdtempSync(join(tmpdir(), 'caogen-institution-migration-'))
 const reportPath = resolve('test-results/project-institution-migration/latest.json')
@@ -292,6 +294,39 @@ async function main() {
         [{ sourceRoleId: 'xichang', institutionId: 'neige' }, { sourceRoleId: 'xichang', institutionId: 'gongbu' }]
       ]) await assert.rejects(workspace.previewInstitutionMigration(projectId,
         { scope: 'future_goals', target: DEFAULT_PROJECT_INSTITUTION_TEMPLATE, roleMappings }), /无效|重复|不允许/)
+    })
+    await check('palace institutions use durable task generations and approved canonical assignments', async () => {
+      const state = await workspace.getState()
+      const persisted = readFileSync(workspace.filePath, 'utf8')
+      assert.equal(SYSTEM_ROLES.length, 21)
+      assert.equal(SYSTEM_ROLES.some(role => ['taizi', 'xichang'].includes(role.id)), false)
+      for (const task of [first, second, third, mappedFirst]) {
+        const context = projectInstitutionContext(state, { projectId, goalId: task.goal.id, workItemId: task.parent.id })
+        const planning = await readGoalInstitutionContext(root, projectId, task.goal.id, task.parent.id)
+        assert.deepEqual(context.template, planning.template)
+        assert.deepEqual(context.roleMappings, planning.roleMappings)
+        const roles = systemRolesForTemplate(context.template, context.recordedRoleIds)
+        assert.equal(roles.some(role => role.id === 'taizi'), context.template.templateId === 'legacy-compatible' || context.recordedRoleIds.includes('taizi'))
+        const records = (await reads.listWorkItems(projectId)).filter(item => item.goalId === task.goal.id)
+        const plan = plans.get(task.meta.id)
+        for (const step of plan.currentVersion!.steps.filter(step => step.institution)) {
+          const receipt = plan.projection!.steps.find(receipt => receipt.stepId === step.id)!
+          assert.ok(palaceInstitutionWorkItems(step.institution!.id, records, [plan]).some(item => item.id === receipt.workItemId))
+          const spoofed = structuredClone(plan)
+          for (const event of spoofed.approvalEvents) if (event.projection) event.projection.workspaceId = 'unrelated-project'
+          const projected = palaceInstitutionWorkItems(step.institution!.id, records.map(item => ({ ...item, role: undefined })), [spoofed])
+          assert.equal(projected.length, 0)
+        }
+      }
+      const custom = systemRolesForTemplate(LEGACY_PROJECT_INSTITUTION_TEMPLATE, ['my-three-departments', 'xichang'])
+      assert.equal(custom.find(role => role.id === 'my-three-departments')?.label, 'my-three-departments')
+      assert.equal(custom.find(role => role.id === 'my-three-departments')?.sceneHotspot, false)
+      assert.equal(custom.filter(role => role.id === 'xichang').length, 1)
+      assert.throws(() => projectInstitutionContext(state, { projectId, goalId: first.goal.id, workItemId: second.parent.id }), /归属/)
+      assert.throws(() => projectInstitutionContext(state, { projectId, workItemId: 'missing-task' }), /归属/)
+      assert.equal(projectInstitutionContext(state, { projectId, workItemId: first.parent.id }).goalId, first.goal.id)
+      assert.equal(projectInstitutionContext(state, { projectId }).goalId, undefined)
+      assert.equal(readFileSync(workspace.filePath, 'utf8'), persisted, 'scene read wrote a migration')
     })
     await check('historical template retention does not bypass actual resource or Goal changes', async () => {
       const current = (await workspace.getWorkspace(projectId))!

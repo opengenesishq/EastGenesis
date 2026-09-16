@@ -1,12 +1,13 @@
 import type { ProjectWorkspace, WorkItem } from '../../../../shared/project-workspace-types'
 import type { OfficeOperationStatus } from './officeOperationRefresh'
-import { SYSTEM_ROLES, type SystemRoleId } from './kit/palace/systemRoleCatalog'
+import { SYSTEM_ROLES, type SystemRoleId, type SystemRoleSpec } from './kit/palace/systemRoleCatalog'
+import type { TaskPlanStateView } from '../../../../shared/types'
+import { palaceInstitutionWorkItems } from './palaceActions'
 import './office-role-work-items.css'
 
 /** Read-only projection. A scene role never becomes a task owner or an Agent. */
-export function officeRoleWorkItems(roleId: SystemRoleId, workItems: readonly WorkItem[]): WorkItem[] {
-  return workItems.filter((item) => roleId === 'taizi' || item.role === roleId)
-    .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
+export function officeRoleWorkItems(roleId: SystemRoleId, workItems: readonly WorkItem[], plans: readonly TaskPlanStateView[] = []): WorkItem[] {
+  return palaceInstitutionWorkItems(roleId, workItems, plans)
 }
 
 const STATUS_ZH: Record<WorkItem['status'], string> = {
@@ -14,7 +15,7 @@ const STATUS_ZH: Record<WorkItem['status'], string> = {
   blocked: '已阻塞', verifying: '验收中', done: '已完成', failed: '失败', cancelled: '已取消'
 }
 
-export default function OfficeRoleWorkItems({ roleId, workItems, projects, status, zh, onOpen, onSelectRole }: {
+export default function OfficeRoleWorkItems({ roleId, workItems, projects, status, zh, onOpen, onSelectRole, roles = SYSTEM_ROLES, plans = [] }: {
   roleId: SystemRoleId
   workItems: readonly WorkItem[]
   projects: readonly ProjectWorkspace[]
@@ -22,24 +23,27 @@ export default function OfficeRoleWorkItems({ roleId, workItems, projects, statu
   zh: boolean
   onOpen: (item: WorkItem) => void
   onSelectRole: (roleId: SystemRoleId) => void
+  roles?: readonly SystemRoleSpec[]
+  plans?: readonly TaskPlanStateView[]
 }): React.JSX.Element {
-  const items = officeRoleWorkItems(roleId, workItems)
+  const items = officeRoleWorkItems(roleId, workItems, plans)
   const projectNames = new Map(projects.map((project) => [project.id, project.name]))
   return <section className="office-role-work-items" data-office-role-work-items={roleId}
     aria-label={zh ? '任务与负责人' : 'Tasks and owners'} aria-busy={status.state === 'loading'}>
     <label className="office-role-selector">{zh ? '查看职责' : 'View role'}
       <select value={roleId} data-office-role-selector onChange={(event) => onSelectRole(event.target.value as SystemRoleId)}>
-        {SYSTEM_ROLES.map((role) => <option key={role.id} value={role.id}>{zh ? role.label : role.labelEn}</option>)}
+        <option value="all">{zh ? '全部任务' : 'All tasks'}</option>
+        {roles.map((role) => <option key={role.id} value={role.id}>{zh ? role.label : role.labelEn}</option>)}
       </select>
     </label>
-    <p>{roleId === 'taizi'
+    <p>{roleId === 'all'
       ? zh ? '协调事项：查看各项目的现有任务，进入工作台处理。' : 'Coordination: inspect existing project tasks and continue in the workbench.'
-      : zh ? '仅显示明确设置此角色的任务；负责人以任务分派为准。' : 'Tasks explicitly assigned this role. Owners come from task assignments.'}</p>
+      : zh ? '按已批准方案中的机构职责或原任务角色显示；负责人以实际分派为准。' : 'Uses approved plan responsibilities or recorded task roles. Owners come from assignments.'}</p>
     {status.state === 'loading' && <p role="status">{zh ? '正在读取任务…' : 'Loading tasks…'}</p>}
     {status.state === 'stale' && <p role="alert" data-office-role-work-items-error>{zh ? '任务刷新失败，以下为最近读取的记录。' : 'Task refresh failed. Showing the last available records.'}</p>}
     {status.state !== 'loading' && items.length === 0 && <p data-office-role-work-items-empty>{status.state === 'stale'
       ? zh ? '当前没有可显示的记录。' : 'No records are available.'
-      : roleId === 'taizi' ? zh ? '暂无任务。' : 'No tasks yet.'
+      : roleId === 'all' ? zh ? '暂无任务。' : 'No tasks yet.'
         : zh ? '尚无明确分派给此角色的任务。场景人物不表示已有执行者。' : 'No task has this role. A scene figure does not indicate a configured executor.'}</p>}
     {items.length > 0 && <>
       <p data-office-role-work-items-count={items.length}>{zh ? `显示 ${Math.min(items.length, 20)} / ${items.length} 项` : `Showing ${Math.min(items.length, 20)} of ${items.length}`}</p>

@@ -69,6 +69,7 @@ export const projectWorkspaceApi: Pick<AgentDeskApi,
   | 'prepareProjectGoalTask'
   | 'startProjectGoalTask'
   | 'previewProjectInstitutionMigration'
+  | 'getProjectInstitutionContext'
   | 'applyProjectInstitutionMigration'
   | 'reorderProjectWorkItem'
   | 'setProjectWorkItemAcceptance' | 'acquireProjectWorkItemLease'
@@ -113,6 +114,7 @@ export const projectWorkspaceApi: Pick<AgentDeskApi,
     invokeProjectWorkspace('update', id, patch, options),
   previewProjectInstitutionMigration: (id: string, input: ProjectInstitutionMigrationPreviewInput) =>
     invokeProjectWorkspace('institutions:preview', id, input),
+  getProjectInstitutionContext: (input) => invokeProjectWorkspace('institutions:context', input),
   applyProjectInstitutionMigration: (id: string, input: ProjectInstitutionMigrationApplyInput) =>
     invokeProjectWorkspace('institutions:apply', id, input),
   mutateProjectConnector: (projectId: string, resourceId: string, mutation: ProjectConnectorMutation, options?: MutationOptions) =>

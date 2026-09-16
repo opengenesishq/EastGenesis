@@ -5,8 +5,28 @@ import {
   type ProjectInstitutionTemplateRef,
   type ProjectInstitutionRoleMapping
 } from '../../shared/project-institution-template'
+import type { ProjectInstitutionContext, ProjectInstitutionContextInput } from '../../shared/project-institution-template'
+import type { ProjectWorkspaceState } from '../../shared/project-workspace-types'
 import { openProjectWorkspaceStore } from './store'
 import { assertInstitutionMigrationEvents, currentInstitutionRoleMappings } from './institution-migration'
+
+export function projectInstitutionContext(state: ProjectWorkspaceState, input: ProjectInstitutionContextInput): ProjectInstitutionContext {
+  const workspace = state.workspaces.find(item => item.id === input.projectId && item.status !== 'deleted')
+  if (!workspace) throw new Error('机构所属项目不存在或不可用')
+  const workItem = input.workItemId ? state.workItems.find(item => item.id === input.workItemId && item.projectId === workspace.id) : undefined
+  if (input.workItemId && !workItem) throw new Error('机构职责与原任务归属不一致')
+  if (input.goalId && workItem && workItem.goalId !== input.goalId) throw new Error('机构职责与原目标归属不一致')
+  const goalId = input.goalId ?? workItem?.goalId
+  if (goalId && !state.goals.some(goal => goal.id === goalId && goal.projectId === workspace.id)) throw new Error('机构职责与原目标归属不一致')
+  const settings = goalId || workItem
+    ? resolveGoalInstitutionSettings(workspace, state.events, goalId, workItem?.id)
+    : { template: projectInstitutionTemplate(workspace.institutionTemplate).ref,
+        roleMappings: currentInstitutionRoleMappings(workspace, state.events) }
+  const recordedRoleIds = [...new Set(state.workItems.filter(item => item.projectId === workspace.id &&
+    (goalId ? item.goalId === goalId : workItem ? item.id === workItem.id : true)).flatMap(item => item.role ? [item.role] : []))].sort()
+  return { projectId: workspace.id, ...(goalId ? { goalId } : {}), ...(workItem ? { workItemId: workItem.id } : {}),
+    workspaceRevision: workspace.revision, ...settings, recordedRoleIds }
+}
 
 /** Migration changes future Goals. The first migration covering an existing Goal freezes its prior template. */
 export function resolveGoalInstitutionTemplate(

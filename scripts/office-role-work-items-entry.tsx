@@ -10,6 +10,8 @@ import PalaceInstitutionWorkItem from '../src/renderer/src/components/office/Pal
 import { palaceInstitutionExecution } from '../src/renderer/src/components/office/palaceActions'
 import { useStore, type SessionState } from '../src/renderer/src/store'
 import type { WorkflowRunSummary } from '../src/shared/types'
+import { useOfficeInstitutions } from '../src/renderer/src/components/office/useOfficeInstitutions'
+import { DEFAULT_PROJECT_INSTITUTION_TEMPLATE, LEGACY_PROJECT_INSTITUTION_TEMPLATE, type ProjectInstitutionContext } from '../src/shared/project-institution-template'
 
 const fixtureWindow = window as typeof window & {
   IS_REACT_ACT_ENVIRONMENT: boolean
@@ -35,7 +37,7 @@ fixtureWindow.runOfficeRoleHarness = async () => {
   const calls: string[] = []
   const navigation = { openProjectWorkspace: (id: string) => calls.push(`project:${id}`), setView: (view: 'list') => calls.push(`view:${view}`) }
   function Harness({ workItems = items, status = { state: 'ready' } }: { workItems?: WorkItem[]; status?: OfficeOperationStatus }) {
-    const [role, setRole] = useState<SystemRoleId>('taizi')
+    const [role, setRole] = useState<SystemRoleId>('all')
     return <OfficeRoleWorkItems roleId={role} onSelectRole={setRole} workItems={workItems} projects={projects}
       status={status} zh onOpen={(item) => openOfficeWorkItem(item, navigation)} />
   }
@@ -66,7 +68,7 @@ fixtureWindow.runOfficeRoleHarness = async () => {
     assert(read('[data-office-role-work-items-empty]')?.textContent?.includes('尚无明确分派'), 'unconfigured role claimed readiness')
     assert(!read('[data-office-open-role-work-item]'), 'empty role has a synthetic runnable task')
     passed('unconfigured-role-shows-no-executor-or-task-claim')
-    await selectRole('taizi')
+    await selectRole('all')
     await act(async () => read('[data-office-open-role-work-item="work:owner"]')!.click())
     const target = takeProjectWorkspaceNavigation('project:actual')
     assert(target?.workItemId === 'work:owner' && target.focus === 'work-item', 'navigation lost canonical WorkItem')
@@ -143,6 +145,44 @@ fixtureWindow.runOfficeRoleHarness = async () => {
       assert(!crossProject.sessionId && !crossGoal.sessionId && !duplicates.sessionId, 'untrusted run identity exposed task controls')
       passed('patrol-missing-duplicate-or-other-task-records-cannot-target-old-session')
     } finally { useStore.setState(originalState, true) }
+    const originalBridge = window.agentDesk
+    const context = (projectId: string, legacy = false): ProjectInstitutionContext => ({ projectId, workspaceRevision: 1,
+      template: legacy ? LEGACY_PROJECT_INSTITUTION_TEMPLATE : DEFAULT_PROJECT_INSTITUTION_TEMPLATE,
+      roleMappings: [], recordedRoleIds: legacy ? ['custom-three-departments'] : [] })
+    let releaseOld!: (context: ProjectInstitutionContext) => void
+    const contextCalls: string[] = []
+    window.agentDesk = { ...originalBridge, getProjectInstitutionContext: async input => {
+      contextCalls.push(input.projectId)
+      if (input.projectId === 'old') return await new Promise<ProjectInstitutionContext>(resolve => { releaseOld = resolve })
+      if (input.projectId === 'broken') throw new Error('fixture read failure')
+      return context(input.projectId, input.projectId === 'legacy')
+    } }
+    function InstitutionHarness({ projectId }: { projectId?: string }) {
+      const data = useOfficeInstitutions(projectId, undefined, [], false)
+      return <div data-institution-context={data.context?.projectId ?? ''} data-institution-loading={String(data.loading)}>
+        {data.roles.map(role => <span key={role.id} data-institution-role={role.id}>{role.label}</span>)}
+        {data.error && <p role="alert">{data.error}</p>}
+      </div>
+    }
+    try {
+      await act(async () => root.render(<InstitutionHarness />))
+      assert(read('[data-institution-role="huangdi"]') && !read('[data-institution-role="taizi"]'), 'new scene did not default to Cabinet')
+      assert(contextCalls.length === 0, 'empty scene required a project or made a request')
+      passed('empty-scene-defaults-to-cabinet-without-writing-or-starting-agents')
+      await act(async () => root.render(<InstitutionHarness projectId="old" />))
+      assert(read('[data-institution-loading="true"]') && !read('[data-institution-role]'), 'unread project inherited unrelated roles')
+      await act(async () => root.render(<InstitutionHarness projectId="new" />))
+      await act(async () => releaseOld(context('old', true)))
+      assert(read('[data-institution-context="new"]') && !read('[data-institution-role="taizi"]'), 'late historical response replaced selected project')
+      passed('task-switch-discards-late-institution-response')
+      await act(async () => root.render(<InstitutionHarness projectId="legacy" />))
+      assert(read('[data-institution-role="taizi"]') && read('[data-institution-role="xichang"]') && read('[data-institution-role="custom-three-departments"]'), 'recorded legacy or custom identity disappeared')
+      assert(!read('[data-institution-role="huangdi"]'), 'old context silently adopted a new template')
+      passed('legacy-context-retains-recorded-identities-and-custom-roles')
+      await act(async () => root.render(<InstitutionHarness projectId="broken" />))
+      assert(read('[role="alert"]') && !read('[data-institution-role]'), 'failed context kept another tasks institutions')
+      passed('failed-context-clears-roles-and-shows-a-readable-error')
+    } finally { window.agentDesk = originalBridge }
     return checks
   } finally { await act(async () => root.unmount()) }
 }

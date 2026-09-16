@@ -114,6 +114,15 @@ export const PROJECT_INSTITUTION_MIGRATION_EVENT = 'institution-template-migrate
 export interface ProjectInstitutionRoleMapping { sourceRoleId: string; institutionId: string }
 export interface ProjectInstitutionRoleCandidate { id: string; label: string; recordedWorkCount: number }
 
+/** Read-only scene context, resolved from the same migration receipts as planning. */
+export interface ProjectInstitutionContextInput { projectId: string; goalId?: string; workItemId?: string }
+export interface ProjectInstitutionContext extends ProjectInstitutionContextInput {
+  workspaceRevision: number
+  template: ProjectInstitutionTemplateRef
+  roleMappings: ProjectInstitutionRoleMapping[]
+  recordedRoleIds: string[]
+}
+
 export interface ProjectInstitutionMigrationPreviewInput {
   scope: 'future_goals'
   target: ProjectInstitutionTemplateRef

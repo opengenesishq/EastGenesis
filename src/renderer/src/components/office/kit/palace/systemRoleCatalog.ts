@@ -1,4 +1,6 @@
 import type { PalacePoint } from './palaceWorldLayout'
+import { DEFAULT_PROJECT_INSTITUTION_TEMPLATE, projectInstitutionTemplate, type ProjectInstitutionTemplateRef } from '../../../../../../shared/project-institution-template'
+import type { PalaceAction } from '../../palaceActions'
 
 /**
  * Governance projections shown in the command hall.
@@ -8,17 +10,7 @@ import type { PalacePoint } from './palaceWorldLayout'
  * navigation command that reads the canonical chain:
  * Goal -> WorkItem -> Run -> Effect -> Artifact -> Evidence -> Acceptance -> Recovery.
  */
-export type SystemRoleId =
-  | 'taizi'
-  | 'neige'
-  | 'dongchang'
-  | 'xichang'
-  | 'libu'
-  | 'hubu'
-  | 'libu_ritual'
-  | 'bingbu'
-  | 'xingbu'
-  | 'gongbu'
+export type SystemRoleId = string
 
 export type SystemRoleActionId =
   | 'open_command_hall'
@@ -51,6 +43,9 @@ export interface SystemRoleSpec {
   cameraPosition: PalacePoint
   cameraTarget: PalacePoint
   actions: readonly SystemRoleAction[]
+  /** Only existing authored seats produce 3D hotspots; all roles remain in the panel. */
+  sceneHotspot?: boolean
+  workAction?: PalaceAction
 }
 
 const commandHallAction: SystemRoleAction = {
@@ -61,7 +56,7 @@ const summonCouncilAction: SystemRoleAction = {
 }
 
 /** Stable catalog for all authored central-hall governance roles. */
-export const SYSTEM_ROLES: readonly SystemRoleSpec[] = [
+export const LEGACY_SYSTEM_ROLES: readonly SystemRoleSpec[] = [
   {
     id: 'taizi', anchor: 'ROLE_TAIZI', label: '太子', labelEn: 'Crown prince', group: 'council',
     duty: '授权代办、召集议政、确认全局意图', dutyEn: 'Authorized delegation, summoning and intent review',
@@ -130,6 +125,41 @@ export const SYSTEM_ROLES: readonly SystemRoleSpec[] = [
   }
 ]
 
-export function systemRoleById(id: SystemRoleId): SystemRoleSpec | undefined {
-  return SYSTEM_ROLES.find((role) => role.id === id)
+export function systemRolesForTemplate(ref: ProjectInstitutionTemplateRef, recordedRoleIds: readonly string[] = []): readonly SystemRoleSpec[] {
+  const template = projectInstitutionTemplate(ref)
+  const workActions: Record<string, PalaceAction> = {
+    huangdi: 'desk', neige: 'council', hubu: 'court', bingbu: 'court', xingbu: 'approve',
+    duchayuan: 'urgent', liuke: 'inspect', dalisi: 'council', wujun_dudufu: 'court', tongbing_jiangling: 'court',
+    tongzhengsi: 'urgent', silijian: 'approve', libu: 'patrol', guozijian: 'study', taichangsi: 'study',
+    jinyiwei: 'inspect', dongchang: 'inspect'
+  }
+  const roles: SystemRoleSpec[] = template.roles.map(role => {
+    const authored = LEGACY_SYSTEM_ROLES.find(entry => entry.id === role.id)
+    // Reuse matching seats only. An old Crown Prince/Western Depot model is
+    // never relabelled as the Emperor or another institution.
+    const seat: SystemRoleSpec = authored ?? {
+      id: role.id, anchor: 'HALL_main', label: role.name, labelEn: role.nameEn, group: 'council',
+      duty: role.duty, dutyEn: role.dutyEn, canonicalSource: 'HALL_main', projectionOnly: true,
+      position: [0, 2.4, -13.25], cameraPosition: [0, 15, 2], cameraTarget: [0, 3.2, -14], actions: [commandHallAction]
+    }
+    return { ...seat, label: role.name, labelEn: role.nameEn,
+      duty: ref.templateId === 'legacy-compatible' && authored ? authored.duty : role.duty,
+      dutyEn: ref.templateId === 'legacy-compatible' && authored ? authored.dutyEn : role.dutyEn,
+      sceneHotspot: !!authored, workAction: workActions[role.id] ?? 'audience' }
+  })
+  for (const id of recordedRoleIds) {
+    if (roles.some(role => role.id === id)) continue
+    const authored = LEGACY_SYSTEM_ROLES.find(role => role.id === id)
+    roles.push({ ...(authored ?? roles[0]), id, label: authored?.label ?? id, labelEn: authored?.labelEn ?? id,
+      duty: authored?.duty ?? '原任务中记录的职责，身份与授权以原记录为准',
+      dutyEn: authored?.dutyEn ?? 'Recorded task role; identity and authorization follow the original records',
+      sceneHotspot: !!authored, workAction: 'audience' })
+  }
+  return roles
+}
+
+export const SYSTEM_ROLES = systemRolesForTemplate(DEFAULT_PROJECT_INSTITUTION_TEMPLATE)
+
+export function systemRoleById(id: SystemRoleId, roles: readonly SystemRoleSpec[] = SYSTEM_ROLES): SystemRoleSpec | undefined {
+  return roles.find((role) => role.id === id)
 }

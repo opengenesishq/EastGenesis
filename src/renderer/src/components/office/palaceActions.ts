@@ -23,14 +23,15 @@ export function palaceInstitutionWorkItems(roleId: string, items: readonly WorkI
     for (const event of plan.approvalEvents) {
       if (event.kind !== 'approved' || event.projection?.mode !== 'canonical') continue
       const version = plan.versions.find((entry) => entry.version === event.version && entry.digest === event.digest)
-      if (!version?.institutionTemplate) continue
+      if (!version?.institutionTemplate || version.binding.sessionId !== plan.sessionId || event.sessionId !== plan.sessionId ||
+        version.binding.workspaceId !== event.projection.workspaceId || version.binding.goalId !== event.projection.goalId) continue
       for (const receipt of event.projection.steps) {
         const institution = version.steps.find((step) => step.id === receipt.stepId)?.institution
-        if (institution) institutions.set(receipt.workItemId, institution.id)
+        if (institution) institutions.set(JSON.stringify([event.projection.workspaceId, event.projection.goalId, receipt.workItemId]), institution.id)
       }
     }
   }
-  return items.filter((item) => roleId === 'all' || (institutions.get(item.id) ?? item.role) === roleId)
+  return items.filter((item) => roleId === 'all' || (institutions.get(JSON.stringify([item.projectId, item.goalId, item.id])) ?? item.role) === roleId)
     .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
 }
 

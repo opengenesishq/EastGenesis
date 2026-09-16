@@ -19,18 +19,20 @@ function GovernanceRoleFigure({ role, authoredCharacters, summoned }: { role: Sy
 }
 
 /** Clickable governance projections in HALL_main. No role state is created here. */
-export default function SystemRoleHotspots({ selected, summoned = false, onSelect, onFigureCountChange }: {
+export default function SystemRoleHotspots({ selected, summoned = false, onSelect, onFigureCountChange, roles = SYSTEM_ROLES, zh = true }: {
   selected?: SystemRoleId | null
   summoned?: boolean
   onSelect: (id: SystemRoleId) => void
   onFigureCountChange?: (count: number) => void
+  roles?: readonly SystemRoleSpec[]
+  zh?: boolean
 }): React.JSX.Element {
   const [authoredCharacters, setAuthoredCharacters] = useState<Group | null>(() => getLatestPalaceResource()?.authoredCharacters ?? null)
   useEffect(() => subscribePalaceResource(() => setAuthoredCharacters(getLatestPalaceResource()?.authoredCharacters ?? null)), [])
   useEffect(() => {
-    onFigureCountChange?.(SYSTEM_ROLES.filter((role) => authoredCharacters?.getObjectByName(`CHAR_${role.id}`)).length)
-  }, [authoredCharacters, onFigureCountChange])
-  return <>{SYSTEM_ROLES.map((role) => <group key={role.id} position={role.position}
+    onFigureCountChange?.(roles.filter((role) => role.sceneHotspot !== false && authoredCharacters?.getObjectByName(`CHAR_${role.id}`)).length)
+  }, [authoredCharacters, onFigureCountChange, roles])
+  return <>{roles.filter(role => role.sceneHotspot !== false).map((role) => <group key={role.id} position={role.position}
     userData={{ systemRole: role.id, systemRoleAnchor: role.anchor, systemRoleGroup: role.group, canonicalSource: role.canonicalSource, projectionOnly: true }}>
     <GovernanceRoleFigure role={role} authoredCharacters={authoredCharacters} summoned={summoned} />
     <mesh onClick={(event) => { event.stopPropagation(); onSelect(role.id) }}
@@ -40,11 +42,11 @@ export default function SystemRoleHotspots({ selected, summoned = false, onSelec
       <meshBasicMaterial transparent opacity={0.01} depthWrite={false} />
     </mesh>
     <Html position={[0, 2, 0]} center>
-      <button className="office-domain-marker" aria-label={`${role.label}：${role.duty}`} title={role.duty}
+      <button className="office-domain-marker" aria-label={`${zh ? role.label : role.labelEn}：${zh ? role.duty : role.dutyEn}`} title={zh ? role.duty : role.dutyEn}
         aria-pressed={selected === role.id} data-office-system-role={role.id}
         data-office-system-role-anchor={role.anchor} data-office-system-role-group={role.group}
         data-office-system-role-projection="true" onClick={() => onSelect(role.id)}>
-        {role.label}
+        {zh ? role.label : role.labelEn}
       </button>
     </Html>
   </group>)}</>

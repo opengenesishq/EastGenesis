@@ -30,7 +30,7 @@ try {
   execFileSync(require('electron'), [path.join(repoRoot, 'scripts', 'office-role-work-items-electron.cjs'), htmlPath, checksPath],
     { cwd: repoRoot, env, encoding: 'utf8', timeout: 35_000, stdio: ['ignore', 'pipe', 'pipe'] })
   const result = JSON.parse(readFileSync(checksPath, 'utf8'))
-  assert.equal(result.checks.length, 15)
+  assert.equal(result.checks.length, 19)
   assert(result.checks.every((check) => check.status === 'passed'))
   report.checks = result.checks
   report.electron = result.electron

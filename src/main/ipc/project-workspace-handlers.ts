@@ -83,6 +83,8 @@ import { previewProjectKnowledge } from '../project-workspace/project-knowledge-
 import { searchProjectKnowledge } from '../project-workspace/project-knowledge-search'
 import { getProjectPortfolioStore } from '../project-portfolio/store'
 import { inspectProjectAuthorization } from '../project-workspace/project-authorization'
+import { projectInstitutionContext } from '../project-workspace/institution-goal-binding'
+import type { ProjectInstitutionContextInput } from '../../shared/project-institution-template'
 import type { ProjectDependencyInput, ProjectMilestoneInput, ProjectMilestonePatch } from '../../shared/project-portfolio-types'
 
 const WORKSPACE_KEYS = new Set([
@@ -170,6 +172,14 @@ const PROJECT_WORKSPACE_HANDLERS: Record<string, ProjectWorkspaceHandler> = {
     return workspaces
   }),
   get: (rawId) => withStore((store) => store.getWorkspace(assertUserManagedWorkspaceId(rawId))),
+  'institutions:context': (rawInput) => withStore(async (store) => {
+    const input = normalizeInput<ProjectInstitutionContextInput>(rawInput, new Set(['projectId', 'goalId', 'workItemId']), 'institution context')
+    for (const [key, value] of Object.entries(input)) {
+      if (typeof value !== 'string' || !value.trim() || value !== value.trim() || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`Invalid institution ${key}`)
+    }
+    if (!input.projectId) throw new Error('Institution context requires a project')
+    return projectInstitutionContext(await store.getState(), input)
+  }),
   'institutions:preview': (rawId, rawInput) => withStore((store) => store.previewInstitutionMigration(
     assertUserManagedWorkspaceId(rawId),
     normalizeInput<ProjectInstitutionMigrationPreviewInput>(rawInput, INSTITUTION_PREVIEW_KEYS, 'institution migration preview')

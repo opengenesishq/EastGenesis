@@ -73,10 +73,14 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
   const inbox = useMemo(() => data.ledger ? adaptCrossProjectWorkInbox(data.ledger, data.projects) : undefined, [data.ledger, data.projects])
   const urgentReports = useMemo(() => palaceUrgentReports(inbox?.items ?? [], Object.values(sessions), data.ledger?.runs.items ?? []), [inbox, sessions, data.ledger])
   const institutionRoles = useMemo(() => {
-    const byId = new Map([...projectInstitutionTemplate(DEFAULT_PROJECT_INSTITUTION_TEMPLATE).roles,
-      ...projectInstitutionTemplate(LEGACY_PROJECT_INSTITUTION_TEMPLATE).roles].map((role) => [role.id, role]))
+    const byId = new Map([...projectInstitutionTemplate(LEGACY_PROJECT_INSTITUTION_TEMPLATE).roles,
+      ...projectInstitutionTemplate(DEFAULT_PROJECT_INSTITUTION_TEMPLATE).roles].map((role) => [role.id, role]))
+    for (const item of data.items) {
+      if (item.role && !byId.has(item.role)) byId.set(item.role, { id: item.role, name: item.role, nameEn: item.role,
+        duty: '原任务记录的职责', dutyEn: 'Recorded task role', participation: 'legacy' })
+    }
     return [...byId.values()]
-  }, [])
+  }, [data.items])
   const patrolItems = institutionItems
   useEffect(() => { panel.current?.focus(); return () => { taskNavigation.current++ } }, [])
   const openWorkItem = (item: Pick<WorkItem, 'id' | 'projectId'>): void => {
