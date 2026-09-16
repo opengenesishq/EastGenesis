@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { StudioResultSnapshot } from '../../../../shared/studio-result-types'
 import type { StudioResultFileCheck, StudioResultFileObservation } from '../../../../shared/studio-result-file-change-types'
+import type { StudioResultRerunPreview } from '../../../../shared/studio-result-rerun-types'
 
 export default function StudioResultFileChanges({ sessionId, snapshot, language, onRefresh }: {
   sessionId: string
@@ -11,6 +12,7 @@ export default function StudioResultFileChanges({ sessionId, snapshot, language,
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<StudioResultFileCheck>()
   const [error, setError] = useState('')
+  const [preview, setPreview] = useState<StudioResultRerunPreview>()
   const en = language === 'en'
   const check = async (): Promise<void> => {
     setBusy(true)
@@ -26,6 +28,13 @@ export default function StudioResultFileChanges({ sessionId, snapshot, language,
   const workTitle = (id: string): string => snapshot?.workItems.find(item => item.id === id)?.title ?? id
   const changedFiles = result?.files.filter(file => file.state === 'modified' || file.state === 'unavailable') ?? []
   const unchecked = result?.files.filter(file => file.state === 'not_checkable').length ?? 0
+  const previewRerun = async (workItemId: string): Promise<void> => {
+    if (!result?.planDigest) return
+    setBusy(true); setError(''); setPreview(undefined)
+    try { setPreview(await window.agentDesk.previewStudioResultRerun(sessionId, { planDigest: result.planDigest, workItemId })) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+    finally { setBusy(false) }
+  }
   return (
     <section className="studio-result-section" data-studio-result-file-changes>
       <div className="studio-result-row-head">
@@ -54,6 +63,17 @@ export default function StudioResultFileChanges({ sessionId, snapshot, language,
         </li>)}</ul>}
         {result.reviewWorkItemIds.length > 0 && <p>{en ? 'Review before rerunning: ' : '需先确认人工修改，再重跑：'}{result.reviewWorkItemIds.map(workTitle).join('、')}</p>}
         {result.rerunWorkItemIds.length > 0 && <p>{en ? 'Affected downstream work: ' : '受影响的下游工作：'}{result.rerunWorkItemIds.map(workTitle).join('、')}</p>}
+        {result.rerunWorkItemIds.length > 0 && result.planDigest && <div className="studio-result-rerun-actions">
+          {result.rerunWorkItemIds.map(id => <button key={id} type="button" disabled={busy} onClick={() => void previewRerun(id)}>
+            {en ? `Preview rerun: ${workTitle(id)}` : `预览局部重跑：${workTitle(id)}`}
+          </button>)}
+        </div>}
+        {preview && <div className="studio-result-rerun-preview" role="status">
+          <strong>{en ? 'Rerun preview' : '局部重跑预览'}</strong>
+          <p>{preview.state === 'ready' ? (en ? 'Ready after explicit child-task authorization.' : '预览可用；仍需对子任务明确授权后才能执行。') : preview.blockedReasons.join('；')}</p>
+          {preview.outputs.length > 0 && <ul>{preview.outputs.map(file => <li key={file.artifactId}>{file.relativeOutputPath}</li>)}</ul>}
+          {preview.protectedFiles.length > 0 && <p>{en ? 'Protected edited files: ' : '受保护的人工修改文件：'}{preview.protectedFiles.map(file => file.path).join('、')}</p>}
+        </div>}
         {changedFiles.length > 0 && <p className="studio-result-muted">{en ? 'No files were overwritten and no tasks were restarted.' : '本次检查未覆盖文件，也未重新启动任务。'}</p>}
       </div>}
     </section>

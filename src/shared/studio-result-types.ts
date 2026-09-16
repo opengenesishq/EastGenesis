@@ -349,6 +349,7 @@ export interface StudioResultSaveResult {
 
 export interface StudioResultApi {
   checkStudioResultFiles(sessionId: string): Promise<import('./studio-result-file-change-types').StudioResultFileCheck>
+  previewStudioResultRerun(sessionId: string, input: import('./studio-result-rerun-types').StudioResultRerunInput): Promise<import('./studio-result-rerun-types').StudioResultRerunPreview>
   getStudioResultSnapshot(sessionId: string): Promise<StudioResultSnapshot>
   queryStudioAuditTimeline(
     sessionId: string,
