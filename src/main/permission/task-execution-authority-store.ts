@@ -47,7 +47,7 @@ export class TaskExecutionAuthorityStore {
     catch (error) { bindingError = errorText(error) }
     if (!record) return { schemaVersion: 1, sessionId: meta.id, revision: 0,
       status: meta.taskExecutionAuthorityRequired ? 'revoked' : 'legacy', available: false,
-      directory, bindingDigest, allowedWriteTools: [], pathPatterns: [], unavailableReason: bindingError ?? (meta.taskExecutionAuthorityRequired
+      directory, bindingDigest, allowedWriteTools: [], pathPatterns: [], allowedCommandPatterns: [], unavailableReason: bindingError ?? (meta.taskExecutionAuthorityRequired
         ? '此任务需要独立授权；本机没有有效授权，导入或恢复后请重新授权。'
         : '此任务尚未设置独立文件范围，沿用已有策略和权限；这不代表已授予新的文件权限。') }
     let unavailableReason: string | undefined
@@ -56,7 +56,7 @@ export class TaskExecutionAuthorityStore {
     else if (meta.taskStrategy !== 'execute') unavailableReason = '当前任务意图不允许正式执行；文件范围授权不会把规划或查看升为执行。'
     return { schemaVersion: 1, sessionId: meta.id, revision: record.revision, status: record.status,
       available: unavailableReason === undefined, directory, bindingDigest, unavailableReason,
-      allowedWriteTools: record.allowedWriteTools, pathPatterns: record.pathPatterns, grantedAt: record.grantedAt, revokedAt: record.revokedAt }
+      allowedWriteTools: record.allowedWriteTools, pathPatterns: record.pathPatterns, allowedCommandPatterns: record.allowedCommandPatterns, grantedAt: record.grantedAt, revokedAt: record.revokedAt }
   }
 
   grant(meta: SessionMeta, raw: TaskExecutionAuthorityGrant, actorId: string): TaskExecutionAuthorityView {
@@ -79,7 +79,7 @@ export class TaskExecutionAuthorityStore {
     const current = this.read(meta.id)
     if (current?.status === 'revoked') return this.get(meta)
     const now = Date.now(), revision = (current?.revision ?? 0) + 1
-    const scope = { allowedWriteTools: current?.allowedWriteTools ?? [], pathPatterns: current?.pathPatterns ?? [] }
+    const scope = { allowedWriteTools: current?.allowedWriteTools ?? [], pathPatterns: current?.pathPatterns ?? [], allowedCommandPatterns: current?.allowedCommandPatterns ?? [] }
     const directory = current?.directory ?? realpathSync(meta.cwd)
     this.persist({ schemaVersion: 1, sessionId: meta.id, revision, status: 'revoked', ...scope,
       projectId: current?.projectId ?? meta.projectId, workspaceId: current?.workspaceId ?? meta.workspaceId,
@@ -159,13 +159,23 @@ export function parseTaskExecutionAuthorityRecord(value: unknown, sessionId: str
       typeof event.actorId !== 'string' || !event.actorId.startsWith('local-user:')) || record.events.at(-1)?.status !== record.status) {
     throw new Error('任务执行授权记录损坏，已阻止使用。')
   }
+  // Records written before command-level authorization remain valid and have no command grant.
+  const hadCommandField = Object.prototype.hasOwnProperty.call(record, 'allowedCommandPatterns')
+  record.allowedCommandPatterns = record.allowedCommandPatterns ?? []
+  for (const event of record.events) event.allowedCommandPatterns = event.allowedCommandPatterns ?? []
   for (const event of [record, ...record.events]) {
     if (event.status === 'revoked' && Array.isArray(event.allowedWriteTools) && event.allowedWriteTools.length === 0 &&
       Array.isArray(event.pathPatterns) && event.pathPatterns.length === 0) continue
     normalizeTaskExecutionAuthorityScope(event)
   }
   const last = record.events.at(-1)!
-  if (hash([record.allowedWriteTools, record.pathPatterns]) !== hash([last.allowedWriteTools, last.pathPatterns])) throw new Error('任务执行范围与最后授权事件不一致。')
+  const recordScopeDigest = hadCommandField
+    ? hash([record.allowedWriteTools, record.pathPatterns, record.allowedCommandPatterns])
+    : hash([record.allowedWriteTools, record.pathPatterns])
+  const eventScopeDigest = hadCommandField
+    ? hash([last.allowedWriteTools, last.pathPatterns, last.allowedCommandPatterns])
+    : hash([last.allowedWriteTools, last.pathPatterns])
+  if (recordScopeDigest !== eventScopeDigest) throw new Error('任务执行范围与最后授权事件不一致。')
   return record
 }
 
@@ -181,7 +191,7 @@ function directoryIdentity(directory: string): DirectoryIdentity {
 }
 function assertRevision(raw: TaskExecutionAuthorityMutation, current: number, grant = false): void {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).some(key =>
-    key !== 'expectedRevision' && !(grant && ['allowedWriteTools', 'pathPatterns', 'expectedBindingDigest'].includes(key))) ||
+    key !== 'expectedRevision' && !(grant && ['allowedWriteTools', 'pathPatterns', 'allowedCommandPatterns', 'expectedBindingDigest'].includes(key))) ||
     !Number.isSafeInteger(raw.expectedRevision) || raw.expectedRevision < 0 || raw.expectedRevision !== current) throw new Error('任务执行授权版本已变化，请刷新后重试。')
 }
 function assertActor(value: string): void {

@@ -12,6 +12,8 @@ export interface TaskExecutionAuthorityGrant extends TaskExecutionAuthorityMutat
   allowedWriteTools: readonly TaskExecutionAuthorityWriteTool[]
   /** Relative globs under the current real task directory; never absolute paths. */
   pathPatterns: readonly string[]
+  /** Exact complete bash commands, matched verbatim without wildcard expansion. Omitted means no command authority. */
+  allowedCommandPatterns?: readonly string[]
 }
 
 export interface TaskExecutionAuthorityView {
@@ -26,6 +28,7 @@ export interface TaskExecutionAuthorityView {
   unavailableReason?: string
   allowedWriteTools: readonly TaskExecutionAuthorityWriteTool[]
   pathPatterns: readonly string[]
+  allowedCommandPatterns: readonly string[]
   grantedAt?: number
   revokedAt?: number
 }

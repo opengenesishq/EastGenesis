@@ -92,6 +92,16 @@ async function main() {
       assert.throws(() => f.store.assertAllowed(f.meta, 'write_file', { path: 'reports/link/escape.md' }, f.cwd), /符号链接/)
       assert.equal(existsSync(join(f.data, 'escape.md')), false)
     })
+    await check('bash requires an independent verbatim command grant and supports command-only scopes', () => {
+      const f = fixture()
+      assert.throws(() => f.store.grant(f.meta, f.request({ allowedWriteTools: [], allowedCommandPatterns: ['npm test -- --runInBand'] }), 'local-user:fixture'), /文件授权必须同时指定/)
+      const commandOnly = f.grant({ allowedWriteTools: [], pathPatterns: [], allowedCommandPatterns: ['npm test -- --runInBand'] })
+      f.store.assertAllowed(f.meta, 'bash', { command: 'npm test -- --runInBand' }, f.cwd, commandOnly.revision)
+      assert.throws(() => f.store.assertAllowed(f.meta, 'bash', { command: 'npm test -- --runInBand ' }, f.cwd, commandOnly.revision), /没有匹配/)
+      assert.throws(() => f.store.assertAllowed(f.meta, 'bash', { command: 'npm test -- --runInBand && touch reports/x' }, f.cwd, commandOnly.revision), /没有匹配/)
+      assert.throws(() => f.store.assertAllowed(f.meta, 'bash', { command: 'git diff' }, f.cwd, commandOnly.revision), /没有匹配/)
+      assert.throws(() => f.store.assertAllowed(f.meta, 'write_file', { path: 'reports/nope.md' }, f.cwd, commandOnly.revision), /阻止此工具/)
+    })
     await check('relative globs include root files without matching cwd ancestry; previews bind the actual current root', () => {
       const f = fixture()
       f.grant({ pathPatterns: ['**/*'] })
