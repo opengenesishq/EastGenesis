@@ -13,13 +13,58 @@ import { verifyProductionProjectMutation } from '../project-aggregate/project-mu
 import { assertTrustedWorkflowLedgerSender } from './workflow-ledger-handlers'
 import { importLegacyProjectMemory, previewLegacyProjectMemory } from '../memory/legacy-memory-import'
 import type { LegacyMemoryImportInput } from '../../shared/legacy-memory-import-types'
+import {
+  addMemory, archiveStaleMemories, deleteMemory, exportMemories, listMemories, searchMemories, updateMemory,
+  type MemoryScope, type MemorySearchInput, type MemoryUpdateInput
+} from '../memory/memory-manager'
 
 export interface ProjectMemoryIpcOptions {
   memoryRoot: () => string
   targetForSession: (sessionId: string) => ProjectMemoryTarget | null
+  taskScopeForSession: (sessionId: string) => Promise<MemoryScope>
 }
 
 export function registerProjectMemoryIpc(options: ProjectMemoryIpcOptions): void {
+  const scopeFor = async (sessionId?: string): Promise<MemoryScope> => sessionId === undefined
+    ? {}
+    : options.taskScopeForSession(sessionId)
+  ipcMain.handle('memory:taskAdd', async (event, sessionId: string, input: { title: string; body: string }) => {
+    assertTrustedWorkflowLedgerSender(event)
+    requiredTarget(options, sessionId)
+    const scope = await scopeFor(sessionId)
+    if (!scope.sessionId) throw new Error('必须指定当前任务')
+    return addMemory(options.memoryRoot(), {
+      ...scope, layer: 'working', title: input?.title, body: input?.body, source: 'user'
+    })
+  })
+  ipcMain.handle('memory:layeredList', async (event, sessionId?: string) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return listMemories(options.memoryRoot(), await scopeFor(sessionId))
+  })
+  ipcMain.handle('memory:layeredSearch', async (event, sessionId: string | undefined, input: MemorySearchInput) => {
+    assertTrustedWorkflowLedgerSender(event)
+    const scope = await scopeFor(sessionId)
+    return searchMemories(options.memoryRoot(), {
+      query: input?.query, layers: input?.layers, limit: input?.limit, includeArchived: input?.includeArchived,
+      ...scope
+    })
+  })
+  ipcMain.handle('memory:layeredArchive', (event, olderThanDays?: number) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return archiveStaleMemories(options.memoryRoot(), olderThanDays)
+  })
+  ipcMain.handle('memory:layeredExport', (event) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return exportMemories(options.memoryRoot())
+  })
+  ipcMain.handle('memory:layeredUpdate', async (event, entryId: string, input: MemoryUpdateInput, sessionId?: string) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return updateMemory(options.memoryRoot(), entryId, input ?? {}, await scopeFor(sessionId))
+  })
+  ipcMain.handle('memory:layeredDelete', async (event, entryId: string, sessionId?: string) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return deleteMemory(options.memoryRoot(), entryId, await scopeFor(sessionId))
+  })
   ipcMain.handle('memory:legacyPreview', async (event, sessionId: string) => {
     assertTrustedWorkflowLedgerSender(event)
     const target = requiredTarget(options, sessionId)
@@ -70,6 +115,7 @@ async function verifiedMemoryMutation<T>(
 }
 
 function requiredTarget(options: ProjectMemoryIpcOptions, sessionId: string): ProjectMemoryTarget {
+  if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('必须指定当前任务')
   const target = options.targetForSession(sessionId)
   if (!target) throw new Error('会话不存在')
   return target

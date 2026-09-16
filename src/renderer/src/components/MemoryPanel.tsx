@@ -27,11 +27,11 @@ interface Props {
 }
 
 /**
- * 项目记忆管理面板。
+ * 当前任务与项目记忆管理面板。
  * - readProjectMemory 拉取 confirmed 条目(entries)与待确认草稿(drafts)
  * - drafts: 采纳(acceptMemoryDraft)/ 删除(deleteMemoryEntry)
  * - confirmed: 删除(deleteMemoryEntry)
- * - 顶部表单:添加记忆(proposeMemoryDraft),提交后落入 drafts 待用户采纳
+ * - 顶部表单:任务记忆直接保存，项目记忆提交后落入 drafts 待用户采纳
  *
  * 直接调用 window.agentDesk.*(与 SettingsModal 的迁移/健康检查同风格),
  * 无需经 store。所有 IPC 在 acting 期间禁用按钮避免并发竞态。
@@ -53,6 +53,7 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
   const [layeredDraft, setLayeredDraft] = useState({ title: '', body: '', expectedUpdatedAt: '' })
 
   const [showForm, setShowForm] = useState(false)
+  const [formScope, setFormScope] = useState<'task' | 'project'>('task')
   const [revising, setRevising] = useState<ProjectMemoryEntry | null>(null)
   const [form, setForm] = useState({ ...EMPTY_FORM })
   const [reviewForm, setReviewForm] = useState({ ...EMPTY_REVIEW_FORM })
@@ -93,6 +94,7 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
 
   useEffect(() => {
     if (!initialForm) return
+    setFormScope('project')
     setForm({ ...EMPTY_FORM, ...initialForm })
     setShowForm(true)
   }, [initialForm])
@@ -105,14 +107,18 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
     setActing(true)
     setError('')
     try {
-      await window.agentDesk.proposeMemoryDraft(sessionId, {
-        kind: form.kind.trim() || 'note',
-        title: form.title.trim(),
-        body: form.body.trim(),
-        source: 'user',
-        reason: form.reason.trim(),
-        supersedes: revising?.id
-      })
+      if (formScope === 'task') {
+        await window.agentDesk.addTaskMemory(sessionId, { title: form.title.trim(), body: form.body.trim() })
+      } else {
+        await window.agentDesk.proposeMemoryDraft(sessionId, {
+          kind: form.kind.trim() || 'note',
+          title: form.title.trim(),
+          body: form.body.trim(),
+          source: 'user',
+          reason: form.reason.trim(),
+          supersedes: revising?.id
+        })
+      }
       setForm({ ...EMPTY_FORM })
       setRevising(null)
       setShowForm(false)
@@ -272,13 +278,14 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
   return (
     <div className="memory-panel" data-memory-panel="true">
       <div className="settings-section-head">
-        <h3 className="settings-h3">项目记忆</h3>
+        <h3 className="settings-h3">任务与项目记忆</h3>
         <div className="memory-panel-actions">
           <button
             className="btn btn-ghost btn-sm"
             disabled={acting}
             onClick={() => {
               setRevising(null)
+              setFormScope('task')
               setForm({ ...EMPTY_FORM })
               setShowForm((v) => !v)
             }}
@@ -293,7 +300,7 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
         </div>
       </div>
       <p className="settings-hint">
-        记忆按项目隔离，修订草稿确认后生效。记忆提供上下文，不授予工具权限。
+        任务记忆只供当前任务使用，保存后生效；项目记忆供同项目任务共享，草稿确认后生效。记忆不授予工具权限。
       </p>
 
       <LegacyMemoryImportPanel key={sessionId} sessionId={sessionId} onImported={load} />
@@ -382,15 +389,25 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
 
       {showForm && (
         <div className="memory-form" data-memory-form="true">
+          <label className="field-label">使用范围</label>
+          <select className="input input-block" data-memory-form-field="scope" value={formScope}
+            disabled={acting || Boolean(revising)} onChange={(event) => setFormScope(event.target.value as 'task' | 'project')}>
+            <option value="task">仅当前任务</option>
+            <option value="project">当前项目共享</option>
+          </select>
           {revising && <div className="field-hint">修订 v{revising.version} · {revising.source}。确认新版本前，当前版本继续生效。</div>}
-          <label className="field-label">类型</label>
-          <input
-            className="input input-block"
-            data-memory-form-field="kind"
-            value={form.kind}
-            placeholder="note / convention / gotcha …"
-            onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value }))}
-          />
+          {formScope === 'project' && (
+            <>
+              <label className="field-label">类型</label>
+              <input
+                className="input input-block"
+                data-memory-form-field="kind"
+                value={form.kind}
+                placeholder="note / convention / gotcha …"
+                onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value }))}
+              />
+            </>
+          )}
           <label className="field-label">标题</label>
           <input
             className="input input-block"
@@ -408,16 +425,18 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
             placeholder="记忆正文"
             onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
           />
-          <label className="field-label">
-            理由 <span className="field-hint">可选</span>
-          </label>
-          <input
-            className="input input-block"
-            data-memory-form-field="reason"
-            value={form.reason}
-            placeholder="为什么值得记住"
-            onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
-          />
+          {formScope === 'project' && (
+            <>
+              <label className="field-label">理由 <span className="field-hint">可选</span></label>
+              <input
+                className="input input-block"
+                data-memory-form-field="reason"
+                value={form.reason}
+                placeholder="为什么值得记住"
+                onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
+              />
+            </>
+          )}
           <div className="modal-actions">
             <button
               className="btn btn-primary btn-sm"
@@ -425,7 +444,7 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
               disabled={acting}
               onClick={() => void propose()}
             >
-              {acting ? '提交中…' : revising ? '提交修订草稿' : '提交草稿'}
+              {acting ? '保存中…' : formScope === 'task' ? '保存到当前任务' : revising ? '提交修订草稿' : '提交草稿'}
             </button>
           </div>
         </div>
@@ -497,6 +516,7 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
                         disabled={acting}
                         onClick={() => {
                           setRevising(m)
+                          setFormScope('project')
                           setForm({ kind: m.kind, title: m.title, body: m.body, reason: m.reason })
                           setShowForm(true)
                         }}
@@ -518,28 +538,30 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
           <LearningApprovalPanel sessionId={sessionId} refreshToken={learningRefreshToken} onChanged={load} />
 
           <div className="memory-group">
-            <h4 className="settings-h3">分层记忆 · {layered.length}</h4>
+            <h4 className="settings-h3">可用记忆 · {layered.length}</h4>
             {layered.length === 0 ? (
-              <div className="provider-empty">暂无分层记忆</div>
+              <div className="provider-empty">暂无可用记忆</div>
             ) : (
               <div className="provider-list">
                 {layered.map((entry) => {
                   const editing = editingLayeredId === entry.id
                   return (
-                    <div key={entry.id} className="provider-row memory-row">
+                    <div key={entry.id} className="provider-row memory-row" data-layered-memory-id={entry.id}>
                       <div className="provider-row-body">
                         <div className="provider-row-name">
                           {entry.title}
-                          <span className="migrate-kind">{entry.layer}</span>
+                          <span className="migrate-kind">{entry.workItemId || entry.sessionId ? '仅当前任务' : entry.layer === 'user' ? '所有任务共享' : entry.layer === 'working' ? '历史工作记忆 · 项目共享' : '项目共享'}</span>
                         </div>
                         {editing ? (
                           <div className="memory-form">
                             <input
+                              aria-label="记忆标题"
                               className="input input-block"
                               value={layeredDraft.title}
                               onChange={(e) => setLayeredDraft((draft) => ({ ...draft, title: e.target.value }))}
                             />
                             <textarea
+                              aria-label="记忆内容"
                               className="input input-block textarea"
                               rows={3}
                               value={layeredDraft.body}
@@ -549,6 +571,7 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
                         ) : (
                           <div className="provider-row-sub memory-body">{entry.body}</div>
                         )}
+                        <div className="field-hint">来源: {entry.source} · {entry.updatedAt}{entry.archivedAt ? ' · 已归档，不参与检索' : ''}</div>
                       </div>
                       <div className="provider-row-actions">
                         {editing ? (

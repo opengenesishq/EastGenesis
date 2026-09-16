@@ -10,6 +10,9 @@ export interface LayeredMemoryEntry {
   id: string
   layer: MemoryLayer
   projectHash?: string
+  /** Present only on task-owned working memory. Older working entries remain project-shared. */
+  sessionId?: string
+  workItemId?: string
   title: string
   body: string
   source: string
@@ -25,6 +28,8 @@ export interface MemoryWriteInput {
   layer: MemoryLayer
   projectRoot?: string
   projectId?: string
+  sessionId?: string
+  workItemId?: string
   title: string
   body: string
   source: string
@@ -43,6 +48,8 @@ export interface MemorySearchInput {
   query: string
   projectRoot?: string
   projectId?: string
+  sessionId?: string
+  workItemId?: string
   layers?: MemoryLayer[]
   includeArchived?: boolean
   limit?: number
@@ -68,6 +75,8 @@ export function memoryProjectHash(projectRoot: string): string {
 export interface MemoryScope {
   projectRoot?: string
   projectId?: string
+  sessionId?: string
+  workItemId?: string
 }
 
 function scopeHash(scope: MemoryScope): string | undefined {
@@ -79,12 +88,19 @@ function scopeHash(scope: MemoryScope): string | undefined {
 
 function inScope(entry: LayeredMemoryEntry, scope: MemoryScope): boolean {
   const projectHash = scopeHash(scope)
-  return entry.layer === 'user' || Boolean(projectHash && entry.projectHash === projectHash)
+  if (entry.layer === 'user') return true
+  if (!projectHash || entry.projectHash !== projectHash) return false
+  if (entry.workItemId) return entry.workItemId === scope.workItemId
+  return !entry.sessionId || entry.sessionId === scope.sessionId
 }
 
 export async function addMemory(rootDir: string, input: MemoryWriteInput): Promise<LayeredMemoryEntry> {
   const projectHash = scopeHash(input)
   if (input.layer !== 'user' && !projectHash) throw new Error('项目与工作记忆必须绑定项目')
+  const sessionId = input.sessionId === undefined ? undefined : requireText(input.sessionId, 'sessionId')
+  const workItemId = input.workItemId === undefined ? undefined : requireText(input.workItemId, 'workItemId')
+  if ((sessionId || workItemId) && input.layer !== 'working') throw new Error('只有工作记忆可以绑定当前任务')
+  if (workItemId && !input.projectId) throw new Error('工作项记忆必须绑定正式项目')
   return mutateStore(rootDir, async () => {
     const file = await readStore(rootDir)
     const now = new Date().toISOString()
@@ -92,6 +108,8 @@ export async function addMemory(rootDir: string, input: MemoryWriteInput): Promi
       id: randomUUID(),
       layer: input.layer,
       ...(input.layer !== 'user' ? { projectHash } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      ...(workItemId ? { workItemId } : {}),
       title: requireText(input.title, 'title'),
       body: requireText(input.body, 'body'),
       source: requireText(input.source, 'source'),
@@ -142,7 +160,7 @@ export async function deleteMemory(rootDir: string, entryId: string, scope?: Mem
   return mutateStore(rootDir, async () => {
     const file = await readStore(rootDir)
     const entry = file.entries.find((item) => item.id === entryId)
-    if (entry && scope && !inScope(entry, scope)) throw new Error('记忆不属于当前项目')
+    if (entry && scope && !inScope(entry, scope)) throw new Error('记忆不属于当前项目或任务')
     const next = file.entries.filter((entry) => entry.id !== entryId)
     if (next.length === file.entries.length) return false
     await writeStore(rootDir, next)
@@ -161,7 +179,7 @@ export async function updateMemory(
     const index = file.entries.findIndex((entry) => entry.id === entryId)
     if (index === -1) return null
     const current = file.entries[index]
-    if (scope && !inScope(current, scope)) throw new Error('记忆不属于当前项目')
+    if (scope && !inScope(current, scope)) throw new Error('记忆不属于当前项目或任务')
     if (patch.expectedUpdatedAt !== undefined && patch.expectedUpdatedAt !== current.updatedAt) {
       throw new Error('记忆已被修改，请刷新后重新修订')
     }
@@ -263,6 +281,8 @@ function isMemoryEntry(value: unknown): value is LayeredMemoryEntry {
     typeof value.updatedAt === 'string' && Number.isFinite(Date.parse(value.updatedAt)) &&
     typeof value.lastUsedAt === 'string' && Number.isFinite(Date.parse(value.lastUsedAt)) &&
     (value.projectHash === undefined || typeof value.projectHash === 'string') &&
+    (value.sessionId === undefined || (value.layer === 'working' && typeof value.sessionId === 'string' && value.sessionId.trim().length > 0)) &&
+    (value.workItemId === undefined || (value.layer === 'working' && typeof value.workItemId === 'string' && value.workItemId.trim().length > 0)) &&
     Array.isArray(value.tags) &&
     value.tags.every((tag) => typeof tag === 'string') &&
     isRecord(value.vector) && Object.values(value.vector).every((item) => typeof item === 'number' && Number.isFinite(item))

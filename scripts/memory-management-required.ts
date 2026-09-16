@@ -62,6 +62,24 @@ async function main(): Promise<void> {
     assert.equal((await searchMemories(root, { query: 'revisiononly', ...a })).length, 0)
     assert.equal((await searchMemories(root, { query: 'survivor', ...b }))[0].entry.id, ownedB.id)
 
+    const taskA = { ...a, sessionId: 'task-a' }
+    const taskB = { ...a, sessionId: 'task-b' }
+    const taskMemory = await addMemory(root, { ...base, ...taskA, layer: 'working', body: 'taskprivate common' })
+    const sharedWorking = await addMemory(root, { ...base, ...a, layer: 'working', body: 'legacyworking common' })
+    assert.equal(taskMemory.sessionId, taskA.sessionId)
+    assert.ok((await listMemories(root, taskA)).some((entry) => entry.id === taskMemory.id))
+    assert.equal((await listMemories(root, taskB)).some((entry) => entry.id === taskMemory.id), false)
+    assert.equal((await searchMemories(root, { query: 'taskprivate', ...a })).length, 0)
+    assert.equal((await searchMemories(root, { query: 'taskprivate', ...taskB })).length, 0)
+    assert.ok((await listMemories(root, taskB)).some((entry) => entry.id === sharedWorking.id), 'unowned legacy working memory remains project-shared')
+    await assert.rejects(updateMemory(root, taskMemory.id, { body: 'cross-task' }, taskB), /当前项目或任务/)
+    await assert.rejects(deleteMemory(root, taskMemory.id, taskB), /当前项目或任务/)
+    await updateMemory(root, taskMemory.id, { body: 'updatedprivate common', expectedUpdatedAt: taskMemory.updatedAt }, taskA)
+    assert.equal((await searchMemories(root, { query: 'taskprivate', ...taskA })).length, 0)
+    assert.equal((await searchMemories(root, { query: 'updatedprivate', ...taskA }))[0].entry.id, taskMemory.id)
+    await deleteMemory(root, taskMemory.id, taskA)
+    assert.equal((await searchMemories(root, { query: 'updatedprivate', ...taskA })).length, 0)
+
     const decision = createTrustedUserLearningDecision('isolated-memory-fixture')
     const proposal = { kind: 'convention', title: 'Scoped proposal', body: 'approved alpha fact', source: 'fixture-source', reason: '' }
     const first = await proposeMemoryDraft(a, root, proposal)
@@ -116,7 +134,7 @@ async function main(): Promise<void> {
     await writeFile(indexPath, corrupt)
     await assert.rejects(deleteMemory(root, user.id), /original file was preserved/)
     assert.equal(await readFile(indexPath, 'utf8'), corrupt)
-    console.log('Memory management: isolated project scope, concurrent deletion, vector revision, trusted approval, source/version history, profile root, automatic drafts and corrupt-file preservation passed.')
+    console.log('Memory management: project/task isolation, legacy working scope, concurrent deletion, vector revision, trusted approval, source/version history, profile root, automatic drafts and corrupt-file preservation passed.')
   } finally {
     if (previousUserData === undefined) delete process.env.CAOGEN_USER_DATA_DIR
     else process.env.CAOGEN_USER_DATA_DIR = previousUserData

@@ -451,6 +451,7 @@ const api: AgentDeskApi = {
   deleteMemoryEntry: (sessionId: string, entryId: string) =>
     ipcRenderer.invoke('memory:delete', sessionId, entryId),
   listLayeredMemories: (sessionId?: string) => ipcRenderer.invoke('memory:layeredList', sessionId),
+  addTaskMemory: (sessionId: string, input: { title: string; body: string }) => ipcRenderer.invoke('memory:taskAdd', sessionId, input),
   searchLayeredMemories: (sessionId: string | undefined, input: LayeredMemorySearchInput) =>
     ipcRenderer.invoke('memory:layeredSearch', sessionId, input),
   archiveLayeredMemories: (olderThanDays?: number) =>

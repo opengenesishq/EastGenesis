@@ -6,6 +6,8 @@ export interface BuildMemoryPromptInput {
   query: string
   projectRoot?: string
   projectId?: string
+  sessionId?: string
+  workItemId?: string
   layers?: MemoryLayer[]
   limit?: number
 }
@@ -15,6 +17,8 @@ export async function retrieveRelevantMemories(input: BuildMemoryPromptInput): P
     query: input.query,
     projectRoot: input.projectRoot,
     projectId: input.projectId,
+    sessionId: input.sessionId,
+    workItemId: input.workItemId,
     layers: input.layers,
     limit: input.limit
   })

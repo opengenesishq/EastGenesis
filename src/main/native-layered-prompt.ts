@@ -3,6 +3,7 @@ import type { StableMessagePayload } from './stable-message-payload'
 import { buildIdeDocumentContextPrompt } from './ide/ide-document-context'
 import { buildEffectiveMemoryPrompt } from './memory/memory-retriever'
 import { resolveMemoryRoot } from './memory/memory-root'
+import { taskMemoryScope } from './memory/task-memory-scope'
 import { buildDigitalWorkerMemoryPrompt } from './digital-worker/worker-memory'
 import { buildDigitalWorkerExecutionPrompt } from './digital-worker/worker-execution-prompt'
 import { getSettings } from './settings'
@@ -43,8 +44,7 @@ export async function augmentNativePayloadWithLayeredMemory(
     memory = await buildEffectiveMemoryPrompt({
       rootDir: resolveMemoryRoot(workerRoot),
       query: payload.text,
-      projectRoot,
-      projectId,
+      ...await taskMemoryScope(meta, workerRoot),
       limit: 6
     })
     ideDocumentContext = buildIdeDocumentContextPrompt(meta.id)

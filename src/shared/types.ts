@@ -575,6 +575,8 @@ export interface ResponsesConversationContext {
 
 export interface SessionMeta extends BusinessLineBinding, SessionRuntimeRoutingBinding {
   id: string
+  /** Session-only memory identity retained by explicit resume; never inherited by new tasks or forks. */
+  taskMemorySessionId?: string
   title: string
   cwd: string
   /** CaoGen Drive 档位:控制默认模型路由、预算、验证深度和工具权限策略。 */
@@ -667,6 +669,7 @@ export interface SessionMeta extends BusinessLineBinding, SessionRuntimeRoutingB
 }
 export interface HistoryEntry extends BusinessLineBinding, SessionRuntimeRoutingBinding, Pick<SessionMeta, 'budgetUsd'> {
   id: string
+  taskMemorySessionId?: string
   title: string
   cwd: string
   driveMode?: CaoGenDriveMode
@@ -1145,6 +1148,8 @@ export interface LayeredMemoryEntry {
   id: string
   layer: MemoryLayer
   projectHash?: string
+  sessionId?: string
+  workItemId?: string
   title: string
   body: string
   source: string
@@ -2722,6 +2727,7 @@ export interface AgentDeskApi extends TaskEffectRecoveryApi, CouncilApi, Prepara
   proposeMemoryDraft(sessionId: string, input: ProjectMemoryDraftInput): Promise<ProjectMemoryDraft>
   acceptMemoryDraft(sessionId: string, draftId: string): Promise<ProjectMemoryEntry>
   deleteMemoryEntry(sessionId: string, entryId: string): Promise<{ id: string; deleted: boolean; deletedFrom: Array<'confirmed' | 'drafts'> }>
+  addTaskMemory(sessionId: string, input: { title: string; body: string }): Promise<LayeredMemoryEntry>
   listLayeredMemories(sessionId?: string): Promise<LayeredMemoryEntry[]>
   searchLayeredMemories(
     sessionId: string | undefined,

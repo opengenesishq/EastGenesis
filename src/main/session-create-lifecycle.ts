@@ -173,6 +173,9 @@ function createSessionDraftMeta(input: SessionDraftMetaInput): SessionMeta {
   })
   return {
     ...meta,
+    taskMemorySessionId: input.historyMode === 'resume'
+      ? normalizedOptionalId(resumeHistory?.taskMemorySessionId) ?? resumeHistory?.id
+      : undefined,
     executorEngine: opts.executorEngine,
     costUsd: input.historyMode === 'resume' ? resumeHistory?.costUsd ?? meta.costUsd : meta.costUsd,
     businessLineId: opts.businessLineId,

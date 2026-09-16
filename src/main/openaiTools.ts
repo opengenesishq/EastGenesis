@@ -51,6 +51,7 @@ import { resolveExistingProjectPathSync, resolveWritableProjectPathSync } from '
 import { OPENAI_PERMISSION_READ_ONLY_TOOLS, stableValueDigest } from './task/tool-idempotency'
 import { SkillManager } from './skill/skill-manager'
 import { searchMemories, type MemoryLayer } from './memory/memory-manager'
+import { taskMemoryScope } from './memory/task-memory-scope'
 import { resolveMemoryRoot } from './memory/memory-root'
 import { proposeModelMemoryDraft } from './learning/memory-tool-adapter'
 import {
@@ -1206,8 +1207,9 @@ export async function executeCodingTool(
       case 'memory_search': {
         const hits = await searchMemories(resolveMemoryRoot(options.userDataRoot), {
           query: stringArg(args, 'query'),
-          projectRoot: options.sessionMeta?.sourceCwd ?? options.sessionMeta?.cwd ?? cwd,
-          projectId: options.sessionMeta?.workspaceId,
+          ...(options.sessionMeta
+            ? await taskMemoryScope(options.sessionMeta, options.userDataRoot ?? '')
+            : { projectRoot: cwd, sessionId: options.sessionId }),
           layers: memoryLayersArg(args.layers),
           limit: numberArg(args.limit)
         })

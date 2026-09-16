@@ -4,6 +4,7 @@ import type { HistoryEntry, SessionMeta } from '../shared/types'
 export function sessionHistoryEntry(meta: SessionMeta & { sdkSessionId: string }): HistoryEntry {
   return {
     id: meta.id,
+    taskMemorySessionId: meta.taskMemorySessionId,
     title: meta.title,
     cwd: meta.cwd,
     driveMode: meta.driveMode,

@@ -314,6 +314,8 @@ export const EFFECT_ENTRY_REGISTRY = [
     queryable(['code_forge_patch'], 'src/main/code-forge/patch-effect.ts')),
 
   ...entries(ipc(readOnlyIpcChannels), readOnlyIpc),
+  ...entries(ipc(['memory:taskAdd']), contract('mutation', 'direct_user', 'never',
+    'src/main/ipc/memory-handlers.ts', 'The user saves task-owned memory explicitly; creation has no automatic replay contract.')),
   ...entries(ipc(['personalTasks:command']), delegatedIpc('PersonalTaskService.submit -> sessionManager.send')),
   ...entries(ipc(durableIpcChannels), durableIpc),
   ...entries(ipc(opaqueIpcChannels), opaqueIpc),

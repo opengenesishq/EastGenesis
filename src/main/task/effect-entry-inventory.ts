@@ -172,6 +172,7 @@ export const IPC_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
     'workflowLedger:importDeliveryIdentityTrustBundle', 'workflowLedger:restoreDeliveryIdentityBackup',
     'workflowLedger:saveProjectDeliveryPackageVerificationReceipt'
   ], DIRECT_USER),
+  policyGroup(['memory:taskAdd'], { impact: 'local', effect: 'direct_user', replay: 'never' }),
   delegatedPolicyGroup({
     'routines:runNow': 'runRoutineNow',
     'sessions:create': 'sessionManager.create',
