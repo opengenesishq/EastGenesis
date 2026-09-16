@@ -525,6 +525,8 @@ function SummaryView({
   verdict,
   language
 }: ResultViewProps & { verdict?: DeliveryVerdictDetail; language?: 'zh' | 'en' }): React.JSX.Element {
+  const costValue = snapshot.cost.coverage === 'unavailable' ? labels.unknown
+    : `$${snapshot.cost.knownUsd.toFixed(4)}${snapshot.cost.coverage === 'partial' ? (language === 'en' ? ' (recorded portion)' : '（已记录部分）') : ''}`
   const metrics = [
     [labels.runs, snapshot.summary.runs],
     [labels.deliveryReady, `${snapshot.summary.readyArtifacts}/${snapshot.summary.currentArtifacts}`],
@@ -532,7 +534,7 @@ function SummaryView({
     [labels.evidence, snapshot.summary.evidence],
     [labels.acceptance, `${snapshot.summary.passedAcceptances}/${snapshot.summary.acceptances}`],
     [labels.tests, snapshot.summary.tests],
-    [labels.cost, snapshot.cost.coverage === 'unavailable' ? labels.unknown : `$${snapshot.cost.knownUsd.toFixed(4)}`]
+    [labels.cost, costValue]
   ]
   return (
     <div className="studio-result-content" role="tabpanel" data-studio-result-view="summary">
@@ -566,6 +568,13 @@ function SummaryView({
           </div>
         ))}
       </section>
+      <p className="studio-result-muted" data-studio-result-cost-coverage={snapshot.cost.coverage}>
+        {snapshot.cost.coverage === 'unavailable'
+          ? (language === 'en' ? 'No model-call cost records are available for this task.' : '本任务暂无模型调用费用记录。')
+          : snapshot.cost.coverage === 'partial'
+            ? (language === 'en' ? 'Some model-call costs are missing. This includes only recorded costs and may contain estimates.' : '部分模型调用费用尚未记录，以上仅为已记录金额，可能包含估算。')
+            : (language === 'en' ? 'Calculated from model-call records, which may contain cost estimates.' : '按模型调用费用记录汇总，可能包含估算。')}
+      </p>
       <IssueSection title={labels.risks} items={snapshot.risks} empty={labels.noRisks} />
       <IssueSection title={labels.openItems} items={snapshot.openItems} empty={labels.noOpenItems} />
       <IssueSection title={labels.approvals} items={snapshot.approvals} empty={labels.noApprovals} />
@@ -1178,7 +1187,7 @@ const ZH: Labels = {
   unboundDetail: '该对话尚未绑定 canonical Project、Goal 或 WorkItem。', unavailable: '结果暂不可用', tryRefresh: '刷新后重试。',
   resultViews: '结果视图', quickActions: '结果工具', summary: '摘要', artifacts: '产物', evidence: '证据', timeline: '时间线',
   changes: '变更', workspaceFiles: '文件', preview: '预览', browser: '浏览器', terminal: '终端', tasks: '任务', runs: '运行', acceptance: '验收', tests: '测试',
-  cost: '成本', unknown: '未知', projectResult: 'Project 结果', risks: '风险', openItems: '未完成', approvals: '审批',
+  cost: '模型费用', unknown: '未知', projectResult: 'Project 结果', risks: '风险', openItems: '未完成', approvals: '审批',
   noRisks: '没有已记录风险', noOpenItems: '没有未完成项', noApprovals: '没有待处理审批', canonicalVerified: 'Canonical aggregate 已校验',
   noArtifacts: '当前范围没有 canonical Artifact', noLocation: '没有可用位置', open: '打开', criteria: '项标准', covered: '已覆盖',
   noAcceptance: '没有验收记录', noEvidence: '没有 Evidence', noTests: '没有测试证据', noTimeline: '没有审计事件',
@@ -1195,7 +1204,7 @@ const EN: Labels = {
   unboundDetail: 'This conversation is not bound to a canonical Project, Goal, or WorkItem.', unavailable: 'Results unavailable', tryRefresh: 'Refresh to try again.',
   resultViews: 'Result views', quickActions: 'Result tools', summary: 'Summary', artifacts: 'Artifacts', evidence: 'Evidence', timeline: 'Timeline',
   changes: 'Changes', workspaceFiles: 'Files', preview: 'Preview', browser: 'Browser', terminal: 'Terminal', tasks: 'Tasks', runs: 'Runs', acceptance: 'Acceptance', tests: 'Tests',
-  cost: 'Cost', unknown: 'Unknown', projectResult: 'Project result', risks: 'Risks', openItems: 'Open items', approvals: 'Approvals',
+  cost: 'Model cost', unknown: 'Unknown', projectResult: 'Project result', risks: 'Risks', openItems: 'Open items', approvals: 'Approvals',
   noRisks: 'No recorded risks', noOpenItems: 'No open items', noApprovals: 'No pending approvals', canonicalVerified: 'Canonical aggregate verified',
   noArtifacts: 'No canonical Artifacts in this scope', noLocation: 'No available location', open: 'Open', criteria: 'criteria', covered: 'covered',
   noAcceptance: 'No acceptance records', noEvidence: 'No Evidence', noTests: 'No test evidence', noTimeline: 'No audit events',

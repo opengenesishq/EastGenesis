@@ -107,8 +107,8 @@ export async function studioResultSnapshotForSession(sessionId: string) {
   const aggregate = session.workspaceId
     ? await createProductionProjectAggregateService().verifyLiveProject(session.workspaceId)
     : undefined
-  const costs = [...listHistory(), ...sessionManager.list()]
-  return buildStudioResultSnapshot(session, aggregate, costs)
+  const attempts = session.workspaceId ? await queryAllProjectModelAttempts(session.workspaceId) : []
+  return buildStudioResultSnapshot(session, aggregate, [], Date.now(), attempts)
 }
 
 async function saveStudioResult(

@@ -74,6 +74,8 @@ export interface StudioResultRun {
   taskRunDigest: string
   errorDigest?: string
   costUsd?: number
+  /** Recorded request cost coverage; values may include the runtime's price estimate. */
+  costCoverage?: 'complete' | 'partial' | 'unavailable'
 }
 
 export interface StudioResultArtifactLocation {
@@ -231,6 +233,7 @@ export interface StudioAuditTimelineItem {
   protocol?: string
   keyLabel?: string
   costUsd?: number
+  costCoverage?: 'complete' | 'partial' | 'unavailable'
   toolName?: string
   targetKind?: string
   resultDigest?: string
@@ -267,6 +270,8 @@ export interface StudioAuditTimelinePage {
 }
 
 export interface StudioResultCostSummary {
+  /** ModelAttempt records only; never a verified supplier invoice or all execution expenses. */
+  source?: 'model_attempt_records'
   knownUsd: number
   knownRunCount: number
   totalRunCount: number

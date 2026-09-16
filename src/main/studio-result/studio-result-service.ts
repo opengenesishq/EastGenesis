@@ -1,4 +1,5 @@
 import type { HistoryEntry, SessionMeta } from '../../shared/types'
+import type { ModelAttemptRecord } from '../../shared/model-attempt-types'
 import type { ProjectAggregateSnapshot } from '../../shared/project-aggregate-types'
 import {
   STUDIO_RESULT_EXPORT_FORMAT,
@@ -45,8 +46,9 @@ const TEST_EVIDENCE_KINDS = new Set(['test_result', 'security_scan', 'delivery_c
 export function buildStudioResultSnapshot(
   session: SessionMeta,
   aggregate: ProjectAggregateSnapshot | undefined,
-  sessionCosts: ReadonlyArray<Pick<SessionMeta | HistoryEntry, 'id' | 'costUsd'>> = [],
-  now = Date.now()
+  _sessionCosts: ReadonlyArray<Pick<SessionMeta | HistoryEntry, 'id' | 'costUsd'>> = [],
+  now = Date.now(),
+  attempts: readonly ModelAttemptRecord[] = []
 ): StudioResultSnapshot {
   assertSessionScope(session)
   assertTimestamp(now)
@@ -68,8 +70,8 @@ export function buildStudioResultSnapshot(
     workflowEvidence,
     taskEvidence
   } = selectResultRecords(session, aggregate)
-  const costBySession = normalizedSessionCosts(sessionCosts)
-  const projectedRuns = runs.map((run) => projectRun(run, costBySession.get(run.sessionId)))
+  const costs = projectStudioRunCosts(runs, attempts)
+  const projectedRuns = runs.map((run) => projectRun(run, costs.get(run.id)!))
   const projectedAcceptances = acceptances.map((acceptance) =>
     projectAcceptance(acceptance, aggregate.workItems, evidenceLinks, aggregate.workflow.artifacts))
   const blockingAcceptances = projectedAcceptances.filter((acceptance) =>
@@ -398,7 +400,7 @@ function projectWorkItem(item: ProjectAggregateSnapshot['workItems'][number]): S
 
 function projectRun(
   run: ProjectAggregateSnapshot['workflow']['runs'][number],
-  costUsd: number | undefined
+  cost: StudioRunCost
 ): StudioResultRun {
   return {
     id: run.id,
@@ -413,7 +415,7 @@ function projectRun(
     ...(run.finishedAt === undefined ? {} : { finishedAt: run.finishedAt }),
     taskRunDigest: projectAggregateDigest(run.taskRun),
     ...('error' in run && typeof run.error === 'string' ? { errorDigest: sha256(run.error) } : {}),
-    ...(costUsd === undefined ? {} : { costUsd })
+    ...cost
   }
 }
 
@@ -711,20 +713,54 @@ function selectTimeline(
 function buildCostSummary(runs: StudioResultRun[]): StudioResultCostSummary {
   const known = runs.filter((run) => run.costUsd !== undefined)
   return {
+    source: 'model_attempt_records',
     knownUsd: Math.round(known.reduce((total, run) => total + (run.costUsd ?? 0), 0) * 1_000_000) / 1_000_000,
     knownRunCount: known.length,
     totalRunCount: runs.length,
-    coverage: known.length === 0 ? 'unavailable' : known.length === runs.length ? 'complete' : 'partial'
+    coverage: known.length === 0 ? 'unavailable' : runs.every(run => run.costCoverage === 'complete') ? 'complete' : 'partial'
   }
 }
 
-function normalizedSessionCosts(values: ReadonlyArray<Pick<SessionMeta | HistoryEntry, 'id' | 'costUsd'>>): Map<string, number> {
-  const costs = new Map<string, number>()
-  for (const value of values) {
-    if (!value?.id || !Number.isFinite(value.costUsd) || value.costUsd < 0) continue
-    costs.set(value.id, Math.round(value.costUsd * 1_000_000) / 1_000_000)
+export type StudioRunCost = { costUsd?: number; costCoverage: StudioResultCostSummary['coverage'] }
+
+/** Session totals cannot be assigned to an individual Run or WorkItem. */
+export function projectStudioRunCosts(
+  runs: readonly ProjectAggregateSnapshot['workflow']['runs'][number][],
+  attempts: readonly ModelAttemptRecord[]
+): Map<string, StudioRunCost> {
+  const runById = new Map(runs.map(run => [run.id, run]))
+  const unique = new Map<string, ModelAttemptRecord>()
+  for (const attempt of attempts) {
+    const run = runById.get(attempt.runId)
+    if (!run) continue
+    if (attempt.projectId !== run.projectId || attempt.goalId !== run.goalId || attempt.workItemId !== run.workItemId ||
+        (attempt.stepId && !run.taskRun.steps?.some(step => step.id === attempt.stepId))) {
+      throw new Error('Studio result model attempt cost crosses canonical Run ownership')
+    }
+    const previous = unique.get(attempt.id)
+    if (previous && projectAggregateDigest(previous) !== projectAggregateDigest(attempt)) throw new Error('Studio result model attempt cost has conflicting records')
+    unique.set(attempt.id, attempt)
+  }
+  const costs = new Map<string, StudioRunCost>()
+  for (const run of runs) {
+    const recorded = [...unique.values()].filter(attempt => attempt.runId === run.id)
+    const known = recorded.flatMap(attempt => {
+      const cost = recordedStudioAttemptCost(attempt)
+      return cost === undefined ? [] : [cost]
+    })
+    const coveredSteps = (run.taskRun.steps ?? []).every(step => recorded.some(attempt => attempt.stepId === step.id))
+    const costCoverage = !known.length ? 'unavailable' : known.length === recorded.length && coveredSteps &&
+      TERMINAL_RUN_STATUSES.has(run.status) ? 'complete' : 'partial'
+    costs.set(run.id, { costCoverage, ...(known.length ? { costUsd: Math.round(known.reduce((sum, cost) => sum + cost, 0) * 1_000_000) / 1_000_000 } : {}) })
   }
   return costs
+}
+
+/** Persisted costs can be estimates; unresolved attempts have no attributable settled cost. */
+export function recordedStudioAttemptCost(attempt: ModelAttemptRecord): number | undefined {
+  return attempt.status !== 'started' && attempt.outcome !== 'unknown' &&
+    typeof attempt.costUsd === 'number' && Number.isFinite(attempt.costUsd) && attempt.costUsd >= 0
+    ? attempt.costUsd : undefined
 }
 
 function issue(

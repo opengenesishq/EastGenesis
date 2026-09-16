@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import type { SessionMeta, TaskRunRecord } from '../src/shared/types'
 import type { StudioResultFileCheck } from '../src/shared/studio-result-file-change-types'
+import type { ModelAttemptRecord } from '../src/shared/model-attempt-types'
 import { openProjectWorkspaceStore } from '../src/main/project-workspace/store'
 import { createProjectWorkspaceCommandService } from '../src/main/project-workspace/command-service'
 import { createProductionProjectAggregateService } from '../src/main/project-aggregate'
@@ -12,6 +13,7 @@ import { buildTaskSnapshot, readTaskSnapshotDatabase, saveTaskSnapshot } from '.
 import { registerCanonicalProducedArtifact } from '../src/main/task/artifact-production-boundary'
 import { createWorkflowArtifactEdge, listPersistedWorkflowLedger, saveWorkflowAcceptance, verifyPersistedWorkflowLedger } from '../src/main/task/workflow-ledger-api'
 import { buildStudioResultSnapshot } from '../src/main/studio-result/studio-result-service'
+import { buildStudioAuditTimelinePage } from '../src/main/studio-result/studio-audit-timeline'
 import { checkStudioResultFiles } from '../src/main/studio-result/studio-result-file-changes'
 import { commitProjectWorkspaceFileChangeImpact } from '../src/main/project-workspace/file-change-impact'
 import { createProjectWorkspaceCanonicalWriteBoundary } from '../src/main/project-workspace/canonical-write'
@@ -77,6 +79,57 @@ async function main() {
   goal = await commands.setGoalAcceptance(goalId, { status: 'passed', evidenceRefs: ['evidence:source', 'evidence:report'],
     verifiedBy: 'fixture-user', verifiedAt: Date.now() }, { expectedRevision: goal!.revision })
   await commands.transitionGoal(goalId, 'completed', { expectedRevision: goal.revision })
+  const costAggregate = await createProductionProjectAggregateService(root).verifyLiveProject(projectId)
+  // Model two ended Runs in one Session, while retaining their distinct WorkItem ownership.
+  costAggregate.workflow.runs = costAggregate.workflow.runs.map(run => ({ ...run, status: 'completed',
+    sessionId: 'shared-cost-session', taskRun: { ...run.taskRun, sessionId: 'shared-cost-session', status: 'completed' } }))
+  const sessionCosts = [{ id: 'shared-cost-session', costUsd: 80 }]
+  const costAttempt = (id: string, work: string, costUsd?: number, extra: Partial<ModelAttemptRecord> = {}): ModelAttemptRecord => ({
+    schemaVersion: 1, id, runId: `run:${work}`, requestId: `request:${id}`, projectId, goalId, workItemId: `work:${work}`,
+    ordinal: 1, providerId: 'fixture', model: 'fixture', protocol: 'openai.responses', adapterVersion: 'fixture',
+    contextDigest: '0'.repeat(64), routeReason: 'cost projection fixture', status: 'succeeded', outcome: 'success', revision: 2,
+    startedAt: 1, completedAt: 2, startCommandId: `start:${id}`, startPayloadDigest: '1'.repeat(64),
+    recordDigest: '2'.repeat(64), ...(costUsd === undefined ? {} : { costUsd }), ...extra
+  })
+  await check('Session cumulative totals never become Run or selected WorkItem costs', () => {
+    const result = buildStudioResultSnapshot(meta, costAggregate, sessionCosts)
+    assert.equal(result.cost.coverage, 'unavailable'); assert.equal(result.cost.knownUsd, 0)
+    assert(result.runs.every(run => run.costUsd === undefined && run.costCoverage === 'unavailable'))
+    const audit = buildStudioAuditTimelinePage({ session: meta, aggregate: costAggregate, sessionCosts })
+    assert(audit.items.filter(item => item.category === 'run').every(item => item.costUsd === undefined))
+  })
+  const attempts = [costAttempt('source-main', 'source', 0.125), costAttempt('source-retry', 'source', 0.025, { status: 'failed', outcome: 'error' }),
+    costAttempt('report-main', 'report', 0.2)]
+  await check('bound request costs are deduplicated across Runs and constrained to the selected WorkItem', () => {
+    const records = [...attempts, { ...attempts[0] }, costAttempt('foreign', 'outside', 99)]
+    const result = buildStudioResultSnapshot(meta, costAggregate, sessionCosts, Date.now(), records)
+    assert.equal(result.runs.find(run => run.id === 'run:source')?.costUsd, 0.15)
+    assert.equal(result.runs.find(run => run.id === 'run:report')?.costUsd, 0.2)
+    assert.deepEqual(result.cost, { source: 'model_attempt_records', knownUsd: 0.35, knownRunCount: 2, totalRunCount: 3, coverage: 'partial' })
+    const selected = buildStudioResultSnapshot({ ...meta, workItemId: 'work:report' }, costAggregate, sessionCosts, Date.now(), records)
+    assert.equal(selected.cost.knownUsd, 0.2); assert.equal(selected.cost.coverage, 'complete')
+    const audit = buildStudioAuditTimelinePage({ session: meta, aggregate: costAggregate, sessionCosts, attempts: records, query: { limit: 100 } })
+    assert.equal(audit.items.find(item => item.category === 'run' && item.runId === 'run:source')?.costUsd, 0.15)
+    assert.equal(audit.items.find(item => item.category === 'run' && item.runId === 'run:unrelated')?.costUsd, undefined)
+  })
+  await check('missing, pending and unknown request costs preserve partial coverage; explicit zero is known', () => {
+    const unknown = costAttempt('unknown', 'source', 90, { status: 'failed', outcome: 'unknown' })
+    const records = [...attempts, unknown, costAttempt('pending', 'report', 90, { status: 'started', outcome: undefined, completedAt: undefined }),
+      costAttempt('unpriced', 'report'), costAttempt('free', 'unrelated', 0)]
+    const result = buildStudioResultSnapshot(meta, costAggregate, sessionCosts, Date.now(), records)
+    assert.equal(result.cost.knownUsd, 0.35); assert.equal(result.cost.coverage, 'partial')
+    assert.equal(result.runs.find(run => run.id === 'run:source')?.costCoverage, 'partial')
+    assert.equal(result.runs.find(run => run.id === 'run:report')?.costCoverage, 'partial')
+    assert.equal(result.runs.find(run => run.id === 'run:unrelated')?.costUsd, 0)
+    assert.equal(result.runs.find(run => run.id === 'run:unrelated')?.costCoverage, 'complete')
+    const audit = buildStudioAuditTimelinePage({ session: meta, aggregate: costAggregate, attempts: records, query: { limit: 100 } })
+    const unknownItem = audit.items.find(item => item.entityId === unknown.id)
+    assert(unknownItem); assert.equal(unknownItem.costUsd, undefined)
+    const complete = buildStudioResultSnapshot(meta, costAggregate, sessionCosts, Date.now(), [...attempts, costAttempt('free', 'unrelated', 0)])
+    assert.equal(complete.cost.coverage, 'complete'); assert.equal(complete.cost.knownUsd, 0.35)
+    assert.throws(() => buildStudioResultSnapshot(meta, costAggregate, [], Date.now(), [{ ...attempts[0], workItemId: 'wrong' }]), /ownership/)
+    assert.throws(() => buildStudioResultSnapshot(meta, costAggregate, [], Date.now(), [attempts[0], { ...attempts[0], costUsd: 2 }]), /conflicting/)
+  })
   await check('unchanged canonical source files do not mutate verification', async () => {
     const before = await ledger()
     const result = await checkStudioResultFiles(meta, root)

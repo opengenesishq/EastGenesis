@@ -9,6 +9,7 @@ import type {
 } from '../../shared/studio-result-types'
 import type { HistoryEntry, SessionMeta, ToolExecutionRecord } from '../../shared/types'
 import { assertNoCredentialMaterial, projectAggregateDigest } from '../project-aggregate/codec'
+import { projectStudioRunCosts, recordedStudioAttemptCost, type StudioRunCost } from './studio-result-service'
 
 const FORMAT = 'caogen.studio-audit-timeline.v1' as const
 const DEFAULT_LIMIT = 50
@@ -30,11 +31,11 @@ export function buildStudioAuditTimelinePage(input: StudioAuditTimelineInput): S
   const scope = auditScope(input.session)
   const query = normalizeQuery(input.query)
   const selected = selectOwnedRecords(input.session, input.aggregate, query.runId)
-  const costs = normalizedSessionCosts(input.sessionCosts ?? [])
   const attempts = (input.attempts ?? []).filter((attempt) => selected.runIds.has(attempt.runId))
+  const costs = projectStudioRunCosts(selected.runs, attempts)
   const items = [
     ...domainItems(input.aggregate, selected, scope),
-    ...selected.runs.map((run) => runItem(run, input.aggregate, costs.get(run.sessionId))),
+    ...selected.runs.map((run) => runItem(run, input.aggregate, costs.get(run.id)!)),
     ...selected.runs.flatMap((run) => toolItems(run, input.aggregate)),
     ...selected.runs.flatMap((run) => effectItems(run, input.aggregate)),
     ...attempts.map((attempt) => modelAttemptItem(attempt, selected.runById, input.aggregate)),
@@ -47,7 +48,7 @@ export function buildStudioAuditTimelinePage(input: StudioAuditTimelineInput): S
     scope,
     runId: query.runId,
     attempts: attempts.map((attempt) => attempt.recordDigest),
-    costs: [...costs].filter(([sessionId]) => selected.sessionIds.has(sessionId)),
+    costs: [...costs],
     items
   })
   const offset = query.cursor ? decodeCursor(query.cursor, sourceDigest, query.runId) : 0
@@ -231,7 +232,7 @@ function domainItems(
   })
 }
 
-function runItem(run: AggregateRun, aggregate: ProjectAggregateSnapshot, costUsd: number | undefined): StudioAuditTimelineItem {
+function runItem(run: AggregateRun, aggregate: ProjectAggregateSnapshot, cost: StudioRunCost): StudioAuditTimelineItem {
   return {
     id: `run:${run.id}:${run.revision}`,
     occurredAt: run.finishedAt ?? run.updatedAt,
@@ -245,7 +246,7 @@ function runItem(run: AggregateRun, aggregate: ProjectAggregateSnapshot, costUsd
     runId: run.id,
     entityType: 'run',
     entityId: run.id,
-    ...(costUsd === undefined ? {} : { costUsd }),
+    ...cost,
     resultDigest: prefixedDigest(projectAggregateDigest(run.taskRun)),
     integrity: 'verified'
   }
@@ -258,6 +259,7 @@ function modelAttemptItem(
 ): StudioAuditTimelineItem {
   const run = runs.get(attempt.runId)
   const reason = safeReason(attempt.routeReason)
+  const costUsd = recordedStudioAttemptCost(attempt)
   return {
     id: `model-attempt:${attempt.id}:${attempt.revision}`,
     occurredAt: attempt.completedAt ?? attempt.startedAt,
@@ -276,7 +278,7 @@ function modelAttemptItem(
     model: attempt.model,
     protocol: attempt.protocol,
     ...(attempt.keyLabel ? { keyLabel: attempt.keyLabel } : {}),
-    ...(attempt.costUsd === undefined ? {} : { costUsd: attempt.costUsd }),
+    ...(costUsd === undefined ? {} : { costUsd }),
     resultDigest: prefixedDigest(attempt.recordDigest),
     integrity: 'verified'
   }
@@ -528,15 +530,6 @@ function systemActor(label: string): StudioAuditActor {
 
 function humanActor(label: string): StudioAuditActor {
   return { kind: 'human', label: compact(label, 120) || 'Local user' }
-}
-
-function normalizedSessionCosts(values: readonly SessionCost[]): Map<string, number> {
-  const costs = new Map<string, number>()
-  for (const value of values) {
-    if (!value?.id || !Number.isFinite(value.costUsd) || value.costUsd < 0) continue
-    costs.set(value.id, Math.round(value.costUsd * 1_000_000) / 1_000_000)
-  }
-  return costs
 }
 
 function encodeCursor(offset: number, sourceDigest: string, runId: string | undefined): string {
