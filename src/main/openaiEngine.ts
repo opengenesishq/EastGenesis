@@ -41,7 +41,7 @@ import { resolveOpenAiSessionTurnRoute, nativeSessionRecoveryContext, assertNati
 import { frozenRetryAllows, frozenSameTargetRetryAllows } from './model/native-recovery-session'
 import { runHasUnresolvedEffects } from './task/effect-runtime'
 import { nativeHttpRefusalEvidence } from './model/native-http-refusal'
-import { runtimeConversationReplay, validateRuntimeContinuationContext } from './session-runtime-continuation-context'
+import { runtimeConversationReplay, validateRuntimeContinuationContext, runtimeContinuationContextItems } from './session-runtime-continuation-context'
 import { rebuildOpenAiTextHistory } from './openai-text-history'
 import { persistContextPack, restoreContextPack } from './agent/context-pack-persistence'
 import { nativeRequestBudgetInput } from './model/native-request-budget'
@@ -641,11 +641,11 @@ export class OpenAIEngine implements Engine {
       payload: layered.payload,
       providerId: this.meta.providerId,
       model: this.effectiveModel(),
-      additionalItems: nativeAdditionalContextItems(
+      additionalItems: [...nativeAdditionalContextItems(
         handoffContext,
         this.chatHistory.length > 0 || Boolean(this.lastResponseId),
         layered.hasMemoryContext
-      )
+      ), ...runtimeContinuationContextItems(this.meta, this.transcript.readAll(), this.responsesReplayRequired)]
     })
     const projectResources = outbound.resourceContext.prompt
     const documentPrompt = documentAttachmentsToPrompt(
@@ -759,7 +759,7 @@ export class OpenAIEngine implements Engine {
     auth: OpenAIAuthConfig
   ): Promise<void> {
     const replay = this.responsesReplayRequired
-      ? runtimeConversationReplay(this.meta, this.transcript.read(), payload.messageId)
+      ? runtimeConversationReplay(this.meta, this.meta.runtimeContinuation ? this.transcript.readAll() : this.transcript.read(), payload.messageId)
       : null
     if (replay) this.refreshConfirmedToolReplay(payload.messageId)
     const confirmedToolReplay = this.activeConfirmedToolReplay
@@ -1165,13 +1165,13 @@ export class OpenAIEngine implements Engine {
     auth: OpenAIAuthConfig
   ): Promise<void> {
     const replayRequired = this.responsesReplayRequired
-    const replayEntries = replayRequired ? this.transcript.read() : []
+    const replayEntries = replayRequired ? (this.meta.runtimeContinuation ? this.transcript.readAll() : this.transcript.read()) : []
     if (replayRequired) this.refreshConfirmedToolReplay(payload.messageId)
     const confirmedToolReplay = this.activeConfirmedToolReplay
     if (replayRequired) {
       const replay = runtimeConversationReplay(this.meta, replayEntries, payload.messageId)
       if (replay) {
-        this.chatHistory = [{ role: 'system', content: replay.text }]
+        this.chatHistory = [{ role: this.meta.runtimeContinuation?.contextMode ? 'user' : 'system', content: replay.text }]
         this.emit({
           kind: 'hook-event',
           event: 'conversation-ledger-replay',

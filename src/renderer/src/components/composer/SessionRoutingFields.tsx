@@ -58,7 +58,7 @@ export default function SessionRoutingFields({ value, providers, engine, disable
         <p>{zh ? '重试还需连接或全局设置允许故障恢复，并遵守连接的重试次数限制。' : 'Retries also require recovery to be enabled for the connection or globally, and remain subject to the connection’s retry limit.'}</p>
       </>}
       <p>{zh ? '首选未满足权限、能力或预算要求时暂停。备选需使用兼容的调用协议，保存时会检查。' : 'Pause if the preferred model fails permission, capability or budget checks. Alternatives must use a compatible protocol, checked when saving.'}</p>
-      <p>{zh ? '切换执行器需要已完成的纯文本对话；含附件或工具操作的历史可能无法继续，系统会保留原记录并提示处理。' : 'Changing executors requires a completed text-only conversation. Attachment or tool history may prevent continuation; the original records remain available.'}</p>
+      <p>{zh ? '切换执行器会带上已完成的对话、工具结果和权限记录；有未决操作、附件或过大的历史时，先整理交接再继续。' : 'Executor changes carry completed conversation, tool results and permission records. Resolve pending operations, attachments or oversized history before continuing.'}</p>
     </>}
     {value.kind === 'locked' && <p>{zh ? '锁定可选择与当前执行器兼容的连接。' : 'Locked mode supports connections compatible with the current executor.'}</p>}
   </fieldset>

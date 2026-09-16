@@ -21,6 +21,8 @@
     "test:fixture:runtime": "tsx scripts/product-launch-fixture-runtime.ts",
     "test:verified-delivery:required": "node scripts/verified-delivery-flow-required.mjs",
     "test:remote-continuation:required": "node scripts/remote-continuation-required.mjs",
+    "test:completed-tool-handoff:required": "node scripts/completed-tool-handoff-required.mjs",
+    "test:task-budget:required": "tsx scripts/task-budget-projection-required.ts && node scripts/task-budget-ipc-required.mjs",
     "test:remote-policy-plane:required": "node scripts/remote-policy-plane-required.mjs",
     "test:routing-performance:required": "node scripts/routing-performance-required.mjs",
     "test:context-pack:required": "tsx scripts/context-pack-contract-runtime.ts && tsx scripts/context-pack-persistence-required.ts && node scripts/context-pack-electron-runtime-required.mjs",

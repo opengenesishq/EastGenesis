@@ -1,6 +1,20 @@
-import type { SendMessagePayload, SessionMeta, TranscriptEntry } from '../shared/types'
+import type { OutboundContextItemView, SendMessagePayload, SessionMeta, TranscriptEntry } from '../shared/types'
 import { buildPortableConversationReplay, type PortableConversationReplay } from './conversation-ledger-replay'
 import { buildProviderNeutralContextDigest } from './task/provider-neutral-context'
+import { completedToolReplay } from './completed-tool-replay'
+import { digest } from './task/workflow-ledger-canonical'
+import { ModelContextHandoffError } from './model/context-handoff-error'
+
+export function prepareRuntimeContinuationContext(entries: TranscriptEntry[], payload?: SendMessagePayload) {
+  const hasWork = entries.some(({ event }) => ['tool-start', 'tool-result', 'permission-request', 'permission-resolved'].includes(event.kind) ||
+    (event.kind === 'assistant-message' && event.blocks.some(block => block.type !== 'text')))
+  if (!hasWork) {
+    assertPortableTextBoundary(entries, payload)
+    return { contextDigest: buildProviderNeutralContextDigest({ entries }) }
+  }
+  completedToolReplay(entries, payload)
+  return { contextMode: 'completed_tools_v1' as const, contextDigest: `sha256:${digest(entries)}` }
+}
 
 /** This first migration boundary is deliberately lossless text only, not a best-effort summary. */
 export function assertPortableTextBoundary(entries: TranscriptEntry[], payload?: SendMessagePayload): PortableConversationReplay {
@@ -44,14 +58,17 @@ export function validateRuntimeContinuationContext(meta: SessionMeta, entries: T
   if (!record) return
   if (!validContinuationRecord(record) || record.toEngine !== meta.engine) blocked('交接记录不完整')
   const prefix = entries.filter((entry) => entry.seq <= record.boundarySeq)
-  assertPortableTextBoundary(prefix)
-  if (prefix.at(-1)?.seq !== record.boundarySeq || buildProviderNeutralContextDigest({ entries: prefix }) !== record.contextDigest) {
+  if (record.contextMode) completedToolReplay(prefix)
+  else assertPortableTextBoundary(prefix)
+  const actual = record.contextMode ? `sha256:${digest(prefix)}` : buildProviderNeutralContextDigest({ entries: prefix })
+  if (prefix.at(-1)?.seq !== record.boundarySeq || actual !== record.contextDigest) {
     blocked('交接边界与持久账本不一致')
   }
 }
 
 function validContinuationRecord(record: NonNullable<SessionMeta['runtimeContinuation']>): boolean {
   return record.schemaVersion === 1 && typeof record.id === 'string' && record.id.length > 0 &&
+    (record.contextMode === undefined || record.contextMode === 'completed_tools_v1') &&
     ['prepared', 'committed'].includes(record.state) && ['openai', 'anthropic', 'gemini'].includes(record.fromEngine) &&
     Number.isSafeInteger(record.boundarySeq) && record.boundarySeq > 0 && Number.isFinite(record.createdAt) &&
     typeof record.providerId === 'string' && typeof record.model === 'string' && /^sha256:[a-f0-9]{64}$/.test(record.contextDigest)
@@ -59,9 +76,33 @@ function validContinuationRecord(record: NonNullable<SessionMeta['runtimeContinu
 
 export function runtimeConversationReplay(meta: SessionMeta, entries: TranscriptEntry[], currentMessageId?: string) {
   validateRuntimeContinuationContext(meta, entries)
+  if (meta.runtimeContinuation?.contextMode === 'completed_tools_v1') {
+    const boundary = completedReplayBoundary(meta, entries)
+    const source = completedToolReplay(entries.filter(entry => entry.seq <= boundary))
+    const later = buildPortableConversationReplay(entries.filter(entry => entry.seq > boundary), currentMessageId, { providerNeutral: true })
+    if (!later) return source
+    const text = `${source.text}\n\n${later.text}`
+    return { text, characters: text.length, attachmentCount: later.attachmentCount, eventCount: source.eventCount + later.eventCount, toolResultsIncluded: true }
+  }
   return buildPortableConversationReplay(entries, currentMessageId, { providerNeutral: Boolean(meta.runtimeContinuation) })
 }
 
+/** Register the additional historical tool data in the same outbound gate used
+ * by task files and handoffs. This item never authorizes another tool action. */
+export function runtimeContinuationContextItems(meta: SessionMeta, entries: TranscriptEntry[], includeLaterCompleted = false): OutboundContextItemView[] {
+  if (meta.runtimeContinuation?.contextMode !== 'completed_tools_v1') return []
+  validateRuntimeContinuationContext(meta, entries)
+  const boundary = includeLaterCompleted ? completedReplayBoundary(meta, entries) : meta.runtimeContinuation.boundarySeq
+  const replay = completedToolReplay(entries.filter(entry => entry.seq <= boundary))
+  return [{ id: 'context:completed-work', kind: 'workflow_context', label: 'Completed tool observations',
+    dataClass: 'S4', egressPolicy: 'allow', decision: 'included', bytes: Buffer.byteLength(replay.text), digest: `sha256:${digest(replay.text)}` }]
+}
+
+function completedReplayBoundary(meta: SessionMeta, entries: TranscriptEntry[]): number {
+  const lastCompleted = entries.filter(entry => entry.event.kind === 'turn-result' && !entry.event.isError).at(-1)?.seq ?? 0
+  return Math.max(meta.runtimeContinuation!.boundarySeq, lastCompleted)
+}
+
 function blocked(reason: string): never {
-  throw new Error(`跨协议续聊已阻止：${reason}；原会话仍保留，可固定原厂商模型继续。`)
+  throw new ModelContextHandoffError(`跨协议续聊已阻止：${reason}；原会话仍保留，可固定原厂商模型继续。`, undefined)
 }

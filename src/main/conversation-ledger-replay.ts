@@ -16,6 +16,7 @@ export interface PortableConversationReplay {
   eventCount: number
   attachmentCount: number
   characters: number
+  toolResultsIncluded?: boolean
 }
 
 export interface PortableConversationReplayOptions {
@@ -251,6 +252,7 @@ function appendPortableReplayRoutingEvent(
 }
 
 export function portableConversationReplayDetail(replay: PortableConversationReplay): string {
+  if (replay.toolResultsIncluded) return `从本地账本交接 ${replay.eventCount} 条历史记录，携带 ${replay.characters} 字符上下文；包含脱敏工具结果与历史权限决定，不转移权限、附件字节或协议专属思考。`
   return `从本地会话账本恢复 ${replay.eventCount} 条脱敏语义事件、${replay.attachmentCount} 个附件引用，携带 ${replay.characters} 字符可移植上下文；原始工具输出和附件字节未外发。`
 }
 

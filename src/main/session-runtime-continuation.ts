@@ -6,8 +6,7 @@ import { resolveRuntimeSessionRoute } from './model/session-runtime-routing'
 import { clearSessionTurnRoute, prepareSessionTurnRoute, takeSessionTurnRoute } from './model/session-turn-route'
 import { runHasUnresolvedEffects } from './task/effect-runtime'
 import { readTranscriptEntriesStrict } from './transcript'
-import { buildProviderNeutralContextDigest } from './task/provider-neutral-context'
-import { assertPortableTextBoundary } from './session-runtime-continuation-context'
+import { prepareRuntimeContinuationContext } from './session-runtime-continuation-context'
 import { assertRuntimeContinuationAligned, persistRuntimeContinuation } from './session-runtime-continuation-store'
 import { getProvider, resolveProviderEngine } from './providers'
 import { assertSessionExecutorEngine } from '../shared/session-executor-selection'
@@ -48,14 +47,14 @@ export async function prepareRuntimeContinuation(input: RuntimeContinuationInput
   }
   assertSafeRuntimeBoundary(input)
   const entries = readTranscriptEntriesStrict(session.meta.sdkSessionId!)
-  assertPortableTextBoundary(entries, payload)
+  const context = prepareRuntimeContinuationContext(entries, payload)
   const meta: SessionMeta = {
     ...session.meta, engine, providerId: route.providerId, modelRoutingDecision: route.decision,
     responsesContext: undefined, resumeSessionAt: undefined,
     runtimeContinuation: {
       schemaVersion: 1, id: randomUUID(), state: 'prepared', fromEngine: session.meta.engine!, toEngine: engine,
       providerId: route.providerId, model: route.model, boundarySeq: entries.at(-1)!.seq,
-      contextDigest: buildProviderNeutralContextDigest({ entries }), createdAt: Date.now()
+      ...context, createdAt: Date.now()
     }
   }
   const successor = (input.create ?? createEngine)(meta.engine, meta, input.emit, meta.sdkSessionId, entries.at(-1)!.seq)
@@ -77,6 +76,6 @@ function assertSafeRuntimeBoundary({ session, run }: RuntimeContinuationInput): 
   if (session.meta.status !== 'idle' || !session.meta.sdkSessionId || !session.retireForContinuation ||
       session.pendingPermissions().length || run?.pendingPermissionRequestId || runHasUnresolvedEffects(run) ||
       (run && run.status !== 'completed') || run?.toolExecutions?.some((entry) => entry.status === 'unknown_outcome')) {
-    throw new Error('跨协议续聊需要已完成的文本回合，且没有未决工具、审批或执行结果。')
+    throw new Error('跨执行器续聊需要已完成的回合，且没有未决工具、审批或执行结果。')
   }
 }

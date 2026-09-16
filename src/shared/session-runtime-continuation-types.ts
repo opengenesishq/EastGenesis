@@ -11,6 +11,8 @@ export interface SessionRuntimeContinuation {
   model: string
   boundarySeq: number
   contextDigest: string
+  /** Absent on legacy text-only receipts. This mode binds the exact source ledger. */
+  contextMode?: 'completed_tools_v1'
   createdAt: number
 }
 

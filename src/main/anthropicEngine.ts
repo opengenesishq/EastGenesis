@@ -21,6 +21,7 @@ import {
   type AnthropicImageResolver
 } from './anthropic-history'
 import { rebuildSessionAnthropicHistory } from './session-anthropic-history'
+import { runtimeContinuationContextItems } from './session-runtime-continuation-context'
 import { nativeRequestBudgetInput } from './model/native-request-budget'
 import { boundedCouncilBody, claimCouncilPhysicalRequest } from './council/council-request-guard'
 import {
@@ -358,11 +359,11 @@ export class AnthropicEngine implements Engine {
         payload: layeredPayload,
         providerId: target.providerId,
         model: target.model,
-        additionalItems: anthropicAdditionalContextItems(
+        additionalItems: [...anthropicAdditionalContextItems(
           handoffContext,
           this.history.length > 0,
           layered.hasMemoryContext
-        )
+        ), ...runtimeContinuationContextItems(this.meta, this.transcript.readAll())]
       })
       this.activeOutboundContext = outbound.manifest
       const projectResources = outbound.resourceContext.prompt
