@@ -3,6 +3,7 @@ import type { BusinessLineDefinition } from '../../../../shared/business-line-ty
 import { useOfficeCommand, type OfficeCommandTarget } from './useOfficeCommand'
 import SessionInputQueue from '../composer/SessionInputQueue'
 import SessionModelPicker from '../composer/SessionModelPicker'
+import TaskRequirementRevision from '../experience/TaskRequirementRevision'
 import '../composer/session-inputs.css'
 import './office-command.css'
 
@@ -50,6 +51,8 @@ export default function OfficeCommandInput({ lines, defaultLineId, selectedSessi
     <CommandFeedback command={command} target={target} zh={zh} onOpenTask={onOpenTask} onOpenSession={onOpenSession} />
     {target.kind === 'session' && command.modelRequestSessionId === target.id && <SessionModelPicker
       key={target.id} sessionId={target.id} onClose={command.closeModelPicker} />}
+    {target.kind === 'session' && command.requirementRevision?.sessionId === target.id && <TaskRequirementRevision key={target.id}
+      sessionId={target.id} initialText={command.requirementRevision.text} onClose={command.closeRequirementRevision} />}
     {target.kind === 'session' && <SessionInputQueue zh={zh}
       records={command.sessionInputs.records} running={command.running} busy={command.sessionInputs.busy}
       error={command.sessionInputs.error} onApply={command.sessionInputs.apply}

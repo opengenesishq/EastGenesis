@@ -146,7 +146,8 @@ async function main(): Promise<void> {
     assert.equal(sessionInputIntent('换一个更快的模型'), 'model')
     assert.equal(sessionInputIntent('“暂停这个任务”这句话请加入演示稿'), 'message')
     assert.equal(sessionInputIntent('暂停这个任务', true), 'message')
-    assert.equal(sessionInputIntent('第二页补来源'), 'message')
+    assert.equal(sessionInputIntent('第二页补来源'), 'requirements')
+    assert.equal(sessionInputIntent('第二页需要补来源吗？'), 'message')
   })
   await check('acceptance digest binds document versions and Office intent, while transport message id is independent', () => {
     const payload = { text: '补来源', documents: [{ id: 'doc-a', hash: 'v1' }],

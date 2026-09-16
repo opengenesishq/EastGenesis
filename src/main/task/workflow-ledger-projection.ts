@@ -6,11 +6,13 @@ import {
   findWorkflowRun,
   findWorkflowWorkItem,
   projectTaskRun,
+  appendWorkflowEvent,
   WorkflowLedgerCorruptionError,
   type WorkflowLedgerDatabase
 } from './workflow-ledger-store'
 import { readAndVerifyEvents } from './workflow-ledger-query'
 import { projectWorkspaceAuthorityOwnsWorkItem } from '../project-workspace/ledger-import-authority'
+import { captureRunRequirements } from './run-requirement-snapshot'
 
 export function workflowContextForSnapshot(snapshot: TaskSnapshotRecord): WorkflowProjectionContext {
   const meta = snapshot.meta
@@ -45,7 +47,12 @@ export function projectRunIntoWorkflow(
   run: TaskRunRecord,
   context: WorkflowProjectionContext
 ): void {
+  const requirements = findWorkflowRun(db, run.id) ? undefined : captureRunRequirements(db, run, context)
   projectTaskRun(db, run, context)
+  if (requirements) appendWorkflowEvent(db, { eventId: `workflow:run:${run.id}:requirements`,
+    streamId: `run:${run.id}`, entityType: 'run', entityId: run.id, kind: 'workflow.run.requirements.captured',
+    payload: requirements, occurredAt: run.createdAt }, { projectId: context.projectId, goalId: context.goalId,
+    workItemId: context.workItemId, runId: run.id, sessionId: run.sessionId })
 }
 
 export function resolveRunWorkflowProjectionContext(

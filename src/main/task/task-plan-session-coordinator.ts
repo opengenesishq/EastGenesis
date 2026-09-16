@@ -15,6 +15,7 @@ import { reconcileTaskPlanLedger, syncTaskPlanLedger } from './task-plan-ledger'
 import { buildCanonicalMissionTaskPlan, enrichCanonicalTaskPlanInstitutions } from './mission-task-plan'
 import { readGoalInstitutionContext } from '../project-workspace/institution-goal-binding'
 import { bindTaskPlanInstitutions } from './task-plan-institutions'
+import { assertTaskPlanRequirementsCurrent, requirementContinuationDraft } from './task-plan-requirements'
 
 export class TaskPlanSessionCoordinator {
   private readonly store: TaskPlanContractStore
@@ -61,7 +62,8 @@ export class TaskPlanSessionCoordinator {
     this.assertIdle(session.meta, '修改计划')
     if (session.meta.taskStrategy !== 'plan') throw new Error('请先切换到规划，再创建计划版本。')
     return this.persistEnrichedVersion(id, session, {
-      ...draft, source: 'manual', missionSource: this.store.get(id).currentVersion?.missionSource
+      ...draft, source: 'manual', missionSource: this.store.get(id).currentVersion?.missionSource,
+      requirementSource: this.store.get(id).currentVersion?.requirementSource
     }, 'local-user', true)
   }
 
@@ -74,8 +76,20 @@ export class TaskPlanSessionCoordinator {
       ...draft,
       changeReason: current ? (draft.changeReason?.trim() || 'Genesis 重新生成结构化计划') : draft.changeReason,
       source: 'genesis',
-      missionSource: current?.missionSource
+      missionSource: current?.missionSource,
+      requirementSource: current?.requirementSource
     }, 'agent', false)
+  }
+
+  async refreshRequirements(id: string, expectedGoalRevision: number): Promise<TaskPlanStateView> {
+    this.assertApprovalIdle(id)
+    const session = this.requireSession(id)
+    this.assertIdle(session.meta, '更新要求计划')
+    const draft = await requirementContinuationDraft(session.meta, expectedGoalRevision, this.userDataRoot())
+    const current = this.store.get(id)
+    if (current.currentVersion?.requirementSource?.eventId === draft.requirementSource?.eventId &&
+        current.currentVersion?.requirementSource?.contractDigest === draft.requirementSource?.contractDigest) return current
+    return this.persistEnrichedVersion(id, session, draft, 'local-user', true)
   }
 
   async createGeneratedVersion(id: string, draft: TaskPlanDraftInput): Promise<TaskPlanStateView> {
@@ -268,6 +282,7 @@ export class TaskPlanSessionCoordinator {
   }
 
   private async assertMissionSourceCurrent(meta: SessionMeta, version: TaskPlanVersion): Promise<void> {
+    await assertTaskPlanRequirementsCurrent(meta, version, this.userDataRoot())
     if (version.institutionTemplate) {
       if (!meta.workspaceId || (!meta.goalId && !meta.workItemId)) throw new Error('计划机构职责缺少原项目或任务身份')
       const { template } = await readGoalInstitutionContext(this.userDataRoot(), meta.workspaceId, meta.goalId, meta.workItemId)

@@ -3,6 +3,7 @@ import type { SendMessagePayload } from '../../../../shared/types'
 import type { SessionInputRecord } from '../../../../shared/session-input-types'
 import { useStore } from '../../store'
 import { COMPOSER_DRAFTS_DELETED_EVENT, isDeletedComposerDraft } from '../../store/composer-draft-persistence'
+import { REQUIREMENTS_CHANGED_EVENT, announceRequirementRevision } from '../experience/requirement-revision-events'
 
 export function useSessionInputs(sessionId: string | null, running: boolean) {
   const [state, setState] = useState<{ sessionId: string | null; records: SessionInputRecord[] }>({ sessionId, records: [] })
@@ -36,6 +37,9 @@ export function useSessionInputs(sessionId: string | null, running: boolean) {
 
   useEffect(() => {
     void refresh().catch(() => undefined)
+    const changed = (event: Event): void => { if ((event as CustomEvent<{ sessionId: string }>).detail?.sessionId === sessionId) void refresh().catch(() => undefined) }
+    window.addEventListener(REQUIREMENTS_CHANGED_EVENT, changed)
+    return () => window.removeEventListener(REQUIREMENTS_CHANGED_EVENT, changed)
   }, [refresh, running, sessionId])
 
   useEffect(() => {
@@ -49,7 +53,7 @@ export function useSessionInputs(sessionId: string | null, running: boolean) {
     return () => window.removeEventListener(COMPOSER_DRAFTS_DELETED_EVENT, clear)
   }, [sessionId])
 
-  const queue = async (payload: SendMessagePayload): Promise<void> => {
+  const queueRecord = async (payload: SendMessagePayload): Promise<SessionInputRecord> => {
     if (!sessionId) throw new Error('请先选择当前任务')
     if (isDeletedComposerDraft(sessionId)) throw new Error('当前任务已删除')
     const key = `caogen.session-input-request.v1:${sessionId}`
@@ -74,7 +78,10 @@ export function useSessionInputs(sessionId: string | null, running: boolean) {
     }
     window.localStorage.removeItem(key)
     if (currentSessionId.current === sessionId) void refresh().catch(() => undefined)
+    return record
   }
+
+  const queue = async (payload: SendMessagePayload): Promise<void> => { await queueRecord(payload) }
 
   const act = async (record: SessionInputRecord, action: 'apply' | 'cancel'): Promise<void> => {
     if (operation.current || record.sessionId !== sessionId) return
@@ -91,6 +98,7 @@ export function useSessionInputs(sessionId: string | null, running: boolean) {
         ? { sessionId: current.sessionId, records: current.records.map((item) => item.id === updated.id ? updated : item) }
         : current)
       if (action === 'apply') await useStore.getState().syncSession(record.sessionId)
+      if (updated.phase === 'requirements_applied') announceRequirementRevision(record.sessionId)
     } catch (cause) {
       if (currentSessionId.current === sessionId) setErrorState({ sessionId, message: errorText(cause) })
     } finally {
@@ -99,7 +107,7 @@ export function useSessionInputs(sessionId: string | null, running: boolean) {
     }
   }
 
-  return { records, queue, busy, error, ready: loadedGeneration === sessionGeneration.current && state.sessionId === sessionId, refresh,
+  return { records, queue, queueRecord, busy, error, ready: loadedGeneration === sessionGeneration.current && state.sessionId === sessionId, refresh,
     apply: (record: SessionInputRecord) => act(record, 'apply'), cancel: (record: SessionInputRecord) => act(record, 'cancel') }
 }
 

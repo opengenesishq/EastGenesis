@@ -12,6 +12,7 @@ import { assertGoalStartDecision, goalPreparationDigest, normalizeGoalPreparatio
 import { goalTaskIds } from '../project-workspace/goal-task-service'
 import { assertNoCredentialMaterial, projectAggregateCanonicalJson, projectAggregateDigest } from '../project-aggregate/codec'
 import { listProjectSubmissionReceiptFiles } from './submission-receipt-files'
+import { normalizeRequirementRevisionIntent } from '../../shared/session-requirement-revision'
 
 type PortableContext = {
   sessionIds: readonly string[]; sessionFiles: readonly ProjectAggregatePortableFile[]
@@ -82,6 +83,16 @@ export function validateSubmissionReceiptBindings(slice: ProjectSubmissionReceip
     if (!record.goalId || !record.workItemId) fail('Project input has incomplete canonical task binding')
     const goal = goals.get(record.goalId), item = workItems.get(record.workItemId)
     if (!goal || goal.projectId !== slice.projectId || !item || item.projectId !== slice.projectId || item.goalId !== goal.id) fail('input task binding mismatch')
+    if (record.phase === 'requirements_applied') {
+      const receipt = record.requirementRevision!
+      const source = aggregate.audit.find(entry => entry.source === 'project_workspace' &&
+        isRecord(entry.value) && entry.value.id === receipt.sourceEventId)?.value
+      if (!isRecord(source) || !isRecord(source.payload) || source.kind !== 'goal.requirements_revised' || source.entityId !== goal.id ||
+          source.payload.workItemId !== item.id || source.payload.sessionId !== record.sessionId || source.payload.requestId !== record.id ||
+          source.payload.payloadDigest !== (record.importedPayloadDigest ?? messagePayloadDigest(record.payload)) ||
+          source.payload.goalRevision !== receipt.goalRevision || source.payload.workItemRevision !== receipt.workItemRevision ||
+          projectAggregateCanonicalJson(source.payload.requirements) !== projectAggregateCanonicalJson(receipt.requirements)) fail('requirement revision source binding mismatch')
+    }
   }
   for (const record of slice.projectGoals) {
     const ids = goalTaskIds(slice.projectId, record.input.requestId)
@@ -172,10 +183,14 @@ function assertEvidencePayload(item: PortableSessionInput): void {
 function parseSessionInput(value: unknown): SessionInputRecord {
   if (!isRecord(value) || value.schemaVersion !== 1 || !isRecord(value.payload)) fail('invalid Session input')
   const record = value as unknown as SessionInputRecord
+  if (record.payload.requirementRevisionIntent) normalizeRequirementRevisionIntent(record.payload.requirementRevisionIntent)
+  if (record.phase === 'requirements_applied' && (!record.payload.requirementRevisionIntent ||
+      record.requirementRevision?.schemaVersion !== 1 || !record.requirementRevision.sourceEventId ||
+      !Number.isSafeInteger(record.requirementRevision.goalRevision) || !Number.isSafeInteger(record.requirementRevision.workItemRevision))) fail('invalid requirement revision receipt')
   if (typeof record.sessionId !== 'string' || typeof record.id !== 'string' ||
       !/^[A-Za-z0-9_-]{1,160}$/.test(record.sessionId) || !/^[A-Za-z0-9_-]{1,160}$/.test(record.id) ||
       record.messageId !== `session-input:${record.sessionId}:${record.id}` ||
-      !['queued', 'dispatching', 'applied', 'needs_reconciliation', 'cancelled'].includes(record.phase) ||
+      !['queued', 'dispatching', 'applied', 'requirements_applied', 'needs_reconciliation', 'cancelled'].includes(record.phase) ||
       typeof record.payload.text !== 'string' || record.payload.text.length > 200_000 ||
       record.payload.messageId || !timestamp(record.createdAt) || !timestamp(record.updatedAt) ||
       (record.revision !== undefined && (!Number.isSafeInteger(record.revision) || record.revision < 1))) fail('invalid Session input record')

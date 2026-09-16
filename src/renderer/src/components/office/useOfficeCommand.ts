@@ -6,7 +6,7 @@ import { useStore } from '../../store'
 import { publishOfficeActionFeedback } from './OfficeActionFeedback'
 import { submitOfficeSessionInstruction } from './office-session-commands'
 import { useSessionInputs } from '../composer/useSessionInputs'
-import { sessionInputIntent } from '../composer/session-input-intent'
+import { sessionInputIntent, sessionRequirementRevisionText } from '../composer/session-input-intent'
 import { useSessionComposerDraft } from '../composer/useSessionComposerDraft'
 
 export type OfficeCommandTarget = { kind: 'session'; id: string; title: string } |
@@ -23,6 +23,7 @@ export function useOfficeCommand(target: OfficeCommandTarget, zh: boolean) {
   const [error, setError] = useState(false)
   const [lastSessionId, setLastSessionId] = useState<string | null>(null)
   const [modelRequestSessionId, setModelRequestSessionId] = useState<string | null>(null)
+  const [requirementRevision, setRequirementRevision] = useState<{ sessionId: string; text: string }>()
   const [pending, setPending] = useState<PersonalTaskSubmissionRecovery[]>([])
   const inFlight = useRef(false)
   const current = useRef({ text, target })
@@ -65,6 +66,10 @@ export function useOfficeCommand(target: OfficeCommandTarget, zh: boolean) {
       return handleReceipt(result.receipt, result.pendingCleanupError)
     }
     const intent = sessionInputIntent(text)
+    if (intent === 'requirements') {
+      setRequirementRevision({ sessionId: target.id, text: sessionRequirementRevisionText(text) ?? text })
+      return true
+    }
     if (intent === 'model') {
       setModelRequestSessionId(target.id)
       return true
@@ -79,7 +84,7 @@ export function useOfficeCommand(target: OfficeCommandTarget, zh: boolean) {
       setMessage(zh ? '已请求暂停当前任务，可核对进度后继续。' : 'Pause requested for this task. Review its progress before continuing.')
       return true
     }
-    const queued = running || !sessionInputs.ready || sessionInputs.records.some((record) => record.phase !== 'applied' && record.phase !== 'cancelled')
+    const queued = running || !sessionInputs.ready || sessionInputs.records.some((record) => record.phase !== 'applied' && record.phase !== 'requirements_applied' && record.phase !== 'cancelled')
     if (queued) await sessionInputs.queue({ text: text.trim() })
     else await submitOfficeSessionInstruction(target.id, text.trim(), zh)
     setLastSessionId(target.id)
@@ -100,6 +105,7 @@ export function useOfficeCommand(target: OfficeCommandTarget, zh: boolean) {
     finally { inFlight.current = false; setBusy(false); void recover() }
   }
   return { text, setText, busy, message, error, lastSessionId, pending, recover, send, sessionInputs, running,
+    requirementRevision, closeRequirementRevision: () => setRequirementRevision(undefined),
     modelRequestSessionId, closeModelPicker: () => setModelRequestSessionId(null) }
 }
 

@@ -599,6 +599,10 @@ class SessionManager {
   async generateTaskPlan(id: string, input: TaskPlanGenerateInput): Promise<TaskPlanStateView> {
     const session = this.sessions.get(id)
     if (!session) throw new Error('会话不存在')
+    if (input.expectedGoalRevision !== undefined) {
+      if (!Number.isSafeInteger(input.expectedGoalRevision) || input.expectedGoalRevision < 1) throw new Error('目标要求版本无效')
+      return this.taskPlans.refreshRequirements(id, input.expectedGoalRevision)
+    }
     const objective = typeof input?.objective === 'string' ? input.objective.replace(/\s+/g, ' ').trim() : ''
     if (!objective || objective.length > 20_000) throw new Error('工作流目标无效')
     const existing = this.taskPlans.get(id)
@@ -1119,6 +1123,9 @@ class SessionManager {
   ): Promise<boolean> {
     let session = this.sessions.get(id)
     if (!session) return false
+    if (typeof input !== 'string' && input.requirementRevisionIntent) {
+      return this.rejectBeforeRun(session, '交付要求修订必须通过当前任务的确认入口保存')
+    }
     try { assertSessionModelChangeReady(session.meta) }
     catch (error) { return this.rejectBeforeRun(session, error instanceof Error ? error.message : String(error)) }
     await this.council.loadSnapshots()

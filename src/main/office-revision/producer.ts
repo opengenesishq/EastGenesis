@@ -8,6 +8,8 @@ import { officeError } from './errors'
 import { regenerateFrozenOfficeRevision } from './effect'
 import { frozenOfficeContext } from './reconciliation'
 import { readBoundOfficeFile } from './scope'
+import { checkOfficeDeliveryRequirements } from '../task/office-delivery-requirements'
+import { readOfficeRunRequirements, recordOfficeDeliveryRequirements } from '../task/office-delivery-requirement-ledger'
 
 type RevisionEffect = EffectRecord & { target: OfficeRevisionEffectTarget }
 export function isConfirmedOfficeRevisionEffect(effect: EffectRecord): effect is RevisionEffect {
@@ -21,6 +23,9 @@ export async function registerOfficeRevisionLifecycle(input: { run: TaskRunRecor
   const existing = await getPersistedArtifactLifecycle(artifactId, rootDir)
   const content = await readBoundOfficeFile(target.workspacePath, target.expectedSha256, target.expectedBytes)
   const result = await regenerateFrozenOfficeRevision(frozenOfficeContext(target, rootDir), target, false)
+  const requirements = await checkOfficeDeliveryRequirements({ workspacePath: target.workspacePath,
+    expectedDigest: target.expectedSha256, kind: target.artifactKind, sourceRefs: [], bytes: content,
+    ...await readOfficeRunRequirements(workflowRun, rootDir) })
   const registered = await registerCanonicalProducedArtifact({
     lifecycle: { id: artifactId, projectId: target.projectId, goalId: target.goalId, workItemId: target.workItemId,
       runId: workflowRun.id, lineageId: target.lineageId, kind: target.artifactKind, title: target.title,
@@ -37,6 +42,7 @@ export async function registerOfficeRevisionLifecycle(input: { run: TaskRunRecor
     attachToStage: false
   }, rootDir)
   if (registered.lifecycle.digest !== target.expectedSha256 || registered.lifecycle.supersedesId !== target.baseArtifactId) officeError('OFFICE_OUTPUT_CONFLICT', 'canonical新版本登记结果不匹配。')
+  await recordOfficeDeliveryRequirements(registered.lifecycle, requirements, rootDir)
   return registered.lifecycle
 }
 /** Only called after completeEffect has committed canonical lifecycle + evidence. */

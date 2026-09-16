@@ -1,4 +1,5 @@
 import type { SendMessagePayload } from './message-payload-types'
+import type { SessionRequirementRevisionReceipt } from './session-requirement-revision'
 
 /** A durable outbox for additions to an existing Session, never a new task. */
 export interface SessionInputRecord {
@@ -15,7 +16,9 @@ export interface SessionInputRecord {
   workItemId?: string
   messageId: string
   payload: SendMessagePayload
-  phase: 'queued' | 'dispatching' | 'applied' | 'needs_reconciliation' | 'cancelled'
+  /** requirements_applied records a contract-only command; it never means an engine received a message. */
+  phase: 'queued' | 'dispatching' | 'applied' | 'requirements_applied' | 'needs_reconciliation' | 'cancelled'
+  requirementRevision?: SessionRequirementRevisionReceipt
   createdAt: number
   updatedAt: number
   error?: string

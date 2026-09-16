@@ -3,6 +3,7 @@ import { isAbsolute, relative, resolve } from 'node:path'
 import type { DocumentAttachmentView, ImageAttachmentView, SendMessagePayload } from '../../shared/types'
 import { sessionImageAttachmentsRoot } from '../attachmentOps'
 import { normalizeOfficeIntent } from '../office-revision/input'
+import { normalizeRequirementRevisionIntent } from '../../shared/session-requirement-revision'
 
 export function attachmentRoot(sessionId: string): string {
   return sessionImageAttachmentsRoot(app.getPath('userData'), sessionId)
@@ -31,6 +32,7 @@ export function normalizeSendPayload(sessionId: string, raw: unknown): SendMessa
   return {
     text,
     ...(record.officeRevisionIntent === undefined ? {} : { officeRevisionIntent: normalizeOfficeIntent(record.officeRevisionIntent) }),
+    ...(record.requirementRevisionIntent === undefined ? {} : { requirementRevisionIntent: normalizeRequirementRevisionIntent(record.requirementRevisionIntent) }),
     ...(images.length > 0 ? { images } : {}),
     ...(documents.length > 0 ? { documents } : {})
   }

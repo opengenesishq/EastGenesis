@@ -45,8 +45,16 @@ export interface TaskPlanDraftInput {
   source?: TaskPlanSource
   /** Host-derived canonical inputs. Included in the plan digest when present. */
   missionSource?: TaskPlanMissionSource
+  requirementSource?: TaskPlanRequirementSource
   /** Frozen with each step's responsibility and covered by the approval digest. */
   institutionTemplate?: ProjectInstitutionTemplateRef
+}
+
+/** A host-owned link to the confirmed Goal amendment, frozen in the plan digest. */
+export interface TaskPlanRequirementSource {
+  eventId: string
+  goalRevision: number
+  contractDigest: string
 }
 
 export interface TaskPlanMissionSource {
@@ -98,6 +106,7 @@ export interface TaskPlanVersion {
   changeReason: string
   source: TaskPlanSource
   missionSource?: TaskPlanMissionSource
+  requirementSource?: TaskPlanRequirementSource
   institutionTemplate?: ProjectInstitutionTemplateRef
   createdBy: 'local-user' | 'agent'
   createdAt: number
@@ -152,6 +161,8 @@ export interface TaskPlanApprovalInput {
 
 export interface TaskPlanGenerateInput {
   objective: string
+  /** Refresh only after reviewing an exact current Goal version. */
+  expectedGoalRevision?: number
 }
 
 export interface TaskPlanDispatchResult {

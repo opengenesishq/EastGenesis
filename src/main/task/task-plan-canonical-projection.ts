@@ -68,6 +68,7 @@ export class TaskPlanCanonicalProjector {
       }
     }
     for (const item of removed) {
+      if (version.requirementSource && !CANCELLABLE_UNSTARTED_STATUSES.has(item.status)) continue
       if (item.status !== 'cancelled') {
         await commands.transitionWorkItem(item.id, 'cancelled', { expectedRevision: item.revision })
       }
@@ -192,6 +193,7 @@ function preflight(
       throw new Error('旧计划步骤的 canonical WorkItem 归属冲突，已阻止审批')
     }
     if (item.status !== 'cancelled' && !CANCELLABLE_UNSTARTED_STATUSES.has(item.status)) {
+      if (version.requirementSource && item.status !== 'running' && item.status !== 'waiting_approval') continue
       throw new Error(`旧计划步骤 ${item.title} 已启动，不能从新版本中移除`)
     }
   }

@@ -55,6 +55,7 @@ import {
 import { runHasUnresolvedEffects } from './task/effect-runtime'
 import { taskStrategySystemAppend, updateTaskStrategyMeta } from './task/task-strategy'
 import { buildWorkflowStageHandoffPrompt } from './task/workflow-stage-handoff'
+import { buildSessionRequirementContext } from './task/session-requirement-context'
 import { nativeRecoveryHandoffPrompt } from './task/native-recovery-handoff'
 import { sessionModelHandoffPrompt } from './agent/session-model-handoff'
 import { buildUserRulesSystemAppendSync } from './user-rules'
@@ -349,7 +350,8 @@ export class AnthropicEngine implements Engine {
           return ''
         })
       const modelHandoff = sessionModelHandoffPrompt(this.meta.modelChange?.handoff, this.meta, this.transcript.readAll())
-      const handoffContext = [modelHandoff, handoff].filter(Boolean).join('\n\n')
+      const requirements = await buildSessionRequirementContext(this.meta, app.getPath('userData'))
+      const handoffContext = [modelHandoff, handoff, requirements].filter(Boolean).join('\n\n')
       const outbound = await prepareOutboundContext({
         meta: this.meta,
         rootDir: app.getPath('userData'),

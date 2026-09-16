@@ -4,5 +4,6 @@ import { stableValueDigest } from './task/tool-idempotency'
 /** Bind the original user request, including document versions and typed intent, to its ledger event. */
 export function messagePayloadDigest(payload: SendMessagePayload): string {
   return stableValueDigest({ text: payload.text.trim(), images: payload.images ?? [],
-    documents: payload.documents ?? [], officeRevisionIntent: payload.officeRevisionIntent ?? null })
+    documents: payload.documents ?? [], officeRevisionIntent: payload.officeRevisionIntent ?? null,
+    ...(payload.requirementRevisionIntent ? { requirementRevisionIntent: payload.requirementRevisionIntent } : {}) })
 }

@@ -1,0 +1,13 @@
+.task-requirement-revision { margin: 8px 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); max-height: min(65vh, 650px); overflow: auto; font-size: 12px; overflow-wrap: anywhere; }
+.task-requirement-revision > header, .task-requirement-revision-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.task-requirement-revision > header > strong { flex: 1; }
+.task-requirement-revision p { margin: 7px 0; line-height: 1.5; }
+.task-requirement-revision textarea { display: block; width: 100%; box-sizing: border-box; margin: 6px 0; padding: 8px; resize: vertical; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; font: inherit; }
+.task-requirement-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.task-requirement-comparison > div { min-width: 0; padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.task-requirement-comparison > div > div { margin-top: 8px; }
+.task-requirement-comparison ul { margin: 5px 0; padding-left: 17px; }
+.task-requirement-comparison li + li { margin-top: 4px; }
+.task-requirement-revision [role=alert] { color: var(--danger, #c44040); }
+.task-requirement-revision-actions { margin-top: 10px; }
+@media (max-width: 600px) { .task-requirement-comparison { grid-template-columns: minmax(0, 1fr); } }

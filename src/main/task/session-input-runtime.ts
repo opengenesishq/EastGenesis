@@ -39,7 +39,7 @@ async function acceptedInput(rootDir: string, record: SessionInputRecord): Promi
       throw new Error('补充要求与原始运行记录不一致')
     }
     if (workItem && !workItem.runRefs.includes(run.id)) throw new Error('补充要求的运行记录尚未绑定原始任务')
-    if ((record.payload.documents?.length || record.payload.images?.length || record.payload.officeRevisionIntent) &&
+    if ((record.payload.documents?.length || record.payload.images?.length || record.payload.officeRevisionIntent || record.payload.requirementRevisionIntent) &&
         (event?.kind !== 'user-message' || event.payloadDigest !== (record.importedPayloadDigest ?? messagePayloadDigest(record.payload)))) return false
     return true
   })
@@ -53,6 +53,11 @@ export function getSessionInputService(rawRoot: string): SessionInputService {
   if (existing) return existing
   const service = new SessionInputService(rootDir, {
     meta: (id) => sessionManager.get(id)?.meta,
+    preflight: async (record) => {
+      const meta = sessionManager.get(record.sessionId)?.meta
+      if (!meta) throw new Error('请先恢复原任务，再继续执行')
+      if (meta.taskStrategy === 'execute') await sessionManager.assertInteractiveExecutionAuthorized(record.sessionId, '继续原任务')
+    },
     send: async (id, payload) => {
       const normalized = normalizeSendPayload(id, payload)
       if (!normalized || (normalized.images?.length ?? 0) !== (payload.images?.length ?? 0) ||

@@ -22,6 +22,7 @@ import {
   type TaskPlanApprovalInput,
   type TaskPlanDraftInput,
   type TaskPlanMissionSource,
+  type TaskPlanRequirementSource,
   type TaskPlanInstitutionResponsibility,
   type TaskPlanExecutionAuthorization,
   type TaskPlanProjectionReceipt,
@@ -131,6 +132,7 @@ export class TaskPlanContractStore {
       changeReason: draft.changeReason,
       source: draft.source,
       ...(draft.missionSource ? { missionSource: draft.missionSource } : {}),
+      ...(draft.requirementSource ? { requirementSource: draft.requirementSource } : {}),
       ...(draft.institutionTemplate ? { institutionTemplate: draft.institutionTemplate } : {}),
       createdBy,
       createdAt: now
@@ -380,6 +382,7 @@ function normalizeDraft(input: TaskPlanDraftInput): Omit<TaskPlanVersion, 'schem
     changeReason: optionalText(input.changeReason, 1_000) ?? '',
     source: source(input.source),
     ...(input.missionSource !== undefined ? { missionSource: normalizeMissionSource(input.missionSource) } : {}),
+    ...(input.requirementSource !== undefined ? { requirementSource: normalizeRequirementSource(input.requirementSource) } : {}),
     ...(institutionTemplate ? { institutionTemplate } : {})
   }
 }
@@ -392,6 +395,15 @@ function normalizeMissionSource(input: TaskPlanMissionSource): TaskPlanMissionSo
     throw new Error('Mission 计划来源无效')
   }
   return { goalRevision: input.goalRevision, inputDigest: input.inputDigest, missionDigest: input.missionDigest }
+}
+
+function normalizeRequirementSource(input: TaskPlanRequirementSource): TaskPlanRequirementSource {
+  if (!input || typeof input !== 'object' || Array.isArray(input) ||
+      Object.keys(input).some(key => !['eventId', 'goalRevision', 'contractDigest'].includes(key)) ||
+      !/^goal-requirement:[a-f0-9]{64}$/.test(input.eventId) ||
+      !Number.isSafeInteger(input.goalRevision) || input.goalRevision < 1 ||
+      !/^[a-f0-9]{64}$/.test(input.contractDigest)) throw new Error('交付要求计划来源无效')
+  return { eventId: input.eventId, goalRevision: input.goalRevision, contractDigest: input.contractDigest }
 }
 
 function normalizeStep(input: TaskPlanDraftInput['steps'][number], index: number): TaskPlanStep {
@@ -493,6 +505,7 @@ function planDigest(
     riskLevel: draft.riskLevel,
     acceptanceCriteria: draft.acceptanceCriteria,
     ...(draft.missionSource ? { missionSource: draft.missionSource } : {}),
+    ...(draft.requirementSource ? { requirementSource: draft.requirementSource } : {}),
     ...(draft.institutionTemplate ? { institutionTemplate: draft.institutionTemplate } : {})
   }
   return `sha256:${createHash('sha256').update(canonicalJson(material)).digest('hex')}`
@@ -719,6 +732,7 @@ function planVersionMaterial(value: ReturnType<typeof normalizeDraft> | TaskPlan
     changeReason: value.changeReason,
     source: value.source,
     ...(value.missionSource ? { missionSource: value.missionSource } : {}),
+    ...(value.requirementSource ? { requirementSource: value.requirementSource } : {}),
     ...(value.institutionTemplate ? { institutionTemplate: value.institutionTemplate } : {})
   }
 }

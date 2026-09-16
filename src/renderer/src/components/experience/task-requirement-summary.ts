@@ -26,6 +26,6 @@ export function taskRequirementSummary(binding: RequirementBinding, goal?: Goal,
     for (const step of plan.steps) add('stepAcceptance', (step.acceptanceSpec ?? []).map(entry => entry.criterion), step.title)
   }
   return { groups, preview: unique(groups.flatMap(group => group.values)).slice(0, 3),
-    goalRevision: goal?.revision, planVersion: plan?.version, planGoalRevision: plan?.missionSource?.goalRevision,
-    outdatedPlan: Boolean(goal && plan?.missionSource && goal.revision !== plan.missionSource.goalRevision) }
+    goalRevision: goal?.revision, planVersion: plan?.version, planGoalRevision: plan?.requirementSource?.goalRevision ?? plan?.missionSource?.goalRevision,
+    outdatedPlan: Boolean(goal && (plan?.requirementSource ?? plan?.missionSource) && goal.revision !== (plan?.requirementSource ?? plan?.missionSource)?.goalRevision) }
 }

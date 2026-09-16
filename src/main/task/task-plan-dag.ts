@@ -91,6 +91,7 @@ function taskFromPlanStep(
       '你是 CaoGen 已批准工作流的执行 Agent。',
       '',
       `父目标：${version.objective}`,
+      ...(version.requirementSource ? ['这是原任务的要求修订。原始目标保留最初说法；冲突的页数、格式或内容以以下当前步骤验收条件为准。'] : []),
       `当前步骤：${step.title}`,
       ...(step.role ? [`岗位：${step.role}`] : []),
       ...(step.workItemType ? [`任务类型：${step.workItemType}`] : []),

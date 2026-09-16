@@ -19,6 +19,7 @@ import { taskRuntimeRegistry } from '../src/main/task/task-runtime-registry'
 import { openProjectWorkspaceStore } from '../src/main/project-workspace/store'
 import { createProjectWorkspaceCommandService } from '../src/main/project-workspace/command-service'
 import { getPersistedArtifactLifecycle } from '../src/main/task/artifact-lifecycle-api'
+import { saveWorkflowAcceptance, listPersistedWorkflowLedger, listWorkflowEvidence } from '../src/main/task/workflow-ledger-api'
 import { slideTextRevision } from '../src/renderer/src/components/workbench/office-revision/office-revision-model'
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'caogen-office-revision-'))), cwd = join(root, 'formal')
@@ -36,10 +37,14 @@ async function main() {
   await commands.reconcileShadowProjection()
   await commands.createGoal({ id: meta.goalId!, projectId: meta.workspaceId!, title: 'Prepare report', objective: 'Revise a selected slide', status: 'verifying' })
   await commands.createWorkItem({ id: meta.workItemId!, projectId: meta.workspaceId!, goalId: meta.goalId, title: 'Draft presentation', type: 'planning', status: 'verifying' })
+  const originalAcceptance = await saveWorkflowAcceptance({ id: 'office-original-requirements', projectId: meta.workspaceId,
+    goalId: meta.goalId, workItemId: meta.workItemId, criteria: ['输出 PPTX，控制在一页，注明来源'], status: 'pending', evidenceRefs: [],
+    revision: 1, createdAt: 1, updatedAt: 1 }, root)
   const run: TaskRunRecord = { schemaVersion: 1, id: 'revision-run', sessionId: meta.id, taskId: meta.childTaskId!, status: 'executing',
     revision: 1, attempt: 1, recoveryCount: 0, createdAt: 1, updatedAt: 2, steps: [], toolExecutions: [], effects: [] }
   const saved = await saveTaskSnapshot(buildTaskSnapshot({ meta, run, transcript: [], lastSeq: 0, eventCount: 0, reason: 'created', now: 2 }), root)
   taskRuntimeRegistry.set(meta.id, saved.run!)
+  await saveWorkflowAcceptance({ ...originalAcceptance, status: 'verifying', revision: 2, updatedAt: 2 }, root)
   const item = await workspace.getWorkItem(meta.workItemId!)
   await commands.updateWorkItem(item!.id, { runRefs: [run.id] }, { expectedRevision: item!.revision })
 
@@ -61,6 +66,21 @@ async function main() {
   const artifactId = `artifact:office:${created!.id}`
   const original = await getPersistedArtifactLifecycle(artifactId, root)
   assert(original)
+  await check('Office checks bind actual page count to the original Run Acceptance revision and leave user acceptance open', async () => {
+    const evidence = (await listWorkflowEvidence({ artifactId }, root)).find(item => item.verifier === 'office-request-requirements')
+    assert(evidence)
+    const report = evidence.metadata?.report as { binding: { acceptanceRevision: number }; checks: Array<{ requirement: { kind: string }; status: string; actualPageCount?: number }> }
+    assert.equal(report.binding.acceptanceRevision, 1)
+    assert.equal(evidence.runId, run.id)
+    assert.equal(evidence.artifactId, artifactId)
+    assert.equal(evidence.contentDigest, original.digest.slice(7))
+    assert.equal(report.checks.find(item => item.requirement.kind === 'page_count')?.actualPageCount, 2)
+    assert.equal(report.checks.find(item => item.requirement.kind === 'page_count')?.status, 'failed')
+    const ledger = await listPersistedWorkflowLedger({}, root)
+    assert.equal(ledger.acceptances.items.find(item => item.id === originalAcceptance.id)?.status, 'verifying')
+    assert.ok(ledger.acceptances.items.some(item => item.id.startsWith(`acceptance:office-requirements:${artifactId}:`) && item.status === 'verifying'))
+    assert.ok(ledger.acceptances.items.some(item => item.id.startsWith(`acceptance:office-requirements:${artifactId}:`) && item.status === 'failed'))
+  })
   const sourceBytes = readFileSync(draftArgs.path)
   grants.revoke(meta, { expectedRevision: grant.revision }, 'local-user:fixture')
   meta.taskStrategy = 'execute'
@@ -113,6 +133,9 @@ async function main() {
     const record = await getPersistedArtifactLifecycle(finalized.artifactId, root)
     assert.equal(record?.kind, 'presentation')
     assert.equal(record?.digest, target.expectedSha256)
+    const revisedEvidence = (await listWorkflowEvidence({ artifactId: finalized.artifactId }, root)).find(item => item.verifier === 'office-request-requirements')
+    assert.equal(revisedEvidence?.contentDigest, target.expectedSha256.slice(7))
+    assert.equal(revisedEvidence?.metadata?.artifactVersion, 2)
     assert.deepEqual(readFileSync(draftArgs.path), sourceBytes)
     const finalSnapshot = await inspectScopedOffice(context, finalized.artifactId, finalized.digest)
     assert.equal(finalSnapshot.slideTexts!.find((text) => text.slideId === selected.slideId && text.shapeId === selected.shapeId)!.text, 'Revised customer title')

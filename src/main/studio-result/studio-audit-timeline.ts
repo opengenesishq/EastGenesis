@@ -216,7 +216,16 @@ function selectOwnedRecords(session: SessionMeta, aggregate: ProjectAggregateSna
       ? Boolean(artifact.runId && runIds.has(artifact.runId))
       : Boolean(artifact.runId && runIds.has(artifact.runId)) || Boolean(artifact.workItemId && workItemIds.has(artifact.workItemId))
   ).map((artifact) => artifact.id))
+  // Artifact checks intentionally have no WorkItem ownership: their result
+  // cannot approve the whole task. Include them through the existing evidence
+  // bindings without changing that authority boundary.
+  const linkedAcceptanceIds = new Set(aggregate.workflow.evidenceLinks.flatMap((link) =>
+    link.acceptanceId && (Boolean(link.runId && runIds.has(link.runId)) ||
+      ((!runFiltered || !link.runId) && Boolean(link.artifactId && artifactIds.has(link.artifactId))))
+      ? [link.acceptanceId]
+      : []))
   const acceptances = aggregate.workflow.acceptances.filter((acceptance) =>
+    linkedAcceptanceIds.has(acceptance.id) ||
     Boolean(acceptance.workItemId && workItemIds.has(acceptance.workItemId)) ||
     (!session.workItemId && Boolean(session.goalId && acceptance.goalId === session.goalId)) ||
     (!session.goalId && !session.workItemId)

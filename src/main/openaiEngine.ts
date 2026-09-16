@@ -67,6 +67,7 @@ import { taskRuntimeRegistry } from './task/task-runtime-registry'
 import { effectReplayTargetDigest } from './task/effect-reconciler'
 import { taskStrategySystemPrompt, updateTaskStrategyMeta } from './task/task-strategy'
 import { buildWorkflowStageHandoffPrompt } from './task/workflow-stage-handoff'
+import { buildSessionRequirementContext } from './task/session-requirement-context'
 import { nativeRecoveryHandoffPrompt } from './task/native-recovery-handoff'
 import { sessionModelHandoffPrompt } from './agent/session-model-handoff'
 import { buildUserRulesSystemAppendSync } from './user-rules'
@@ -632,7 +633,8 @@ export class OpenAIEngine implements Engine {
       app.getPath('userData')
     )
     const modelHandoff = sessionModelHandoffPrompt(this.meta.modelChange?.handoff, this.meta, this.transcript.readAll())
-    const handoffContext = [modelHandoff, handoff, recoveryHandoff].filter(Boolean).join('\n\n')
+    const requirements = await buildSessionRequirementContext(this.meta, app.getPath('userData'))
+    const handoffContext = [modelHandoff, handoff, recoveryHandoff, requirements].filter(Boolean).join('\n\n')
     const outbound = await prepareOutboundContext({
       meta: this.meta,
       rootDir: app.getPath('userData'),

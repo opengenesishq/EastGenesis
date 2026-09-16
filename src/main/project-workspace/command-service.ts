@@ -44,6 +44,7 @@ export interface ProjectWorkspaceCommandRepository {
   readonly rootDir?: string
   createGoal(input: GoalInput, options?: MutationOptions | number): Promise<Goal>
   updateGoal(id: string, patch: GoalPatch, options?: MutationOptions | number): Promise<Goal>
+  reviseGoalRequirements?(id: string, input: import('../../shared/session-requirement-revision').SessionRequirementRevisionInput, options?: MutationOptions | number): Promise<Goal>
   setGoalAcceptance(id: string, result: AcceptanceResult, options?: MutationOptions | number): Promise<Goal>
   transitionGoal(id: string, status: GoalStatus, options?: MutationOptions | number): Promise<Goal>
   archiveGoal(id: string, options?: MutationOptions | number): Promise<Goal>
@@ -91,6 +92,13 @@ export class ProjectWorkspaceCommandService {
       { command: 'goal.update', entityType: 'goal', entityId },
       () => this.repository.updateGoal(entityId, patch, options)
     )
+  }
+
+  reviseGoalRequirements(id: string, input: import('../../shared/session-requirement-revision').SessionRequirementRevisionInput, options?: MutationOptions | number): Promise<Goal> {
+    if (!this.repository.reviseGoalRequirements) throw new Error('Canonical requirement revision repository is unavailable')
+    const entityId = requiredId(id, 'goal id')
+    return this.execute({ command: 'goal.update', entityType: 'goal', entityId },
+      () => this.repository.reviseGoalRequirements!(entityId, input, options))
   }
 
   setGoalAcceptance(id: string, result: AcceptanceResult, options?: MutationOptions | number): Promise<Goal> {

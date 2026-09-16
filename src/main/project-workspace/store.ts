@@ -232,6 +232,10 @@ export class ProjectWorkspaceStore {
     return this.goals.list(projectId, options)
   }
 
+  reviseGoalRequirements(id: string, input: import('../../shared/session-requirement-revision').SessionRequirementRevisionInput, options?: MutationOptions | number): Promise<Goal> {
+    return this.goals.reviseRequirements(id, input, options)
+  }
+
   updateGoal(id: string, patch: GoalPatch, options?: MutationOptions | number): Promise<Goal> {
     return this.goals.update(id, patch, options)
   }

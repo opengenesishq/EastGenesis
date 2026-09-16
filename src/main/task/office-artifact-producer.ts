@@ -7,6 +7,8 @@ import { runOfficeSelfCheck, type OfficeSelfCheckResult } from '../agent/tools/o
 import { registerCanonicalProducedArtifact } from './artifact-production-boundary'
 import { openProjectWorkspaceStore } from '../project-workspace/store'
 import { assertSha256Digest } from './artifact-lifecycle-content'
+import { checkOfficeDeliveryRequirements } from './office-delivery-requirements'
+import { readOfficeRunRequirements, recordOfficeDeliveryRequirements } from './office-delivery-requirement-ledger'
 
 type OfficeArtifactEffect = EffectRecord & {
   target: Extract<EffectRecord['target'], { kind: 'office_artifact' }>
@@ -59,6 +61,9 @@ export async function registerOfficeArtifactLifecycle(
     runtimeTraceable: true
   })
   const status = deriveOfficeAcceptanceStatus(selfCheck)
+  const requirements = await checkOfficeDeliveryRequirements({ workspacePath: effect.target.workspacePath,
+    expectedDigest: expectedOutput.sha256, kind: effect.target.artifactKind, sourceRefs: effect.target.sourceRefs,
+    ...await readOfficeRunRequirements(workflowRun, rootDir) })
   const observedAt = existing?.createdAt ?? effect.terminalAt ?? effect.updatedAt
   const workspaceRoot = resolveLifecycleRoots(rootDir).workspaceRoot
   const hasProjectWorkspace = Boolean(
@@ -116,7 +121,8 @@ export async function registerOfficeArtifactLifecycle(
       status,
       verifier: 'office-delivery'
     },
-    attachToStage: hasProjectWorkspace
+    attachToStage: hasProjectWorkspace && !requirements.binding.reason && requirements.checks.every((check) =>
+      check.status === 'passed' || check.status === 'not_applicable')
   }, rootDir)
   assertExistingOfficeArtifact(
     registered.lifecycle,
@@ -125,6 +131,7 @@ export async function registerOfficeArtifactLifecycle(
     effect.target.workspacePath,
     expectedOutput
   )
+  await recordOfficeDeliveryRequirements(registered.lifecycle, requirements, rootDir)
   return registered.lifecycle
 }
 

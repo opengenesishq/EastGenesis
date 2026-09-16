@@ -18,9 +18,10 @@ import {
 import { useComposerSubmission } from './composer/useComposerSubmission'
 import { useSessionComposerDraft } from './composer/useSessionComposerDraft'
 import { useSessionInputs } from './composer/useSessionInputs'
-import { sessionInputIntent } from './composer/session-input-intent'
+import { sessionInputIntent, sessionRequirementRevisionText } from './composer/session-input-intent'
 import SessionInputQueue from './composer/SessionInputQueue'
 import SessionModelPicker from './composer/SessionModelPicker'
+import TaskRequirementRevision from './experience/TaskRequirementRevision'
 import PreparationPermission from './composer/PreparationPermission'
 import TaskExecutionAuthority from './composer/TaskExecutionAuthority'
 import './composer/session-inputs.css'
@@ -147,12 +148,13 @@ export default function Composer({ running, onModelRequest }: { running: boolean
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
   const [dragActive, setDragActive] = useState(false)
   const [modelRequestSessionId, setModelRequestSessionId] = useState<string | null>(null)
+  const [requirementRevision, setRequirementRevision] = useState<{ sessionId: string; text: string }>()
   const currentSessionId = useRef(activeId)
   currentSessionId.current = activeId
   const attachments = activeId ? attachmentsBySession[activeId] ?? [] : []
   const documents = activeId ? documentsBySession[activeId] ?? [] : []
   const sessionInputs = useSessionInputs(activeId, running)
-  const hasPendingInputs = !sessionInputs.ready || sessionInputs.records.some((record) => record.phase !== 'applied' && record.phase !== 'cancelled')
+  const hasPendingInputs = !sessionInputs.ready || sessionInputs.records.some((record) => record.phase !== 'applied' && record.phase !== 'requirements_applied' && record.phase !== 'cancelled')
   const localInput = sessionInputIntent(text, attachments.length > 0 || documents.length > 0) !== 'message'
   const localSubmission = localInput || running || hasPendingInputs
   const outbound = useComposerOutboundPreview(activeId, activeSession?.meta, text, attachments, documents)
@@ -287,6 +289,7 @@ export default function Composer({ running, onModelRequest }: { running: boolean
       if (intent === 'pause') await useStore.getState().interrupt(activeId)
       if (intent === 'palace') useStore.getState().setView('office')
       if (intent === 'model') (onModelRequest ?? setModelRequestSessionId)(activeId)
+      if (intent === 'requirements') setRequirementRevision({ sessionId: activeId, text: sessionRequirementRevisionText(text) ?? text })
       return true
     },
     onAccepted: () => {
@@ -615,6 +618,8 @@ export default function Composer({ running, onModelRequest }: { running: boolean
       />
       {modelRequestSessionId && modelRequestSessionId === activeId && <SessionModelPicker
         key={activeId} sessionId={activeId} onClose={() => setModelRequestSessionId(null)} />}
+      {requirementRevision?.sessionId === activeId && <TaskRequirementRevision key={activeId}
+        sessionId={requirementRevision.sessionId} initialText={requirementRevision.text} onClose={() => setRequirementRevision(undefined)} />}
       <OutboundContextPreview manifest={outbound.manifest} error={outbound.error} />
       <div className="composer-row">
         <input
