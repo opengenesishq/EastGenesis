@@ -19,6 +19,7 @@ export function reserveRequestBudget(input: ReserveRequestBudgetInput): RequestB
       existing.status = 'reserved'
       delete existing.actualUsd
       existing.updatedAt = input.now ?? Date.now()
+      bindAggregateBudgets(document.sessions.find((entry) => entry.key === existing.sessionKey)!, input.scope)
       writeBudgetDocument(input.rootDir, document)
       return { ...existing, reused: false }
     }
@@ -31,6 +32,7 @@ export function reserveRequestBudget(input: ReserveRequestBudgetInput): RequestB
       baselineTextUsd: input.scope.sessionTextCostUsd, observedTextUsd: input.scope.sessionTextCostUsd, createdAt: now }
     document.sessions.push(session)
   }
+  bindAggregateBudgets(session, input.scope)
   assertRequestBudget(requestBudgetSnapshot(document, input.scope, now), input.estimatedUsd)
   session.sessionIds = [...new Set([...session.sessionIds, input.scope.sessionId])]
   session.sdkSessionId ??= input.scope.sdkSessionId
@@ -104,9 +106,13 @@ function budgetFile(rootDir: string): string {
   return join(resolve(rootDir), 'request-budget-reservations.json')
 }
 function validateScope(scope: RequestBudgetScope): void {
+  if (!optionalIds(scope.aggregateBudgetIds)) throw new Error('Invalid aggregate request budget membership')
   if (scope.aggregateBudgets !== undefined && (!Array.isArray(scope.aggregateBudgets) || scope.aggregateBudgets.some((budget) =>
     !budget.id || !Array.isArray(budget.sessionIds) || budget.sessionIds.some((id) => typeof id !== 'string' || !id) ||
-    !Number.isFinite(budget.limitUsd) || budget.limitUsd < 0 || !Number.isFinite(budget.textSpentUsd) || budget.textSpentUsd < 0))) {
+    !Number.isFinite(budget.limitUsd) || budget.limitUsd < 0 || !Number.isFinite(budget.textSpentUsd) || budget.textSpentUsd < 0 ||
+    (budget.textCostFloors !== undefined && (!Array.isArray(budget.textCostFloors) || budget.textCostFloors.some((floor) =>
+      !floor.id || !Array.isArray(floor.sessionIds) || !optionalIds(floor.sessionIds) ||
+      !finiteMoney(floor.observedUsd) || !finiteMoney(floor.minimumUsd))))))) {
     throw new Error('Invalid aggregate request budget scope')
   }
   if (!scope.sessionId || !finiteMoney(scope.sessionTextCostUsd) || !finiteMoney(scope.monthlyTextSpentUsd) ||
@@ -117,8 +123,8 @@ function validateScope(scope: RequestBudgetScope): void {
 }
 function validateStoredSession(value: unknown): void {
   if (!isRecord(value) || typeof value.key !== 'string' || !Array.isArray(value.sessionIds) ||
-      value.sessionIds.some((id) => typeof id !== 'string') || !finiteMoney(value.baselineTextUsd) ||
-      !finiteMoney(value.observedTextUsd) || !finiteMoney(value.createdAt)) throw new Error('Invalid budget session record')
+    value.sessionIds.some((id) => typeof id !== 'string') || !finiteMoney(value.baselineTextUsd) ||
+    !finiteMoney(value.observedTextUsd) || !finiteMoney(value.createdAt) || !optionalIds(value.aggregateBudgetIds)) throw new Error('Invalid budget session record')
 }
 function validateStoredReservation(value: unknown): void {
   if (!isRecord(value) || typeof value.id !== 'string' || typeof value.sessionKey !== 'string' ||
@@ -131,3 +137,8 @@ function validateStoredReservation(value: unknown): void {
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === 'object' && !Array.isArray(value) }
 function finiteMoney(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) && value >= 0 }
 function money(value: unknown): value is number | undefined { return value === undefined || finiteMoney(value) }
+function optionalIds(value: unknown): boolean { return value === undefined || (Array.isArray(value) && value.every((id) => typeof id === 'string' && id.length > 0)) }
+function bindAggregateBudgets(session: RequestBudgetDocument['sessions'][number], scope: RequestBudgetScope): void {
+  const ids = [...new Set([...(session.aggregateBudgetIds ?? []), ...(scope.aggregateBudgetIds ?? []), ...(scope.aggregateBudgets ?? []).map((budget) => budget.id)])]
+  if (ids.length) session.aggregateBudgetIds = ids
+}

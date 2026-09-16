@@ -1,6 +1,9 @@
 /** Main-process budget inputs; never accepted from tool arguments or renderer IPC. */
 export interface RequestBudgetScope {
-  aggregateBudgets?: Array<{ id: string; sessionIds: string[]; limitUsd: number; textSpentUsd: number }>
+  /** Stable canonical memberships, including groups that do not yet have a limit. */
+  aggregateBudgetIds?: string[]
+  aggregateBudgets?: Array<{ id: string; sessionIds: string[]; limitUsd: number; textSpentUsd: number;
+    textCostFloors?: Array<{ id: string; sessionIds: string[]; observedUsd: number; minimumUsd: number }> }>
   sessionId: string
   sdkSessionId?: string
   sessionTextCostUsd: number
@@ -27,6 +30,8 @@ export interface BudgetSession {
   key: string
   sessionIds: string[]
   sdkSessionId?: string
+  /** Retained when history is removed or concurrent siblings are not projected yet. */
+  aggregateBudgetIds?: string[]
   baselineTextUsd: number
   observedTextUsd: number
   createdAt: number

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import {
   mkdir,
   open,
@@ -1050,6 +1051,20 @@ function cloneDocument(document: SupervisorStateDocument): SupervisorStateDocume
 async function readDocument(filePath: string): Promise<SupervisorStateDocument> {
   try {
     const parsed: unknown = JSON.parse(await readFile(filePath, 'utf8'))
+    assertDocument(parsed)
+    return parsed
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return emptyDocument()
+    if (error instanceof SupervisorStateError) throw error
+    throw new SupervisorStateError('corrupt_store', `cannot read supervisor state: ${String(error)}`)
+  }
+}
+
+/** Synchronous read for the final request-budget barrier. Uses the same
+ * validated, atomically replaced document as Supervisor mutations. */
+export function readSupervisorStateSync(rootDir: string): SupervisorStateDocument {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(join(rootDir, STORE_FILE_NAME), 'utf8'))
     assertDocument(parsed)
     return parsed
   } catch (error) {

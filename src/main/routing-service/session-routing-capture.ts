@@ -45,7 +45,7 @@ export function captureSessionRouting(input: { meta: SessionMeta; prompt: string
   const connectionIdentities = Object.fromEntries(providers.map((provider) => [provider.id, getProviderConnectionIdentity(provider.id)]))
   const identities = new Map(providers.map((provider) => [provider.id, JSON.stringify(connectionIdentities[provider.id])]))
   const catalog = buildRoutingCatalog(providers)
-  const remaining = [budget.sessionRemainingUsd, budget.monthlyRemainingUsd].filter((value): value is number => value !== undefined)
+  const remaining = [budget.sessionRemainingUsd, budget.monthlyRemainingUsd, ...(budget.aggregateRemainingUsd ?? [])].filter((value): value is number => value !== undefined)
   const snapshots: RoutingEvaluationSnapshots = { providers, expertPolicy: settings.routingExpertPolicy,
     budget: remaining.length === 0 ? undefined : { remainingUsd: Math.min(...remaining), hardLimit: true },
     targetEligibility: buildTargetEligibility(catalog, task, settings.routingExpertPolicy, identities, normalizeSessionExecutorEngine(input.meta.executorEngine)),

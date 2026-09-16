@@ -55,6 +55,8 @@ export function resolveRuntimeSessionRoute(input: {
   const history = input.history ?? listHistory()
   const monthly = calculateMonthlyBudgetSnapshot({ settings, history, currentSession: meta })
   const budget = nativeBudgetSnapshot(meta, { settings, history }, input.rootDir)
+  const sharedRemaining = [budget.monthlyRemainingUsd ?? monthly.remainingUsd, ...(budget.aggregateRemainingUsd ?? [])]
+    .filter((value): value is number => value !== undefined)
   if (budget.sessionUnknown && budget.sessionRemainingUsd !== undefined) throw new ModelRouteError('ROUTING_BUDGET_EXHAUSTED', '会话存在费用待对账的请求，有限预算暂不可继续发送。')
   const result = resolveSessionModelRoute({
     ...routingSettings(settings), enabled: true, currentModel: meta.model,
@@ -68,7 +70,7 @@ export function resolveRuntimeSessionRoute(input: {
     driveMode: meta.driveMode, payload, businessLineStrategy: businessLine?.routingPreference,
     sessionCostUsd: budget.sessionSpentUsd, sessionBudgetUsd: meta.budgetUsd,
     estimatedContextTokens: meta.contextTokens,
-    monthlyBudgetRemainingUsd: budget.monthlyRemainingUsd ?? monthly.remainingUsd, projectPath: meta.sourceCwd ?? meta.cwd
+    monthlyBudgetRemainingUsd: sharedRemaining.length ? Math.min(...sharedRemaining) : undefined, projectPath: meta.sourceCwd ?? meta.cwd
   })
   if (result.kind !== 'routed') throw new ModelRouteError('ROUTING_NO_CANDIDATES', '自动调度未产生可执行的模型。')
   return bindRuntimeRouteModel(result, providers)

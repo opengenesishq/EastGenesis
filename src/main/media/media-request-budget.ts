@@ -22,7 +22,7 @@ export function mediaRequestBudgetScope(production: VideoProduction, context?: M
 
 export function remainingRequestBudget(rootDir: string, scope: RequestBudgetScope): number | undefined {
   const budget = readRequestBudgetSnapshot(rootDir, scope)
-  const limits = [budget.sessionRemainingUsd, budget.monthlyRemainingUsd].filter((value): value is number => value !== undefined)
+  const limits = [budget.sessionRemainingUsd, budget.monthlyRemainingUsd, ...(budget.aggregateRemainingUsd ?? [])].filter((value): value is number => value !== undefined)
   return limits.length ? Math.min(...limits) : undefined
 }
 
