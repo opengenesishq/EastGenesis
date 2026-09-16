@@ -146,7 +146,7 @@ const durableIpcChannels = [
   'providers:delete', 'providers:update',
   'routines:create', 'routines:delete',
   'routines:markRun', 'routines:reviewRun', 'routines:update', 'sessions:close',
-  'sessions:create', 'sessions:rename', 'sessions:setModel', 'sessions:setPermissionMode',
+  'sessions:create', 'sessions:rename', 'sessions:setModel', 'sessions:setRoutingControl', 'sessions:setPermissionMode',
   'settings-domain:routing:save', 'settings-domain:update', 'supervisor:invoke', 'taskSnapshots:delete', 'taskSnapshots:recover',
   'taskSnapshots:resolveDagFinalization', 'taskSnapshots:resolveEffect', 'taskSnapshots:recheckEffect',
   'workflowLedger:createArtifact', 'workflowLedger:createArtifactAcceptance', 'workflowLedger:createArtifactEdge',

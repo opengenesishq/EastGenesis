@@ -64,6 +64,12 @@ export function frozenRetryAllows(input: {
   return [policy.initialTarget, ...policy.retryTargets].some(same)
 }
 
+/** Same-target replay is opt-in and only follows a transport-proven refusal. */
+export function frozenSameTargetRetryAllows(input: Parameters<typeof frozenRetryAllows>[0]): boolean {
+  return input.recovery.frozenRetry?.effectivePolicy.failure.kind === 'retry_same_target'
+    && Number.isSafeInteger(input.attempt) && input.attempt > 0 && frozenRetryAllows(input)
+}
+
 export function nativeSessionRecoveryContext(meta: SessionMeta, settings = getSettings()): NativeSessionRecoveryContext {
   const frozen = turnAnchors.get(meta)
   if (!frozen) throw new ModelRouteError('ROUTING_MANUAL_TARGET_UNAVAILABLE', '本轮缺少初始故障恢复范围，已阻止重新选择目标。')

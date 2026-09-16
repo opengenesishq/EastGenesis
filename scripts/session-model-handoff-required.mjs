@@ -30,6 +30,9 @@ try {
     export { nativeRecoveryHandoffPrompt } from './src/main/task/native-recovery-handoff'
     export { nativeTurnRejection } from './src/main/model/native-turn-rejection'
     export { prepareOutboundContext, appendOutboundContextItems, assertOutboundContextAllowed } from './src/main/project-workspace/outbound-context-policy'
+    export { persistRuntimeContinuation, restoreRuntimeContinuation } from './src/main/session-runtime-continuation-store'
+    export { buildProviderNeutralContextDigest } from './src/main/task/provider-neutral-context'
+    export { sealSessionModelChange } from './src/main/session-model-change'
   `, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, platform: 'node', format: 'cjs', target: 'node22', packages: 'external',
     plugins: [{ name: 'handoff-local-boundaries', setup(builder) {
       builder.onResolve({ filter: /^electron$|(?:^|\/)(?:providers|settings|sessionManager|history|session-input-runtime|session-creation-journal|acceptance-quality-feedback)$/ }, args => ({ path: args.path === 'electron' ? 'electron' : args.path.split('/').at(-1), namespace: 'handoff-local-boundaries' }))
@@ -240,6 +243,41 @@ try {
     assert.doesNotThrow(() => api.assertSessionModelHandoff(shorter, checkpointMeta, durable))
     assert.ok(api.sessionModelHandoffPrompt(shorter, checkpointMeta, durable).includes(before.digest))
     assert.throws(() => api.assertSessionModelHandoff(before, checkpointMeta, durable), /前缀/)
+  })
+  await check('durable continuation restores routing control while later explicit locks supersede old receipts', async () => {
+    const meta = { ...base, id: 'routing-receipt', sdkSessionId: 'routing-receipt-sdk', model: 'auto', routingScope: 'global', engine: 'anthropic',
+      routingControl: { kind: 'auto', scope: { kind: 'global' } } }
+    const writer = new api.TranscriptWriter(meta.sdkSessionId)
+    writer.next({ kind: 'user-message', messageId: 'first', text: 'Explain the goal' })
+    writer.next({ kind: 'assistant-message', messageId: 'answer', blocks: [{ type: 'text', text: 'The goal is clear.' }] })
+    writer.next({ kind: 'turn-result', isError: false })
+    const entries = writer.readAll()
+    const handoff = await api.prepareSessionModelHandoff(meta, undefined, root)
+    const control = { kind: 'preferred', primary: { providerId: 'fixture', model: 'fixture-model' }, alternatives: [], failure: { kind: 'pause' } }
+    const change = (id, createdAt, routingControl, model = 'auto', routingScope = 'global') => api.sealSessionModelChange({
+      schemaVersion: 1, id, state: 'committed', sessionId: meta.id, createdAt, handoff,
+      from: { providerId: 'fixture', model: 'auto', routingScope: 'global', routingControl: { kind: 'auto', scope: { kind: 'global' } } },
+      to: { providerId: 'fixture', model, routingScope, routingControl }
+    })
+    const receipt = { ...meta, routingControl: control, modelChange: change('preferred-choice', 90, control), runtimeContinuation: {
+      schemaVersion: 1, id: 'continuation', state: 'committed', fromEngine: 'openai', toEngine: 'anthropic', providerId: 'fixture', model: 'fixture-model',
+      boundarySeq: entries.at(-1).seq, contextDigest: api.buildProviderNeutralContextDigest({ entries }), createdAt: 100
+    } }
+    api.persistRuntimeContinuation(receipt)
+    const restored = structuredClone(meta)
+    api.restoreRuntimeContinuation(restored)
+    assert.deepEqual(restored.routingControl, control)
+    assert.equal(restored.modelChange.id, 'preferred-choice')
+    assert.equal(restored.runtimeContinuation.id, 'continuation')
+
+    const locked = { kind: 'locked', target: { providerId: 'fixture', model: 'later-model' } }
+    const later = { ...meta, model: 'later-model', routingScope: 'fixed', routingControl: locked,
+      modelChange: change('later-lock', 200, locked, 'later-model', 'fixed') }
+    const before = structuredClone(later)
+    api.restoreRuntimeContinuation(later)
+    assert.deepEqual(later, before, 'old automatic receipt replaced a later explicit lock')
+    const conflict = { ...meta, routingControl: control, modelChange: change('conflicting-choice', 95, control) }
+    assert.throws(() => api.restoreRuntimeContinuation(conflict), /顺序冲突/)
   })
   assert.equal(networkCalls, 0)
   console.log(`session-model-handoff-required: ${passed}/${passed}; production handoff and canonical stores; no Provider I/O`)

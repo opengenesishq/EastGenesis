@@ -100,7 +100,7 @@ function filePath(file: File): string | undefined {
 let imageAttachmentDrafts: Record<string, ComposerImageAttachment[]> = {}
 let documentAttachmentDrafts: Record<string, DocumentAttachmentView[]> = {}
 
-export default function Composer({ running }: { running: boolean }): React.JSX.Element {
+export default function Composer({ running, onModelRequest }: { running: boolean; onModelRequest?(sessionId: string): void }): React.JSX.Element {
   const t = useT()
   const projection = useExperienceProjection()
   const sendMessage = useStore((s) => s.sendMessage)
@@ -286,7 +286,7 @@ export default function Composer({ running }: { running: boolean }): React.JSX.E
       if (!activeId) throw new Error('请先选择当前任务')
       if (intent === 'pause') await useStore.getState().interrupt(activeId)
       if (intent === 'palace') useStore.getState().setView('office')
-      if (intent === 'model') setModelRequestSessionId(activeId)
+      if (intent === 'model') (onModelRequest ?? setModelRequestSessionId)(activeId)
       return true
     },
     onAccepted: () => {

@@ -38,6 +38,7 @@ import { AUTO_MODEL, AUTO_PROVIDER_ID } from '../shared/types'
 import type { WorkItem } from '../shared/project-workspace-types'
 import { reconcileTaskExecutionAuthorityMarker } from './permission/task-execution-authority-marker'
 import { assertSessionModelChange } from './session-model-change'
+import { normalizeSessionRoutingControl } from '../shared/session-routing-control'
 
 export interface SessionCreationDraft {
   opts: CreateSessionOptions
@@ -98,9 +99,12 @@ export function prepareSessionCreationDraft(
   }
   // A model-change receipt belongs to the original task. Reopening that
   // conversation must keep its identity, including an unfinished switch.
-  if (historySource?.mode === 'resume' && resumeHistory && (resumeWorktreeRecord || resumeHistory.modelChange)) {
+  if (historySource?.mode === 'resume' && resumeHistory && (resumeWorktreeRecord || resumeHistory.modelChange || resumeHistory.routingControl)) {
     baseMeta.id = resumeHistory.id
     baseMeta.createdAt = resumeHistory.createdAt
+  }
+  if (historySource?.mode === 'resume' && resumeHistory?.routingControl) {
+    baseMeta.routingControl = normalizeSessionRoutingControl(resumeHistory.routingControl, baseMeta)
   }
   if (historySource?.mode === 'resume' && resumeHistory?.modelChange) {
     // A new Session identity can replay conversation history, but cannot claim

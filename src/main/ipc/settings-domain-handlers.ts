@@ -13,6 +13,8 @@ import type { RoutingSettingsSnapshot } from '../routing-settings/routing-settin
 import { sessionManager } from '../sessionManager'
 import type { AppSettings } from '../../shared/types'
 import type { RoutingRulePreviewInput, RoutingRuleSaveInput, RoutingRulePreviewResult } from '../../shared/routing-policy-types'
+import { sessionRoutingControl, sessionRoutingIntent } from '../../shared/session-routing-control-types'
+import { digest } from '../task/workflow-ledger-canonical'
 
 let service: ReturnType<typeof createRoutingRuleService> | undefined
 
@@ -45,11 +47,7 @@ function routingService() {
           resolveSession: (sessionId) => sessionId === meta.id ? {
             sessionId: meta.id,
             businessLineId: meta.businessLineId ?? (() => { throw new Error('任务缺少业务线归属，不能预演。') })(),
-            routingIntent: meta.routingScope === 'fixed'
-              ? { kind: 'fixed', target: { providerId: meta.providerId, model: meta.model } }
-              : meta.routingScope === 'provider'
-                ? { kind: 'provider', providerId: meta.providerId }
-                : { kind: 'global' },
+            routingIntent: sessionRoutingIntent(meta),
             task: { requiresTools: true, contextTokens: meta.contextTokens },
             authority: { sessionId: meta.id, workspaceId: meta.workspaceId ?? null,
               goalId: meta.goalId ?? null, workItemId: meta.workItemId ?? null }
@@ -80,6 +78,8 @@ function routingService() {
         && meta.providerId === authority.providerId
         && meta.model === authority.model
         && (meta.routingScope ?? 'global') === (authority.routingScope ?? 'global')
+        && authority.routingControl !== undefined
+        && digest(sessionRoutingControl(meta)) === digest(authority.routingControl)
         && (meta.workspaceId ?? null) === (authority.workspaceId ?? null)
         && (meta.goalId ?? null) === (authority.goalId ?? null)
         && (meta.workItemId ?? null) === (authority.workItemId ?? null)

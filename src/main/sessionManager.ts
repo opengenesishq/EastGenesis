@@ -20,7 +20,7 @@ import { calculateMonthlyBudgetSnapshot } from './model/monthly-budget'
 import { checkpointRestoreEffectBoundary } from './checkpoint-effect-boundary'
 import { normalizeStableMessagePayload } from './stable-message-payload'
 import { withSessionOperationQueue } from './session-operation-queue'
-import { applySessionModelSwitch } from './ipc/session-model-switch-handler'
+import { applySessionModelSwitch, applySessionRoutingControl } from './ipc/session-model-switch-handler'
 import { assertSessionModelChangeReady, restoreModelChangeSourceRun, sealSessionModelChange } from './session-model-change'
 import { prepareSessionModelHandoffCheckpoint } from './agent/session-model-handoff'
 import { assertPersistedSessionExecutionAllowed } from './session-execution-ownership'
@@ -707,6 +707,14 @@ class SessionManager {
   }
 
   setModel(sessionId: string, model: unknown): Promise<void> {
+    return this.changeSessionRouting(sessionId, model, false)
+  }
+
+  setRoutingControl(sessionId: string, control: unknown): Promise<void> {
+    return this.changeSessionRouting(sessionId, control, true)
+  }
+
+  private changeSessionRouting(sessionId: string, value: unknown, routingControl: boolean): Promise<void> {
     return withSessionOperationQueue(sessionId, async () => {
       const session = this.sessions.get(sessionId)
       if (session?.meta.modelChange?.state === 'prepared' && !this.taskRuns.get(sessionId)) {
@@ -717,7 +725,7 @@ class SessionManager {
         const source = restoreModelChangeSourceRun(session.meta, persisted)
         if (source) this.taskRuns.set(sessionId, source)
       }
-      await applySessionModelSwitch(session, model, {
+      await (routingControl ? applySessionRoutingControl : applySessionModelSwitch)(session, value, {
         rootDir: app.getPath('userData'), getRun: () => this.getTaskRun(sessionId),
         isCurrent: candidate => this.sessions.get(sessionId) === candidate,
         assertRecoveryAllowed: async () => {

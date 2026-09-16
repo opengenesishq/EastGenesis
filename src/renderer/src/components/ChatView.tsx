@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { modelOptionsForProvider, useStore } from '../store'
+import { useStore } from '../store'
 import { useT } from '../i18n'
 import { HeaderIcon, type HeaderIconName } from './ChatHeaderIcons'
 import MessageItem, { type MessageFork, type MessageRevision } from './MessageItem'
@@ -12,6 +12,8 @@ import type { ChatItem, ToolResultInfo } from '../store'
 import ChatStatusBar from './experience/ChatStatusBar'
 import ChatTaskStrategyControl from './experience/ChatTaskStrategyControl'
 import TaskPlanWorkbench from './experience/TaskPlanWorkbench'
+import SessionModelPicker from './composer/SessionModelPicker'
+import { sessionRoutingLabel } from './composer/session-routing-form'
 
 const VIRTUAL_MESSAGE_THRESHOLD = 100
 const VIRTUAL_MESSAGE_ESTIMATED_HEIGHT = 116
@@ -47,7 +49,7 @@ export default function ChatView(): React.JSX.Element | null {
   const providers = useStore((s) => s.providers)
   const closeSession = useStore((s) => s.closeSession)
   const interrupt = useStore((s) => s.interrupt)
-  const setModel = useStore((s) => s.setModel)
+  const zh = useStore((s) => s.settings.language === 'zh')
   const openLatestRewindPanel = useStore((s) => s.openLatestRewindPanel)
   const openBrowserPanel = useStore((s) => s.openBrowserPanel)
   const openFilesPanel = useStore((s) => s.openFilesPanel)
@@ -80,6 +82,7 @@ export default function ChatView(): React.JSX.Element | null {
   const scrollFrame = useRef<number | null>(null)
   const [scrollSnapshot, setScrollSnapshot] = useState<ScrollSnapshot>({ top: 0, height: 0 })
   const [moreOpen, setMoreOpen] = useState(false)
+  const [modelPickerSessionId, setModelPickerSessionId] = useState<string | null>(null)
   const [startSuggestionsSessionId, setStartSuggestionsSessionId] = useState<string | null>(null)
   const moreRef = useRef<HTMLDivElement>(null)
   const startSuggestionsOpen = startSuggestionsSessionId === activeId
@@ -186,7 +189,6 @@ export default function ChatView(): React.JSX.Element | null {
   if (!session || !activeId) return null
   const { meta } = session
   const running = meta.status === 'running' || meta.status === 'starting'
-  const modelOptions = modelOptionsForProvider(providers, meta.providerId, t('autoRoute'), meta.model)
   const providerName = providerDisplayName(meta.providerId, providers, t)
   const activeMemorySuggestion = memorySuggestion?.sessionId === activeId ? memorySuggestion : undefined
 
@@ -240,14 +242,11 @@ export default function ChatView(): React.JSX.Element | null {
         </div>
         <div className="chat-controls no-drag">
           <ChatTaskStrategyControl value={meta.taskStrategy} disabled={running} />
-          <SessionModelSelect
-            disabled={running}
-            label={t('switchModel')}
-            model={meta.model}
-            onChange={setModel}
-            options={modelOptions}
-            sessionId={meta.id}
-          />
+          <button type="button" className="btn" data-session-routing-open title={t('switchModel')}
+            aria-expanded={modelPickerSessionId === activeId}
+            onClick={() => setModelPickerSessionId(modelPickerSessionId === activeId ? null : activeId)}>
+            {sessionRoutingLabel(meta, zh)}
+          </button>
           {running && (
             <button className="btn btn-danger" onClick={() => void interrupt()}>
               {t('stop')}
@@ -486,58 +485,11 @@ export default function ChatView(): React.JSX.Element | null {
         </div>
       )}
       <ChatStatusBar meta={meta} providerName={providerName} session={session} />
-      <Composer running={running} />
+      {modelPickerSessionId === activeId && <SessionModelPicker key={activeId} sessionId={activeId} onClose={() => setModelPickerSessionId(null)} />}
+      <Composer running={running} onModelRequest={setModelPickerSessionId} />
       <RewindPanel />
     </div>
   )
-}
-
-interface SessionModelSelectProps {
-  disabled: boolean
-  label: string
-  model: string
-  onChange: (model: string) => Promise<void>
-  options: Array<{ value: string; label: string }>
-  sessionId: string
-}
-
-function SessionModelSelect({
-  disabled,
-  label,
-  model,
-  onChange,
-  options,
-  sessionId
-}: SessionModelSelectProps): React.JSX.Element {
-  const [error, setError] = useState('')
-  useEffect(() => setError(''), [model, sessionId])
-  const errorId = error ? 'session-model-switch-error' : undefined
-
-  return (
-    <div className="session-model-control">
-      <select
-        aria-describedby={errorId}
-        aria-invalid={Boolean(error)}
-        className="select"
-        data-expert-control="true"
-        data-session-model-select="true"
-        disabled={disabled}
-        title={label}
-        value={model}
-        onChange={(event) => {
-          setError('')
-          void onChange(event.target.value).catch((cause) => setError(errorText(cause)))
-        }}
-      >
-        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-      </select>
-      {error && <span id={errorId} className="session-model-error" role="alert">{error}</span>}
-    </div>
-  )
-}
-
-function errorText(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause)
 }
 
 interface MessageListProps {

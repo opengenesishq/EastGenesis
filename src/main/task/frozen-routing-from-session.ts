@@ -18,6 +18,7 @@ import { providerAllowedByRoutingExpertPolicy, isLocalProviderUrl } from '../mod
 import { resolveProviderRuntimeTarget } from '../provider/providerRuntimeTarget'
 import { resolveNativeExecutorProtocol } from '../model/executor-compatibility'
 import { hasExplicitModelChange } from '../session-model-change'
+import { evaluateSessionRoutingControl } from '../session-routing-control'
 
 /** Build the immutable native text policy from the already trusted session route. */
 export function frozenPolicyForSessionRun(
@@ -53,6 +54,9 @@ export function frozenPolicyForSessionRun(
       frozenAt: Date.now(),
       originalPromptDigest: digest(payload.text)
     })
+  }
+  if (meta.routingControl && meta.routingControl.kind !== 'auto') {
+    return freezeSessionRoutingControl(meta, run, payload)
   }
   // Explicit fixed targets are already user-authorized routing decisions and
   // must remain executable even when a V1 rule set is enabled but cannot
@@ -203,12 +207,12 @@ function prepareFrozenContinuationRoute(
   if (!provider) throw new Error(`冻结路由目标 ${target.providerId} 不再可用。`)
   // A continuation preserves its target, but new input still has to fit that
   // target (for example, adding an image to a text-only conversation).
-  resolveRuntimeSessionRoute({ meta: { ...meta, providerId: target.providerId, model: target.model, routingScope: 'fixed' },
+  resolveRuntimeSessionRoute({ meta: { ...meta, providerId: target.providerId, model: target.model, routingScope: 'fixed', routingControl: undefined },
     payload, settings: getSettings(), providers: [provider], allowAnyEngine: true })
   let route: ResolvedSessionRoute | undefined
   try {
     route = resolveRuntimeSessionRoute({
-      meta: { ...meta, providerId: target.providerId, model: 'auto', engine: meta.engine },
+      meta: { ...meta, providerId: target.providerId, model: 'auto', engine: meta.engine, routingControl: undefined },
       payload,
       settings: getSettings(),
       providers: listProviders(),
@@ -267,6 +271,35 @@ function resolveRouteForEvaluation(meta: SessionMeta, payload: SendMessagePayloa
     crossValidationPlan: { ...route.crossValidationPlan,
       primary: { ...route.crossValidationPlan.primary, providerId: target.providerId, providerName: provider.name, model: target.model } }
   }
+}
+
+function freezeSessionRoutingControl(meta: SessionMeta, run: TaskRunRecord, payload: SendMessagePayload): FrozenRunRoutingPolicyV1 {
+  const { capture, result, rules } = evaluateSessionRoutingControl(meta, payload)
+  const provider = listProviders().find(item => item.id === result.initialTarget.providerId)
+  if (!provider) throw new Error('任务路由目标已不可用。')
+  const protocol = targetProtocol(result.initialTarget)
+  if (result.allowedAlternatives.some(target => targetProtocol(target) !== protocol)) {
+    throw new Error('备选连接的协议已变化，请重新确认当前任务的备选范围。')
+  }
+  const switchedProvider = provider.id !== meta.providerId
+  const target = { ...result.initialTarget, providerName: provider.name }
+  const route: ResolvedSessionRoute = {
+    kind: 'routed', ...target, switchedProvider, reason: '采用当前任务明确选择的路由',
+    decision: { ...createLegacyRoutingDecisionView({ ...target, strategy: result.task.strategy,
+      complexity: 'medium', candidateCount: result.rankedCandidates.length, switchedProvider,
+      reason: '采用当前任务明确选择的路由' }), decisionDigest: result.decisionDigest,
+      taskKinds: result.task.taskKinds, riskLevel: result.task.riskLevel, manualOverrideApplied: true },
+    crossValidationPlan: { enabled: false, primary: target, validators: [], policy: 'skip', reason: '任务路由仅允许明确选择的目标' },
+    recoveryCatalog: result.qualifiedTargets,
+    recoveryTask: { requiresTools: result.task.requiresTools, requiresVision: result.task.requiresVision, minContextTokens: result.task.minContextTokens }
+  }
+  const policy = frozenPolicyFromEvaluation({ meta, run, payload, context: capture.context,
+    snapshots: capture.snapshots, result, ruleSetRevision: 1, ruleSetDigest: digest(rules),
+    contextDigest: digest(capture.context), catalogDigest: digest(capture.snapshots),
+    connectionIdentities: new Map(listProviders().map(item => [item.id, getProviderConnectionIdentity(item.id)])),
+    protocolForTarget: targetProtocol })
+  prepareSessionTurnRoute(meta, payload, route)
+  return policy
 }
 
 function targetProtocol(target: { providerId: string; model: string }): FrozenNativeProtocol {

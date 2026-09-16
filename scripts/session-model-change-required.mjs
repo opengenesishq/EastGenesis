@@ -23,7 +23,13 @@ function load(file) {
 }
 const canonical = load('src/main/task/workflow-ledger-canonical.ts')
 const root = mkdtempSync(join(tmpdir(), 'caogen-model-switch-'))
-const provider = { id: 'fixture', name: 'Fixture', ready: true, engine: 'openai' }
+const models = ['old-model', 'new-model', 'third-model', 'shared-model']
+const provider = { id: 'fixture', name: 'Fixture', ready: true, engine: 'openai', baseUrl: 'https://fixture.invalid', models,
+  advancedConfig: { modelProfiles: models.map(model => ({ model, capabilities: ['text', 'tools'], contextWindow: 128000, pricing: { inputPerMillion: 1, outputPerMillion: 1 } })) } }
+const backup = { ...provider, id: 'backup', name: 'Backup' }
+const otherProtocol = { ...provider, id: 'anthropic', engine: 'anthropic' }
+const providers = [provider, backup, otherProtocol]
+let remainingBudget, denyTarget
 const settings = { schedulerStrategy: 'balanced', routingExpertPolicy: { locality: 'any', allowedProviderIds: [] } }
 let armedRoute, preparationCount = 0
 const handoffBoundary = {
@@ -40,8 +46,8 @@ const handoffBoundary = {
 }
 boundary('src/main/agent/session-model-handoff.ts', handoffBoundary)
 boundary('src/main/task/effect-runtime.ts', { runHasUnresolvedEffects: load('src/main/task/effect-ledger.ts').hasUnresolvedEffects })
-boundary('src/main/providers.ts', { listProviders: () => [provider], getProviderConnectionIdentity: () => ({ generationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', revision: 1 }) })
-boundary('src/main/settings.ts', { getSettings: () => settings })
+boundary('src/main/providers.ts', { listProviders: () => providers, resolveProviderEngine: provider => provider.engine, getProviderConnectionIdentity: () => ({ generationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', revision: 1 }) })
+boundary('src/main/settings.ts', { getSettings: () => settings, getRoutingSettingsBoundary: () => ({ read: () => ({ document: {} }) }) })
 boundary('src/shared/business-line-types.ts', { ...load('src/shared/business-line-types.ts'), getBusinessLines: () => [{ id: 'studio', enabled: true }] })
 boundary('src/main/model/session-runtime-routing.ts', { resolveRuntimeSessionRoute: ({ meta }) => {
   if (meta.model === 'incompatible') throw new Error('incompatible target')
@@ -51,9 +57,23 @@ boundary('src/main/model/session-turn-route.ts', { prepareSessionTurnRoute: (_me
 boundary('src/main/model/session-routing.ts', { createLegacyRoutingDecisionView: input => input })
 boundary('src/main/model/routing-expert-policy.ts', { providerAllowedByRoutingExpertPolicy: () => true, isLocalProviderUrl: () => false })
 boundary('src/main/provider/providerRuntimeTarget.ts', { resolveProviderRuntimeTarget: () => ({ baseUrl: 'https://fixture.invalid' }) })
-boundary('src/main/model/executor-compatibility.ts', { resolveNativeExecutorProtocol: () => 'openai.chat-completions' })
-for (const file of ['src/main/model/routing-policy/routing-policy-evaluator.ts', 'src/main/routing-service/session-routing-capture.ts', 'src/main/routing-settings/routing-settings-state.ts']) boundary(file, {})
-const { applySessionModelSwitch } = load('src/main/ipc/session-model-switch-handler.ts')
+boundary('src/main/model/executor-compatibility.ts', { resolveNativeExecutorProtocol: provider => provider.engine === 'anthropic' ? 'anthropic.messages' : provider.engine === 'gemini' ? 'google.generative-language' : 'openai.chat-completions' })
+boundary('src/main/task/workflow-ledger-codec.ts', canonical)
+boundary('src/main/model/acceptance-quality-signal.ts', {})
+boundary('src/main/model/route-observation-signal.ts', { routeObservationIdentity: () => undefined })
+boundary('src/main/routing-settings/routing-settings-state.ts', { readStoredRoutingState: () => ({ mode: 'legacy_active' }) })
+const controls = load('src/shared/session-routing-control-types.ts')
+const { canonicalTarget } = load('src/main/model/routing-policy/evaluator-catalog.ts')
+boundary('src/main/routing-service/session-routing-capture.ts', { captureSessionRouting: ({ meta, prompt }) => ({
+  context: { executionDomain: 'native_text', originalPrompt: prompt, businessLine: { id: 'studio', enabled: true, requiredCapabilities: ['tools'] },
+    userIntent: controls.sessionRoutingIntent(meta), baseStrategy: 'balanced', baseStrategySource: { kind: 'global' }, task: { requiresTools: true } },
+  snapshots: { providers, expertPolicy: settings.routingExpertPolicy,
+    budget: remainingBudget === undefined ? undefined : { remainingUsd: remainingBudget, hardLimit: true },
+    targetEligibility: providers.flatMap(provider => provider.models.map(model => ({ target: canonicalTarget(provider, model),
+      allowed: model !== 'incompatible' && denyTarget !== provider.id, reasons: [], connectionFingerprint: 'fixture' }))),
+    providerHealth: {}, scoringSignals: providers.flatMap(provider => provider.models.map(model => ({ providerId: provider.id, model, reliability: 0.5 }))) }
+}) })
+const { applySessionModelSwitch, applySessionRoutingControl } = load('src/main/ipc/session-model-switch-handler.ts')
 const change = load('src/main/session-model-change.ts')
 const { frozenPolicyForSessionRun } = load('src/main/task/frozen-routing-from-session.ts')
 const { sessionHistoryEntry } = load('src/main/session-history-entry.ts')
@@ -63,7 +83,7 @@ function fixture() {
     meta: { id: 'session', model: 'old-model', providerId: 'fixture', routingScope: 'fixed', status: 'idle', sdkSessionId: 'sdk',
       workItemId: 'work', goalId: 'goal', workspaceId: 'project', businessLineId: 'studio', engine: 'openai', cwd: root },
     permissions: [], setCalls: 0, events: [], pendingPermissions() { return this.permissions },
-    async setModel(model) { this.setCalls++; this.meta.model = model; this.meta.routingScope = model === 'auto' ? 'provider' : 'fixed' },
+    async setModel(model, providerId) { this.setCalls++; if (providerId) this.meta.providerId = providerId; this.meta.model = model; this.meta.routingScope = model === 'auto' ? 'provider' : 'fixed' },
     emitSyntheticEvent(event) { this.events.push(event) }
   }
   const run = { id: 'run-old', sessionId: 'session', taskId: 'session', status: 'completed', revision: 1, createdAt: 1, effects: [], toolExecutions: [] }
@@ -137,7 +157,7 @@ try {
       assert.equal(f.session.setCalls, 0); assert.equal(f.saves.length, 0)
     }
     const f = fixture()
-    await assert.rejects(applySessionModelSwitch(f.session, 'incompatible', f.context), /incompatible/)
+    await assert.rejects(applySessionModelSwitch(f.session, 'incompatible', f.context), /不可执行/)
     assert.equal(f.session.setCalls, 0)
     for (const value of ['', 'bad\u0000model', 'x'.repeat(241)]) await assert.rejects(applySessionModelSwitch(f.session, value, f.context))
   })
@@ -177,6 +197,129 @@ try {
     await ready; let sent = false
     const sending = withSessionOperationQueue('session', async () => { change.assertSessionModelChangeReady(f.session.meta); assert.equal(f.session.meta.model, 'new-model'); sent = true })
     await Promise.resolve(); assert.equal(sent, false); release(); await Promise.all([switching, sending]); assert.equal(sent, true)
+  })
+  await check('preferred production evaluator freezes primary and only the authorized same-protocol backup', async () => {
+    const f = fixture(), original = JSON.stringify(f.run.routingPolicy)
+    const control = { kind: 'preferred', primary: { providerId: 'fixture', model: 'new-model' },
+      alternatives: [{ providerId: 'backup', model: 'shared-model' }],
+      failure: { kind: 'retry_allowed_targets', maxAdditionalAttempts: 1, retryOn: ['rate_limited'] } }
+    await applySessionRoutingControl(f.session, control, f.context)
+    assert.deepEqual(f.session.meta.routingControl, control)
+    assert.deepEqual(f.saves.map(meta => meta.modelChange.state), ['prepared', 'committed'])
+    const next = { ...f.run, id: 'preferred-run' }; delete next.routingPolicy
+    const policy = frozenPolicyForSessionRun(f.session.meta, next, { text: 'continue', messageId: 'preferred-message' }, f.run)
+    assert.equal(policy.initialTarget.providerId, 'fixture'); assert.equal(policy.initialTarget.model, 'new-model')
+    assert.deepEqual(policy.retryTargets.map(({ providerId, model }) => ({ providerId, model })), control.alternatives)
+    assert.equal(policy.matchedRules[0].id, 'session-routing-control')
+    assert.equal(armedRoute.providerId, 'fixture'); assert.equal(armedRoute.model, 'new-model')
+    assert.equal(JSON.stringify(f.run.routingPolicy), original)
+    next.routingPolicy = policy
+    const successor = { ...next, id: 'preferred-next' }; delete successor.routingPolicy
+    assert.equal(frozenPolicyForSessionRun(f.session.meta, successor, { text: 'again', messageId: 'preferred-next-message' }, next).initialTarget.model, 'new-model')
+    denyTarget = 'fixture'
+    assert.throws(() => frozenPolicyForSessionRun(f.session.meta, { ...f.run, id: 'refused' }, { text: 'continue', messageId: 'refused-message' }, f.run), /不可执行/)
+    denyTarget = undefined
+  })
+  await check('locked same-name cross-provider selection is durable and does not grant retry', async () => {
+    const f = fixture(); f.session.meta.model = 'shared-model'
+    await applySessionRoutingControl(f.session, { kind: 'locked', target: { providerId: 'backup', model: 'shared-model' } }, f.context)
+    assert.equal(f.session.meta.providerId, 'backup'); assert.equal(f.saves[0].providerId, 'fixture')
+    const policy = frozenPolicyForSessionRun(f.session.meta, { ...f.run, id: 'locked-next' }, { text: 'continue', messageId: 'locked-message' }, f.run)
+    assert.equal(policy.initialTarget.providerId, 'backup'); assert.deepEqual(policy.retryTargets, [])
+    assert.equal(policy.effectivePolicy.failure.kind, 'pause')
+  })
+  await check('aliases preserve the saved choice while locked/preferred policies freeze canonical targets', async () => {
+    const aliasProvider = { ...provider, id: 'alias-provider', models: ['canonical-primary', 'canonical-backup'],
+      advancedConfig: { modelProfiles: [
+        { model: 'canonical-primary', aliases: ['primary-alias'], capabilities: ['text', 'tools'], contextWindow: 128000 },
+        { model: 'canonical-backup', aliases: ['backup-alias'], capabilities: ['text', 'tools'], contextWindow: 128000 }
+      ] } }
+    providers.push(aliasProvider)
+    try {
+      for (const kind of ['locked', 'preferred']) {
+        const f = fixture()
+        const primary = { providerId: aliasProvider.id, model: 'primary-alias' }
+        const control = kind === 'locked' ? { kind, target: primary } : { kind, primary,
+          alternatives: [{ providerId: aliasProvider.id, model: 'backup-alias' }],
+          failure: { kind: 'retry_allowed_targets', maxAdditionalAttempts: 1, retryOn: ['rate_limited'] } }
+        const original = structuredClone(control)
+        await applySessionRoutingControl(f.session, control, f.context)
+        assert.deepEqual(control, original)
+        assert.deepEqual(f.session.meta.modelChange.to.routingControl, original, 'receipt must preserve user selected spelling')
+        const policy = frozenPolicyForSessionRun(f.session.meta, { ...f.run, id: `alias-${kind}` },
+          { text: 'continue', messageId: `alias-${kind}-message` }, f.run)
+        assert.equal(policy.initialTarget.providerId, aliasProvider.id)
+        assert.equal(policy.initialTarget.model, 'canonical-primary')
+        if (kind === 'locked') {
+          assert.deepEqual(policy.effectivePolicy.selection.target, { providerId: aliasProvider.id, model: 'canonical-primary' })
+          assert.deepEqual(policy.userIntent.target, { providerId: aliasProvider.id, model: 'canonical-primary' })
+          assert.deepEqual(policy.retryTargets, [])
+        } else {
+          assert.deepEqual(policy.effectivePolicy.selection.primary, { providerId: aliasProvider.id, model: 'canonical-primary' })
+          assert.deepEqual(policy.effectivePolicy.selection.alternatives, [{ providerId: aliasProvider.id, model: 'canonical-backup' }])
+          assert.deepEqual(policy.retryTargets.map(({ providerId, model }) => ({ providerId, model })), [{ providerId: aliasProvider.id, model: 'canonical-backup' }])
+        }
+      }
+      const refused = fixture()
+      await assert.rejects(applySessionRoutingControl(refused.session, { kind: 'preferred',
+        primary: { providerId: aliasProvider.id, model: 'primary-alias' },
+        alternatives: [{ providerId: 'backup', model: 'backup-alias' }], failure: { kind: 'pause' } }, refused.context))
+      assert.equal(refused.saves.length, 0, 'an alias from another provider must not widen the catalog')
+    } finally { providers.pop() }
+  })
+  await check('Gemini catalog prefixes normalize only frozen targets and retain selected provider identity', async () => {
+    const gemini = { ...provider, id: 'gemini-fixture', engine: 'gemini', models: ['models/gemini-primary', 'models/gemini-backup'],
+      advancedConfig: { modelProfiles: ['models/gemini-primary', 'models/gemini-backup'].map(model => ({ model, capabilities: ['text', 'tools'], contextWindow: 128000 })) } }
+    providers.push(gemini)
+    try {
+      const f = fixture()
+      const control = { kind: 'preferred', primary: { providerId: gemini.id, model: 'models/gemini-primary' },
+        alternatives: [{ providerId: gemini.id, model: 'models/gemini-backup' }],
+        failure: { kind: 'retry_allowed_targets', maxAdditionalAttempts: 1, retryOn: ['rate_limited'] } }
+      await applySessionRoutingControl(f.session, control, f.context)
+      assert.deepEqual(f.session.meta.routingControl, control)
+      const policy = frozenPolicyForSessionRun(f.session.meta, { ...f.run, id: 'gemini-prefixed' },
+        { text: 'continue', messageId: 'gemini-prefixed-message' }, f.run)
+      assert.deepEqual(policy.initialTarget, { providerId: gemini.id, model: 'gemini-primary', protocol: 'google.generative-language' })
+      assert.deepEqual(policy.retryTargets, [{ providerId: gemini.id, model: 'gemini-backup', protocol: 'google.generative-language' }])
+      assert.equal(policy.qualifiedTargets.every(target => target.providerId === gemini.id), true)
+    } finally { providers.pop() }
+  })
+  await check('budget, invalid target, cross-protocol alternatives and noncanonical preferred reject before mutation', async () => {
+    const preferred = { kind: 'preferred', primary: { providerId: 'fixture', model: 'new-model' }, alternatives: [], failure: { kind: 'pause' } }
+    for (const mutate of [
+      f => { remainingBudget = 0 },
+      f => { delete f.session.meta.workItemId },
+      f => { preferred.alternatives = [{ providerId: 'anthropic', model: 'new-model' }] },
+      f => { preferred.alternatives = [{ providerId: 'backup', model: 'missing' }] }
+    ]) {
+      const f = fixture(); mutate(f)
+      await assert.rejects(applySessionRoutingControl(f.session, preferred, f.context))
+      assert.equal(f.saves.length, 0); assert.equal(f.session.setCalls, 0)
+      remainingBudget = undefined; preferred.alternatives = []
+    }
+    const f = fixture()
+    await assert.rejects(applySessionRoutingControl(f.session, { kind: 'locked', target: { providerId: 'anthropic', model: 'new-model' } }, f.context), /跨执行器/)
+    await assert.rejects(applySessionRoutingControl(f.session, { kind: 'locked', target: { providerId: 'fixture', model: 'new-model' }, failure: { kind: 'retry_allowed_targets' } }, f.context))
+  })
+  await check('legacy auto keeps provider scope and legacy missing scope produces a valid committed receipt', async () => {
+    const f = fixture(); delete f.session.meta.routingScope
+    await applySessionModelSwitch(f.session, 'new-model', f.context)
+    change.assertSessionModelChangeReady(f.session.meta)
+    await applySessionModelSwitch(f.session, 'auto', f.context)
+    assert.deepEqual(f.session.meta.routingControl, { kind: 'auto', scope: { kind: 'provider', providerId: 'fixture' } })
+    change.assertSessionModelChangeReady(f.session.meta)
+  })
+  await check('cross-engine preferred keeps the active provider until the next frozen continuation', async () => {
+    const f = fixture()
+    await applySessionRoutingControl(f.session, { kind: 'preferred', primary: { providerId: 'anthropic', model: 'new-model' },
+      alternatives: [], failure: { kind: 'pause' } }, f.context)
+    assert.equal(f.session.meta.providerId, 'fixture'); assert.equal(f.session.meta.engine, 'openai')
+    assert.equal(f.saves[1].providerId, 'fixture')
+    const next = { ...f.run, id: 'cross-engine-next' }; delete next.routingPolicy
+    const policy = frozenPolicyForSessionRun(f.session.meta, next, { text: 'continue', messageId: 'cross-engine-message' }, f.run)
+    assert.equal(policy.initialTarget.providerId, 'anthropic'); assert.equal(policy.initialTarget.protocol, 'anthropic.messages')
+    assert.equal(armedRoute.providerId, 'anthropic')
   })
   console.log(`session-model-change-required: ${passed}/${passed}; production transaction and frozen Run routing; no Provider I/O`)
 } finally { rmSync(root, { recursive: true, force: true }) }

@@ -30,6 +30,7 @@ export function sessionHistoryEntry(meta: SessionMeta & { sdkSessionId: string }
     model: meta.model,
     providerId: meta.providerId,
     routingScope: meta.routingScope,
+    routingControl: meta.routingControl,
     modelRoutingDecision: meta.modelRoutingDecision,
     runtimeContinuation: meta.runtimeContinuation,
     modelChange: meta.modelChange,

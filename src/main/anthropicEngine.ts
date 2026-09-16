@@ -308,7 +308,8 @@ export class AnthropicEngine implements Engine {
     updateTaskStrategyMeta(this.meta, strategy, (meta) => this.emit({ kind: 'meta', meta }))
   }
 
-  async setModel(model: string): Promise<void> {
+  async setModel(model: string, providerId?: string): Promise<void> {
+    if (providerId !== undefined) this.meta.providerId = providerId
     this.meta.routingScope = model === AUTO_MODEL ? (this.meta.routingScope === 'global' ? 'global' : 'provider') : 'fixed'
     this.meta.model = model
     this.resolvedModel = model && model !== AUTO_MODEL ? model : undefined

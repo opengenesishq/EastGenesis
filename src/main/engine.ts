@@ -40,7 +40,7 @@ export interface Engine {
   emitSyntheticEvent?(event: AgentEvent): void
   setPermissionMode(mode: PermissionModeId): Promise<void>
   setTaskStrategy(strategy: TaskStrategy): Promise<void>
-  setModel(model: string): Promise<void>
+  setModel(model: string, providerId?: string): Promise<void>
   rename(title: string): void
   /** 文件检查点回退(引擎可选;不支持则返回 canRewind:false) */
   rewindFiles?(messageId: string, dryRun: boolean): Promise<RewindResult>

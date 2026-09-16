@@ -109,7 +109,7 @@ export const IPC_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
     'quickbar:setVisible',
     'routines:create', 'routines:delete', 'routines:markRun', 'routines:reviewRun', 'routines:update',
     'sessions:close', 'sessions:interrupt', 'sessions:permission', 'sessions:rename',
-    'sessions:setModel', 'sessions:setPermissionMode',
+    'sessions:setModel', 'sessions:setRoutingControl', 'sessions:setPermissionMode',
     'settings-domain:update', 'settings-domain:routing:save',
     'supervisor:invoke',
     'taskSnapshots:delete', 'taskSnapshots:resolveDagFinalization', 'taskSnapshots:resolveEffect', 'taskSnapshots:recheckEffect',

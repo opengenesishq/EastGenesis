@@ -164,9 +164,10 @@ class ContractBoundEngine implements NativeRuntimeBoundEngine {
     this.assertIdentity()
   }
 
-  async setModel(model: string): Promise<void> {
+  async setModel(model: string, providerId?: string): Promise<void> {
     requiredString(model, 'model')
-    await this.engine.setModel(model)
+    if (providerId !== undefined) requiredString(providerId, 'provider id')
+    await this.engine.setModel(model, providerId)
     this.assertIdentity()
   }
 

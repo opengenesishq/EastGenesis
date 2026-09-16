@@ -124,7 +124,9 @@
     "test:task-effect-recovery:required": "tsx scripts/task-effect-recovery-required.ts",
     "test:desktop-notification-navigation:required": "node scripts/desktop-notification-navigation-required.mjs",
     "test:session-model-change:required": "node scripts/session-model-change-required.mjs",
-    "test:session-model-handoff:required": "node scripts/session-model-handoff-required.mjs"
+    "test:session-model-handoff:required": "node scripts/session-model-handoff-required.mjs",
+    "test:session-routing-control:ui:required": "node scripts/session-routing-control-ui-required.mjs",
+    "test:session-routing-recovery:required": "node scripts/session-routing-recovery-required.mjs"
   },
   "build": {
     "appId": "com.caogen.app",

@@ -38,7 +38,8 @@ import { getSettings } from './settings'
 import { sessionRouteEvent } from './model/session-runtime-routing'
 import { withNativeRecoveryBoundary } from './model/native-recovery-boundary'
 import { resolveOpenAiSessionTurnRoute, nativeSessionRecoveryContext, assertNativeSessionRecoveryTarget } from './model/native-recovery-session'
-import { frozenRetryAllows } from './model/native-recovery-session'
+import { frozenRetryAllows, frozenSameTargetRetryAllows } from './model/native-recovery-session'
+import { runHasUnresolvedEffects } from './task/effect-runtime'
 import { nativeHttpRefusalEvidence } from './model/native-http-refusal'
 import { runtimeConversationReplay, validateRuntimeContinuationContext } from './session-runtime-continuation-context'
 import { rebuildOpenAiTextHistory } from './openai-text-history'
@@ -492,9 +493,13 @@ export class OpenAIEngine implements Engine {
     updateTaskStrategyMeta(this.meta, strategy, (meta) => this.emit({ kind: 'meta', meta }))
   }
 
-  async setModel(model: string): Promise<void> {
-    if (this.meta.model !== model) this.clearResponsesContext(this.protocol() === 'responses')
+  async setModel(model: string, providerId?: string): Promise<void> {
+    // A task routing transaction also resets AUTO's previously resolved target.
+    // Rebuild from the local transcript even when the provider/model labels match.
+    if (providerId !== undefined) this.clearResponsesContext(true)
+    else if (this.meta.model !== model) this.clearResponsesContext(this.protocol() === 'responses')
     this.protocolOverride = undefined
+    if (providerId !== undefined) this.meta.providerId = providerId
     this.meta.routingScope = model === AUTO_MODEL ? (this.meta.routingScope === 'global' ? 'global' : 'provider') : 'fixed'
     this.meta.model = model
     this.routedModel = undefined
@@ -588,6 +593,7 @@ export class OpenAIEngine implements Engine {
         const nativeRetryReason = refusal?.outcome
         const text = errText(operationError)
         releaseProviderRequest(this.meta.providerId)
+        if (await this.trySameTargetRetry(text, payload, controller, nativeRetryReason)) return
         if (await this.tryProviderKeyFailover(text, payload, controller, auth, nativeRetryReason)) return
         recordFailure(this.meta.providerId, text)
         recordModelFailure(this.effectiveModel())
@@ -899,6 +905,35 @@ export class OpenAIEngine implements Engine {
     }
     this.appendText(`\n\n[已达单轮工具调用上限 ${MAX_TOOL_ITERATIONS} 次,任务可能未完成;请拆分任务后继续]`)
   }
+  private async trySameTargetRetry(
+    errorText: string,
+    payload: SendMessagePayload,
+    controller: AbortController,
+    nativeRetryReason?: 'rate_limited' | 'auth_failed'
+  ): Promise<boolean> {
+    const settings = getSettings()
+    const recovery = nativeSessionRecoveryContext(this.meta, settings)
+    if (this.disposed || controller.signal.aborted || this.assistantText.length > 0 ||
+        runHasUnresolvedEffects(taskRuntimeRegistry.get(this.meta.id)) ||
+        !this.recoveryState.canRecover(this.meta.providerId, settings.failoverEnabled, recovery, nativeRetryReason) ||
+        !frozenSameTargetRetryAllows({ recovery, providerId: this.meta.providerId, model: this.effectiveModel(),
+          protocol: this.protocol() === 'responses' ? 'openai.responses' : 'openai.chat-completions',
+          attempt: this.recoveryState.recoveryAttempts + 1,
+          refusal: nativeRetryReason ? { outcome: nativeRetryReason } : undefined })) return false
+    recordFailure(this.meta.providerId, errorText)
+    recordModelFailure(this.effectiveModel())
+    this.refreshConfirmedToolReplay(payload.messageId)
+    this.clearResponsesContext(true)
+    this.recoveryState.recordRecovery()
+    const reason = `同一目标重试：${nativeRetryReason} (${this.recoveryState.recoveryAttempts})`
+    this.modelAttempts.setRouteReason(reason)
+    this.emit({ kind: 'hook-event', event: 'provider-same-target-retry', detail: reason })
+    // The tracker keeps the refused request/attempt lineage. All ordinary
+    // lease, circuit, outbound, budget and durable Attempt gates run again.
+    await this.runResponse(payload, controller)
+    return true
+  }
+
   /** Recover the current logical request on another model before another Provider. */
   private async tryProviderModelFailover(
     errorText: string,

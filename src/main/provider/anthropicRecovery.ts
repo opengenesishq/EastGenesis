@@ -22,12 +22,12 @@ import type {
 } from '../scheduler'
 import { synchronizeProviderReliabilityPolicies } from '../providerHealth'
 import { assertNativeRecoveryTargetAllowed, evaluateNativeRecoveryTarget, filterNativeRecoveryModels } from '../model/native-recovery-eligibility'
-import { frozenRetryAllows, type NativeSessionRecoveryContext } from '../model/native-recovery-session'
+import { frozenRetryAllows, frozenSameTargetRetryAllows, type NativeSessionRecoveryContext } from '../model/native-recovery-session'
 import type { RoutingRetryReason } from '../../shared/routing-policy-types'
 import { ModelRouteError } from '../model/model-route-error'
 
 type RecoveryEvent = Extract<AgentEvent, {
-  kind: 'provider-key-failover' | 'provider-model-failover' | 'failover'
+  kind: 'provider-key-failover' | 'provider-model-failover' | 'failover' | 'hook-event'
 }>
 
 export interface AnthropicRecoveryState {
@@ -95,9 +95,29 @@ export function recoverAnthropicTarget(input: AnthropicRecoveryInput): Anthropic
   if (input.recovery.frozenRetry && !input.nativeRetryReason) return undefined
   if (input.recovery.frozenRetry && input.recovery.frozenRetry.effectivePolicy.failure.kind !== 'pause'
     && input.state.attempts >= input.recovery.frozenRetry.effectivePolicy.failure.maxAdditionalAttempts) return undefined
-  const recovery = recoverProviderKey(input) ?? recoverProviderModel(input) ?? recoverProvider(input)
+  const recovery = recoverSameTarget(input) ?? recoverProviderKey(input) ?? recoverProviderModel(input) ?? recoverProvider(input)
   if (recovery) input.state.attempts += 1
   return recovery
+}
+
+function recoverSameTarget(input: AnthropicRecoveryInput): AnthropicRecoveryResult | undefined {
+  const { current, recovery, state } = input
+  if (!frozenSameTargetRetryAllows({ recovery, providerId: current.providerId, model: current.model,
+    protocol: recoveryProtocol(input), attempt: state.attempts + 1,
+    refusal: input.nativeRetryReason ? { outcome: input.nativeRetryReason } : undefined })) return undefined
+  // Resolve again so a revoked/unavailable credential cannot be reused. This
+  // branch precedes key rotation, which would put the single key in cooldown.
+  let target: AnthropicMessagesTarget
+  try {
+    target = input.resolveTarget({ providerId: current.providerId, model: current.model })
+    if (target.providerId !== current.providerId || target.model !== current.model || target.keyId !== current.keyId) return undefined
+    assertRoutingExpertTargetAllowed(target.providerId, target.baseUrl, input.settings.routingExpertPolicy)
+    assertRecoveryTarget(input, target)
+    const provider = input.providers.find(item => item.id === target.providerId)
+    if (!provider || !providerAllowedByOutboundContext(input.outboundContext, provider, target.model)) return undefined
+  } catch { return undefined }
+  const routeReason = `同一目标重试：${input.nativeRetryReason} (${state.attempts + 1})`
+  return { target, routeReason, metaChanged: false, event: { kind: 'hook-event', event: 'provider-same-target-retry', detail: routeReason } }
 }
 
 export function isAnthropicRecoveryEnabled(
@@ -164,7 +184,7 @@ function recoverProviderModel(input: AnthropicRecoveryInput): AnthropicRecoveryR
     models,
     desiredModel: current.model,
     exclude: attemptedValues(state.triedProviderModels, current.providerId),
-    fallbackModel: input.settings.fallbackModel,
+    fallbackModel: input.recovery.frozenRetry?.effectivePolicy.selection.kind === 'preferred' ? undefined : input.settings.fallbackModel,
     failure
   })
   if (!selected) return undefined
@@ -214,8 +234,8 @@ function recoverProvider(input: AnthropicRecoveryInput): AnthropicRecoveryResult
     candidates,
     exclude: state.triedProviders,
     desiredModel: current.model,
-    fallbackProviderId: input.settings.fallbackProviderId,
-    fallbackModel: input.settings.fallbackModel
+    fallbackProviderId: input.recovery.frozenRetry?.effectivePolicy.selection.kind === 'preferred' ? undefined : input.settings.fallbackProviderId,
+    fallbackModel: input.recovery.frozenRetry?.effectivePolicy.selection.kind === 'preferred' ? undefined : input.settings.fallbackModel
   })
   if (!selected || state.triedProviders.has(selected.providerId)) return undefined
   state.triedProviders.add(selected.providerId)

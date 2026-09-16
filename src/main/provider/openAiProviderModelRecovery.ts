@@ -119,7 +119,7 @@ export function planOpenAiProviderModelRecovery(input: {
     models,
     desiredModel: input.fromModel,
     exclude: input.exclude,
-    fallbackModel: input.fallbackModel,
+    fallbackModel: input.recovery.frozenRetry?.effectivePolicy.selection.kind === 'preferred' ? undefined : input.fallbackModel,
     failure: input.failure
   })
   if (!target) return null
@@ -181,8 +181,8 @@ export function planOpenAiProviderFailover(input: {
     candidates,
     exclude: input.exclude,
     desiredModel: input.currentModel,
-    fallbackProviderId: input.fallbackProviderId,
-    fallbackModel: input.fallbackModel
+    fallbackProviderId: input.recovery.frozenRetry?.effectivePolicy.selection.kind === 'preferred' ? undefined : input.fallbackProviderId,
+    fallbackModel: input.recovery.frozenRetry?.effectivePolicy.selection.kind === 'preferred' ? undefined : input.fallbackModel
   })
   const selectedProvider = target && providers.find((provider) => provider.id === target.providerId)
   if (!target?.model || !selectedProvider || !evaluateNativeRecoveryTarget({ ...input.recovery, provider: selectedProvider, model: target.model }).allowed) return null

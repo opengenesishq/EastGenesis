@@ -2574,6 +2574,7 @@ export interface AgentDeskApi extends TaskEffectRecoveryApi, CouncilApi, Prepara
   ): Promise<void>
   setPermissionMode(sessionId: string, mode: PermissionModeId): Promise<void>
   setModel(sessionId: string, model: string): Promise<void>
+  setRoutingControl(sessionId: string, control: import('./session-routing-control-types').SessionRoutingControl): Promise<void>
   renameSession(sessionId: string, title: string): Promise<void>
   listHistory(): Promise<HistoryEntry[]>
   /** 会话全文搜索:跨历史会话检索转录中的消息内容 */

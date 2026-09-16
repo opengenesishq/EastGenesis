@@ -6,6 +6,8 @@ import { writeDurableFileSync } from './durable-file'
 import { readTranscriptEntriesStrict } from './transcript'
 import { validateRuntimeContinuationContext } from './session-runtime-continuation-context'
 import { runtimeContinuationReceiptPath } from './session-runtime-continuation-path'
+import { assertSessionModelChange } from './session-model-change'
+import { normalizeSessionRoutingControl } from '../shared/session-routing-control'
 
 function receiptPath(sessionId: string): string {
   return runtimeContinuationReceiptPath(app.getPath('userData'), sessionId)
@@ -30,14 +32,26 @@ export function restoreRuntimeContinuation(meta: SessionMeta): void {
   if (!record || record.state !== 'committed' || committed.id !== meta.id || committed.sdkSessionId !== meta.sdkSessionId) {
     throw new Error('运行时交接记录身份不匹配')
   }
-  validateRuntimeContinuationContext(committed, readTranscriptEntriesStrict(committed.sdkSessionId!))
   if (record.id === meta.runtimeContinuation?.id || record.createdAt < (meta.runtimeContinuation?.createdAt ?? 0)) return
+  const currentChange = assertSessionModelChange(meta)
+  const receiptChange = assertSessionModelChange(committed)
+  // A subsequent explicit choice supersedes an older automatic continuation.
+  // Its old durable receipt must not resurrect a broader automatic policy.
+  if (currentChange && currentChange.id !== receiptChange?.id) {
+    if (currentChange.createdAt >= record.createdAt) return
+    if (!receiptChange || currentChange.createdAt >= receiptChange.createdAt) {
+      throw new Error('运行时交接与后续模型选择顺序冲突，请从恢复中心核对。')
+    }
+  }
+  validateRuntimeContinuationContext(committed, readTranscriptEntriesStrict(committed.sdkSessionId!))
   if (meta.model !== 'auto' || meta.routingScope !== 'global') throw new Error('旧会话固定目标与持久自动交接冲突，请恢复最新会话')
   for (const key of ['workspaceId', 'goalId', 'workItemId', 'businessLineId', 'createdAt'] as const) {
     if (committed[key] !== meta[key]) throw new Error(`运行时交接归属不匹配：${key}`)
   }
   Object.assign(meta, {
     engine: committed.engine, providerId: committed.providerId, modelRoutingDecision: committed.modelRoutingDecision,
+    routingControl: committed.routingControl ? normalizeSessionRoutingControl(committed.routingControl, committed) : undefined,
+    modelChange: receiptChange ? structuredClone(receiptChange) : undefined,
     runtimeContinuation: record, responsesContext: undefined, resumeSessionAt: undefined,
     costUsd: Math.max(meta.costUsd, committed.costUsd), usage: {
       input: Math.max(meta.usage.input, committed.usage.input), output: Math.max(meta.usage.output, committed.usage.output),

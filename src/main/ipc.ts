@@ -569,6 +569,11 @@ export function registerIpc(): void {
     return sessionManager.setModel(id, model)
   }))
 
+  ipcMain.handle('sessions:setRoutingControl', sessionReadyHandler((_e, id: string, control: unknown) => {
+    if (typeof id !== 'string' || !id.trim()) throw new Error('必须指定当前任务')
+    return sessionManager.setRoutingControl(id, control)
+  }))
+
   ipcMain.handle('sessions:rename', (_e, id: string, title: string) => {
     if (typeof title === 'string') sessionManager.get(id)?.rename(title)
   })

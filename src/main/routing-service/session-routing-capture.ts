@@ -1,6 +1,6 @@
 import type { RoutingPreviewContext } from '../../shared/routing-policy-types'
 import type { SessionMeta, SendMessagePayload } from '../../shared/types'
-import { AUTO_MODEL } from '../../shared/types'
+import { sessionRoutingControl, sessionRoutingIntent } from '../../shared/session-routing-control-types'
 import { listProviders, getProviderConnectionIdentity } from '../providers'
 import { getHealth } from '../providerHealth'
 import { captureModelRouteScoringSignal } from '../model/model-router'
@@ -33,8 +33,7 @@ export function captureSessionRouting(input: { meta: SessionMeta; prompt: string
   const context: TrustedRoutingContext = { executionDomain: 'native_text', originalPrompt: input.prompt,
     businessLine: { id: line.id, enabled: true, requiredCapabilities: line.requiredCapabilities ?? [] },
     // Fixed intent is independent of the old scheduler; only V1 evaluates it.
-    userIntent: (input.meta.routingScope === 'fixed' || (!input.meta.routingScope && input.meta.model !== AUTO_MODEL)) ? { kind: 'fixed', target: { providerId: input.meta.providerId, model: input.meta.model } }
-      : input.meta.routingScope === 'provider' ? { kind: 'provider', providerId: input.meta.providerId } : { kind: 'global' },
+    userIntent: sessionRoutingIntent(input.meta),
     baseStrategy: line.routingPreference ?? settings.schedulerStrategy,
     baseStrategySource: line.routingPreference ? { kind: 'business_line', businessLineId: line.id } : { kind: 'global' },
     task: { requiresTools: task.requiresTools, contextTokens: input.meta.contextTokens,
@@ -55,7 +54,7 @@ export function captureSessionRouting(input: { meta: SessionMeta; prompt: string
   return { context, snapshots, authority: { kind: 'session', sessionId: input.meta.id, revision: 0,
     businessLineId: line.id,
     providerId: input.meta.providerId, model: input.meta.model,
-    routingScope: input.meta.routingScope ?? 'global', driveMode: input.meta.driveMode ?? null,
+    routingScope: input.meta.routingScope ?? 'global', routingControl: sessionRoutingControl(input.meta), driveMode: input.meta.driveMode ?? null,
     connectionIdentities: Object.fromEntries(identities) } }
 }
 

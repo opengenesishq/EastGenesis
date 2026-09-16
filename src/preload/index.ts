@@ -138,6 +138,8 @@ const api: AgentDeskApi = {
     ipcRenderer.invoke('sessions:permission', sessionId, requestId, allow, message),
   setPermissionMode: (sessionId: string, mode: PermissionModeId) =>
     ipcRenderer.invoke('sessions:setPermissionMode', sessionId, mode),
+  setRoutingControl: (sessionId: string, control: import('../shared/session-routing-control-types').SessionRoutingControl) =>
+    ipcRenderer.invoke('sessions:setRoutingControl', sessionId, control),
   setModel: (sessionId: string, model: string) =>
     ipcRenderer.invoke('sessions:setModel', sessionId, model),
   renameSession: (sessionId: string, title: string) =>

@@ -15,6 +15,7 @@ export interface SessionRuntimeContinuation {
 }
 
 export interface SessionRuntimeRoutingBinding {
+  routingControl?: import('./session-routing-control-types').SessionRoutingControl
   /** Concrete target is independent from the user's AUTO/model intent. */
   modelRoutingDecision?: ModelRoutingDecisionView
   runtimeContinuation?: SessionRuntimeContinuation

@@ -17,7 +17,7 @@ import { readStoredRoutingState } from '../routing-settings/routing-settings-sta
 import { evaluateNativeExecutorCompatibility, type ExecutorCompatibilityRequirements } from './executor-compatibility'
 
 export type ResolvedSessionRoute = Extract<SessionRouteResult, { kind: 'routed' }>
-type RoutingSession = Pick<SessionMeta, 'id' | 'sdkSessionId' | 'createdAt' | 'providerId' | 'model' | 'routingScope' | 'engine' | 'driveMode' | 'costUsd' | 'budgetUsd' | 'cwd' | 'sourceCwd' | 'contextTokens' | 'businessLineId'>
+type RoutingSession = Pick<SessionMeta, 'id' | 'sdkSessionId' | 'createdAt' | 'providerId' | 'model' | 'routingScope' | 'routingControl' | 'engine' | 'driveMode' | 'costUsd' | 'budgetUsd' | 'cwd' | 'sourceCwd' | 'contextTokens' | 'businessLineId'>
 
 /** One routing policy serves session creation and every native protocol runtime. */
 export function resolveRuntimeSessionRoute(input: {
@@ -30,6 +30,9 @@ export function resolveRuntimeSessionRoute(input: {
   rootDir?: string
 }): ResolvedSessionRoute | undefined {
   const { meta, payload } = input
+  if (meta.routingControl?.kind === 'preferred') {
+    throw new Error('优先指定必须使用已冻结的任务路由，请从任务工作区继续。')
+  }
   const settings = settingsForCaoGenDrive(input.settings ?? getSettings(), meta.driveMode)
   const businessLine = meta.businessLineId ? requireBusinessLine(settings, meta.businessLineId) : undefined
   const scopedProviders = filterBusinessLineModels(input.providers ?? listProviders(), businessLine).filter((provider) =>

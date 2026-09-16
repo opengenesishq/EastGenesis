@@ -11,3 +11,12 @@
 .composer-pending-input p { margin: 7px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .composer-pending-actions { display: flex; gap: 8px; }
 .composer-pending-inputs select { margin: 6px; max-width: 100%; }
+.session-routing-picker { max-height: min(420px, 50vh); flex-shrink: 0; }
+.session-routing-fields, .session-routing-target { border: 0; padding: 0; margin: 0; min-width: 0; }
+.session-routing-fields legend, .session-routing-target legend { font-weight: 600; margin: 6px 0; }
+.session-routing-target { display: flex; flex-wrap: wrap; gap: 8px; }
+.session-routing-target label { min-width: 0; flex: 1 1 180px; }
+.session-routing-target select { width: calc(100% - 12px); }
+.session-routing-fields p { margin: 7px 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+.session-routing-alternative { display: flex; gap: 8px; align-items: end; margin-bottom: 6px; }
+.session-routing-alternative .session-routing-target { flex: 1; }
