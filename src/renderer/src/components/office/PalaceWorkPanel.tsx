@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { useStore, type SessionState } from '../../store'
+import { useStore } from '../../store'
 import { PALACE_ACTIONS, palaceInstitutionWorkItems, type PalaceAction, type PalaceActionContext } from './palaceActions'
 import { usePalaceWorkData } from './usePalaceWorkData'
 import { adaptCrossProjectWorkInbox, type CrossProjectWorkInboxItem } from '../studio/workInboxNavigation'
@@ -7,7 +7,7 @@ import { createRunDetailRoute, resolveRunRecoverySnapshotId } from '../../../../
 import type { WorkItem } from '../../../../shared/types'
 import { projectInstitutionTemplate, DEFAULT_PROJECT_INSTITUTION_TEMPLATE, LEGACY_PROJECT_INSTITUTION_TEMPLATE } from '../../../../shared/project-institution-template'
 import { requestProjectWorkspaceNavigation } from '../studio/projectWorkspaceNavigation'
-import PermissionBar, { formatPermissionInput } from '../PermissionBar'
+import PermissionBar from '../PermissionBar'
 import TaskPlanWorkbench from '../experience/TaskPlanWorkbench'
 import CouncilPanel from '../experience/CouncilPanel'
 import RunDetailPanel from '../studio/RunDetailPanel'
@@ -15,6 +15,9 @@ import { ProjectDeliveryWorkbench } from '../studio/ProjectDeliveryWorkbench'
 import OfficeSessionActions from './OfficeSessionActions'
 import PalaceInstitutionWorkItem from './PalaceInstitutionWorkItem'
 import { preparePalaceTaskNavigation } from './palaceTaskNavigation'
+import { palaceUrgentReports } from './palace-urgent-reports'
+import PalaceUrgentReports from './PalaceUrgentReports'
+import PalaceRawRecords from './PalaceRawRecords'
 import './palace-work-panel.css'
 
 const ChatView = lazy(() => import('../ChatView'))
@@ -63,6 +66,7 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
   const deliveryWorkItemId = workSelection.kind === 'session' ? selected?.meta.workItemId : workSelection.workItemId
   const definition = PALACE_ACTIONS.find((item) => item.id === action)!
   const inbox = useMemo(() => data.ledger ? adaptCrossProjectWorkInbox(data.ledger, data.projects) : undefined, [data.ledger, data.projects])
+  const urgentReports = useMemo(() => palaceUrgentReports(inbox?.items ?? [], Object.values(sessions), data.ledger?.runs.items ?? []), [inbox, sessions, data.ledger])
   const institutionRoles = useMemo(() => {
     const byId = new Map([...projectInstitutionTemplate(DEFAULT_PROJECT_INSTITUTION_TEMPLATE).roles,
       ...projectInstitutionTemplate(LEGACY_PROJECT_INSTITUTION_TEMPLATE).roles].map((role) => [role.id, role]))
@@ -99,6 +103,11 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
     setOpeningTaskId(undefined)
     if (item.runId) setRunRoute(createRunDetailRoute(item.runId))
     else if (item.workItemId && item.projectId) openWorkItem({ id: item.workItemId, projectId: item.projectId })
+    else if (item.sourceKind === 'goal' && item.projectId && item.projectAvailable) {
+      useStore.getState().openProjectWorkspace(item.projectId)
+      requestProjectWorkspaceNavigation(item.projectId, 'goal')
+      useStore.getState().setView('list')
+    }
   }
   const openInboxTask = async (item: CrossProjectWorkInboxItem, nextAction: 'study' | 'approve'): Promise<void> => {
     const request = ++taskNavigation.current
@@ -158,15 +167,19 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
       <button type="button" className="btn" onClick={() => onAction('approve', currentContext)}>{zh ? '处理奏折' : 'Review approvals'}</button>
       <button type="button" className="btn" onClick={() => onAction('study', currentContext)}>{zh ? '继续御书房工作' : 'Continue in the study'}</button>
     </div>}
-    {overviewModes && inbox && <>
+    {overviewModes && action !== 'urgent' && inbox && <>
       <div className="palace-work-summary">{Object.entries(inbox.lanes).map(([lane, value]) => <span key={lane}>{laneLabel(lane, zh)} <strong>{value.items.length}</strong></span>)}</div>
       <p>{zh ? '与现代工作台显示相同任务和状态。' : 'Shows the same tasks and states as the modern workspace.'}</p>
-      <InboxRows items={inbox.items.filter((item) => action !== 'urgent' || ['needs_confirmation', 'blocked', 'ready_for_delivery'].includes(item.lane))}
+      <InboxRows items={inbox.items}
         zh={zh} openingTaskId={openingTaskId} onOpen={openInboxItem} onTask={item => void openInboxTask(item, 'study')}
         onApprovals={item => void openInboxTask(item, 'approve')} />
     </>}
-    {action === 'urgent' && <div>{sessionIds.filter((id) => sessions[id].pendingPermissions.length > 0).map((id) => <button key={id} className="btn" onClick={() => onAction('approve', { sessionId: id, projectId: sessions[id].meta.workspaceId, workItemId: sessions[id].meta.workItemId })}>
-      {sessions[id].meta.title} · {sessions[id].pendingPermissions.length} {zh ? '项授权待办' : 'pending permissions'}</button>)}</div>}
+    {action === 'urgent' && <PalaceUrgentReports reports={urgentReports} zh={zh} loading={data.loading} openingTaskId={openingTaskId}
+      onOpen={openInboxItem} onTask={item => void openInboxTask(item, 'study')} onApprovals={item => void openInboxTask(item, 'approve')}
+      onDelivery={openDelivery} onPermission={id => {
+        const current = useStore.getState().sessions[id]
+        if (current?.pendingPermissions.length) onAction('approve', { sessionId: id, projectId: current.meta.workspaceId, workItemId: current.meta.workItemId })
+      }} />}
     {(action === 'approve' || action === 'desk') && <label className="palace-work-selector">{zh ? '项目交付与验收' : 'Project delivery and acceptance'}
       <select value={activeProject?.id ?? ''} onChange={(event) => selectWork({ kind: 'delivery', projectId: event.target.value })}>
         <option value="">{zh ? '选择项目' : 'Select a project'}</option>{data.projects.filter((project) => project.status === 'active').map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
@@ -201,7 +214,7 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
               // Tools use the modern workbench. Carry the same task there so
               // preview/browser/terminal controls never open behind this panel.
               useStore.getState().setView('list')
-            }} /> : <RawSessionRecords session={selected} zh={zh} />}
+            }} /> : <PalaceRawRecords session={selected} zh={zh} />}
         </Suspense>
       </div>
     </>}
@@ -230,17 +243,6 @@ function InboxRows({ items, zh, openingTaskId, onOpen, onTask, onApprovals }: { 
     {(item.workItemId || item.runId) && <button type="button" className="btn btn-ghost btn-sm" data-palace-inbox-task={item.id} disabled={Boolean(openingTaskId)} onClick={() => onTask(item)}>{openingTaskId === item.id ? (zh ? '正在打开…' : 'Opening…') : (zh ? '继续当前任务' : 'Continue task')}</button>}
     {item.lane === 'needs_confirmation' && <button type="button" className="btn btn-primary btn-sm" data-palace-inbox-approval={item.id} disabled={Boolean(openingTaskId)} onClick={() => onApprovals(item)}>{zh ? '批奏折' : 'Review approval'}</button>}
   </article>)}</div>
-}
-
-function RawSessionRecords({ session, zh }: { session: SessionState; zh: boolean }): React.JSX.Element {
-  const results = Object.entries(session.toolResults)
-  const events = session.items.filter((item) => !['assistant', 'user'].includes(item.kind))
-  return <div className="palace-raw-records" data-palace-raw-records>
-    <h3>{zh ? '原始工具结果与运行记录' : 'Original tool results and run records'}</h3>
-    {results.length === 0 && events.length === 0 && <p>{zh ? '当前会话暂无工具结果或运行记录。' : 'This session has no tool results or run records.'}</p>}
-    {results.map(([id, result]) => <details key={id}><summary>{id} · {result.isError ? (zh ? '失败' : 'Failed') : (zh ? '工具结果' : 'Tool result')}</summary><pre>{formatPermissionInput(result)}</pre></details>)}
-    {events.map((item) => <details key={item.id}><summary>{item.kind} · {item.id}</summary><pre>{formatPermissionInput(item)}</pre></details>)}
-  </div>
 }
 
 function surfaceLabel(surface: Surface, zh: boolean): string { return ({ chat: ['对话', 'Conversation'], logs: ['原始日志', 'Original logs'], files: ['文件', 'Files'], diff: ['代码差异', 'Code changes'], results: ['成果与验收', 'Results and acceptance'] })[surface][zh ? 0 : 1] }
