@@ -30,7 +30,6 @@ export function evaluateSessionModelSwitch(
   requestedModel: unknown
 ): SessionModelSwitchDecision {
   const model = normalizeRequestedModel(requestedModel)
-  if (model === state.currentModel) return { allowed: true, changed: false, model }
   if (state.status === 'starting' || state.status === 'running') {
     return blocked(model, 'active-run', '任务正在运行，已阻止切换模型；请先等待完成或中断任务。')
   }
@@ -40,7 +39,7 @@ export function evaluateSessionModelSwitch(
   if (state.status === 'closed') {
     return blocked(model, 'closed-session', '会话已关闭，无法切换模型。')
   }
-  return { allowed: true, changed: true, model }
+  return { allowed: true, changed: model !== state.currentModel, model }
 }
 
 export function assertSessionModelSwitchAllowed(
@@ -54,7 +53,9 @@ export function assertSessionModelSwitchAllowed(
 
 function normalizeRequestedModel(value: unknown): string {
   if (typeof value !== 'string') throw new TypeError('模型必须是字符串')
-  return value.trim()
+  const model = value.trim()
+  if (!model || model.length > 240 || /[\u0000-\u001f\u007f]/.test(model)) throw new TypeError('请选择有效模型')
+  return model
 }
 
 function blocked(

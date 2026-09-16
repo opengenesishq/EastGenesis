@@ -37,6 +37,7 @@ import type {
 import { AUTO_MODEL, AUTO_PROVIDER_ID } from '../shared/types'
 import type { WorkItem } from '../shared/project-workspace-types'
 import { reconcileTaskExecutionAuthorityMarker } from './permission/task-execution-authority-marker'
+import { assertSessionModelChange } from './session-model-change'
 
 export interface SessionCreationDraft {
   opts: CreateSessionOptions
@@ -95,9 +96,21 @@ export function prepareSessionCreationDraft(
   if (resumeHistory?.taskExecutionAuthorityRequired || parentMeta?.taskExecutionAuthorityRequired) {
     baseMeta.taskExecutionAuthorityRequired = true
   }
-  if (historySource?.mode === 'resume' && resumeHistory && resumeWorktreeRecord) {
+  // A model-change receipt belongs to the original task. Reopening that
+  // conversation must keep its identity, including an unfinished switch.
+  if (historySource?.mode === 'resume' && resumeHistory && (resumeWorktreeRecord || resumeHistory.modelChange)) {
     baseMeta.id = resumeHistory.id
     baseMeta.createdAt = resumeHistory.createdAt
+  }
+  if (historySource?.mode === 'resume' && resumeHistory?.modelChange) {
+    // A new Session identity can replay conversation history, but cannot claim
+    // the old Session's explicit routing decision or unfinished commit.
+    if (baseMeta.id === resumeHistory.id) {
+      baseMeta.modelChange = structuredClone(resumeHistory.modelChange)
+      assertSessionModelChange({ ...baseMeta, sdkSessionId: resumeHistory.sdkSessionId })
+    } else if (resumeHistory.modelChange.state === 'prepared') {
+      throw new Error('原任务的模型切换尚未完成，请从恢复中心打开原任务并完成切换。')
+    }
   }
   baseMeta.modelRoutingDecision = initialRoute?.decision ?? (historySource?.mode === 'resume' ? resumeHistory?.modelRoutingDecision : undefined)
   assertBusinessLineTaskStrategy(baseMeta, baseMeta.taskStrategy)

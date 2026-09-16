@@ -7,7 +7,6 @@ import { getTaskSnapshot } from './task/task-snapshot'
 import type { EffectResolution } from '../shared/effect-recovery-types'
 import { sessionReadyHandler } from './ipc/session-ready-handler'
 import { previewOutboundContext } from './project-workspace/outbound-context-policy'
-import { applySessionModelSwitch } from './ipc/session-model-switch-handler'
 import { createUnassignedSession } from './ipc/unassigned-session'
 import { resolveWorkspaceSessionCwd } from './project-workspace/workspace-session-cwd'
 import { activateLocalCompute } from './provider/localCompute'
@@ -565,8 +564,10 @@ export function registerIpc(): void {
     await sessionManager.get(id)?.setPermissionMode(mode)
   }))
 
-  ipcMain.handle('sessions:setModel', (_e, id: string, model: string) =>
-    applySessionModelSwitch(sessionManager.get(id), model))
+  ipcMain.handle('sessions:setModel', sessionReadyHandler((_e, id: string, model: unknown) => {
+    if (typeof id !== 'string' || !id.trim()) throw new Error('必须指定当前任务')
+    return sessionManager.setModel(id, model)
+  }))
 
   ipcMain.handle('sessions:rename', (_e, id: string, title: string) => {
     if (typeof title === 'string') sessionManager.get(id)?.rename(title)

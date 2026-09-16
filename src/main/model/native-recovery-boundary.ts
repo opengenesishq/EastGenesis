@@ -1,7 +1,10 @@
 import { nativeTurnRejection } from './native-turn-rejection'
 import { isModelAttemptPersistenceError, unwrapModelAttemptOperationError } from '../task/model-attempt-runtime'
 
-type RecoveryFailure = { message: string; subtype: 'policy-denied' | 'outbound-policy-denied' | 'routing-blocked' | 'ledger-error' | 'error' }
+type RecoveryFailure = NonNullable<ReturnType<typeof nativeTurnRejection>> | {
+  message: string
+  subtype: 'ledger-error' | 'error'
+}
 
 /** Covers the whole asynchronous recovery ladder, including policy changes after an await. */
 export async function withNativeRecoveryBoundary(operation: () => Promise<void>, finish: (failure: RecoveryFailure) => void): Promise<void> {

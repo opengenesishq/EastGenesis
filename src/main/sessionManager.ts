@@ -20,9 +20,12 @@ import { calculateMonthlyBudgetSnapshot } from './model/monthly-budget'
 import { checkpointRestoreEffectBoundary } from './checkpoint-effect-boundary'
 import { normalizeStableMessagePayload } from './stable-message-payload'
 import { withSessionOperationQueue } from './session-operation-queue'
+import { applySessionModelSwitch } from './ipc/session-model-switch-handler'
+import { assertSessionModelChangeReady, restoreModelChangeSourceRun, sealSessionModelChange } from './session-model-change'
+import { prepareSessionModelHandoffCheckpoint } from './agent/session-model-handoff'
 import { assertPersistedSessionExecutionAllowed } from './session-execution-ownership'
 import {
-  cleanupTranscripts, readTranscriptEntries, restoreTranscriptIfMissing,
+  cleanupTranscripts, readTranscriptEntries, readTranscriptEntriesStrict, restoreTranscriptIfMissing,
   shouldPersistConversationLedgerEvent, transcriptForkSeedEntries
 } from './transcript'
 import { touchProject } from './projects'
@@ -429,7 +432,7 @@ class SessionManager {
       )
       return attempt.value
     }
-    const outcome = await executeInteractiveOperationEffect<CheckpointOperationAttempt<CheckpointRestoreResult>>({
+    const outcome = await withSessionOperationQueue(id, () => executeInteractiveOperationEffect<CheckpointOperationAttempt<CheckpointRestoreResult>>({
       kind: 'checkpoint_restore',
       title: `恢复 ${mode} checkpoint ${messageId}`,
       sourceSessionId: id,
@@ -440,7 +443,7 @@ class SessionManager {
       execute: () => this.restoreCheckpointAttempt(id, messageId, mode, false),
       isSuccess: checkpointOperationAttemptSucceeded,
       resultSummary: checkpointOperationAttemptSummary
-    })
+    }))
     return checkpointRestoreOutcome(outcome, messageId, mode)
   }
 
@@ -509,6 +512,23 @@ class SessionManager {
           applied: false,
           error: boundary.reason
         }
+      }
+    }
+    if (!dryRun && session.meta.modelChange) {
+      assertSessionModelChangeReady(session.meta)
+      const preview = await session.restoreCheckpoint(messageId, mode, true)
+      if (!preview.canRewind || preview.error || !preview.chat?.ok) return { phase: 'preflight', value: preview }
+      if (!session.meta.sdkSessionId) throw new Error('模型交接缺少原会话身份，不能回溯。')
+      const handoff = prepareSessionModelHandoffCheckpoint(session.meta, messageId,
+        readTranscriptEntriesStrict(session.meta.sdkSessionId), preview.chat)
+      if (handoff) {
+        // The shorter prefix remains valid even if the process exits before
+        // truncation. Preserve the selected model and original source Run.
+        session.meta.modelChange = sealSessionModelChange({ ...session.meta.modelChange, handoff })
+        this.persistActiveSessions(true)
+        this.persist(id)
+        await this.writeTaskSnapshot(id, 'important-event', 0, undefined, undefined, true)
+        session.emitSyntheticEvent?.({ kind: 'meta', meta: { ...session.meta } })
       }
     }
     const result = await session.restoreCheckpoint(messageId, mode, dryRun)
@@ -684,6 +704,35 @@ class SessionManager {
   getTaskRun(sessionId: string): TaskRunRecord | undefined {
     const run = this.taskRuns.get(sessionId)
     return run ? structuredClone(run) : undefined
+  }
+
+  setModel(sessionId: string, model: unknown): Promise<void> {
+    return withSessionOperationQueue(sessionId, async () => {
+      const session = this.sessions.get(sessionId)
+      if (session?.meta.modelChange?.state === 'prepared' && !this.taskRuns.get(sessionId)) {
+        const persisted = await listPersistedTaskRuns(sessionId)
+        if (this.sessions.get(sessionId) !== session || this.taskRuns.get(sessionId)) {
+          throw new Error('任务状态已变化，请重新选择模型。')
+        }
+        const source = restoreModelChangeSourceRun(session.meta, persisted)
+        if (source) this.taskRuns.set(sessionId, source)
+      }
+      await applySessionModelSwitch(session, model, {
+        rootDir: app.getPath('userData'), getRun: () => this.getTaskRun(sessionId),
+        isCurrent: candidate => this.sessions.get(sessionId) === candidate,
+        assertRecoveryAllowed: async () => {
+          await this.modelAttemptRecoveryGate.refreshBeforeSend(sessionId)
+          const gate = this.modelAttemptRecoveryGate.decideSend(sessionId, this.taskRuns.get(sessionId), false)
+          if (!gate.allowed) throw new Error(gate.error)
+        },
+        persist: async () => {
+          await this.writeTaskSnapshot(sessionId, 'important-event', 0, undefined, undefined, true)
+          this.persistActiveSessions(true)
+          this.persist(sessionId)
+        }
+      })
+      if (session) session.emitSyntheticEvent?.({ kind: 'meta', meta: { ...session.meta } })
+    })
   }
 
   /** Persist the latest TaskRun projection before a lifecycle consumer writes dependent records. */
@@ -1068,6 +1117,8 @@ class SessionManager {
   ): Promise<boolean> {
     let session = this.sessions.get(id)
     if (!session) return false
+    try { assertSessionModelChangeReady(session.meta) }
+    catch (error) { return this.rejectBeforeRun(session, error instanceof Error ? error.message : String(error)) }
     await this.council.loadSnapshots()
     try {
       assertCouncilSend(session.meta, typeof input === 'string' ? undefined : input.messageId)

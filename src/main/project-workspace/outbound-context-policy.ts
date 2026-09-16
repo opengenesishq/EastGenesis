@@ -130,6 +130,26 @@ export async function assertOutboundContextAllowed(input: {
   }
 }
 
+/** Main-only addition of a durable recovery observation; preserve every prior resource and egress constraint. */
+export function appendOutboundContextItems(manifest: OutboundContextManifest, additional: OutboundContextItemView[]): OutboundContextManifest {
+  assertManifestDigest(manifest)
+  for (const item of additional) {
+    const prior = manifest.items.find(candidate => candidate.id === item.id)
+    if (prior && (prior.kind !== item.kind || prior.dataClass !== item.dataClass || prior.egressPolicy !== item.egressPolicy || prior.decision !== item.decision)) {
+      throw new OutboundContextPolicyError('OUTBOUND_CONTEXT_DENIED', '恢复上下文不得覆盖已有资料的外发限制')
+    }
+  }
+  const replacementIds = new Set(additional.map(item => item.id))
+  const items = [...manifest.items.filter(item => !replacementIds.has(item.id)), ...additional]
+  const evaluation = evaluateOutboundContextPolicy(items, manifest.receiver)
+  const { manifestDigest: _previousDigest, ...prior } = manifest
+  const body = { ...prior, items,
+    dataClasses: [...new Set(items.filter(item => item.decision === 'included').map(item => item.dataClass))].sort(),
+    blocked: evaluation.blockReasons.length > 0, blockReasons: evaluation.blockReasons,
+    failoverAllowed: manifest.failoverAllowed && evaluation.failoverAllowed }
+  return { ...body, manifestDigest: digestManifestBody(body) }
+}
+
 export function providerAllowedByOutboundContext(
   manifest: OutboundContextManifest | undefined,
   provider: ProviderView,

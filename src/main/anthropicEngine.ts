@@ -45,6 +45,7 @@ import { getSettings } from './settings'
 import { resolveNativeSessionTarget, nativeModelProtocol, nativeModelErrorSubtype } from './model/native-session-target'
 import { nativeSessionRecoveryContext, assertNativeSessionRecoveryTarget } from './model/native-recovery-session'
 import { nativeHttpRefusalEvidence } from './model/native-http-refusal'
+import { nativeTurnRejection } from './model/native-turn-rejection'
 import { emitNativeUserMessage } from './native-user-message'
 import { listHistory } from './history'
 import { normalizeStableMessagePayload, type StableMessagePayload } from './stable-message-payload'
@@ -54,9 +55,12 @@ import {
 import { runHasUnresolvedEffects } from './task/effect-runtime'
 import { taskStrategySystemAppend, updateTaskStrategyMeta } from './task/task-strategy'
 import { buildWorkflowStageHandoffPrompt } from './task/workflow-stage-handoff'
+import { nativeRecoveryHandoffPrompt } from './task/native-recovery-handoff'
+import { sessionModelHandoffPrompt } from './agent/session-model-handoff'
 import { buildUserRulesSystemAppendSync } from './user-rules'
 import {
   assertOutboundContextAllowed,
+  appendOutboundContextItems,
   OutboundContextPolicyError,
   prepareOutboundContext
 } from './project-workspace/outbound-context-policy'
@@ -68,10 +72,7 @@ import {
   fetchWithProviderCredentialLease,
   providerCredentialScopeForSession
 } from './providerRuntimeAuth'
-import {
-  assertDigitalWorkerProviderDispatchAllowed,
-  isDigitalWorkerProviderDispatchDeniedError
-} from './digital-worker/session-action-policy'
+import { assertDigitalWorkerProviderDispatchAllowed } from './digital-worker/session-action-policy'
 import { TranscriptWriter } from './transcript'
 import {
   providerChatCheckpointId,
@@ -346,6 +347,8 @@ export class AnthropicEngine implements Engine {
           console.error('[caogen] workflow stage handoff retrieval failed:', error)
           return ''
         })
+      const modelHandoff = sessionModelHandoffPrompt(this.meta.modelChange?.handoff, this.meta, this.transcript.readAll())
+      const handoffContext = [modelHandoff, handoff].filter(Boolean).join('\n\n')
       const outbound = await prepareOutboundContext({
         meta: this.meta,
         rootDir: app.getPath('userData'),
@@ -353,7 +356,7 @@ export class AnthropicEngine implements Engine {
         providerId: target.providerId,
         model: target.model,
         additionalItems: anthropicAdditionalContextItems(
-          handoff,
+          handoffContext,
           this.history.length > 0,
           layered.hasMemoryContext
         )
@@ -364,10 +367,10 @@ export class AnthropicEngine implements Engine {
         payload.documents,
         sessionImageAttachmentsRoot(app.getPath('userData'), this.meta.id)
       )
-      const enrichedPayload = handoff || projectResources || documentPrompt
+      const enrichedPayload = handoffContext || projectResources || documentPrompt
         ? {
             ...payload,
-            text: [projectResources, handoff, documentPrompt, '## Current User Request', layeredPayload.text]
+            text: [projectResources, handoffContext, documentPrompt, '## Current User Request', layeredPayload.text]
               .filter(Boolean)
               .join('\n\n')
           }
@@ -457,17 +460,28 @@ export class AnthropicEngine implements Engine {
     }
   }
 
-  private executeMessageAttempt(
+  private async executeMessageAttempt(
     target: AnthropicMessagesTarget,
     turnMessages: AnthropicMessagesMessage[],
     controller: AbortController,
     lineage?: AnthropicAttemptLineage
   ): Promise<AnthropicMessagesResult> {
+    // Refresh each request, including tool-loop successors after a successful failover.
+    const recoveryHandoff = await nativeRecoveryHandoffPrompt(
+      this.meta,
+      this.dependencies.getRun(this.meta.id),
+      app.getPath('userData')
+    )
+    if (recoveryHandoff) {
+      if (!this.activeOutboundContext) throw new Error('模型恢复缺少外发上下文清单')
+      const items = anthropicAdditionalContextItems(recoveryHandoff, false).map(item => ({ ...item, id: 'context:model-recovery', label: 'Persisted model recovery evidence' }))
+      this.activeOutboundContext = appendOutboundContextItems(this.activeOutboundContext, items)
+    }
     const projectContext = [buildUserRulesSystemAppendSync(), buildProjectContextSystemAppendSync(this.meta.sourceCwd ?? this.meta.cwd)].filter(Boolean).join('\n\n')
     const request = this.dependencies.applyRuntimeToRequest({
       model: target.model,
       maxTokens: DEFAULT_MAX_TOKENS,
-      system: taskStrategySystemAppend(this.meta.taskStrategy, projectContext, preparationPermissionSystemPrompt(this.meta, app.getPath('userData')), taskExecutionAuthoritySystemPrompt(this.meta, app.getPath('userData'))),
+      system: [taskStrategySystemAppend(this.meta.taskStrategy, projectContext, preparationPermissionSystemPrompt(this.meta, app.getPath('userData')), taskExecutionAuthoritySystemPrompt(this.meta, app.getPath('userData'))), recoveryHandoff].filter(Boolean).join('\n\n'),
       messages: [...this.history, ...turnMessages],
       tools: ANTHROPIC_CODING_TOOLS,
       extraBody: target.credentialProvider.advancedConfig?.request?.body
@@ -512,7 +526,8 @@ export class AnthropicEngine implements Engine {
       body, budgetScope: nativeRequestBudgetInput({ meta: this.meta, providerId: target.providerId, model: target.model, body }),
       canonicalContextDigest: buildProviderNeutralContextDigest({
         entries: this.transcript.readAll(),
-        outboundContext: this.activeOutboundContext
+        outboundContext: this.activeOutboundContext,
+        artifactContinuationDigest: this.meta.modelChange?.handoff.artifactContinuationDigest
       }),
       signal: controller.signal,
       auth: { keyId: target.keyId, keyLabel: target.keyLabel },
@@ -760,12 +775,9 @@ export class AnthropicEngine implements Engine {
   }
 
   private finishTurnError(error: unknown, controller: AbortController): void {
-    if (isDigitalWorkerProviderDispatchDeniedError(error)) {
-      this.finishTurn(true, error.message, 'policy-denied')
-      return
-    }
-    if (error instanceof OutboundContextPolicyError) {
-      this.finishTurn(true, error.message, 'outbound-policy-denied')
+    const rejection = nativeTurnRejection(error)
+    if (rejection) {
+      this.finishTurn(true, rejection.message, rejection.subtype)
       return
     }
     if (isModelAttemptPersistenceError(error)) {

@@ -17,6 +17,7 @@ import { getBusinessLines } from '../../shared/business-line-types'
 import { providerAllowedByRoutingExpertPolicy, isLocalProviderUrl } from '../model/routing-expert-policy'
 import { resolveProviderRuntimeTarget } from '../provider/providerRuntimeTarget'
 import { resolveNativeExecutorProtocol } from '../model/executor-compatibility'
+import { hasExplicitModelChange } from '../session-model-change'
 
 /** Build the immutable native text policy from the already trusted session route. */
 export function frozenPolicyForSessionRun(
@@ -31,7 +32,7 @@ export function frozenPolicyForSessionRun(
   // previous Run's immutable target/provenance forward under the new Run and
   // message identity; the physical Engine then remains on the same protocol.
   const previousPolicy = previousRun ? frozenRoutingPolicyForRun(previousRun) : undefined
-  if (previousPolicy) {
+  if (previousPolicy && !hasExplicitModelChange(meta, previousRun)) {
     // Successor Runs inherit the immutable target, but the Engine still needs
     // a one-message route hand-off. Without this, native resolvers fall back
     // to the mutable scheduler after a rule/settings change.

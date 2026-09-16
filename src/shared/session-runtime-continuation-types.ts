@@ -18,4 +18,6 @@ export interface SessionRuntimeRoutingBinding {
   /** Concrete target is independent from the user's AUTO/model intent. */
   modelRoutingDecision?: ModelRoutingDecisionView
   runtimeContinuation?: SessionRuntimeContinuation
+  /** Latest explicit model change, with its frozen work context and predecessor. */
+  modelChange?: import('./session-model-change-types').SessionModelChange
 }

@@ -66,6 +66,8 @@ import { taskRuntimeRegistry } from './task/task-runtime-registry'
 import { effectReplayTargetDigest } from './task/effect-reconciler'
 import { taskStrategySystemPrompt, updateTaskStrategyMeta } from './task/task-strategy'
 import { buildWorkflowStageHandoffPrompt } from './task/workflow-stage-handoff'
+import { nativeRecoveryHandoffPrompt } from './task/native-recovery-handoff'
+import { sessionModelHandoffPrompt } from './agent/session-model-handoff'
 import { buildUserRulesSystemAppendSync } from './user-rules'
 import {
   assertOutboundContextAllowed,
@@ -618,6 +620,13 @@ export class OpenAIEngine implements Engine {
         console.error('[caogen] workflow stage handoff retrieval failed:', error)
         return ''
       })
+    const recoveryHandoff = await nativeRecoveryHandoffPrompt(
+      this.meta,
+      taskRuntimeRegistry.get(this.meta.id),
+      app.getPath('userData')
+    )
+    const modelHandoff = sessionModelHandoffPrompt(this.meta.modelChange?.handoff, this.meta, this.transcript.readAll())
+    const handoffContext = [modelHandoff, handoff, recoveryHandoff].filter(Boolean).join('\n\n')
     const outbound = await prepareOutboundContext({
       meta: this.meta,
       rootDir: app.getPath('userData'),
@@ -625,7 +634,7 @@ export class OpenAIEngine implements Engine {
       providerId: this.meta.providerId,
       model: this.effectiveModel(),
       additionalItems: nativeAdditionalContextItems(
-        handoff,
+        handoffContext,
         this.chatHistory.length > 0 || Boolean(this.lastResponseId),
         layered.hasMemoryContext
       )
@@ -635,12 +644,12 @@ export class OpenAIEngine implements Engine {
       payload.documents ?? [],
       sessionImageAttachmentsRoot(app.getPath('userData'), this.meta.id)
     )
-    const enriched = handoff.trim() || projectResources.trim() || documentPrompt.trim()
+    const enriched = handoffContext.trim() || projectResources.trim() || documentPrompt.trim()
       ? {
         ...layered.payload,
         text: [
           projectResources,
-          handoff,
+          handoffContext,
           documentPrompt,
           '## Current User Request',
           layered.payload.text
@@ -1509,7 +1518,8 @@ export class OpenAIEngine implements Engine {
       auth: { keyId: auth.keyId, keyLabel: auth.keyLabel },
       canonicalContextDigest: buildProviderNeutralContextDigest({
         entries: this.transcript.readAll(),
-        outboundContext: this.activeOutboundContext
+        outboundContext: this.activeOutboundContext,
+        artifactContinuationDigest: this.meta.modelChange?.handoff.artifactContinuationDigest
       }),
       estimateCost: (usage) => estimateModelAttemptCostUsd({ providerId, model, protocol }, usage),
       executeFetch: async (operationId) => {
