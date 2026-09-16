@@ -14,6 +14,11 @@
 .palace-work-row { padding: 10px 0; border-bottom: 1px solid var(--border); }
 .palace-work-row > div { flex: 1; min-width: 160px; overflow-wrap: anywhere; }
 .palace-work-row p { margin: 4px 0 0; }
+.palace-institution-work-item { padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.palace-institution-work-item > .palace-work-row { border-bottom: 0; }
+.palace-institution-run-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.palace-institution-run-controls .palace-work-selector { flex: 1; min-width: 180px; }
+.palace-institution-work-item > .office-session-actions { margin-top: 8px; }
 .palace-work-summary > span { border: 1px solid var(--border); padding: 7px 10px; border-radius: 6px; font-size: 13px; }
 .palace-work-surface { min-height: 300px; height: min(650px, 65vh); display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: auto; }
 .palace-work-surface > .chat, .palace-work-surface > .file-panel { height: 100%; min-height: 0; }

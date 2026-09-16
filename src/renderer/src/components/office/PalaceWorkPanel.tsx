@@ -13,6 +13,7 @@ import CouncilPanel from '../experience/CouncilPanel'
 import RunDetailPanel from '../studio/RunDetailPanel'
 import { ProjectDeliveryWorkbench } from '../studio/ProjectDeliveryWorkbench'
 import OfficeSessionActions from './OfficeSessionActions'
+import PalaceInstitutionWorkItem from './PalaceInstitutionWorkItem'
 import './palace-work-panel.css'
 
 const ChatView = lazy(() => import('../ChatView'))
@@ -168,12 +169,10 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
       <p>{zh ? '机构按已批准计划中冻结的职责或任务原有角色过滤。负责人来自真实任务分派；未载入的历史计划不会猜测归属。' : 'Filters use approved plan responsibilities or existing task roles. Owners come from task assignments.'}</p>
       <div className="palace-work-summary"><span>{zh ? '任务' : 'Tasks'} {patrolItems.length}</span><span>{zh ? '运行' : 'Running'} {patrolItems.filter((item) => item.status === 'running').length}</span><span>{zh ? '阻塞 / 失败' : 'Blocked / failed'} {patrolItems.filter((item) => ['blocked', 'failed'].includes(item.status)).length}</span><span>{zh ? '完成' : 'Completed'} {patrolItems.filter((item) => item.status === 'done').length}</span></div>
       {patrolItems.length === 0 && <p>{zh ? '当前没有可确认归属的任务。' : 'No task with a confirmed institution is available.'}</p>}
-      {patrolItems.map((item) => <article className="palace-work-row" key={item.id} data-palace-institution-work-item={item.id}><div><strong>{item.title}</strong><p>{item.status} · {item.owner?.displayName || item.owner?.id || (zh ? '未分派' : 'Unassigned')} · {item.runRefs.length} Run · {item.artifactRefs.length} {zh ? '产物' : 'artifacts'}</p></div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
-          const id = sessionIds.find((candidate) => sessions[candidate].meta.workItemId === item.id && sessions[candidate].meta.workspaceId === item.projectId)
-          if (id) onAction('study', { sessionId: id, projectId: item.projectId, workItemId: item.id })
-          else openWorkItem(item)
-        }}>{zh ? '继续处理' : 'Continue work'}</button></article>)}
+      {patrolItems.map((item) => <PalaceInstitutionWorkItem key={`${item.projectId}:${item.id}`} item={item} runs={data.ledger?.runs.items ?? []} sessions={sessions} zh={zh}
+        onRun={runId => setRunRoute(createRunDetailRoute(runId))}
+        onStudy={id => onAction('study', { sessionId: id, projectId: item.projectId, workItemId: item.id })}
+        onDelivery={() => openDelivery(item.projectId, item.id)} onWorkItem={() => openWorkItem(item)} />)}
     </>}
     {runRoute && data.ledger && <RunDetailPanel route={runRoute} onNavigate={setRunRoute} onOpenDelivery={openDelivery}
       onRecover={recoverRun} onRecoveryChanged={data.refresh}

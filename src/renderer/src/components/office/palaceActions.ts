@@ -1,4 +1,4 @@
-import type { TaskPlanStateView, WorkItem } from '../../../../shared/types'
+import type { SessionMeta, TaskPlanStateView, WorkItem, WorkflowRunSummary } from '../../../../shared/types'
 
 export const PALACE_ACTIONS = [
   { id: 'edict', label: '下旨', labelEn: 'Give an instruction' },
@@ -32,4 +32,20 @@ export function palaceInstitutionWorkItems(roleId: string, items: readonly WorkI
   }
   return items.filter((item) => roleId === 'all' || (institutions.get(item.id) ?? item.role) === roleId)
     .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
+}
+
+/** Keep patrol controls bound to the latest canonical execution, never an old
+ * session that happens to share a WorkItem after recovery or reassignment. */
+export function palaceInstitutionExecution(item: WorkItem, runs: readonly WorkflowRunSummary[], sessions: readonly SessionMeta[]) {
+  const ownedRuns = item.runRefs.flatMap(id => {
+    const matches = runs.filter(run => run.id === id && run.projectId === item.projectId &&
+      run.workItemId === item.id && run.goalId === item.goalId)
+    return matches.length === 1 ? matches : []
+  }).reverse()
+  const latestId = item.runRefs.at(-1)
+  const latest = ownedRuns.find(run => run.id === latestId)
+  const matchingSessions = sessions.filter(meta => meta.workspaceId === item.projectId && meta.workItemId === item.id &&
+    meta.goalId === item.goalId && meta.status !== 'closed' && (!latestId || latest?.sessionId === meta.id))
+  return { runs: ownedRuns, sessionId: matchingSessions.length === 1 ? matchingSessions[0].id : undefined,
+    unavailableRuns: item.runRefs.length - ownedRuns.length }
 }

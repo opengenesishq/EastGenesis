@@ -6,6 +6,10 @@ import { takeProjectWorkspaceNavigation } from '../src/renderer/src/components/s
 import type { WorkItem, ProjectWorkspace } from '../src/shared/project-workspace-types'
 import type { SystemRoleId } from '../src/renderer/src/components/office/kit/palace/systemRoleCatalog'
 import type { OfficeOperationStatus } from '../src/renderer/src/components/office/officeOperationRefresh'
+import PalaceInstitutionWorkItem from '../src/renderer/src/components/office/PalaceInstitutionWorkItem'
+import { palaceInstitutionExecution } from '../src/renderer/src/components/office/palaceActions'
+import { useStore, type SessionState } from '../src/renderer/src/store'
+import type { WorkflowRunSummary } from '../src/shared/types'
 
 const fixtureWindow = window as typeof window & {
   IS_REACT_ACT_ENVIRONMENT: boolean
@@ -87,6 +91,58 @@ fixtureWindow.runOfficeRoleHarness = async () => {
     assert(read('[data-office-role-work-items-count="21"]')?.textContent?.includes('20 / 21'), 'limited list hid total count')
     assert(officeRoleWorkItems('gongbu', [task('looks-like-ministry', undefined, { type: 'digital_worker', id: 'gongbu', displayName: '工部' })]).length === 0, 'owner name inferred role')
     passed('bounded-list-discloses-total-and-owner-names-never-infer-roles')
+
+    const patrolItem = { ...items[0], goalId: 'goal:actual', runRefs: ['run:old', 'run:current'] }
+    const runs = ['old', 'current'].map((suffix, index) => ({ id: `run:${suffix}`, projectId: patrolItem.projectId,
+      goalId: patrolItem.goalId, workItemId: patrolItem.id, sessionId: `session:${suffix}`, status: index ? 'completed' : 'failed',
+      createdAt: index + 1, revision: 1 })) as WorkflowRunSummary[]
+    const session = (id: string): SessionState => ({ meta: { id, workspaceId: patrolItem.projectId, goalId: patrolItem.goalId,
+      workItemId: patrolItem.id, status: 'idle', title: id }, pendingPermissions: [], runningTools: {} } as SessionState)
+    const patrolSessions = { 'session:old': session('session:old'), 'session:current': session('session:current') }
+    const originalState = useStore.getState()
+    const patrolCalls: string[] = []
+    const renderPatrol = async (nextRuns = runs, nextSessions = patrolSessions) => {
+      await act(async () => root.render(<PalaceInstitutionWorkItem item={patrolItem} runs={nextRuns} sessions={nextSessions} zh
+        onRun={id => patrolCalls.push(`run:${id}`)} onStudy={id => patrolCalls.push(`study:${id}`)}
+        onDelivery={() => patrolCalls.push('delivery')} onWorkItem={() => patrolCalls.push('work-item')} />))
+    }
+    try {
+      useStore.setState({ sessions: patrolSessions, activeId: 'session:unrelated', taskSnapshots: [], taskSnapshotsError: undefined,
+        modelAttemptReconciliations: [], syncSession: async id => { patrolCalls.push(`sync:${id}`); return true },
+        hydrateTaskRecoveryCandidates: async () => { patrolCalls.push('recovery-check') },
+        sendMessage: async (_text, id) => { patrolCalls.push(`send:${id}`) },
+        interrupt: async id => { patrolCalls.push(`stop:${id}`) } })
+      await renderPatrol()
+      assert(patrolCalls.length === 0, 'render issued an institution task command')
+      assert(read('[data-palace-institution-run="run:current"]'), 'patrol did not bind latest canonical execution')
+      assert(container.querySelectorAll('[data-palace-institution-run-selector] option').length === 2, 'earlier execution missing')
+      assert(read('[data-office-session-actions="session:current"]'), 'controls bound the old session')
+      passed('patrol-binds-latest-canonical-execution-and-retains-history')
+      await act(async () => read('[data-office-session-continue]')!.click())
+      assert(patrolCalls.join('|') === 'sync:session:current|recovery-check|send:session:current', 'continue bypassed recovery or used global selection')
+      passed('patrol-continues-exact-task-through-existing-recovery-gate')
+      const runningSessions = { ...patrolSessions, 'session:current': { ...patrolSessions['session:current'], meta: { ...patrolSessions['session:current'].meta, status: 'running' as const } } }
+      useStore.setState({ sessions: runningSessions })
+      await renderPatrol(runs, runningSessions)
+      await act(async () => read('[data-office-session-stop]')!.click())
+      assert(patrolCalls.at(-1) === 'stop:session:current', 'stop targeted another session')
+      passed('patrol-stops-only-current-institution-execution')
+      const select = read('[data-palace-institution-run-selector]') as HTMLSelectElement
+      await act(async () => { select.value = 'run:old'; select.dispatchEvent(new Event('change', { bubbles: true })) })
+      assert(!read('[data-office-session-actions]'), 'historical execution showed current execution mutation controls')
+      await act(async () => read('[data-palace-institution-run="run:old"]')!.click())
+      assert(patrolCalls.at(-1) === 'run:run:old', 'historical execution opened current run')
+      await act(async () => read('[data-palace-institution-delivery]')!.click())
+      assert(patrolCalls.at(-1) === 'delivery', 'task delivery review was not opened')
+      passed('patrol-opens-historical-run-and-delivery-without-controlling-newer-run')
+      await renderPatrol(runs.slice(0, 1))
+      assert(!read('[data-office-session-actions]') && read('[role="status"]')?.textContent?.includes('1 次运行'), 'missing latest record fell back to old live session')
+      const crossProject = palaceInstitutionExecution(patrolItem, [{ ...runs[1], projectId: 'other' }], Object.values(patrolSessions).map(entry => entry.meta))
+      const crossGoal = palaceInstitutionExecution(patrolItem, [{ ...runs[1], goalId: 'other' }], Object.values(patrolSessions).map(entry => entry.meta))
+      const duplicates = palaceInstitutionExecution(patrolItem, [runs[1], runs[1]], Object.values(patrolSessions).map(entry => entry.meta))
+      assert(!crossProject.sessionId && !crossGoal.sessionId && !duplicates.sessionId, 'untrusted run identity exposed task controls')
+      passed('patrol-missing-duplicate-or-other-task-records-cannot-target-old-session')
+    } finally { useStore.setState(originalState, true) }
     return checks
   } finally { await act(async () => root.unmount()) }
 }
