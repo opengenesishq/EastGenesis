@@ -27,7 +27,7 @@ import { TaskExecutionAuthorityStore } from './permission/task-execution-authori
 import { classifyToolCapabilities } from './permission/tool-capabilities'
 import { taskRuntimeRegistry, type ToolIdempotencyDecision } from './task/task-runtime-registry'
 import { registerSessionProducedArtifacts } from './task/session-artifact-producer'
-import { isDisabledModeInspectionToolCall, isReadOnlyToolCall, isSideEffectingToolCall } from './task/tool-idempotency'
+import { isDisabledModeInspectionToolCall, isReadOnlyToolCall, isSideEffectingToolCall, stableValueDigest } from './task/tool-idempotency'
 import { buildEffectDescriptor, effectReplayTargetDigest } from './task/effect-reconciler'
 import { describeOfficeArtifactReplayTarget, isOfficeArtifactTool } from './agent/tools/office-artifact'
 import { decideTaskStrategyTool } from './task/task-strategy'
@@ -418,6 +418,7 @@ export class NativeToolRuntime {
     if (preflight.allow === false) {
       return { ok: false, output: `操作已被权限策略拒绝${preflight.message ? `:${preflight.message}` : ''}` }
     }
+    const commandInputDigest = name === 'bash' ? stableValueDigest(input) : undefined
     const effectInput: PrepareEffectExecutionInput = {
       sessionId: this.meta.id,
       cwd: preflight.executionScope.cwd,
@@ -446,7 +447,7 @@ export class NativeToolRuntime {
       '操作在审批后、外部执行前已中断'
     )
     if (interruptedAfterGate) return interruptedAfterGate
-    return this.executeAllowedTool(name, input, effectHandle, effectInput, preflight.executionScope, preflight.taskExecutionAuthorityRevision, signal)
+    return this.executeAllowedTool(name, input, effectHandle, effectInput, preflight.executionScope, preflight.taskExecutionAuthorityRevision, signal, commandInputDigest)
   }
 
   private async prepareToolEffect(effectInput: PrepareEffectExecutionInput): Promise<PreparedEffect> {
@@ -574,7 +575,8 @@ export class NativeToolRuntime {
     effectInput: PrepareEffectExecutionInput,
     executionScope: PreparationToolScope,
     taskExecutionAuthorityRevision: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    commandInputDigest?: string
   ): Promise<NativeToolExecutionResult> {
     const settings = settingsForCaoGenDrive(getSettings(), this.meta.driveMode)
     const interruptedBeforeStart = await this.cancelIfAborted(
@@ -600,11 +602,15 @@ export class NativeToolRuntime {
       '操作在外部执行前已中断'
     )
     if (interruptedAfterStart) return interruptedAfterStart
+    if (commandInputDigest !== undefined && stableValueDigest(input) !== commandInputDigest) {
+      return this.settlePermissionDenial(effectHandle, { allow: false, message: '执行前命令输入已变化，旧审批失效；请重新审批。' })
+    }
     let exec: ToolExecResult
     try {
       exec = await executeCodingTool(name, input, executionScope.cwd, {
         preparationPermission: executionScope.preparation,
         taskExecutionAuthorityRevision,
+        commandInputDigest,
         signal,
         sandboxMode: settings.sandboxMode,
         chinaMirrorEnabled: settings.chinaEcosystemMirrorEnabled,

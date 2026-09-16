@@ -14,6 +14,8 @@ import { formalFileWriteGuard } from '../src/main/permission/limited-file-execut
 import { normalizeSettingsDocument } from '../src/main/settings'
 import { compareAndWriteSettingsFile, readSettingsFileSnapshot } from '../src/main/settings-file-storage'
 import { executeCodingTool } from '../src/main/openaiTools'
+import { isReadOnlyToolCall, stableValueDigest } from '../src/main/task/tool-idempotency'
+import { sessionKey } from '../src/main/permission/preparation-permission-store'
 import { writeTextFileLocally } from '../src/main/sandbox/local-execution'
 import { buildOfficeArtifactEffectTarget, executeOfficeArtifactTool } from '../src/main/agent/tools/office-artifact'
 
@@ -101,6 +103,45 @@ async function main() {
       assert.throws(() => f.store.assertAllowed(f.meta, 'bash', { command: 'npm test -- --runInBand && touch reports/x' }, f.cwd, commandOnly.revision), /没有匹配/)
       assert.throws(() => f.store.assertAllowed(f.meta, 'bash', { command: 'git diff' }, f.cwd, commandOnly.revision), /没有匹配/)
       assert.throws(() => f.store.assertAllowed(f.meta, 'write_file', { path: 'reports/nope.md' }, f.cwd, commandOnly.revision), /阻止此工具/)
+    })
+    await check('native bash starts only the approved exact command; revoked, changed and global-denied commands never spawn', async () => {
+      const f = fixture(), command = "printf permitted > reports/command.txt", changed = "printf changed > reports/changed.txt"
+      assert.equal(isReadOnlyToolCall('bash', { command }), false)
+      assert.equal(isReadOnlyToolCall('Bash', { command, dry_run: true }), false)
+      const grant = f.grant({ allowedWriteTools: [], pathPatterns: [], allowedCommandPatterns: [command, changed] })
+      const input = { command }, options = { userDataRoot: f.data, sessionMeta: f.meta, sessionId: f.meta.id,
+        taskExecutionAuthorityRevision: grant.revision, commandInputDigest: stableValueDigest(input) }
+      const okay = await executeCodingTool('bash', input, f.cwd, options)
+      assert.equal(okay.ok, true, okay.output); assert.equal(readFileSync(join(f.cwd, 'reports/command.txt'), 'utf8'), 'permitted')
+      const mutated = await executeCodingTool('bash', { command: changed }, f.cwd, options)
+      assert.equal(mutated.ok, false); assert.match(mutated.output, /命令输入已变化/)
+      assert.equal(mutated.commandTermination, 'not_started'); assert.equal(existsSync(join(f.cwd, 'reports/changed.txt')), false)
+      f.store.revoke(f.meta, { expectedRevision: grant.revision }, 'local-user:fixture')
+      const revoked = await executeCodingTool('bash', { command: changed }, f.cwd, { ...options, commandInputDigest: stableValueDigest({ command: changed }) })
+      assert.equal(revoked.ok, false); assert.match(revoked.output, /撤销或变更/)
+      assert.equal(existsSync(join(f.cwd, 'reports/changed.txt')), false)
+      const regrant = f.grant({ allowedWriteTools: [], pathPatterns: [], allowedCommandPatterns: [changed] })
+      const deniedRule = { ...rule('deny', ''), toolPattern: 'bash', commandPattern: changed, capabilityScope: [] }
+      saveSettings(f.data, { ...normalizeSettingsDocument({}), permissionRules: [deniedRule] })
+      const denied = await executeCodingTool('bash', { command: changed }, f.cwd, { ...options, taskExecutionAuthorityRevision: regrant.revision, commandInputDigest: stableValueDigest({ command: changed }) })
+      assert.equal(denied.ok, false); assert.equal(existsSync(join(f.cwd, 'reports/changed.txt')), false)
+    })
+    await check('older persisted file grants have no command authority and can be revoked or upgraded', () => {
+      const f = fixture(); f.grant()
+      const file = join(f.data, 'private/task-execution-authorities', `${sessionKey(f.meta.id)}.json`)
+      const old = JSON.parse(readFileSync(file, 'utf8'))
+      delete old.allowedCommandPatterns
+      for (const event of old.events) delete event.allowedCommandPatterns
+      delete old.digest
+      writeFileSync(file, JSON.stringify({ ...old, digest: digest(JSON.stringify(old)) }))
+      const fresh = new TaskExecutionAuthorityStore(f.data)
+      assert.deepEqual(fresh.get(f.meta).allowedCommandPatterns, [])
+      fresh.assertAllowed(f.meta, 'write_file', { path: 'reports/legacy.md' }, f.cwd)
+      assert.throws(() => fresh.assertAllowed(f.meta, 'bash', { command: 'pwd' }, f.cwd), /没有匹配/)
+      f.grant({ allowedCommandPatterns: ['pwd'] })
+      fresh.assertAllowed(f.meta, 'bash', { command: 'pwd' }, f.cwd)
+      fresh.revoke(f.meta, { expectedRevision: fresh.get(f.meta).revision }, 'local-user:fixture')
+      assert.throws(() => fresh.assertAllowed(f.meta, 'bash', { command: 'pwd' }, f.cwd), /撤销或缺失/)
     })
     await check('relative globs include root files without matching cwd ancestry; previews bind the actual current root', () => {
       const f = fixture()

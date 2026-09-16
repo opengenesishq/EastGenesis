@@ -16,7 +16,7 @@ type TaskExecutionAuthorityScopeInput = Omit<TaskExecutionAuthorityScope, 'allow
 
 export function normalizeTaskExecutionAuthorityScope(raw: TaskExecutionAuthorityScopeInput): TaskExecutionAuthorityScope {
   const tools = raw.allowedWriteTools, paths = raw.pathPatterns
-  const commands = raw.allowedCommandPatterns ?? []
+  const commands = raw.allowedCommandPatterns === undefined ? [] : raw.allowedCommandPatterns
   if (!Array.isArray(tools) || new Set(tools).size !== tools.length ||
     tools.some(tool => !TASK_EXECUTION_AUTHORITY_WRITE_TOOLS.includes(tool))) throw new Error('任务文件工具范围无效。')
   if (!Array.isArray(paths) || paths.length > 32 || new Set(paths).size !== paths.length || paths.some(path =>

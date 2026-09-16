@@ -160,21 +160,16 @@ export function parseTaskExecutionAuthorityRecord(value: unknown, sessionId: str
     throw new Error('任务执行授权记录损坏，已阻止使用。')
   }
   // Records written before command-level authorization remain valid and have no command grant.
-  const hadCommandField = Object.prototype.hasOwnProperty.call(record, 'allowedCommandPatterns')
-  record.allowedCommandPatterns = record.allowedCommandPatterns ?? []
-  for (const event of record.events) event.allowedCommandPatterns = event.allowedCommandPatterns ?? []
   for (const event of [record, ...record.events]) {
+    if (event.allowedCommandPatterns === undefined) event.allowedCommandPatterns = []
     if (event.status === 'revoked' && Array.isArray(event.allowedWriteTools) && event.allowedWriteTools.length === 0 &&
-      Array.isArray(event.pathPatterns) && event.pathPatterns.length === 0) continue
+      Array.isArray(event.pathPatterns) && event.pathPatterns.length === 0 &&
+      Array.isArray(event.allowedCommandPatterns) && event.allowedCommandPatterns.length === 0) continue
     normalizeTaskExecutionAuthorityScope(event)
   }
   const last = record.events.at(-1)!
-  const recordScopeDigest = hadCommandField
-    ? hash([record.allowedWriteTools, record.pathPatterns, record.allowedCommandPatterns])
-    : hash([record.allowedWriteTools, record.pathPatterns])
-  const eventScopeDigest = hadCommandField
-    ? hash([last.allowedWriteTools, last.pathPatterns, last.allowedCommandPatterns])
-    : hash([last.allowedWriteTools, last.pathPatterns])
+  const recordScopeDigest = hash([record.allowedWriteTools, record.pathPatterns, record.allowedCommandPatterns])
+  const eventScopeDigest = hash([last.allowedWriteTools, last.pathPatterns, last.allowedCommandPatterns])
   if (recordScopeDigest !== eventScopeDigest) throw new Error('任务执行范围与最后授权事件不一致。')
   return record
 }

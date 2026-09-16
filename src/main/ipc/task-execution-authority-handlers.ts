@@ -40,7 +40,7 @@ export function registerTaskExecutionAuthorityIpc(): void {
             writeSessionAuditLog({ ...before, taskStrategy: 'plan' }, {
               action: 'deny', source: 'user', toolName: 'task_file_authority',
               input: { operation, revision: result.revision, pathPatterns: result.pathPatterns, allowedWriteTools: result.allowedWriteTools, allowedCommandPatterns: result.allowedCommandPatterns },
-              message: '用户撤销当前任务的 Agent 文件修改授权。'
+              message: '用户撤销当前任务的 Agent 文件与命令执行授权。'
             })
             return result
           }
@@ -54,7 +54,7 @@ export function registerTaskExecutionAuthorityIpc(): void {
           writeSessionAuditLog({ ...live, taskStrategy: 'plan' }, {
             action: 'allow', source: 'user', toolName: 'task_file_authority',
             input: { operation, revision: result.revision, pathPatterns: result.pathPatterns, allowedWriteTools: result.allowedWriteTools, allowedCommandPatterns: result.allowedCommandPatterns },
-            message: '用户限定当前任务的 Agent 文件修改范围。'
+            message: '用户限定当前任务的 Agent 文件与命令执行范围。'
           })
           return result
         })

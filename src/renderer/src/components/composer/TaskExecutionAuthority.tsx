@@ -25,9 +25,9 @@ export default function TaskExecutionAuthority({ sessionId, running }: {
       void window.agentDesk.getTaskExecutionAuthority(sessionId).then(value => {
         if (!mounted.current || revision !== generation.current) return
         setView(value); setError('')
-        if (value.status === 'granted') {
+        if (value.status !== 'legacy') {
           setPaths(value.pathPatterns.join('\n')); setCommands(value.allowedCommandPatterns.join('\n')); setTools([...value.allowedWriteTools])
-        }
+        } else { setPaths('**/*'); setCommands(''); setTools([...TASK_EXECUTION_AUTHORITY_WRITE_TOOLS]) }
       }).catch(() => {
         if (mounted.current && revision === generation.current) setError(zh ? '无法读取任务授权，请重新打开任务。' : 'Unable to read access. Reopen this task.')
       })
@@ -65,7 +65,7 @@ export default function TaskExecutionAuthority({ sessionId, running }: {
     : view?.status === 'revoked' ? (zh ? '已撤权' : 'Revoked')
       : view?.status === 'legacy' ? (zh ? '沿用现有规则' : 'Existing rules') : (zh ? '读取中' : 'Loading')
   return <details className="preparation-permission task-execution-authority" data-task-authority-session={sessionId} data-task-authority-status={view?.status ?? 'loading'}>
-    <summary>{zh ? 'Agent 文件修改范围' : 'Agent file access'} · {status}</summary>
+    <summary>{zh ? 'Agent 文件与命令授权' : 'Agent file and command access'} · {status}</summary>
     <p>{zh ? '限定后，Agent 可读取资料并使用下方工具修改文件。命令需另行逐条授权；桌面和外部服务不在此范围。全局规则仍生效。恢复到其他设备后需要重新授权。'
       : 'Once scoped, the Agent can read and use the selected tools to modify files. Commands require separate per-command authorization; desktop actions and external services are outside this scope. Global rules also apply. Restoring on another device requires a new grant.'}</p>
     {view?.directory && <code className="preparation-directory">{view.directory}</code>}
@@ -85,9 +85,9 @@ export default function TaskExecutionAuthority({ sessionId, running }: {
     </label>)}</div>
     <div className="task-execution-authority-actions">
       <button type="button" className="btn btn-ghost btn-sm" disabled={!view?.bindingDigest || busy || running || strategy !== 'execute' || (!paths.trim() && !commands.trim()) || Boolean(paths.trim()) !== Boolean(tools.length)}
-        onClick={() => void mutate('grant')}>{view?.status === 'granted' ? (zh ? '更新修改范围' : 'Update scope') : (zh ? '限定并授权' : 'Grant scoped access')}</button>
+        onClick={() => void mutate('grant')}>{view?.status === 'granted' ? (zh ? '更新授权范围' : 'Update scope') : (zh ? '限定并授权' : 'Grant scoped access')}</button>
       <button type="button" className="btn btn-ghost btn-sm" disabled={!view || busy || view.status === 'revoked'}
-        onClick={() => void mutate('revoke')}>{zh ? '撤销 Agent 文件修改权限' : 'Revoke Agent file access'}</button>
+        onClick={() => void mutate('revoke')}>{zh ? '撤销 Agent 执行授权' : 'Revoke Agent execution access'}</button>
     </div>
     {strategy !== 'execute' && <p>{zh ? '批准计划并进入执行后，可授权正式目录修改；起草可使用文件准备区。' : 'Approve the plan and enter execution to grant project file access. Drafts can use the preparation area.'}</p>}
     {error && <p role="alert">{error}</p>}

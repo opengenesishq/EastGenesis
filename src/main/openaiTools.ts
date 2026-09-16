@@ -48,7 +48,7 @@ import {
 } from './genesis/orchestrator'
 import { buildGenesisPlanContract } from './task/genesis-plan-contract'
 import { resolveExistingProjectPathSync, resolveWritableProjectPathSync } from './utils/safe-project-path'
-import { OPENAI_PERMISSION_READ_ONLY_TOOLS } from './task/tool-idempotency'
+import { OPENAI_PERMISSION_READ_ONLY_TOOLS, stableValueDigest } from './task/tool-idempotency'
 import { SkillManager } from './skill/skill-manager'
 import { searchMemories, type MemoryLayer } from './memory/memory-manager'
 import { resolveMemoryRoot } from './memory/memory-root'
@@ -110,6 +110,8 @@ export interface ToolExecutionOptions {
   assertFormalWriteAuthorized?: () => void
   /** Main-owned version captured before approval; never supplied by model tool input. */
   taskExecutionAuthorityRevision?: number
+  /** Main-owned immutable input digest captured before command approval. */
+  commandInputDigest?: string
   preparationPermission?: PreparationToolPermission
   signal?: AbortSignal
   sandboxMode?: SandboxMode
@@ -972,6 +974,9 @@ export async function executeCodingTool(
   }
   try {
     if (options.signal?.aborted) return { ok: false, output: '操作已中断' }
+    if (name === 'bash' && options.commandInputDigest !== undefined && options.commandInputDigest !== stableValueDigest(args)) {
+      return { ok: false, output: '执行前命令输入已变化，旧审批失效；请重新审批。', commandTermination: 'not_started' }
+    }
     const assertFormalWriteAuthorized = formalFileWriteGuard(name, args, cwd, {
       preparation: Boolean(options.preparationPermission), sessionId: options.sessionId, effectTarget: options.effectTarget, rootDir: options.userDataRoot,
       sessionMeta: options.sessionMeta, taskExecutionAuthorityRevision: options.taskExecutionAuthorityRevision
