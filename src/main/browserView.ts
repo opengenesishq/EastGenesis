@@ -18,6 +18,8 @@ import type {
 } from '../shared/types'
 import { DEFAULT_BROWSER_URL, normalizeBrowserNavigationUrl } from './browserNavigation'
 import { readBrowserPageSource, type BrowserPageSource } from './browser/browser-page-source'
+import { isBrowserSearchPage, searchBrowserPage } from './browser/browser-search-page'
+import type { SearchAdapterResult } from './search/search-broker'
 
 interface BrowserRecord {
   sessionId: string
@@ -46,6 +48,7 @@ const MAX_CONSOLE_ERRORS = 200
 class BrowserViewManager {
   private readonly records = new Map<string, BrowserRecord>()
   private readonly listeners = new Set<Listener>()
+  private readonly activeSearches = new Set<string>()
 
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener)
@@ -151,6 +154,32 @@ class BrowserViewManager {
       getDocumentRevision: () => record.navigationRevision,
       executeJavaScriptInIsolatedWorld: (worldId, scripts) => wc.executeJavaScriptInIsolatedWorld(worldId, scripts)
     })
+  }
+
+  async searchPage(sessionId: string, query: string, signal: AbortSignal): Promise<SearchAdapterResult> {
+    const record = this.requireRecord(sessionId)
+    if (this.activeSearches.has(sessionId)) throw new Error('BROWSER_SEARCH_BUSY')
+    this.activeSearches.add(sessionId)
+    const wc = record.view.webContents
+    let pendingUrl = ''
+    const trackNavigation = (details: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>) => {
+      if (details.isMainFrame) pendingUrl = details.url
+    }
+    wc.on('did-start-navigation', trackNavigation)
+    try {
+      return await searchBrowserPage({
+        getURL: () => wc.getURL(), getTitle: () => wc.getTitle(), isLoading: () => wc.isLoadingMainFrame(),
+        getDocumentRevision: () => record.navigationRevision,
+        executeJavaScriptInIsolatedWorld: (worldId, scripts) => wc.executeJavaScriptInIsolatedWorld(worldId, scripts),
+        navigate: url => wc.loadURL(url),
+        // A user navigation may supersede this query. Cancel only the load
+        // still owned by this search, never the user's replacement page.
+        stopOwnedNavigation: () => { if (!wc.isDestroyed() && isBrowserSearchPage(pendingUrl, query)) wc.stop() }
+      }, query, signal)
+    } finally {
+      wc.removeListener('did-start-navigation', trackNavigation)
+      this.activeSearches.delete(sessionId)
+    }
   }
 
   async goBack(sessionId: string): Promise<BrowserViewState> {

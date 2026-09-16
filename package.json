@@ -114,6 +114,7 @@
     "test:legacy-memory-import:required": "tsx scripts/legacy-memory-import-required.ts",
     "test:office-local-revision:required": "tsx --tsconfig tsconfig.web.json scripts/office-local-revision-required.ts && tsx scripts/office-revision-lifecycle-required.ts",
     "test:browser-research-source:required": "node scripts/browser-research-source-required.mjs",
+    "test:browser-search-adapter:required": "node scripts/browser-search-adapter-required.mjs",
     "test:limited-file-execution:required": "tsx scripts/limited-file-execution-required.ts",
     "test:task-execution-authority:required": "tsx scripts/task-execution-authority-required.ts && tsx scripts/task-execution-authority-marker-required.ts && tsx scripts/task-execution-authority-purge-required.ts && tsx scripts/task-execution-authority-private-marker-required.ts && node scripts/task-execution-authority-ipc-required.mjs",
     "test:council-runtime:required": "node scripts/council-runtime-required.mjs && node scripts/council-lifecycle-required.mjs"

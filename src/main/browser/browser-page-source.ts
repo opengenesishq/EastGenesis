@@ -50,7 +50,7 @@ export function requireSourceUrl(value: string): string {
 }
 
 /** Do not send form values or credential-bearing lines to the model or ledger. */
-function safeSourceText(value: string): string {
+export function safeSourceText(value: string): string {
   // Redact across DOM text-node boundaries first: a label and its value can
   // occupy separate lines, and private-key blocks span multiple lines.
   return redactSensitiveText(value).replace(/\[REDACTED[^\]]*\]/g, '[内容已隐藏]').split(/\r?\n/).map(clean => {

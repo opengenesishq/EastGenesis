@@ -514,6 +514,8 @@ function projectWorkflowEvidence(evidence: WorkflowEvidenceRecord): StudioResult
     title: evidence.title,
     ...(evidence.summary ? { summary: evidence.summary } : {}),
     ...(sourceUri ? { sourceUri } : {}),
+    ...(evidence.kind === 'research_source' && evidence.metadata?.contentKind === 'search_snippet'
+      ? { sourceContentKind: 'search_snippet' as const } : {}),
     ...(evidence.runId ? { runId: evidence.runId } : {}),
     ...(evidence.artifactId ? { artifactId: evidence.artifactId } : {}),
     observedAt: evidence.observedAt,

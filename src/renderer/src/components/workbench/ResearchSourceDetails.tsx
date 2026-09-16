@@ -12,6 +12,8 @@ export default function ResearchSourceDetails({ evidence, language, onOpen }: {
   if (evidence.kind !== 'research_source') return null
   const en = language === 'en'
   return <div className="studio-result-source-details" data-studio-result-source={evidence.id}>
+    {evidence.sourceContentKind === 'search_snippet' && <p className="studio-result-muted">{en
+      ? 'Search summary; the original page has not been read.' : '搜索摘要，尚未读取原网页正文。'}</p>}
     {evidence.summary && <p>{evidence.summary}</p>}
     <p className="studio-result-muted">
       {en ? 'Source recorded: ' : '来源记录时间：'}

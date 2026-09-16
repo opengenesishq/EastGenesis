@@ -129,6 +129,7 @@ export interface StudioResultEvidence {
   summary?: string
   /** Recorded research source, restricted to credential-free HTTP(S). Never inferred from prose. */
   sourceUri?: string
+  sourceContentKind?: 'search_snippet'
   runId?: string
   artifactId?: string
   observedAt: number

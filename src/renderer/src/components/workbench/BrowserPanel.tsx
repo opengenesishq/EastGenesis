@@ -3,6 +3,7 @@ import type { BrowserViewState } from '../../../../shared/types'
 import { useT } from '../../i18n'
 import { useStore } from '../../store'
 import { canSendToSession, isSessionBusy } from './session-send-availability'
+import ResearchSearchPanel from './ResearchSearchPanel'
 
 function annotationLabel(note: string): string {
   const clean = note.replace(/\s+/g, ' ').trim()
@@ -236,6 +237,7 @@ export default function BrowserPanel(): React.JSX.Element {
           {!browserState && <div className="browser-placeholder">{t('browserStarting')}</div>}
         </div>
         <aside className="browser-annotations">
+          {activeId && <ResearchSearchPanel key={activeId} sessionId={activeId} />}
           <div className="browser-annotation-editor">
             <textarea
               className="input browser-note"

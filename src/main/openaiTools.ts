@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import { beginCodeForgeVerification, finishCodeForgeVerification, type CodeForgeVerificationCapture } from './code-forge/verification-evidence'
+import { taskRuntimeRegistry } from './task/task-runtime-registry'
 import { formalFileWriteGuard } from './permission/limited-file-execution'
 import { assertPreparationToolScope, isPreparationTool, resolvePreparationToolScope, type PreparationToolPermission } from './permission/preparation-tool-scope'
 import { withDataLifecycleMutation } from './data-lifecycle/data-lifecycle-mutation-lock'
@@ -142,7 +144,8 @@ export const OPENAI_CODING_TOOLS: ToolDefinition[] = [
       parameters: {
         type: 'object',
         properties: {
-          command: { type: 'string', description: '要执行的 shell 命令' }
+          command: { type: 'string', description: '要执行的 shell 命令' },
+          recordVerification: { type: 'boolean', description: '验证代码时设为 true：主进程记录执行前后源码版本与真实结果，供 code_forge_delivery 引用此调用 ID。' }
         },
         required: ['command']
       }
@@ -980,6 +983,7 @@ export async function executeCodingTool(
     if (isGitToolName(name)) {
       return clipExecResult(await executeGitTool(name, args, cwd, {
         sessionId: options.sessionId,
+        userDataRoot: options.userDataRoot,
         worktreeContext: options.worktreeContext,
         effectTarget: options.effectTarget
       }))
@@ -994,7 +998,7 @@ export async function executeCodingTool(
     }
     switch (name) {
       case 'bash':
-        return await runBash(String(args.command ?? ''), cwd, options)
+        return await runBash(String(args.command ?? ''), cwd, options, args)
       case 'read_file': {
         const p = jailExisting(cwd, String(args.path ?? ''))
         const stat = statSync(p)
@@ -1440,9 +1444,18 @@ function withExecutionMetadata(
 async function runBash(
   command: string,
   cwd: string,
-  options: ToolExecutionOptions
+  options: ToolExecutionOptions,
+  args: Record<string, unknown>
 ): Promise<ToolExecResult> {
   const sandboxMode = options.sandboxMode ?? 'restrictedLocal'
+  let capture: CodeForgeVerificationCapture | undefined, captureError: string | undefined
+  if (args.recordVerification === true) {
+    try {
+      const run = options.sessionId ? taskRuntimeRegistry.get(options.sessionId) : undefined
+      if (!run || !options.sessionId || !options.toolUseId || !options.userDataRoot) throw new Error('验证记录缺少当前 Run 身份')
+      capture = beginCodeForgeVerification({ rootDir: options.userDataRoot, sessionId: options.sessionId, runId: run.id, toolUseId: options.toolUseId }, cwd, args)
+    } catch (error) { captureError = error instanceof Error ? error.message : String(error) }
+  }
   const result = await runLocalCommand({
     command,
     cwd,
@@ -1454,7 +1467,7 @@ async function runBash(
     pipIndexUrl: options.pipIndexUrl,
     signal: options.signal
   })
-  return {
+  const execution: ToolExecResult = {
     ok: result.ok,
     output: clip(result.output),
     exitCode: result.exitCode, commandTermination: result.commandTermination,
@@ -1463,4 +1476,18 @@ async function runBash(
     sandboxed: result.sandboxed,
     fallbackReason: result.fallbackReason
   }
+  if (capture) {
+    try {
+      const frozenCapture = capture
+      if (!options.sessionMeta) throw new Error('验证记录缺少当前任务身份')
+      await withDataLifecycleMutation(capture.rootDir, async () => {
+        assertPreparationSessionNotDeleted(frozenCapture.rootDir, options.sessionMeta!)
+        if (taskRuntimeRegistry.get(frozenCapture.sessionId)?.id !== frozenCapture.runId) throw new Error('执行期间当前 Run 已变更')
+        finishCodeForgeVerification(frozenCapture, execution)
+      })
+    }
+    catch (error) { captureError = error instanceof Error ? error.message : String(error) }
+  }
+  if (captureError) execution.output += `\n\n验证版本记录未完成：${captureError}；此命令结果不能作为当前代码版本通过的证据。`
+  return execution
 }

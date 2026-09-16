@@ -5,6 +5,7 @@ import {
   readdirSync
 } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { codeForgeVerificationDirectory } from '../code-forge/verification-evidence'
 import { join, posix, relative, resolve, sep } from 'node:path'
 import type {
   ProjectAggregatePortableFile,
@@ -242,6 +243,7 @@ function collectOwnedFiles(
     const component = sessionFileComponent(sessionId)
     if (!component) continue
     targets.push(
+      codeForgeVerificationDirectory(root, sessionId),
       join(root, 'attachments', component),
       join(root, 'preview-annotations', component),
       join(root, 'task-audit', `${component}.jsonl`),
@@ -294,6 +296,7 @@ function allowedPathRules(
     const component = sessionFileComponent(sessionId)
     if (!component) continue
     directories.push(`attachments/${component}/`, `preview-annotations/${component}/`)
+    directories.push(`${portablePath(codeForgeVerificationDirectory('', sessionId))}/`)
     exact.add(`task-audit/${component}.jsonl`)
     exact.add(`patches/${component}.patch`)
     exact.add(portablePath(runtimeContinuationReceiptPath('', sessionId)))

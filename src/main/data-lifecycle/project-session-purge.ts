@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { codeForgeVerificationDirectory } from '../code-forge/verification-evidence'
 import {
   existsSync,
   lstatSync,
@@ -152,6 +153,7 @@ export function purgeProjectSessionData(
     const component = sessionFileComponent(sessionId)
     if (!component) continue
     removeOwned(root, join(root, 'attachments', component), removedPaths)
+    removeOwned(root, codeForgeVerificationDirectory(root, sessionId), removedPaths)
     removeOwned(root, join(root, 'browser-annotations', component), removedPaths)
     removeOwned(root, join(root, 'preview-annotations', component), removedPaths)
     removeOwned(root, join(root, 'task-audit', `${component}.jsonl`), removedPaths)
@@ -209,6 +211,7 @@ export function scanProjectSessionResiduals(
     const component = sessionFileComponent(sessionId)
     if (!component) continue
     for (const target of [
+      codeForgeVerificationDirectory(root, sessionId),
       join(root, 'attachments', component),
       join(root, 'browser-annotations', component),
       join(root, 'preview-annotations', component),
@@ -300,6 +303,7 @@ export function purgeStandaloneSessionFiles(
   removedPaths.push(...purgeTaskExecutionAuthorityFiles(root, [sessionId]))
   removedPaths.push(...purgeSessionSubmissionReceipts(root, sessionId))
   for (const target of [
+    codeForgeVerificationDirectory(root, sessionId),
     join(root, 'attachments', component),
     join(root, 'browser-annotations', component),
     join(root, 'preview-annotations', component),
@@ -338,6 +342,7 @@ export function scanStandaloneSessionResiduals(
     ownedPaths: 0
   }
   for (const target of [
+    codeForgeVerificationDirectory(root, sessionId),
     join(root, 'attachments', component),
     join(root, 'browser-annotations', component),
     join(root, 'preview-annotations', component),

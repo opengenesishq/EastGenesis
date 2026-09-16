@@ -138,7 +138,7 @@ export async function checkStudioResultFiles(
 
 type FileObservation = { bytesRead: number } & ({ digest: string } | { reason: NonNullable<StudioResultFileObservation['reason']> })
 
-async function observeLocalFile(path: string, limit: number): Promise<FileObservation> {
+export async function observeLocalFile(path: string, limit: number): Promise<FileObservation> {
   let bytesRead = 0
   try {
     // Lifecycle source paths are canonical at registration. Reject later

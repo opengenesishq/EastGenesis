@@ -42,6 +42,7 @@ export type GitToolName = (typeof GIT_TOOL_NAMES)[number]
 
 export interface GitToolExecutionContext {
   sessionId?: string
+  userDataRoot?: string
   worktreeContext?: CodeForgeWorktreeContext
   effectTarget?: EffectTarget
 }
@@ -197,10 +198,12 @@ export const GIT_TOOLS: ToolDefinition[] = [
     function: {
       name: 'code_forge_delivery',
       description:
-        '汇总 worktree/repo diff，并按 report/patch 模式生成结构化交付报告或补丁。不执行验证命令，也不暂存、提交、推送或创建 PR；验证必须先显式调用 bash。',
+        '汇总 worktree/repo diff，生成报告或补丁。可用 verificationToolUseIds 引用当前 Run 中先前通过 bash recordVerification=true 执行的验证记录；只核对证据，不运行命令或自动提交。',
       parameters: {
         type: 'object',
         properties: {
+          verificationToolUseIds: { type: 'array', items: { type: 'string' }, maxItems: 20, uniqueItems: true,
+            description: '可选：当前 Run 中已完成的 bash 工具调用 ID；源码版本、命令与真实结果必须一致。' },
           mode: {
             type: 'string',
             enum: ['report', 'patch'],
@@ -324,11 +327,11 @@ function executeMergeTool(
   return stringifyResult(gitMerge(cwd, requiredString(args.branch, 'branch'), frozen))
 }
 
-function executeCodeForgeDeliveryTool(
+async function executeCodeForgeDeliveryTool(
   args: Record<string, unknown>,
   cwd: string,
   context: GitToolExecutionContext
-): ToolExecResult {
+): Promise<ToolExecResult> {
   const mode = deliveryMode(args.mode)
   if (mode === 'commit' || mode === 'pr') {
     return {
@@ -343,9 +346,33 @@ function executeCodeForgeDeliveryTool(
       return { ok: false, output: `code_forge_delivery 不接受模型覆盖 ${field}；目标只来自当前 session/worktree 上下文。` }
     }
   }
+  if (args.verificationToolUseIds !== undefined && (!Array.isArray(args.verificationToolUseIds) || args.verificationToolUseIds.some((value) => typeof value !== 'string'))) {
+    return { ok: false, output: 'verificationToolUseIds 必须是工具调用 ID 数组。' }
+  }
+  const verificationToolUseIds = args.verificationToolUseIds as string[] | undefined
+  let verificationContext: import('../../code-forge/verification-evidence').CodeForgeVerificationContext | undefined
+  if (verificationToolUseIds?.length && context.sessionId && context.userDataRoot) {
+    const { taskRuntimeRegistry } = await import('../../task/task-runtime-registry')
+    const { getTaskSnapshot } = await import('../../task/task-snapshot')
+    const snapshot = await getTaskSnapshot(context.sessionId, context.userDataRoot)
+    const current = taskRuntimeRegistry.get(context.sessionId)
+    if (current && snapshot?.run?.id === current.id && snapshot.sessionId === context.sessionId) {
+      const persistedRun = snapshot.run
+      const consistent = verificationToolUseIds.every((id) => {
+        const live = current.toolExecutions?.find((execution) => execution.toolUseId === id)
+        const stored = persistedRun.toolExecutions?.find((execution) => execution.toolUseId === id)
+        return live && stored && live.id === stored.id && live.status === stored.status && live.effectStatus === stored.effectStatus &&
+          live.inputDigest === stored.inputDigest && live.outputDigest === stored.outputDigest && live.resultEventId === stored.resultEventId &&
+          live.supersededByExecutionId === stored.supersededByExecutionId
+      })
+      if (consistent) verificationContext = { rootDir: context.userDataRoot, run: persistedRun, transcript: snapshot.transcript }
+    }
+  }
   return stringifyCodeForgeResult(runCodeForgeDelivery({
     cwd,
     mode,
+    verificationToolUseIds,
+    verificationContext,
     verificationCommand: args.verificationCommand as string | undefined,
     verificationCommands: args.verificationCommands as string[] | undefined,
     createPatch: typeof args.createPatch === 'boolean' ? args.createPatch : undefined,

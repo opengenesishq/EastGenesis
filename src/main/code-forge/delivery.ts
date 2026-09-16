@@ -14,6 +14,8 @@ import {
   inspectCodeForgeUntrackedFiles
 } from './source-security'
 import { trustedCodeForgeManagedWorktree } from './managed-context-security'
+import { collectCodeForgeVerification, type CodeForgeVerificationContext } from './verification-evidence'
+import type { CodeForgeSourceVersion } from './verification-source'
 import {
   buildCodeForgePatchText,
   checkCodeForgePatchApplies,
@@ -56,6 +58,9 @@ export interface CodeForgeDeliveryInput {
   baseSha?: string
   branch?: string
   worktreeContext?: CodeForgeWorktreeContext
+  verificationToolUseIds?: string[]
+  /** Main-owned persisted Run and transcript, never accepted from tool arguments. */
+  verificationContext?: CodeForgeVerificationContext
 }
 
 export interface CodeForgeTargetReport {
@@ -80,6 +85,15 @@ export interface CodeForgeChangeSummary {
 }
 
 export interface CodeForgeVerificationCommandResult {
+  toolUseId?: string
+  runId?: string
+  executionId?: string
+  resultEventId?: string
+  effectId?: string
+  effectEvidenceIds?: string[]
+  evidenceDigest?: string
+  sourceVersion?: CodeForgeSourceVersion
+  reason?: string
   command: string
   cwd: string
   status: CodeForgeVerificationStatus
@@ -89,6 +103,7 @@ export interface CodeForgeVerificationCommandResult {
 }
 
 export interface CodeForgeVerificationSummary {
+  scope?: string
   status: CodeForgeVerificationStatus
   commands: CodeForgeVerificationCommandResult[]
   passed: number
@@ -190,7 +205,7 @@ export function runCodeForgeDelivery(
     const target = patchExecution?.target ?? context?.target
     if (!target) throw new Error('Code Forge 无法解析交付目标')
     const changes = patchExecution?.changes ?? summarizeChanges(context as ResolvedContext)
-    const verification = skippedVerification()
+    const verification = collectCodeForgeVerification(input.verificationToolUseIds, input.cwd, target.sessionId, input.verificationContext)
     const patch = patchExecution?.patch
     const risk = assessRisk({ changes, verification, patch })
     const status = deliveryStatus({ changes, verification, patch })
@@ -235,6 +250,10 @@ function assertSupportedDeliveryRequest(
   input: CodeForgeDeliveryInput,
   mode: CodeForgeDeliveryMode
 ): void {
+  if (input.verificationToolUseIds !== undefined && (!Array.isArray(input.verificationToolUseIds) || input.verificationToolUseIds.length > 20 ||
+      new Set(input.verificationToolUseIds).size !== input.verificationToolUseIds.length || input.verificationToolUseIds.some((id) => typeof id !== 'string' || !id.trim()))) {
+    throw new Error('verificationToolUseIds 须为至多 20 个不重复的真实工具调用 ID')
+  }
   if (mode === 'commit' || mode === 'pr') {
     throw new Error(
       `code_forge_delivery mode=${mode} 已停用；请先生成 report/patch，再使用独立 Git 工具完成暂存、提交、推送或 PR`
@@ -248,10 +267,6 @@ function assertSupportedDeliveryRequest(
   if (input.createPatch === true) {
     throw new Error('code_forge_delivery createPatch=true 已停用；请显式使用 mode=patch，以建立可查询 Effect')
   }
-}
-
-function skippedVerification(): CodeForgeVerificationSummary {
-  return { status: 'skipped', commands: [], passed: 0, failed: 0, skipped: 1 }
 }
 
 function resolveContext(input: CodeForgeDeliveryInput): ResolvedContext {
@@ -356,7 +371,7 @@ function assessRisk(input: {
   }
   if (input.verification.status === 'skipped') {
     level = maxRisk(level, 'medium')
-    reasons.push('Code Forge 未采集验证结果；验证必须通过显式 bash 独立执行')
+    reasons.push('尚无与当前源码版本一致的完整验证证据；请查看每条命令的核对原因')
   }
   if (input.verification.status === 'failed') {
     level = maxRisk(level, 'high')

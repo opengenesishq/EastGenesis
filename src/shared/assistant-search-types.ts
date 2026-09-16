@@ -1,5 +1,8 @@
+import type { AssistantSearchAuthorityApi } from './assistant-search-authority-types'
+export type * from './assistant-search-authority-types'
+
 /** Renderer-safe contract for Assistant Search Broker IPC. */
-export type AssistantSearchAdapterKind = 'native' | 'byok'
+export type AssistantSearchAdapterKind = 'native' | 'byok' | 'browser_fallback'
 export type AssistantSearchAttemptStatus = 'running' | 'succeeded' | 'failed'
 export type AssistantSearchFailureCode =
   | 'no_credentials'
@@ -10,15 +13,20 @@ export type AssistantSearchFailureCode =
   | 'invalid_result'
   | 'scope_denied'
   | 'unknown'
+  | 'cancelled'
+  | 'browser_unavailable'
 
 export interface AssistantSearchRequest {
   requestId: string
   query: string
+  sessionId?: string
   projectId?: string
   goalId?: string
   workItemId?: string
   runId?: string
   artifactId?: string
+  /** Main-owned consent receipt, scoped to this query and original task. */
+  authorizationId?: string
   egress?: 'allow' | 'deny'
 }
 
@@ -29,6 +37,9 @@ export interface AssistantSearchCitation {
   contentDigest: string
   evidenceId: string
   artifactId?: string
+  contentKind?: 'search_snippet'
+  /** Observed search endpoint, with query text and fragment removed. */
+  sourcePageUrl?: string
 }
 
 export interface AssistantSearchAttempt {
@@ -36,6 +47,7 @@ export interface AssistantSearchAttempt {
   attemptId: string
   idempotencyKey: string
   requestId: string
+  sessionId?: string
   queryDigest: string
   projectId?: string
   goalId?: string
@@ -54,7 +66,7 @@ export interface AssistantSearchAttempt {
   evidenceIds: string[]
 }
 
-export interface AssistantSearchApi {
+export interface AssistantSearchApi extends AssistantSearchAuthorityApi {
   searchAssistant(request: AssistantSearchRequest): Promise<AssistantSearchAttempt>
   getAssistantSearchAttempt(idempotencyKey: string): Promise<AssistantSearchAttempt | null>
 }

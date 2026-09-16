@@ -1,0 +1,11 @@
+.research-search-panel{padding:12px;border-bottom:1px solid var(--border);overflow-wrap:anywhere;min-width:0}
+.research-search-panel h3{font-size:13px;margin:0 0 8px}
+.research-search-panel .input{box-sizing:border-box;width:100%}
+.research-search-label{display:block;font-size:12px;margin-bottom:6px}
+.research-search-help{font-size:11px;opacity:.72;line-height:1.5}
+.research-search-actions{display:flex;gap:6px;flex-wrap:wrap}
+.research-search-results{padding-left:18px;margin:8px 0 0;max-height:360px;overflow:auto}
+.research-search-results li{padding-bottom:10px;font-size:12px;line-height:1.5}
+.research-search-results p{margin:5px 0;white-space:pre-wrap}
+.research-search-results time{display:block;margin-bottom:4px}
+.research-search-results button{max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left}
