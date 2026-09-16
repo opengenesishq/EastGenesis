@@ -5,8 +5,8 @@ import { publishOfficeActionFeedback } from './OfficeActionFeedback'
 import { officeSessionCanContinue, officeSessionCanStop, officeSessionNeedsRecovery } from './office-session-action-policy'
 import { submitOfficeSessionInstruction } from './office-session-commands'
 
-export default function OfficeSessionActions({ session, onOpenResults }: {
-  session: SessionState; onOpenResults?: () => void
+export default function OfficeSessionActions({ session, onOpenResults, showPermissions = true }: {
+  session: SessionState; onOpenResults?: () => void; showPermissions?: boolean
 }): React.JSX.Element {
   const zh = useStore((state) => state.settings.language) === 'zh'
   const [busy, setBusy] = useState(false)
@@ -30,7 +30,7 @@ export default function OfficeSessionActions({ session, onOpenResults }: {
     } finally { setBusy(false) }
   }
   return <div className="office-session-actions" data-office-session-actions={id}>
-    <PermissionBar sessionId={id} requests={session.pendingPermissions} />
+    {showPermissions && <PermissionBar sessionId={id} requests={session.pendingPermissions} />}
     <div className="office-operation-actions">
       {onOpenResults && <button className="btn btn-ghost btn-sm" data-office-session-results onClick={onOpenResults}>{zh ? '查看成果' : 'View results'}</button>}
       {officeSessionCanContinue(session) && <button className="btn btn-ghost btn-sm" data-office-session-continue disabled={busy} onClick={() => void operate('continue')}>{zh ? '继续任务' : 'Continue task'}</button>}

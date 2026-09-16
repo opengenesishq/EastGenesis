@@ -12,12 +12,14 @@ import TaskPlanWorkbench from '../experience/TaskPlanWorkbench'
 import CouncilPanel from '../experience/CouncilPanel'
 import RunDetailPanel from '../studio/RunDetailPanel'
 import { ProjectDeliveryWorkbench } from '../studio/ProjectDeliveryWorkbench'
+import OfficeSessionActions from './OfficeSessionActions'
 import './palace-work-panel.css'
 
 const ChatView = lazy(() => import('../ChatView'))
 const FilePanel = lazy(() => import('../workbench/FilePanel'))
 const DiffPanel = lazy(() => import('../workbench/DiffPanel'))
-type Surface = 'chat' | 'logs' | 'files' | 'diff'
+const StudioResultPanel = lazy(() => import('../workbench/StudioResultPanel'))
+type Surface = 'chat' | 'logs' | 'files' | 'diff' | 'results'
 
 export default function PalaceWorkPanel({ action, initialContext, onClose, onAction, onEdict }: {
   action: Exclude<PalaceAction, 'edict'>
@@ -138,10 +140,16 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
       <TaskPlanWorkbench sessionId={selected.meta.id} strategy={selected.meta.taskStrategy ?? 'view'} running={['running', 'starting'].includes(selected.meta.status)} showCouncil={action !== 'council'} />
     </>}
     {selected && ['audience', 'study', 'inspect', 'council'].includes(action) && <>
-      <nav aria-label={zh ? '任务工作区' : 'Task workspace'}>{(['chat', 'logs', 'files', 'diff'] as const).map((tab) => <button key={tab} className="btn btn-ghost btn-sm" aria-pressed={surface === tab} onClick={() => setSurface(tab)}>{surfaceLabel(tab, zh)}</button>)}</nav>
+      <OfficeSessionActions key={selected.meta.id} session={selected} showPermissions={action !== 'council' && surface !== 'chat'} onOpenResults={() => setSurface('results')} />
+      <nav aria-label={zh ? '任务工作区' : 'Task workspace'}>{(['chat', 'logs', 'files', 'diff', 'results'] as const).map((tab) => <button key={tab} className="btn btn-ghost btn-sm" aria-pressed={surface === tab} data-palace-workspace-tab={tab} onClick={() => setSurface(tab)}>{surfaceLabel(tab, zh)}</button>)}</nav>
       <div className="palace-work-surface" data-palace-session-surface={surface} data-palace-session-id={selected.meta.id}>
         <Suspense fallback={<p>{zh ? '正在打开工作区…' : 'Opening workspace…'}</p>}>
-          {surface === 'chat' ? <ChatView /> : surface === 'files' ? <FilePanel /> : surface === 'diff' ? <DiffPanel /> : <RawSessionRecords session={selected} zh={zh} />}
+          {surface === 'chat' ? <ChatView /> : surface === 'files' ? <FilePanel /> : surface === 'diff' ? <DiffPanel />
+            : surface === 'results' ? <StudioResultPanel sessionId={selected.meta.id} standalone onOpenSessionSurface={() => {
+              // Tools use the modern workbench. Carry the same task there so
+              // preview/browser/terminal controls never open behind this panel.
+              useStore.getState().setView('list')
+            }} /> : <RawSessionRecords session={selected} zh={zh} />}
         </Suspense>
       </div>
     </>}
@@ -183,5 +191,5 @@ function RawSessionRecords({ session, zh }: { session: SessionState; zh: boolean
   </div>
 }
 
-function surfaceLabel(surface: Surface, zh: boolean): string { return ({ chat: ['对话', 'Conversation'], logs: ['原始日志', 'Original logs'], files: ['文件', 'Files'], diff: ['代码差异', 'Code changes'] })[surface][zh ? 0 : 1] }
+function surfaceLabel(surface: Surface, zh: boolean): string { return ({ chat: ['对话', 'Conversation'], logs: ['原始日志', 'Original logs'], files: ['文件', 'Files'], diff: ['代码差异', 'Code changes'], results: ['成果与验收', 'Results and acceptance'] })[surface][zh ? 0 : 1] }
 function laneLabel(lane: string, zh: boolean): string { return ({ needs_confirmation: ['待确认', 'Needs confirmation'], running: ['运行中', 'Running'], blocked: ['阻塞', 'Blocked'], ready_for_delivery: ['待交付', 'Ready for delivery'], completed: ['已完成', 'Completed'] } as Record<string, string[]>)[lane]?.[zh ? 0 : 1] ?? lane }
