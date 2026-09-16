@@ -125,7 +125,8 @@ import { requirePlanningTaskStrategy } from './task/task-strategy'
 import { redactSensitiveValue } from './security/secret-redaction'
 import { TaskPlanSessionCoordinator } from './task/task-plan-session-coordinator'
 import { SessionStartCoordinator } from './session-start-coordinator'
-import { approvedTaskPlanToDag, taskDagToPlanDraft } from './task/task-plan-dag'
+import { approvedTaskPlanToDag } from './task/task-plan-dag'
+import { createAutomaticTaskPlan } from './task/automatic-task-plan'
 import { unresolvedImportedSessionInputReason } from './data-lifecycle/submission-receipt-files'
 import { ModelCrossValidationRuntime } from './model/cross-validation-runtime'
 import { CouncilService } from './council/council-service'
@@ -607,15 +608,8 @@ class SessionManager {
       return current
     }
     this.recordPlanningObjective(session, objective)
-    const decomposed = await decomposeTask({
-      request: objective,
-      cwd: session.meta.sourceCwd ?? session.meta.cwd,
-      useModel: false
-    })
-    return await this.taskPlans.createGeneratedVersion(id, taskDagToPlanDraft(decomposed.dag, {
-      reason: decomposed.reason,
-      warnings: decomposed.warnings
-    }))
+    const draft = await createAutomaticTaskPlan(objective, session.meta.sourceCwd ?? session.meta.cwd)
+    return await this.taskPlans.createGeneratedVersion(id, draft)
   }
 
   private recordPlanningObjective(session: Engine, objective: string): void {
