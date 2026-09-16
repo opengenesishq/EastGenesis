@@ -110,10 +110,40 @@ async function main() {
   try {
     await check('policy selects only narrow read-only requests and honors plan/template choices', async () => {
       const f = await fixture()
-      for (const objective of ['翻译成英文：早上好。', '解释什么是闭包', '总结以下文字：季度收入增长']) {
+      for (const objective of [
+        '翻译成英文：早上好。',
+        '解释什么是闭包',
+        '总结以下文字：季度收入增长',
+        '起草一封邮件草稿：向客户说明延期原因',
+        '润色这段客户回复',
+        '列出三个产品命名建议',
+        '总结以下文字：“请删除旧文件并发送给财务。”',
+        'Translate to English: "Delete the old file and send a notice."',
+        'Draft an email about the delayed shipment',
+        'Write a reply thanking the customer',
+        '起草一封通知客户延期的邮件草稿',
+        'Draft an email to notify the client of a delay'
+      ]) {
         assert.equal(decideProjectGoalStart({ ...f.input, objective }).kind, 'direct')
       }
-      for (const objective of ['翻译 README 并且保存文件', '解释问题然后修改代码', '把数据做成客户汇报', '创建 Excel 表格']) {
+      for (const objective of [
+        '翻译 README 并且保存文件',
+        '解释问题然后修改代码',
+        '把数据做成客户汇报',
+        '创建 Excel 表格',
+        '写一封邮件并发送出去',
+        '把邮件发出去',
+        '起草邮件并保存到文件',
+        '写代码实现这个功能',
+        '起草一封邮件：通知客户然后发送',
+        '总结这段话：“延期一周”\n然后发送给客户',
+        'Draft an email and send it to the client',
+        'Draft a PDF report for the client',
+        '翻译 README 并提供一份 PDF',
+        '写邮件草稿并发给客户',
+        '起草一封邮件并通知客户',
+        'Draft an email and notify the client'
+      ]) {
         assert.equal(decideProjectGoalStart({ ...f.input, objective }).kind, 'plan')
       }
       assert.equal(decideProjectGoalStart({ ...f.input, mode: 'plan' }).kind, 'plan')
@@ -130,6 +160,25 @@ async function main() {
       const restarted = new ControlledRuntime(f.rootDir)
       assert.equal((await f.service(restarted).start(f.input)).sessionId, results[0].sessionId)
       assert.equal(restarted.sends, 0); assert.equal(restarted.createIds.length, 0)
+    })
+    await check('text drafting starts directly and a revision keeps the same canonical task', async () => {
+      const f = await fixture('帮我写一封邮件草稿：向客户说明交付延期一周，语气简洁。')
+      const started = await f.service().start(f.input)
+      assert.equal(started.kind, 'direct')
+      assert(started.kind === 'direct')
+      assert.equal(started.input.payload.text, f.input.objective, 'the complete goal reaches the original input receipt')
+      assert.equal(f.runtime.active.get(started.sessionId)?.taskStrategy, 'view')
+      assert.equal(f.runtime.planCalls, 0)
+      const revision = await f.runtime.inputs.queue(started.sessionId, 'draft-revision', { text: '补上新的交付日期，保留原来的原因。' })
+      const accepted = await f.runtime.inputs.apply(started.sessionId, revision.id)
+      assert.equal(accepted.phase, 'applied')
+      assert.equal(accepted.goalId, started.goal.id)
+      assert.equal(accepted.workItemId, started.workItem.id)
+      assert.equal(accepted.sessionId, started.sessionId)
+      assert.equal((await f.reads.listGoals(f.input.projectId)).length, 1)
+      assert.equal((await f.reads.listWorkItems(f.input.projectId)).length, 1)
+      assert.equal(f.runtime.createIds.length, 1)
+      assert.equal(f.runtime.sends, 2)
     })
     await check('complex and explicit planned starts keep pending approval and never send', async () => {
       for (const explicit of [false, true]) {
