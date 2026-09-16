@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CouncilContext, CouncilPhase, CouncilPreview, CouncilPreviewInput, CouncilRecord } from '../../../../shared/council-types'
 import { useStore } from '../../store'
+import { formatPermissionInput } from '../PermissionBar'
+import { readCouncilOpinionRecords, type CouncilOpinionRecords } from './council-opinion-records'
 import './council-panel.css'
 
 export default function CouncilPanel({ sessionId, expanded = false, mode = 'council', institutionId }: {
@@ -23,6 +25,10 @@ function CouncilSessionPanel({ sessionId, initiallyExpanded, single, initialInst
   const [preview, setPreview] = useState<CouncilPreview>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [openingOpinion, setOpeningOpinion] = useState<string>()
+  const [opinionRecords, setOpinionRecords] = useState<CouncilOpinionRecords>()
+  const [opinionError, setOpinionError] = useState('')
+  const opinionRequest = useRef(0)
   const mounted = useRef(true), sequence = useRef(0), draftVersion = useRef(0)
   const previewInput = useRef<CouncilPreviewInput>()
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; sequence.current++ } }, [])
@@ -82,6 +88,24 @@ function CouncilSessionPanel({ sessionId, initiallyExpanded, single, initialInst
     catch (cause) { if (mounted.current) setError(errorText(cause)) }
     finally { if (mounted.current) setBusy(false) }
   }
+  const openOpinion = async (record: CouncilRecord, opinion: CouncilRecord['opinions'][number]): Promise<void> => {
+    if (busy || openingOpinion || !opinion.sessionId) return
+    const request = ++opinionRequest.current
+    setOpeningOpinion(opinion.sessionId); setOpinionRecords(undefined); setOpinionError('')
+    try {
+      const result = await readCouncilOpinionRecords(record, opinion, {
+        councilGet: input => window.agentDesk.councilGet(input),
+        listSessions: () => window.agentDesk.listSessions(),
+        syncSession: id => useStore.getState().syncSession(id),
+        session: id => useStore.getState().sessions[id]?.meta,
+        getTranscript: id => window.agentDesk.getTranscript(id),
+        listHistory: () => window.agentDesk.listHistory(),
+        listTaskSnapshots: () => window.agentDesk.listTaskSnapshots()
+      })
+      if (mounted.current && request === opinionRequest.current) setOpinionRecords(result)
+    } catch (cause) { if (mounted.current && request === opinionRequest.current) setOpinionError(errorText(cause)) }
+    finally { if (mounted.current && request === opinionRequest.current) setOpeningOpinion(undefined) }
+  }
   const eligible = context?.institutions.filter(role => role.participation === 'on_demand' || role.participation === 'legacy') ?? []
   return <details className="council-panel" open={expanded} onToggle={event => setExpanded(event.currentTarget.open)} data-council-session={sessionId}>
     <summary>{single ? (zh ? '单独召见' : 'Individual consultation') : (zh ? '召集议事' : 'Council review')}{active ? ` · ${phaseLabel(active.phase, zh)}` : ''}</summary>
@@ -117,6 +141,16 @@ function CouncilSessionPanel({ sessionId, initiallyExpanded, single, initialInst
       </div>}
       {error && <p role="alert">{error}</p>}
       <button className="btn btn-ghost btn-sm" type="button" disabled={busy} onClick={() => void refresh()}>{zh ? '刷新议事记录' : 'Refresh records'}</button>
+      {opinionError && <p role="alert" data-council-opinion-error>{opinionError}</p>}
+      {opinionRecords && <section data-council-opinion-records={opinionRecords.sessionId} className="council-opinion-records" aria-label={zh ? '原始意见记录' : 'Original opinion records'}>
+        <header><strong>{zh ? '原始意见记录' : 'Original opinion records'}</strong><button type="button" className="btn btn-ghost btn-sm" onClick={() => { opinionRequest.current++; setOpinionRecords(undefined) }}>{zh ? '收起记录' : 'Close records'}</button></header>
+        <p>{opinionRecords.sessionId} · {opinionRecords.source === 'snapshot'
+          ? (zh ? `只读快照 · 保存于 ${new Date(opinionRecords.capturedAt!).toLocaleString()}` : `Read-only snapshot · saved ${new Date(opinionRecords.capturedAt!).toLocaleString()}`)
+          : (zh ? '只读记录' : 'Read-only records')}</p>
+        {opinionRecords.transcript.length === 0 && <p role="status">{zh ? '原始转录当前不可用。可核对上方已有意见及纪要，或在恢复中心查看保存状态。' : 'The original transcript is unavailable. Review the saved opinion and council record, or inspect its saved state in Recovery.'}</p>}
+        {opinionRecords.transcript.map((entry, index) => <details key={`${entry.eventId ?? entry.seq}:${index}`}><summary>{entry.seq} · {entry.event.kind}</summary><pre>{formatPermissionInput(entry)}</pre></details>)}
+        {opinionRecords.recoveryAvailable && <button type="button" className="btn btn-ghost btn-sm" onClick={() => useStore.getState().setShowTaskRecovery(true)}>{zh ? '在恢复中心核对原记录' : 'Review original records in Recovery'}</button>}
+      </section>}
       {history.map(record => <article key={record.councilId} data-council-id={record.councilId} data-council-phase={record.phase}>
         <header><strong>{record.topic}</strong><span>{phaseLabel(record.phase, zh)}</span>
           {(isRunning(record.phase) || record.phase === 'needs_reconciliation') && <button className="btn btn-ghost btn-sm" type="button" disabled={busy} onClick={() => void stop(record)}>{zh ? '停止议事' : 'Stop council'}</button>}</header>
@@ -124,9 +158,8 @@ function CouncilSessionPanel({ sessionId, initiallyExpanded, single, initialInst
         {record.error && <p role="alert">{record.error}</p>}
         {record.opinions.map(opinion => <details key={opinion.institutionId}><summary>{record.participants.find(item => item.institutionId === opinion.institutionId)?.institutionName ?? opinion.institutionId} · {opinionLabel(opinion.status, zh)}</summary>
           {opinion.conclusion && <pre>{opinion.conclusion}</pre>}{opinion.error && <p role="alert">{opinion.error}</p>}
-          {opinion.sessionId && <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
-            useStore.getState().selectSession(opinion.sessionId); useStore.getState().setView('list')
-          }}>{zh ? '打开原始意见记录' : 'Open original opinion'}</button>}
+          {opinion.sessionId && <button type="button" className="btn btn-ghost btn-sm" disabled={busy || Boolean(openingOpinion)} onClick={() => void openOpinion(record, opinion)}>
+            {openingOpinion === opinion.sessionId ? (zh ? '正在核对记录…' : 'Checking record…') : (zh ? '打开原始意见记录' : 'Open original opinion')}</button>}
         </details>)}
         {record.report && <details><summary>{zh ? '议事纪要与分歧' : 'Council record and differing opinions'}</summary><pre>{record.report}</pre></details>}
       </article>)}
