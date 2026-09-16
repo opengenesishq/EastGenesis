@@ -27,7 +27,6 @@ export default function WorkInbox({ active }: { active: boolean }): React.JSX.El
   const selectSession = useStore((state) => state.selectSession)
   const syncSession = useStore((state) => state.syncSession)
   const setStudioSurface = useStore((state) => state.setStudioSurface)
-  const setExperienceMode = useStore((state) => state.setExperienceMode)
   const setShowNewSession = useStore((state) => state.setShowNewSession)
   const refreshProjects = useStore((state) => state.refreshProjectWorkspaces)
   const openProjectWorkspace = useStore((state) => state.openProjectWorkspace)
@@ -44,6 +43,27 @@ export default function WorkInbox({ active }: { active: boolean }): React.JSX.El
     if (!active) taskNavigation.current += 1
     return () => { taskNavigation.current += 1 }
   }, [active])
+  const refresh = useCallback(async (): Promise<void> => {
+    setLoading(true)
+    setError('')
+    try {
+      await refreshProjects()
+      const pages: WorkflowLedgerRendererSelection[] = []
+      let cursor: string | undefined
+      do {
+        const page = await window.agentDesk.listWorkflowLedger({ limit: PAGE_SIZE, ...(cursor ? { cursor } : {}) })
+        pages.push(page)
+        cursor = [page.goals, page.workItems, page.runs, page.artifacts, page.acceptances, page.evidenceLinks, page.events]
+          .find((candidate) => candidate.hasMore)?.nextCursor
+      } while (cursor)
+      setLedger(mergeWorkflowLedgerPages(pages))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+      throw cause instanceof Error ? cause : new Error(String(cause))
+    } finally {
+      setLoading(false)
+    }
+  }, [refreshProjects])
   const openTask = useCallback(async (item: CrossProjectWorkInboxItem, focus: 'task' | 'plan'): Promise<void> => {
     const request = ++taskNavigation.current
     const state = useStore.getState()
@@ -63,7 +83,11 @@ export default function WorkInbox({ active }: { active: boolean }): React.JSX.El
       })
       if (!current()) return
       if (!target.sessionId) {
-        if (target.runId) setSelectedRunRoute(createRunDetailRoute(target.runId))
+        if (target.runId) {
+          await refresh()
+          if (!current()) return
+          setSelectedRunRoute(createRunDetailRoute(target.runId))
+        }
         setNavigationError(target.reason === 'identity_conflict'
           ? localized('任务归属发生冲突，请刷新并核对执行记录。', 'Task ownership conflicts. Refresh and review the execution record.')
           : localized('原任务会话尚未载入。可核对下方执行记录，或打开恢复中心继续。', 'The original task session is unavailable. Review its execution below or open Recovery.'))
@@ -80,13 +104,21 @@ export default function WorkInbox({ active }: { active: boolean }): React.JSX.El
         setNavigationError(localized('任务会话已变化，请刷新后重新打开。', 'The task session changed. Refresh and open it again.'))
         return
       }
+      const latest = await resolveInboxTaskDestination(item, {
+        readLedger: scope => window.agentDesk.listWorkflowLedger(scope),
+        listSessions: () => window.agentDesk.listSessions()
+      })
+      if (!current()) return
+      if (latest.sessionId !== target.sessionId || latest.runId !== target.runId) {
+        setNavigationError(localized('任务执行已变化，请重新打开当前任务。', 'The current execution changed. Open the task again.'))
+        return
+      }
       // Queue the plan before changing surfaces; the real session workbench
       // consumes it after mounting. No duplicate approval UI lives in Inbox.
       if (focus === 'plan') requestTaskPlanNavigation(target.sessionId)
       selectSession(target.sessionId)
       state.setView('list')
-      setExperienceMode('studio')
-      setStudioSurface('workspace')
+      setStudioSurface('session')
       setShowNewSession(false)
       state.setShowTaskRecovery(false)
       setSelectedRunRoute(null)
@@ -95,28 +127,7 @@ export default function WorkInbox({ active }: { active: boolean }): React.JSX.El
     } finally {
       if (request === taskNavigation.current) setOpeningTaskId(null)
     }
-  }, [selectSession, setExperienceMode, setShowNewSession, setStudioSurface, syncSession])
-  const refresh = useCallback(async (): Promise<void> => {
-    setLoading(true)
-    setError('')
-    try {
-      await refreshProjects()
-      const pages: WorkflowLedgerRendererSelection[] = []
-      let cursor: string | undefined
-      do {
-        const page = await window.agentDesk.listWorkflowLedger({ limit: PAGE_SIZE, ...(cursor ? { cursor } : {}) })
-        pages.push(page)
-        cursor = [page.goals, page.workItems, page.runs, page.artifacts, page.acceptances, page.events]
-          .find((candidate) => candidate.hasMore)?.nextCursor
-      } while (cursor)
-      setLedger(mergeWorkflowLedgerPages(pages))
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-      throw cause instanceof Error ? cause : new Error(String(cause))
-    } finally {
-      setLoading(false)
-    }
-  }, [refreshProjects])
+  }, [refresh, selectSession, setShowNewSession, setStudioSurface, syncSession])
   const goalStarter = useProjectGoalTaskStart(refresh)
   const selectedIntakeProject = intakeProjectId ?? preferredProjectId ?? ''
   const intakeProject = projects.find((project) => project.id === selectedIntakeProject && project.status === 'active')

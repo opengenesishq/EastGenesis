@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { resolveInboxTaskDestination } from '../src/renderer/src/components/studio/workInboxTaskNavigation'
 import type { SessionMeta, WorkflowLedgerRendererSelection, WorkflowRunSummary, WorkflowWorkItemRecord } from '../src/shared/types'
 import type { WorkInboxItem } from '../src/shared/work-inbox-projection'
+import { sessionExperienceMode } from '../src/renderer/src/store/session-experience'
 
 const root = process.cwd()
 const inbox = readFileSync(resolve(root, 'src/renderer/src/components/studio/WorkInbox.tsx'), 'utf8')
@@ -15,12 +16,16 @@ function check(id: string, condition: boolean, detail: string): void {
 }
 check('canonical-session-navigation', inbox.includes('requestTaskPlanNavigation(target.sessionId)') && inbox.includes('selectSession(target.sessionId)') && inbox.includes('await syncSession(target.sessionId)'), 'Inbox loads the resolved canonical session before navigation')
 check('single-plan-workbench', !inbox.includes('<TaskPlanWorkbench '), 'Inbox does not mount a duplicate plan editor with synthetic running state')
+check('original-session-surface', inbox.includes("setStudioSurface('session')") && !inbox.includes("setExperienceMode('studio')"), 'Opening a task preserves its own experience mode and shows the session surface')
 check('plan-entry-visible', inbox.includes('localized(\'打开计划\', \'Open plan\')'), 'Inbox exposes an Open plan action')
 check('existing-plan-workbench', workbench.includes('approveTaskPlan') && workbench.includes('revokeTaskPlanApproval') && workbench.includes('dispatchApprovedTaskPlan'), 'Open plan lands on the existing approval workbench')
 check('approval-is-explicit', workbench.includes('onApproveAndExecute') && workbench.includes('canApprove'), 'Plan approval and execution remain explicit')
 check('no-provider-from-inbox', !/window\.agentDesk\.(sendMessage|run|execute|fetchProvider)/u.test(inbox), 'Inbox plan navigation does not call a Provider')
 
 async function main(): Promise<void> {
+assert.equal(sessionExperienceMode({ workspaceId: 'personal', workItemId: 'work', experienceModeOverride: 'assistant' }), 'assistant')
+assert.equal(sessionExperienceMode({ workspaceId: 'project', workItemId: 'work' }), 'studio')
+check('standalone-and-project-surfaces', true, 'Standalone work opens in Assistant and project work opens in Studio')
 const item: WorkInboxItem = { id: 'row', sourceKind: 'work_item', sourceId: 'work', workItemId: 'work',
   projectId: 'project', goalId: 'goal', runId: 'old', title: 'Task', lane: 'running', status: 'running', artifactIds: [], updatedAt: 1 }
 const work = { id: 'work', projectId: 'project', goalId: 'goal', runIds: ['old', 'current'], currentRunId: 'current' } as WorkflowWorkItemRecord
