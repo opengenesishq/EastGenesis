@@ -33,6 +33,7 @@ import {
   isDataRetentionBlockedError
 } from './retention-authority'
 import { withDataLifecycleMutation } from './data-lifecycle-mutation-lock'
+import { captureSessionDeletionMemoryScope, countStandaloneSessionMemory, purgeStandaloneSessionMemory } from './session-memory-purge'
 
 export interface SessionDeletionResult {
   operationId: string
@@ -42,6 +43,7 @@ export interface SessionDeletionResult {
   removedRecords: Record<string, number>
   removedPathCount: number
   residuals: Record<string, number>
+  memoryOwnership: 'resolved' | 'unresolved'
 }
 
 export interface SessionDeletionCoordinatorOptions {
@@ -51,7 +53,7 @@ export interface SessionDeletionCoordinatorOptions {
 }
 
 type EntryPatch = Partial<Pick<SessionDeletionJournalEntry,
-  'removedRecords' | 'removedPathCount' | 'residuals'>>
+  'removedRecords' | 'removedPathCount' | 'residuals' | 'memoryScope'>>
 
 export async function deleteStandaloneSession(
   sessionIdInput: string,
@@ -75,11 +77,15 @@ export async function deleteStandaloneSession(
     ]
   }
   const entry = pending ?? await withDataLifecycleMutation(root, async () => {
+    const memoryScope = await captureSessionDeletionMemoryScope(root, sessionId)
     const prepared = await journal.begin({
       sessionId,
       sdkSessionId,
       retentionTargets: retentionInput.targets,
-      legalHoldSubjects: retentionInput.relatedLegalHoldSubjects
+      legalHoldSubjects: [...retentionInput.relatedLegalHoldSubjects,
+        ...(memoryScope.ownership === 'resolved' && memoryScope.sessionId !== sessionId
+          ? [{ kind: 'session' as const, id: memoryScope.sessionId }] : [])],
+      memoryScope
     })
     assertDeletionAllowed(root, prepared)
     await options.afterPhase?.('prepared', prepared)
@@ -133,6 +139,10 @@ async function executeDeletionLocked(
     await options.afterPhase?.(phase, entry)
   }
 
+  if (!entry.memoryScope) {
+    await advance(entry.phase, { memoryScope: await captureSessionDeletionMemoryScope(root, entry.sessionId) })
+  }
+
   if (current() < phaseIndex('snapshot_purged')) {
     assertDeletionAllowed(root, entry)
     const removed = await purgeRecoverySnapshot(root, entry.sessionId)
@@ -174,9 +184,11 @@ async function executeDeletionLocked(
   }
 
   if (current() < phaseIndex('verified')) {
-    const residuals = await scanResiduals(root, entry.sessionId, entry.sdkSessionId)
+    assertDeletionAllowed(root, entry)
+    const memory = await purgeStandaloneSessionMemory(root, entry.sessionId, entry.memoryScope)
+    const residuals = await scanResiduals(root, entry)
     assertNoResiduals(residuals)
-    await advance('verified', { residuals })
+    await advance('verified', { residuals, removedRecords: mergeCounts(entry.removedRecords, { layeredMemory: memory }) })
   }
 
   if (current() < phaseIndex('completed')) await advance('completed')
@@ -187,7 +199,8 @@ async function executeDeletionLocked(
     phase: 'completed',
     removedRecords: { ...(entry.removedRecords ?? {}) },
     removedPathCount: entry.removedPathCount ?? 0,
-    residuals: { ...(entry.residuals ?? {}) }
+    residuals: { ...(entry.residuals ?? {}) },
+    memoryOwnership: entry.memoryScope?.ownership ?? 'unresolved'
   }
   await journal.compactCompleted()
   return result
@@ -226,9 +239,9 @@ async function purgeRecoverySnapshot(root: string, sessionId: string): Promise<b
 
 async function scanResiduals(
   root: string,
-  sessionId: string,
-  sdkSessionId: string
+  entry: SessionDeletionJournalEntry
 ): Promise<Record<string, number>> {
+  const { sessionId, sdkSessionId } = entry
   const local = scanStandaloneSessionResiduals(root, sessionId, sdkSessionId)
   const snapshots = await listTaskSnapshots(root)
   const archive = await countConversationLedgerArchiveResidualsForSession(sdkSessionId, root)
@@ -237,6 +250,7 @@ async function scanResiduals(
   if ('error' in worktreeLookup) throw new Error(worktreeLookup.error)
   return {
     ...local,
+    layeredMemory: await countStandaloneSessionMemory(root, sessionId, entry.memoryScope),
     taskSnapshots: snapshots.filter((snapshot) =>
       snapshot.id === sessionId || snapshot.sessionId === sessionId).length,
     conversationLedgerStreams: archive.streams,

@@ -5,6 +5,7 @@ import { writeDurableFile } from '../durable-file'
 import { acquireFileLock, enqueueMutation, releaseFileLock } from '../digital-worker/persistence'
 import { withDataLifecycleMutation } from '../data-lifecycle/data-lifecycle-mutation-lock'
 import { assertMemoryProjectWritable } from './memory-project-lifecycle'
+import { assertMemorySessionWritable } from './memory-session-lifecycle'
 
 export type MemoryLayer = 'working' | 'project' | 'user'
 
@@ -31,6 +32,8 @@ export interface MemoryWriteInput {
   projectRoot?: string
   projectId?: string
   sessionId?: string
+  /** Live caller identity; sessionId may be the anchor inherited from an explicit resume. */
+  writerSessionId?: string
   workItemId?: string
   title: string
   body: string
@@ -82,6 +85,7 @@ export interface MemoryScope {
   projectRoot?: string
   projectId?: string
   sessionId?: string
+  writerSessionId?: string
   workItemId?: string
 }
 
@@ -109,6 +113,7 @@ export async function addMemory(rootDir: string, input: MemoryWriteInput): Promi
   if (workItemId && !input.projectId) throw new Error('工作项记忆必须绑定正式项目')
   return mutateStore(rootDir, async () => {
     if (input.projectId) assertMemoryProjectWritable(path.dirname(path.resolve(rootDir)), input.projectId)
+    assertMemorySessionWritable(path.dirname(path.resolve(rootDir)), input)
     const file = await readStore(rootDir)
     const now = new Date().toISOString()
     const entry: LayeredMemoryEntry = {
@@ -165,6 +170,7 @@ export async function listMemories(rootDir: string, scope?: MemoryScope): Promis
 
 export async function deleteMemory(rootDir: string, entryId: string, scope?: MemoryScope): Promise<boolean> {
   return mutateStore(rootDir, async () => {
+    if (scope) assertMemorySessionWritable(path.dirname(path.resolve(rootDir)), scope)
     const file = await readStore(rootDir)
     const entry = file.entries.find((item) => item.id === entryId)
     if (entry && scope && !inScope(entry, scope)) throw new Error('记忆不属于当前项目或任务')
@@ -182,6 +188,7 @@ export async function updateMemory(
   scope?: MemoryScope
 ): Promise<LayeredMemoryEntry | null> {
   return mutateStore(rootDir, async () => {
+    if (scope) assertMemorySessionWritable(path.dirname(path.resolve(rootDir)), scope)
     const file = await readStore(rootDir)
     const index = file.entries.findIndex((entry) => entry.id === entryId)
     if (index === -1) return null

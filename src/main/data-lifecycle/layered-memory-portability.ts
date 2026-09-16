@@ -110,8 +110,7 @@ function sessionBindings(sessionId: string, aggregate: Aggregate, context: Conte
     if (!isRecord(value)) return []
     const meta = isRecord(value.meta) ? value.meta : isRecord(value.draft) && isRecord(value.draft.baseMeta) ? value.draft.baseMeta : value
     if (meta.id !== sessionId && value.sessionId !== sessionId && meta.taskMemorySessionId !== sessionId) return []
-    if (meta.workspaceId !== undefined && meta.projectId !== undefined && meta.workspaceId !== meta.projectId) fail('conflicting Project metadata')
-    return [{ projectId: meta.workspaceId ?? meta.projectId, workItemId: meta.workItemId }]
+    return [{ projectId: meta.workspaceId, workItemId: meta.workItemId }]
   })
   return [...bindings, ...aggregate.workflow.runs.filter(run => run.sessionId === sessionId)
     .map(run => ({ projectId: run.projectId, workItemId: run.workItemId }))]

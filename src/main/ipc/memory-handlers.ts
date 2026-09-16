@@ -13,6 +13,7 @@ import { verifyProductionProjectMutation } from '../project-aggregate/project-mu
 import { assertTrustedWorkflowLedgerSender } from './workflow-ledger-handlers'
 import { importLegacyProjectMemory, previewLegacyProjectMemory } from '../memory/legacy-memory-import'
 import type { LegacyMemoryImportInput } from '../../shared/legacy-memory-import-types'
+import { withDataLifecycleMutation } from '../data-lifecycle/data-lifecycle-mutation-lock'
 import {
   addMemory, archiveStaleMemories, deleteMemory, exportMemories, listMemories, searchMemories, updateMemory,
   type MemoryScope, type MemorySearchInput, type MemoryUpdateInput
@@ -30,11 +31,10 @@ export function registerProjectMemoryIpc(options: ProjectMemoryIpcOptions): void
     : options.taskScopeForSession(sessionId)
   ipcMain.handle('memory:taskAdd', async (event, sessionId: string, input: { title: string; body: string }) => {
     assertTrustedWorkflowLedgerSender(event)
-    requiredTarget(options, sessionId)
-    const scope = await scopeFor(sessionId)
-    if (!scope.sessionId) throw new Error('必须指定当前任务')
-    return addMemory(options.memoryRoot(), {
-      ...scope, layer: 'working', title: input?.title, body: input?.body, source: 'user'
+    return withLayeredMemoryScope(options, sessionId, (scope, root) => {
+      requiredTarget(options, sessionId)
+      if (!scope.sessionId) throw new Error('必须指定当前任务')
+      return addMemory(root, { ...scope, layer: 'working', title: input?.title, body: input?.body, source: 'user' })
     })
   })
   ipcMain.handle('memory:layeredList', async (event, sessionId?: string) => {
@@ -59,11 +59,11 @@ export function registerProjectMemoryIpc(options: ProjectMemoryIpcOptions): void
   })
   ipcMain.handle('memory:layeredUpdate', async (event, entryId: string, input: MemoryUpdateInput, sessionId?: string) => {
     assertTrustedWorkflowLedgerSender(event)
-    return updateMemory(options.memoryRoot(), entryId, input ?? {}, await scopeFor(sessionId))
+    return withLayeredMemoryScope(options, sessionId, (scope, root) => updateMemory(root, entryId, input ?? {}, scope))
   })
   ipcMain.handle('memory:layeredDelete', async (event, entryId: string, sessionId?: string) => {
     assertTrustedWorkflowLedgerSender(event)
-    return deleteMemory(options.memoryRoot(), entryId, await scopeFor(sessionId))
+    return withLayeredMemoryScope(options, sessionId, (scope, root) => deleteMemory(root, entryId, scope))
   })
   ipcMain.handle('memory:legacyPreview', async (event, sessionId: string) => {
     assertTrustedWorkflowLedgerSender(event)
@@ -100,6 +100,18 @@ export function registerProjectMemoryIpc(options: ProjectMemoryIpcOptions): void
       target, root, entryId, createTrustedUserLearningDecision('ipc:memory:delete')
     ))
   })
+}
+
+function withLayeredMemoryScope<T>(
+  options: ProjectMemoryIpcOptions,
+  sessionId: string | undefined,
+  operation: (scope: MemoryScope, root: string) => Promise<T>
+): Promise<T> {
+  const root = options.memoryRoot()
+  // Resolve the current writer after acquiring the deletion lock. Completed
+  // deletion receipts may compact, but a closed/removed caller cannot survive this read.
+  return withDataLifecycleMutation(dirname(root), async () =>
+    operation(sessionId === undefined ? {} : await options.taskScopeForSession(sessionId), root))
 }
 
 async function verifiedMemoryMutation<T>(

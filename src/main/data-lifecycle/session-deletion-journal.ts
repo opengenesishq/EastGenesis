@@ -24,6 +24,9 @@ export const SESSION_DELETION_PHASES = [
 
 export type SessionDeletionPhase = typeof SESSION_DELETION_PHASES[number]
 
+export type SessionDeletionMemoryScope = { ownership: 'unresolved' } |
+  { ownership: 'resolved'; sessionId: string; projectHash: string }
+
 export interface SessionDeletionJournalEntry {
   schemaVersion: 1
   operationId: string
@@ -31,6 +34,8 @@ export interface SessionDeletionJournalEntry {
   sdkSessionId: string
   retentionTargets?: DataPurgeTarget[]
   legalHoldSubjects?: DataRetentionSubject[]
+  /** Captured before history/snapshot removal; never inferred from a shared directory afterward. */
+  memoryScope?: SessionDeletionMemoryScope
   phase: SessionDeletionPhase
   removedRecords?: Record<string, number>
   removedPathCount?: number
@@ -51,6 +56,7 @@ export interface SessionDeletionJournalBeginInput {
   sdkSessionId: string
   retentionTargets: DataPurgeTarget[]
   legalHoldSubjects?: DataRetentionSubject[]
+  memoryScope?: SessionDeletionMemoryScope
 }
 
 export interface SessionDeletionJournalCompactionResult {
@@ -61,7 +67,7 @@ export interface SessionDeletionJournalCompactionResult {
 }
 
 type JournalPatch = Partial<Pick<SessionDeletionJournalEntry,
-  'removedRecords' | 'removedPathCount' | 'residuals'>>
+  'removedRecords' | 'removedPathCount' | 'residuals' | 'memoryScope'>>
 
 export class SessionDeletionJournal {
   readonly filePath: string
@@ -135,6 +141,7 @@ export class SessionDeletionJournal {
         sdkSessionId,
         retentionTargets,
         legalHoldSubjects,
+        ...(input.memoryScope ? { memoryScope: normalizedMemoryScope(input.memoryScope) } : {}),
         phase: 'prepared',
         createdAt: now,
         updatedAt: now
@@ -159,6 +166,9 @@ export class SessionDeletionJournal {
       if (targetIndex < currentIndex) return entry
       if (targetIndex > currentIndex + 1) {
         throw new Error(`session deletion phase cannot skip ${entry.phase} -> ${phase}`)
+      }
+      if (patch.memoryScope && entry.memoryScope && JSON.stringify(patch.memoryScope) !== JSON.stringify(entry.memoryScope)) {
+        throw new Error('session deletion memory ownership is immutable')
       }
       entry.phase = phase
       entry.updatedAt = Date.now()
@@ -318,6 +328,7 @@ function assertEntry(value: unknown): asserts value is SessionDeletionJournalEnt
       (entry.completedAt !== undefined && !validTimestamp(entry.completedAt)) ||
       !optionalRetentionTargets(entry.retentionTargets) || !optionalLegalHoldSubjects(entry.legalHoldSubjects) ||
       !optionalCounts(entry.removedRecords) || !optionalCounts(entry.residuals) ||
+      !optionalMemoryScope(entry.memoryScope) ||
       (entry.removedPathCount !== undefined && (!Number.isSafeInteger(entry.removedPathCount) || entry.removedPathCount < 0))) {
     throw new Error('session deletion journal entry is invalid')
   }
@@ -348,6 +359,7 @@ function optionalLegalHoldSubjects(value: unknown): boolean {
 
 function normalizePatch(patch: JournalPatch): JournalPatch {
   const next: JournalPatch = {}
+  if (patch.memoryScope !== undefined) next.memoryScope = normalizedMemoryScope(patch.memoryScope)
   if (patch.removedRecords !== undefined) next.removedRecords = normalizedCounts(patch.removedRecords)
   if (patch.removedPathCount !== undefined) {
     if (!Number.isSafeInteger(patch.removedPathCount) || patch.removedPathCount < 0) {
@@ -357,6 +369,21 @@ function normalizePatch(patch: JournalPatch): JournalPatch {
   }
   if (patch.residuals !== undefined) next.residuals = normalizedCounts(patch.residuals)
   return next
+}
+
+function optionalMemoryScope(value: unknown): boolean {
+  if (value === undefined) return true
+  try { normalizedMemoryScope(value); return true } catch { return false }
+}
+
+function normalizedMemoryScope(value: unknown): SessionDeletionMemoryScope {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('session deletion memory scope is invalid')
+  const scope = value as Partial<Extract<SessionDeletionMemoryScope, { ownership: 'resolved' }>> | { ownership: 'unresolved' }
+  if (scope.ownership === 'unresolved') return { ownership: 'unresolved' }
+  if (scope.ownership !== 'resolved' || typeof scope.projectHash !== 'string' || !/^[a-f0-9]{64}$/.test(scope.projectHash)) {
+    throw new Error('session deletion memory scope is invalid')
+  }
+  return { ownership: 'resolved', sessionId: requiredId(scope.sessionId, 'memory sessionId'), projectHash: scope.projectHash }
 }
 
 function optionalCounts(value: unknown): boolean {

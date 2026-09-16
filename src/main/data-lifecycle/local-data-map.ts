@@ -263,16 +263,17 @@ export const LOCAL_DATA_LIFECYCLE_MAP: LocalDataLifecycleEntry[] = [
     title: 'Project and task working memory, legacy path memory, and user memory',
     paths: ['userData/memory/memory-index.json'],
     sourceModules: ['src/main/memory/memory-manager.ts', 'src/main/memory/memory-project-lifecycle.ts',
+      'src/main/memory/memory-session-lifecycle.ts', 'src/main/data-lifecycle/session-memory-purge.ts',
       'src/main/data-lifecycle/layered-memory-portability.ts', 'src/main/data-lifecycle/project-portable-runtime.ts',
       'src/main/data-lifecycle/project-deletion-coordinator.ts'],
     owner: { scope: 'mixed', key: 'canonical projectId hash plus optional WorkItem/Session identity; legacy root hash or user layer' },
     sensitivity: 'confidential',
     backup: { behavior: 'aggregate_export', status: 'partial' },
-    retention: { rule: 'Canonical Project-owned records join Project purge and its deletion backup; archive changes retrieval only. User and unresolved legacy ownership remain separate.', status: 'partial' },
+    retention: { rule: 'Canonical Project records join Project purge/backup. Session-only working records are purged after their final retained resume identity is deleted; WorkItem and shared records remain. Archive changes retrieval only.', status: 'partial' },
     export: { mode: 'redacted', status: 'partial' },
     deletion: { softDelete: 'record', purge: 'project_cascade', externalDelete: 'not_applicable', status: 'partial' },
     implementationStatus: 'partial', projectObjects: ['Memory'],
-    gaps: ['Project export/import preserves exact WorkItem/Session identity and excludes user/other-Project memory. Path-only and missing ownership cannot be assigned from a shared directory and remain untouched; standalone Session memory purge and unified age retention remain open.']
+    gaps: ['Project export/import preserves exact WorkItem/Session identity and excludes user/other-Project memory. Session deletion freezes namespace/anchor before removing metadata and preserves other retained dependents. Missing ownership is reported unresolved and remains untouched; unified age retention remains open.']
   },
   {
     id: 'learning-materializations', title: 'Approved Skill materializations',

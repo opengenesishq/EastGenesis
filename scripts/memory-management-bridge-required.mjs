@@ -29,6 +29,7 @@ try {
       import { proposeMemoryDraft, acceptMemoryDraft } from ${modulePath('memoryStore.ts')};
       import { createTrustedUserLearningDecision } from ${modulePath('learning/learning-security.ts')};
       import { taskMemoryScope } from ${modulePath('memory/task-memory-scope.ts')};
+      import { withDataLifecycleMutation } from ${modulePath('data-lifecycle/data-lifecycle-mutation-lock.ts')};
       import { openProjectWorkspaceStore } from ${modulePath('project-workspace/store.ts')};
       import { openProjectWorkspaceCommandService } from ${modulePath('project-workspace/command-service.ts')};
       import { LearningChangePreview } from ${JSON.stringify(path.join(repo, 'src/renderer/src/components/LearningApprovalPanel.tsx'))};
@@ -127,13 +128,22 @@ try {
         assert.ok((await invoke('memory:layeredList','reopenedUnbound')).some(x=>x.id===unbound.id));
         assert.ok((await augmentNativePayloadWithLayeredMemory(payload,metas.reopenedUnbound,profile)).payload.text.includes('report legacy session resume'));
         assert.equal((await invoke('memory:layeredList','sibling')).some(x=>x.id===unbound.id),false);
+        let unlock, markLocked;
+        const locked = new Promise(resolve => { markLocked=resolve });
+        const deletionLock = withDataLifecycleMutation(profile, async () => { markLocked(); await new Promise(resolve => { unlock=resolve }); });
+        await locked;
+        const queued = invoke('memory:taskAdd','a',{title:'late writer',body:'must not survive deletion'});
+        const rejected = assert.rejects(queued,/会话不存在/);
+        delete metas.a; delete targets.a;
+        unlock(); await deletionLock; await rejected;
+        assert.equal((await invoke('memory:layeredList','reopenedUnbound')).some(x=>x.body==='must not survive deletion'),false);
         const before = globalThis.__memoryVerifications.length;
         await assert.rejects(async()=>globalThis.__memoryHandlers.get('memory:propose')({trusted:false},'a',input), /untrusted/);
         await assert.rejects(async()=>globalThis.__memoryHandlers.get('learning:delete')({trusted:false},'a',draft.id), /untrusted/);
         await assert.rejects(async()=>globalThis.__memoryHandlers.get('memory:taskAdd')({trusted:false},'a',{title:'untrusted',body:'untrusted'}), /untrusted/);
         assert.equal(globalThis.__memoryVerifications.length,before);
         assert.ok(globalThis.__memoryVerifications.every(x=>x.root===profile && x.id==='a'));
-        console.log('Memory bridge: real IPC lifecycle, task-owned add/edit/delete, same-project session isolation, canonical native prompt, deleted-memory readback and revision preview passed; Electron sender and aggregate verifier use isolated fixtures.');
+        console.log('Memory bridge: real IPC lifecycle, task-owned add/edit/delete, task isolation, queued writer deletion barrier, canonical native prompt, deleted-memory readback and revision preview passed; Electron sender and aggregate verifier use isolated fixtures.');
       }
       main().catch(error => { console.error(error); process.exitCode=1 });
     `, resolveDir: repo, loader: 'tsx' },

@@ -10,6 +10,7 @@ userDataRoot: string): Promise<MemoryScope> {
     projectRoot: meta.sourceCwd ?? meta.cwd,
     projectId: meta.workspaceId,
     sessionId: meta.taskMemorySessionId ?? meta.id,
+    writerSessionId: meta.id,
     workItemId: meta.workItemId
   }
   if (scope.workItemId) {
@@ -20,6 +21,7 @@ userDataRoot: string): Promise<MemoryScope> {
     }
   }
   if (meta.workspaceId !== scope.projectId || meta.workItemId !== scope.workItemId ||
+      meta.id !== scope.writerSessionId ||
       (meta.sourceCwd ?? meta.cwd) !== scope.projectRoot || (meta.taskMemorySessionId ?? meta.id) !== scope.sessionId) {
     throw new Error('读取记忆期间任务归属已变化，请重试')
   }
