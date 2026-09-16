@@ -25,6 +25,7 @@ import { digest as workflowDigest } from '../task/workflow-ledger-codec'
 import { readTaskSnapshotDatabase } from '../task/task-snapshot'
 import { readProjectRoutineSlice } from '../routines/routine-project-store'
 import { collectProjectPortableRuntime } from '../data-lifecycle/project-portable-runtime'
+import { assertProjectMemoryRetentionExportFresh } from '../memory/memory-retention'
 import { isLocalProjectWorkspaceAuthorityEvent } from '../project-workspace/ledger-import-authority'
 import { projectAggregateCanonicalJson, sanitizeProjectAggregateValue } from './codec'
 import { aggregateIntegrityError, ProjectAggregateError, requiredProjectId } from './errors'
@@ -141,6 +142,7 @@ export class ProjectAggregateService {
     options: ProjectAggregateQueryOptions = {}
   ): Promise<ReturnType<typeof buildProjectAggregateExport>> {
     const aggregate = await this.queryProject(projectId, options)
+    await assertProjectMemoryRetentionExportFresh(this.roots.workspaceRoot, aggregate.projectId, aggregate.memory)
     const firstAutomation = await readProjectRoutineSlice(this.roots.routineRoot, aggregate.projectId)
     const automation = await readProjectRoutineSlice(this.roots.routineRoot, aggregate.projectId)
     if (projectAggregateCanonicalJson(firstAutomation) !== projectAggregateCanonicalJson(automation)) {

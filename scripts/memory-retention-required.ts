@@ -3,7 +3,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { addMemory, listMemories, listMemoryEntriesForLifecycle, mutateMemoryEntries, searchMemories, updateMemory } from '../src/main/memory/memory-manager'
-import { previewMemoryRetention, readMemoryRetention, saveMemoryRetention, sweepMemoryRetention } from '../src/main/memory/memory-retention'
+import { previewMemoryRetention, readMemoryRetention, saveMemoryRetention, sweepMemoryRetention,
+  prepareProjectMemoryRetentionExport, assertProjectMemoryRetentionExportFresh } from '../src/main/memory/memory-retention'
 import { MEMORY_RETENTION_DAY_MS as DAY } from '../src/main/memory/memory-retention-policy'
 import { createLearningDraft, approveLearningDraft, listLearningProject, rollbackLearningRecord } from '../src/main/learning/learning-lifecycle'
 import { mutateLearningState, readLearningState } from '../src/main/learning/learning-store'
@@ -12,6 +13,10 @@ import { projectLearningNamespace } from '../src/main/project-aggregate/project-
 import { readProjectMemory } from '../src/main/memoryStore'
 import type { MemoryRetentionLayer } from '../src/shared/memory-retention-types'
 import { collectProjectLayeredMemory, importProjectLayeredMemory } from '../src/main/data-lifecycle/layered-memory-portability'
+import { openProjectWorkspaceStore } from '../src/main/project-workspace/store'
+import { createProductionProjectAggregateService } from '../src/main/project-aggregate/project-aggregate-factory'
+import { importProjectAggregate } from '../src/main/data-lifecycle/project-import-coordinator'
+import type { ProjectAggregateLearningAudit } from '../src/shared/project-aggregate-types'
 
 async function main(): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), 'caogen-memory-retention-'))
@@ -125,6 +130,38 @@ async function main(): Promise<void> {
       assert.deepEqual((await listMemories(join(destination, 'memory'))).map(entry => entry.id), [stillLive.id])
       assert.equal((await readMemoryRetention(join(destination, 'memory'), exportScope)).settings.find(setting => setting.layer === 'project')?.days, null)
       checks.push('export expires persisted entries before snapshot; import into an unconfigured profile cannot revive them')
+
+      const workspace = await openProjectWorkspaceStore(exportRoot)
+      await workspace.createWorkspace({ id: exportScope.projectId, name: 'Retention export', kind: 'software' })
+      const exportNamespace = projectLearningNamespace(exportScope.projectId), exportLearning = join(exportRoot, 'learning')
+      const expiringFact = await createLearningDraft(exportNamespace, exportLearning, proposal)
+      await approveLearningDraft(exportNamespace, exportLearning, expiringFact.id, authority)
+      const expiringDraft = await createLearningDraft(exportNamespace, exportLearning,
+        { ...proposal, payload: { ...proposal.payload, body: 'Expired draft stays expired after import' } })
+      await mutateLearningState(exportLearning, exportNamespace, state => {
+        for (const record of state.records) record.updatedAt = old
+      })
+      const service = createProductionProjectAggregateService(exportRoot)
+      const initialSeal = await service.sealProject(exportScope.projectId, { expectedAggregateRevision: 0 })
+      const captured = await service.queryProject(exportScope.projectId)
+      await assert.rejects(service.exportProject(exportScope.projectId), /项目记忆已到期/)
+      await prepareProjectMemoryRetentionExport(exportRoot, exportScope.projectId)
+      await assert.rejects(assertProjectMemoryRetentionExportFresh(exportRoot, exportScope.projectId, captured.memory), /项目记忆已到期/)
+      await assertProjectMemoryRetentionExportFresh(exportRoot, exportScope.projectId,
+        captured.memory.map(record => ({ ...record, namespace: 'legacy_path' })))
+      await service.sealProject(exportScope.projectId, { expectedAggregateRevision: initialSeal.aggregateRevision })
+      const bundle = (await service.exportProject(exportScope.projectId)).bundle
+      assert(bundle.aggregate.memory.every(({ record }) => record.status === 'expired'))
+      assert(bundle.aggregate.audit.some(entry => entry.source === 'learning' && (entry.value as ProjectAggregateLearningAudit).event.action === 'expired'))
+      const importedRoot = join(exportRoot, 'new-profile')
+      await importProjectAggregate(bundle, importedRoot)
+      const imported = await readLearningState(join(importedRoot, 'learning'), exportNamespace)
+      assert.equal(imported.records.find(record => record.id === expiringFact.id)?.status, 'expired')
+      assert.equal(imported.records.find(record => record.id === expiringDraft.id)?.status, 'expired')
+      assert.deepEqual((await listMemories(join(importedRoot, 'memory'))).map(entry => entry.id), [stillLive.id])
+      assert.equal((await readProjectMemory({ ...exportScope, projectRoot: importedRoot }, join(importedRoot, 'memory'))).entries.length, 0)
+      await assert.rejects(rollbackLearningRecord(exportNamespace, join(importedRoot, 'learning'), expiringFact.id, authority), /Expired memory/)
+      checks.push('sealed Project export rejects expired active memories; prepared export/import preserves expiry and audit without copying retention policy')
     } finally { await rm(exportRoot, { recursive: true, force: true }) }
 
     const corrupt = '{"version":1,"revision":9,"policies":[{"days":0}]}'

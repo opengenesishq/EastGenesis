@@ -45,6 +45,7 @@ import {
   isDataRetentionBlockedError
 } from './retention-authority'
 import { withDataLifecycleMutation } from './data-lifecycle-mutation-lock'
+import { prepareProjectMemoryRetentionExport } from '../memory/memory-retention'
 import { getRemoteContinuationStore } from '../remote/store'
 import { getMediaStore } from '../media/media-store'
 import {
@@ -132,6 +133,7 @@ async function prepareDeletion(
     subject: { kind: 'project', id: projectId },
     retentionAnchorAt: requiredTimestamp(workspace.deletedAt ?? workspace.updatedAt, 'Project retention anchor')
   }
+  await prepareProjectMemoryRetentionExport(root, projectId)
   const service = createProductionProjectAggregateService(root)
   const currentSeal = service.seals.readProject(projectId)
   const seal = await service.sealProject(projectId, {
@@ -449,6 +451,7 @@ export async function verifyProjectDeletionProof(
 }
 
 async function verifiedAggregateExport(root: string, projectId: string) {
+  await prepareProjectMemoryRetentionExport(root, projectId)
   const service = createProductionProjectAggregateService(root)
   const currentSeal = service.seals.readProject(projectId)
   const seal = await service.sealProject(projectId, {

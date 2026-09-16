@@ -15,6 +15,7 @@ import type { CanonicalSystemOperationContext } from './task/system-operation-co
 import { TaskKernel } from './task/task-kernel'
 import { stableValueDigest } from './task/tool-idempotency'
 import type { ProjectPortableExportEffectTarget } from './project-export-effect-target'
+import { prepareProjectMemoryRetentionExport } from './memory/memory-retention'
 
 type OperationGateway = typeof executeInteractiveOperationEffect
 
@@ -73,6 +74,7 @@ async function produceProjectPortableExport(
     throw new Error('Project export requires a project_portable_export EffectTarget')
   }
   const target = effect.target
+  await prepareProjectMemoryRetentionExport(rootDir, target.projectId)
   const service = createProductionProjectAggregateService(rootDir)
   const currentSeal = service.seals.readProject(target.projectId)
   const seal = await service.sealProject(target.projectId, {

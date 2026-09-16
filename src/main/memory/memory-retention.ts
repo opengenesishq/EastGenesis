@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { dirname, join, resolve } from 'node:path'
 import type { MemoryRetentionInput, MemoryRetentionLayer, MemoryRetentionPreview, MemoryRetentionSaveInput, MemoryRetentionView } from '../../shared/memory-retention-types'
+import type { ProjectAggregateMemoryRecord } from '../../shared/project-aggregate-types'
 import { withDataLifecycleMutation } from '../data-lifecycle/data-lifecycle-mutation-lock'
 import { writeDurableFile } from '../durable-file'
 import { expireProjectMemoryByAge } from '../learning/learning-lifecycle'
@@ -64,6 +65,26 @@ export function saveMemoryRetention(memoryRoot: string, scope: MemoryScope, inpu
 export function sweepMemoryRetention(memoryRoot: string, now = Date.now()): Promise<{ layeredCount: number; projectCount: number }> {
   return withDataLifecycleMutation(dirname(resolve(memoryRoot)), async () =>
     applyPolicies(memoryRoot, await readMemoryRetentionPolicies(memoryRoot), now))
+}
+
+/** Export/backup preparation is allowed under its existing lifecycle lock, before sealing. */
+export function prepareProjectMemoryRetentionExport(userDataRoot: string, projectId: string, now = Date.now()): Promise<void> {
+  return withDataLifecycleMutation(userDataRoot, async () => {
+    const { policies } = await readMemoryRetentionPolicies(join(userDataRoot, 'memory'))
+    const policy = policies.find(candidate => candidate.target.layer === 'project' && candidate.target.projectId === projectId)
+    if (policy) await expireProjectMemoryByAge(projectLearningNamespace(projectId), join(userDataRoot, 'learning'), policy.days, now)
+  })
+}
+
+/** Guard the captured snapshot, not live rows: cleanup may race a previously sealed export. */
+export async function assertProjectMemoryRetentionExportFresh(userDataRoot: string, projectId: string,
+  records: readonly ProjectAggregateMemoryRecord[], now = Date.now()): Promise<void> {
+  const { policies } = await readMemoryRetentionPolicies(join(userDataRoot, 'memory'))
+  const policy = policies.find(candidate => candidate.target.layer === 'project' && candidate.target.projectId === projectId)
+  if (policy && records.some(({ namespace, record }) => namespace === 'project_id' && record.scope === 'project' && (record.status === 'active' || record.status === 'draft')
+    && memoryAgeExpired(record.updatedAt, policy.days, now))) {
+    throw new Error('项目记忆已到期，请应用保留规则后重新生成导出快照')
+  }
 }
 
 async function applyPolicies(memoryRoot: string, file: MemoryRetentionPolicyFile, now: number): Promise<{ layeredCount: number; projectCount: number }> {
