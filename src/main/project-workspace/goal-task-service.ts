@@ -14,6 +14,7 @@ import type {
 import { createProjectWorkspaceReadService } from './canonical-read-service'
 import { openProjectWorkspaceCommandService } from './command-service'
 import { openProjectWorkspaceStore } from './store'
+import { extractGoalRequestRequirements } from '../../shared/goal-request-requirements'
 
 const TERMINAL_GOAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'archived'])
 const TERMINAL_WORK_ITEM_STATUSES = new Set(['done', 'failed', 'cancelled'])
@@ -46,6 +47,7 @@ export async function createProjectGoalTask(
   }
 
   const commands = await openProjectWorkspaceCommandService(rootDir)
+  const requirements = extractGoalRequestRequirements(input.objective)
   if (!goal) {
     goal = await createOrRecover(
       () => commands.createGoal({
@@ -54,8 +56,12 @@ export async function createProjectGoalTask(
         title: taskTitle(input.objective),
         objective: input.objective,
         status: options.goalStatus ?? 'running',
-        successCriteria: ['目标完成并有可核验的结果'],
-        acceptance: [{ id: `${ids.goalId}-result`, criterion: '目标完成并有可核验的结果', required: true }]
+        constraints: requirements.filter(item => item.kind === 'constraint' || item.kind === 'page_count').map(item => item.text),
+        successCriteria: [input.objective, ...requirements.map(item => item.text)],
+        acceptance: [
+          { id: `${ids.goalId}-result`, criterion: input.objective, required: true },
+          ...requirements.map(item => ({ id: item.id, criterion: item.text, required: true }))
+        ]
       }),
       () => reads.getGoal(ids.goalId),
       (candidate) => assertMatchingGoal(candidate, input)
@@ -73,11 +79,7 @@ export async function createProjectGoalTask(
         type: 'custom',
         status: options.workItemStatus ?? 'ready',
         owner: options.workItemOwner,
-        acceptanceSpec: [{
-          id: `${ids.workItemId}-result`,
-          criterion: '交付目标要求的结果并附带验证证据',
-          required: true
-        }]
+        acceptanceSpec: goal.acceptance.map(item => ({ ...item }))
       }),
       () => reads.getWorkItem(ids.workItemId),
       (candidate) => assertMatchingWorkItem(candidate, input, goal!.id, options.workItemOwner)

@@ -1,6 +1,7 @@
 import type { TaskPlanDraftInput, TaskPlanStepInput } from '../../shared/task-plan-types'
 import { decomposeTask } from '../agent/task-decomposer'
 import { taskDagToPlanDraft } from './task-plan-dag'
+import { extractGoalRequestRequirements } from '../../shared/goal-request-requirements'
 
 const PROVIDER_EGRESS = '已选 Provider：目标、必要资料与上游步骤结果'
 
@@ -9,7 +10,7 @@ export async function createAutomaticTaskPlan(objective: string, cwd?: string): 
   // Engineering terms in a research topic or document are not a request to build software.
   if (requestsEngineering(objective)) {
     const result = await decomposeTask({ request: objective, cwd, useModel: false })
-    return taskDagToPlanDraft(result.dag, result)
+    return withRequestRequirements(taskDagToPlanDraft(result.dag, result))
   }
 
   const research = /调研(?!报告|结果)|研究(?!报告|结果|结论|资料|论文|成果)|检索|搜集|收集.{0,12}(?:资料|来源)|查找.{0,12}(?:资料|来源)|\b(?:research(?!\s+(?:report|results|paper))|investigate|search for|find sources|gather sources)\b/i.test(objective)
@@ -55,7 +56,7 @@ export async function createAutomaticTaskPlan(objective: string, cwd?: string): 
     description: '核对原始目标明确要求的发送、发布或其他外部操作，绑定实际成果版本、目标对象和已有授权。缺少信息或权限时保留准备成果并请求补充；操作结果未知时先核对实际状态，禁止重复执行。',
     expectedArtifacts: ['外部操作的实际回执，或待补信息、待授权及未知结果记录']
   })
-  return {
+  return withRequestRequirements({
     objective, steps,
     expectedArtifacts: [...new Set(steps.flatMap(step => step.expectedArtifacts ?? []))],
     dataEgress: [...new Set(steps.flatMap(step => step.dataEgress ?? []))], estimatedCostUsd: null,
@@ -67,12 +68,27 @@ export async function createAutomaticTaskPlan(objective: string, cwd?: string): 
       '只执行目标要求且已有授权的操作；明确报告未完成事项和未知结果'
     ],
     source: 'genesis'
+  })
+}
+
+function withRequestRequirements(draft: TaskPlanDraftInput): TaskPlanDraftInput {
+  const requirements = extractGoalRequestRequirements(draft.objective)
+  const delivery = draft.steps.find(step => step.id === 'prepare-deliverable') ?? draft.steps.at(-1)
+  const objectiveCriterion = draft.objective.length <= 2_000 ? draft.objective : '完整满足本计划原始目标中的交付要求，并提供可核对证据'
+  return { ...draft,
+    acceptanceCriteria: [...new Set([objectiveCriterion, ...requirements.map(item => item.text), ...draft.acceptanceCriteria])],
+    steps: draft.steps.map(step => step !== delivery ? step : { ...step, acceptanceSpec: [
+      ...(step.acceptanceSpec ?? (step.expectedArtifacts ?? []).map((artifact, index) => ({
+        id: `artifact-${index + 1}`, criterion: `产出并提供证据：${artifact}`, required: true
+      }))),
+      ...requirements.map(item => ({ id: item.id, criterion: item.text, required: true }))
+    ] })
   }
 }
 
 function requestsEngineering(text: string): boolean {
   return text.split(/[，。；;\n]|\b(?:and then|then)\b/i).some(clause => {
-    const startsEngineering = /^(?:(?:请|帮我|完整|先|再|然后|并|并且|同时|\s)+)*(?:开发|实现|重构|修复|调试|构建|搭建)|^\s*(?:please\s+)?(?:implement|refactor|debug|fix|build\s+(?:an?\s+)?(?:app|website|api))\b/i.test(clause)
+    const startsEngineering = /^(?:请|帮我|完整|先|再|然后|并且|并|同时|\s)*(?:开发|实现|重构|修复|调试|构建|搭建)|^\s*(?:please\s+)?(?:implement|refactor|debug|fix|build\s+(?:an?\s+)?(?:app|website|api))\b/i.test(clause)
     if (requestsDocument(clause) && !startsEngineering) return false
     return /(?:开发|实现|重构|修复|调试|编写|修改|构建|搭建).{0,24}(?:代码|程序|脚本|软件|应用|网站|网页|前端|后端|组件|接口|数据库|登录|认证|功能|\b(?:API|IPC|UI|bug)\b)/i.test(clause)
       || /(?:代码|程序|软件|前端|后端|组件|接口|数据库|\b(?:API|IPC|bug)\b).{0,16}(?:重构|修复|调试|改造|实现)/i.test(clause)
@@ -88,5 +104,15 @@ function requestsDocument(text: string): boolean {
 }
 
 function requestsExternalAction(text: string): boolean {
-  return /发送|发给|发到|寄给|发布|部署|推送|上传|删除|购买|支付|预约|\b(?:send|publish|deploy|push|upload|delete|purchase|pay)\b|\bemail\b.{0,30}\bto\b/i.test(text)
+  const instructions = text.replace(/```[\s\S]*?```|“[^”]*”|「[^」]*」|"[^"\n]*"/g, ' ')
+  for (const match of instructions.matchAll(/发送|发给|发到|寄给|发布|部署|推送|上传|删除|购买|支付|预约|\b(?:send|publish|deploy|push|upload|delete|purchase|pay)\b/gi)) {
+    const before = instructions.slice(0, match.index)
+    const after = instructions.slice(match.index! + match[0].length)
+    if (/(?:不要|不用|无需|不必|不得|禁止|不能|不允许|不需要|不|do not|don't|must not|without|not)\s*$/i.test(before)) continue
+    if (/^(?:发布|部署|推送|上传|删除|购买|支付|预约)$/.test(match[0]) &&
+      /^(?:说明|指南|方案|计划|流程|功能|接口|按钮|状态|记录|机制|权限|策略|方式|方法)/.test(after)) continue
+    if (/^\s+(?:instructions|guide|plan|workflow|feature|button|status|policy)\b/i.test(after)) continue
+    return true
+  }
+  return /(?:^|[，,。；;\n])\s*(?:please\s+)?email\b.{0,40}\bto\b/i.test(instructions)
 }
