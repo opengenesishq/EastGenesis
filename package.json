@@ -132,7 +132,12 @@
     "test:palace-task-navigation:required": "tsx scripts/palace-task-navigation-required.ts",
     "test:layered-memory-portability:required": "tsx scripts/layered-memory-portability-required.ts",
     "test:canonical-request-budget:required": "node scripts/canonical-request-budget-required.mjs",
-    "test:council-opinion-records:required": "tsx scripts/council-opinion-records-required.ts"
+    "test:council-opinion-records:required": "tsx scripts/council-opinion-records-required.ts",
+    "test:goal-request-requirements:required": "tsx scripts/goal-request-requirements-required.ts",
+    "test:session-memory-purge:required": "tsx scripts/session-memory-purge-required.ts",
+    "test:office-delivery-requirements:required": "tsx scripts/office-delivery-requirements-required.ts",
+    "test:office-requirements-audit:required": "tsx scripts/office-requirements-audit-required.ts",
+    "test:session-requirement-revision:required": "tsx scripts/session-requirement-revision-required.ts"
   },
   "build": {
     "appId": "com.caogen.app",
