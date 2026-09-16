@@ -5,6 +5,7 @@ import { findWorkflowRun } from './workflow-ledger-store'
 import { readOfficeRunRequirements } from './office-delivery-requirement-ledger'
 import { currentTaskRequirementSource } from './task-plan-requirements'
 import { createProductionProjectAggregateService } from '../project-aggregate/project-aggregate-factory'
+import { runRequirementArtifactAccess } from './requirement-artifact-access'
 
 /** Use the active Run's frozen acceptance, never replace an earlier Run's
  * contract with a later amendment. File references are revision inputs only. */
@@ -20,6 +21,8 @@ export async function buildSessionRequirementContext(meta: SessionMeta, root: st
   const contract = await readOfficeRunRequirements(run, root)
   if (!contract.criteria || contract.binding.reason) throw new Error('当前 Run 的交付要求未绑定，不能继续修订')
   const aggregate = await createProductionProjectAggregateService(root).verifyLiveProject(meta.workspaceId!)
+  const access = await readTaskSnapshotDatabase(root, db => runRequirementArtifactAccess(db, { runId: run.id,
+    projectId: run.projectId!, goalId: run.goalId, workItemId: run.workItemId }))
   const family = new Set(aggregate.workItems.filter(item => item.id === changed.item.id ||
     item.id === changed.item.parentId || item.parentId === (changed.item.parentId ?? changed.item.id)).map(item => item.id))
   const files = aggregate.workflow.artifacts.filter(file => file.goalId === meta.goalId &&
@@ -30,6 +33,9 @@ export async function buildSessionRequirementContext(meta: SessionMeta, root: st
     ...contract.criteria.map(text => `- ${text}`),
     '# Existing task artifacts for revision',
     'These files may have failed checks or manual edits. Inspect their current bytes and evidence before changing anything. Preserve previous versions and unrelated human content.',
+    ...(access ? ['For Office revisions, inspect_office_artifact and plan_office_revision may use only these approved cross-step inputs (other same-task references are not write grants):',
+      ...access.artifacts.map(file => JSON.stringify(file)),
+      'Use revise_office_artifact with the exact prepared plan to deliver a new version. Do not recreate the whole file to bypass an unsupported selection.'] : []),
     ...files.map(file => JSON.stringify({ id: file.id, title: file.title, digest: file.digest,
       locations: aggregate.workflow.artifactLocations.filter(location => location.artifactId === file.id) }))].join('\n')
   if (prompt.length > 120_000) throw new Error('交付要求和成果上下文过大，请先收窄本次修订范围')

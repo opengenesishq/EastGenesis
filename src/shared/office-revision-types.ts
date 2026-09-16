@@ -59,6 +59,8 @@ export interface OfficeRevisionEffectTarget {
   kind: 'office_artifact_revision'; schemaVersion: 1; artifactKind: OfficeRevisionKind
   sessionId: string; projectId: string; goalId?: string; workItemId: string; businessLineId?: string
   baseArtifactId: string; baseDigest: string; baseVersion: number; lineageId: string
+  /** Frozen amendment Run authorizes a specific cross-step predecessor. */
+  revisionRunId?: string
   planId: string; planDigest: string; operations: OfficeRevisionOperation[]; unchangedScopeDigest: string
   rootPath: string; rootIdentity: { device: string; inode: string }; relativePath: string; workspacePath: string
   expectedSha256: string; expectedBytes: number; mediaType: string; title: string

@@ -55,6 +55,17 @@ export interface TaskPlanRequirementSource {
   eventId: string
   goalRevision: number
   contractDigest: string
+  /** Exact existing files reviewed with the amendment plan. Never a folder grant. */
+  artifacts?: TaskPlanRevisionArtifact[]
+}
+
+export interface TaskPlanRevisionArtifact {
+  artifactId: string
+  workItemId: string
+  lineageId: string
+  digest: string
+  version: number
+  title: string
 }
 
 export interface TaskPlanMissionSource {

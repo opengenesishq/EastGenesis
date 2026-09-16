@@ -33,6 +33,7 @@ import { findEventById } from './workflow-ledger-query'
 import type { WorkflowLedgerDatabase } from './workflow-ledger-db'
 import { canonicalJson, digest } from './workflow-ledger-codec'
 import { WorkflowLedgerCorruptionError } from './workflow-ledger-errors'
+import { hasApprovedArtifactSupersession } from './requirement-artifact-access'
 
 export async function verifyArtifactLifecycle(
   db: WorkflowLedgerDatabase,
@@ -116,6 +117,9 @@ function assertSupersession(db: WorkflowLedgerDatabase, record: ArtifactLifecycl
   const edge = findWorkflowArtifactEdge(db, `artifact-supersedes:${record.artifactId}:${record.supersedesId}`)
   if (!previous || previous.projectId !== record.projectId || previous.lineageId !== record.lineageId ||
       previous.kind !== record.kind || previous.version + 1 !== record.version ||
+      ((previous.workItemId !== record.workItemId || previous.goalId !== record.goalId) &&
+        !(record.kind === 'custom' && record.lineageId === `lineage:project-portable-export:${record.projectId}`) &&
+        !hasApprovedArtifactSupersession(db, previous, record)) ||
       !edge || edge.fromArtifactId !== record.artifactId || edge.toArtifactId !== previous.artifactId ||
       edge.relation !== 'supersedes') {
     throw new WorkflowLedgerCorruptionError(`artifact ${record.artifactId} supersession chain is invalid`)

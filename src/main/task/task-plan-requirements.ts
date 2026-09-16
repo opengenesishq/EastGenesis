@@ -3,6 +3,9 @@ import type { TaskPlanDraftInput, TaskPlanVersion } from '../../shared/task-plan
 import { openProjectWorkspaceStore } from '../project-workspace/store'
 import { createProjectWorkspaceReadService } from '../project-workspace/canonical-read-service'
 import { digest } from '../project-workspace/codec'
+import { readTaskSnapshotDatabase } from './task-snapshot'
+import { readArtifactLifecycles, findArtifactPurge } from './artifact-lifecycle-store'
+import { findWorkflowArtifact } from './workflow-ledger-store'
 
 export async function currentTaskRequirementSource(meta: Pick<SessionMeta, 'workspaceId' | 'goalId' | 'workItemId'>, root: string) {
   if (!meta.workspaceId || !meta.goalId || !meta.workItemId) return undefined
@@ -37,10 +40,21 @@ export async function requirementContinuationDraft(meta: SessionMeta, expectedRe
   const current = await currentTaskRequirementSource(meta, root)
   if (!current || current.goal.revision !== expectedRevision) throw new Error('目标要求版本已变化，请刷新后更新计划')
   const { goal, source } = current
+  const items = await createProjectWorkspaceReadService(root, 'canonical').listWorkItems(goal.projectId)
+  const family = new Set(items.filter(item => item.id === current.item.id || item.parentId === current.item.id).map(item => item.id))
+  const artifacts = await readTaskSnapshotDatabase(root, db => {
+    const records = readArtifactLifecycles(db).filter(record => record.projectId === goal.projectId && record.goalId === goal.id)
+    return records.filter(record => family.has(record.workItemId) && !findArtifactPurge(db, record.artifactId) &&
+      ['document', 'spreadsheet', 'presentation'].includes(record.kind) &&
+      !records.some(next => next.lineageId === record.lineageId && next.version > record.version)).map(record => ({
+        artifactId: record.artifactId, workItemId: record.workItemId, lineageId: record.lineageId,
+        digest: record.digest, version: record.version, title: findWorkflowArtifact(db, record.artifactId)?.title ?? record.artifactId
+      })).sort((a, b) => a.artifactId.localeCompare(b.artifactId))
+  })
   const acceptance = goal.contract.acceptance
   return {
     objective: goal.objective,
-    steps: [{ id: `requirement-change-${source.eventId.slice(-20)}`, title: '按新要求修订现有成果',
+    steps: [{ id: `requirement-change-${digest({ eventId: source.eventId, artifacts }).slice(-20)}`, title: '按新要求修订现有成果',
       workItemType: 'custom', executionRole: 'general', dependsOn: [],
       description: '先读取原任务已有成果、人工修改、来源和检查记录，只修改新要求影响的内容。已有文件以新版本交付，保留人工内容及未受影响的工作；没有现成成果时完成当前目标。不得重发已执行的外部操作，未知结果先核对。',
       expectedArtifacts: ['满足当前交付要求的新版本成果、受影响内容和检查记录'],
@@ -50,6 +64,6 @@ export async function requirementContinuationDraft(meta: SessionMeta, expectedRe
     acceptanceCriteria: acceptance.map(item => item.criterion.length <= 2_000 ? item.criterion : `完整满足步骤验收 [${item.id}] 中保存的交付要求`),
     riskLevel: goal.contract.riskLevel, estimatedCostUsd: null,
     changeReason: `根据已确认的交付要求修订更新计划（目标 v${goal.revision}）`,
-    source: 'genesis', requirementSource: source
+    source: 'genesis', requirementSource: { ...source, artifacts }
   }
 }

@@ -12,7 +12,7 @@ export function frozenOfficeContext(target: OfficeRevisionEffectTarget, rootDir?
   // This identity is accepted only from an integrity-checked durable Effect, never IPC/tool arguments.
   const meta = { id: target.sessionId, cwd: target.rootPath, workspaceId: target.projectId, workItemId: target.workItemId,
     goalId: target.goalId, businessLineId: target.businessLineId, taskStrategy: 'execute' } as SessionMeta
-  return { meta, rootDir: rootDir ?? app.getPath('userData') }
+  return { meta, rootDir: rootDir ?? app.getPath('userData'), historicalRevisionRunId: target.revisionRunId }
 }
 export async function reconcileOfficeRevisionTarget(target: OfficeRevisionEffectTarget, rootDir?: string): Promise<EffectReconciliationResult> {
   try {

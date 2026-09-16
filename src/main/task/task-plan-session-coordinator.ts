@@ -87,8 +87,7 @@ export class TaskPlanSessionCoordinator {
     this.assertIdle(session.meta, '更新要求计划')
     const draft = await requirementContinuationDraft(session.meta, expectedGoalRevision, this.userDataRoot())
     const current = this.store.get(id)
-    if (current.currentVersion?.requirementSource?.eventId === draft.requirementSource?.eventId &&
-        current.currentVersion?.requirementSource?.contractDigest === draft.requirementSource?.contractDigest) return current
+    if (JSON.stringify(current.currentVersion?.requirementSource) === JSON.stringify(draft.requirementSource)) return current
     return this.persistEnrichedVersion(id, session, draft, 'local-user', true)
   }
 

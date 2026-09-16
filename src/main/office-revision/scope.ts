@@ -17,8 +17,11 @@ import { officeError } from './errors'
 import { officeBytesDigest } from './digest'
 import { OFFICE_PACKAGE_LIMITS } from './package'
 import { assertPreparationPath, preparationPaths } from '../data-lifecycle/preparation-data-files'
+import { taskRuntimeRegistry } from '../task/task-runtime-registry'
+import { readVerifiedCanonicalProjectWorkspaceViewFromDatabase } from '../project-workspace/ledger-canonical-view'
+import { accessIncludesArtifact, approvedRequirementArtifactAccess, runRequirementArtifactAccess } from '../task/requirement-artifact-access'
 
-export interface OfficeContext { meta: SessionMeta; rootDir: string }
+export interface OfficeContext { meta: SessionMeta; rootDir: string; historicalRevisionRunId?: string }
 export interface ScopedOfficeArtifact { record: ArtifactLifecycleRecord; title: string; mediaType: string; bytes: Buffer; latest: boolean; scope: OfficeRevisionScope }
 export async function officeSessionScope(context: OfficeContext): Promise<OfficeRevisionScope> {
   const { meta, rootDir } = context
@@ -33,16 +36,38 @@ export async function officeSessionScope(context: OfficeContext): Promise<Office
 export async function readScopedOfficeArtifact(context: OfficeContext, artifactId: string, expectedDigest?: string): Promise<ScopedOfficeArtifact> {
   const scope = await officeSessionScope(context)
   const record = await getPersistedArtifactLifecycle(artifactId, context.rootDir)
-  if (!record || record.projectId !== scope.projectId || record.workItemId !== scope.workItemId || record.goalId !== scope.goalId) officeError('OFFICE_SCOPE_MISMATCH', '成果不属于当前任务。')
+  if (!record || record.projectId !== scope.projectId || record.goalId !== scope.goalId) officeError('OFFICE_SCOPE_MISMATCH', '成果不属于当前任务。')
+  if (record.workItemId !== scope.workItemId) await assertRevisionArtifactAccess(context, scope, record)
   if (!['document', 'spreadsheet', 'presentation'].includes(record.kind)) officeError('OFFICE_UNSUPPORTED_STRUCTURE', '仅支持 Word、Excel 和 PowerPoint 成果。')
   if (expectedDigest !== undefined && expectedDigest !== record.digest) officeError('OFFICE_BASE_CHANGED', '原稿摘要已变化，请重新检查。')
   const artifact = await readTaskSnapshotDatabase(context.rootDir, (db) => findArtifactPurge(db, artifactId) ? null : findWorkflowArtifact(db, artifactId))
   if (!artifact) officeError('OFFICE_SCOPE_MISMATCH', 'canonical成果缺失。')
   const path = await officeArtifactReadPath(context, record)
   const bytes = await readBoundOfficeFile(path, record.digest, record.sizeBytes)
-  const latest = await getLatestPersistedArtifactLifecycleByLineage(record, context.rootDir)
+  const latest = await getLatestPersistedArtifactLifecycleByLineage({ projectId: record.projectId, lineageId: record.lineageId, kind: record.kind }, context.rootDir)
   return { record, title: artifact.title, mediaType: artifact.mediaType ?? '', bytes,
     latest: latest?.artifactId === artifactId, scope }
+}
+async function assertRevisionArtifactAccess(context: OfficeContext, scope: OfficeRevisionScope, record: ArtifactLifecycleRecord): Promise<void> {
+  const allowed = await readTaskSnapshotDatabase(context.rootDir, db => {
+    const runId = context.historicalRevisionRunId ?? taskRuntimeRegistry.get(context.meta.id)?.id
+    if (!runId) return false
+    const run = findWorkflowRun(db, runId)
+    if (!run || run.sessionId !== context.meta.id || run.projectId !== scope.projectId ||
+        run.goalId !== scope.goalId || run.workItemId !== scope.workItemId) return false
+    const frozen = runRequirementArtifactAccess(db, { ...scope, runId })
+    if (!accessIncludesArtifact(frozen, record)) return false
+    if (context.historicalRevisionRunId) return true
+    const view = readVerifiedCanonicalProjectWorkspaceViewFromDatabase(db, scope.projectId)
+    const item = view.workItems.find(item => item.id === scope.workItemId)
+    const source = view.workItems.find(item => item.id === record.workItemId)
+    const goal = view.goals.find(goal => goal.id === scope.goalId)
+    if (!item || !source || !goal || (source.businessLineId ?? 'studio') !== (item.businessLineId ?? 'studio') ||
+        (source.id !== item.parentId && source.parentId !== item.parentId)) return false
+    const current = approvedRequirementArtifactAccess(db, item, goal)
+    return current?.approvalEventId === frozen?.approvalEventId && accessIncludesArtifact(current, record)
+  })
+  if (!allowed) officeError('OFFICE_SCOPE_MISMATCH', '该原稿版本未绑定当前已批准的修订步骤，请刷新原任务的修订计划。')
 }
 async function officeArtifactReadPath(context: OfficeContext, record: ArtifactLifecycleRecord): Promise<string> {
   if (record.storageKind === 'blob') return artifactBlobPath(resolveLifecycleRoots(context.rootDir).workflowRoot, record.digest)

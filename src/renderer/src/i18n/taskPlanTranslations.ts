@@ -42,6 +42,7 @@ export const TASK_PLAN_TRANSLATIONS = {
   taskPlanStepCost: { zh: '步骤成本 (USD)', en: 'Step cost (USD)' },
   taskPlanDependencies: { zh: '依赖 ID', en: 'Dependency IDs' },
   taskPlanArtifacts: { zh: '预期产物', en: 'Expected artifacts' },
+  taskPlanRevisionArtifacts: { zh: '本次修订原稿', en: 'Original files for this revision' },
   taskPlanDataEgress: { zh: '数据外发', en: 'Data egress' },
   taskPlanAcceptance: { zh: '验收条件', en: 'Acceptance criteria' },
   taskPlanRisk: { zh: '风险', en: 'Risk' },

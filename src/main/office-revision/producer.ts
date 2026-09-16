@@ -18,6 +18,7 @@ export function isConfirmedOfficeRevisionEffect(effect: EffectRecord): effect is
 export async function registerOfficeRevisionLifecycle(input: { run: TaskRunRecord; effect: RevisionEffect; workflowRun: WorkflowRunRecord; provenance: WorkflowProjectionSource; rootDir?: string }) {
   const { run, effect, workflowRun, provenance, rootDir } = input, target = effect.target
   if (effect.runId !== run.id || effect.sessionId !== run.sessionId || target.sessionId !== run.sessionId ||
+      (target.revisionRunId !== undefined && target.revisionRunId !== run.id) ||
       workflowRun.projectId !== target.projectId || workflowRun.workItemId !== target.workItemId || workflowRun.goalId !== target.goalId) officeError('OFFICE_SCOPE_MISMATCH', 'Office修订Effect归属与canonical Run不同。')
   const artifactId = `artifact:office-revision:${effect.id}`
   const existing = await getPersistedArtifactLifecycle(artifactId, rootDir)

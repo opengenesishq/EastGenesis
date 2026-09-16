@@ -21,6 +21,13 @@ import { createProjectWorkspaceCommandService } from '../src/main/project-worksp
 import { getPersistedArtifactLifecycle } from '../src/main/task/artifact-lifecycle-api'
 import { saveWorkflowAcceptance, listPersistedWorkflowLedger, listWorkflowEvidence } from '../src/main/task/workflow-ledger-api'
 import { slideTextRevision } from '../src/renderer/src/components/workbench/office-revision/office-revision-model'
+import { TaskPlanContractStore } from '../src/main/task/task-plan-contract-store'
+import { TaskPlanCanonicalProjector } from '../src/main/task/task-plan-canonical-projection'
+import { syncTaskPlanLedger, purgeTaskPlanLedgerForSession } from '../src/main/task/task-plan-ledger'
+import { requirementContinuationDraft } from '../src/main/task/task-plan-requirements'
+import { readTaskSnapshotDatabase } from '../src/main/task/task-snapshot'
+import { verifyArtifactLifecycle } from '../src/main/task/artifact-lifecycle-verification'
+import { readWorkflowEventChain } from '../src/main/task/workflow-ledger-query'
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'caogen-office-revision-'))), cwd = join(root, 'formal')
 mkdirSync(cwd)
@@ -144,6 +151,80 @@ async function main() {
   await check('old-head plans and unrelated Project scope cannot reuse the original', async () => {
     await assert.rejects(prepareOfficeRevision(context, { baseArtifactId: artifactId, expectedDigest: original.digest, operations: [operation] }), /BASE_NOT_HEAD/)
     await assert.rejects(readScopedOfficeArtifact({ ...context, meta: { ...meta, workspaceId: 'other-project' } }, artifactId), /SCOPE_MISMATCH/)
+  })
+  await check('approved amendment child edits the exact prior file and keeps the lineage across WorkItems', async () => {
+    const goal = (await workspace.getGoal(meta.goalId!))!, item = (await workspace.getWorkItem(meta.workItemId!))!
+    await commands.reviseGoalRequirements(goal.id, { sessionId: meta.id, projectId: goal.projectId, workItemId: item.id,
+      requestId: 'revise-existing', messageId: `session-input:${meta.id}:revise-existing`, payloadDigest: 'b'.repeat(64),
+      text: '第二页补来源', intent: { schemaVersion: 1, kind: 'revise_delivery_requirements',
+        expectedGoalRevision: goal.revision, expectedWorkItemRevision: item.revision } })
+    const revisedGoal = (await workspace.getGoal(meta.goalId!))!
+    const draft = await requirementContinuationDraft(meta, revisedGoal.revision, root)
+    assert.deepEqual(draft.requirementSource!.artifacts!.map(file => file.artifactId), [finalized.artifactId])
+    const plans = new TaskPlanContractStore(() => root)
+    const pending = plans.createVersion({ sessionId: meta.id, workspaceId: meta.workspaceId, goalId: meta.goalId, workItemId: meta.workItemId }, draft, 'local-user')
+    await syncTaskPlanLedger(root, pending)
+    const projection = await new TaskPlanCanonicalProjector(() => root).project(pending.currentVersion!)
+    const child = { ...meta, id: 'amendment-child', parentSessionId: meta.id, workItemId: projection.steps[0].workItemId, childTaskId: 'amendment-step' }
+    const childRun = { ...run, id: 'amendment-run', sessionId: child.id, taskId: child.childTaskId, createdAt: Date.now(), updatedAt: Date.now() }
+    await assert.rejects(inspectScopedOffice({ meta: child, rootDir: root }, finalized.artifactId), /SCOPE_MISMATCH/)
+    const approved = plans.approve(meta.id, pending.currentVersion!, projection)
+    await syncTaskPlanLedger(root, approved)
+    await saveTaskSnapshot(buildTaskSnapshot({ meta: child, run: childRun, transcript: [], lastSeq: 0, eventCount: 0, reason: 'created' }), root)
+    taskRuntimeRegistry.set(child.id, childRun)
+    const childContext = { meta: child, rootDir: root }
+    await assert.rejects(inspectScopedOffice(childContext, original.artifactId), /SCOPE_MISMATCH/)
+    const base = await inspectScopedOffice(childContext, finalized.artifactId)
+    const text = base.slideTexts!.find(shape => shape.text === 'Other page unchanged')!
+    const nextPlan = await prepareOfficeRevision(childContext, { baseArtifactId: finalized.artifactId, expectedDigest: finalized.digest,
+      operations: [slideTextRevision(base, text.slideId, text.shapeId, 'Other page unchanged; source: annual report')] })
+    const nextIntent = { planId: nextPlan.planId, planDigest: nextPlan.planDigest, baseArtifactId: finalized.artifactId, baseDigest: finalized.digest }
+    const nextInput = { rootDir: root, sessionId: child.id, toolUseId: 'amendment-revision', toolName: 'revise_office_artifact', toolInput: nextIntent, cwd }
+    const nextHandle = await prepareEffectExecution(nextInput)
+    assert(nextHandle && nextHandle.target.kind === 'office_artifact_revision')
+    assert.equal(nextHandle.target.revisionRunId, childRun.id)
+    assert(isOfficeRevisionTarget(nextHandle.target))
+    await syncTaskPlanLedger(root, plans.revoke(meta.id, pending.currentVersion!))
+    await assert.rejects(executeOfficeRevisionTool('revise_office_artifact', nextIntent, { sessionMeta: child, userDataRoot: root, effectTarget: nextHandle.target }), /SCOPE_MISMATCH/)
+    await completeEffectExecution(nextHandle, { ok: false, output: 'Approval revoked before any file write' })
+    await syncTaskPlanLedger(root, plans.approve(meta.id, pending.currentVersion!, projection))
+    // A new approval cannot refresh an old Run's input authority silently.
+    await assert.rejects(inspectScopedOffice(childContext, finalized.artifactId), /SCOPE_MISMATCH/)
+    const cancelledRun = taskRuntimeRegistry.get(child.id)!
+    await saveTaskSnapshot(buildTaskSnapshot({ meta: child, run: { ...cancelledRun, status: 'cancelled',
+      revision: cancelledRun.revision + 1, updatedAt: Date.now() }, transcript: [], lastSeq: 0, eventCount: 0, reason: 'important-event' }), root)
+    const restartedRun = { ...childRun, id: 'amendment-run-reapproved', steps: [], toolExecutions: [], effects: [], createdAt: Date.now(), updatedAt: Date.now() }
+    const restarted = await saveTaskSnapshot(buildTaskSnapshot({ meta: child, run: restartedRun, transcript: [], lastSeq: 1, eventCount: 1, reason: 'created' }), root)
+    assert.equal(restarted.run?.id, restartedRun.id)
+    const frozenInputs = await readTaskSnapshotDatabase(root, db => readWorkflowEventChain(db).find(event => event.eventId === `workflow:run:${restartedRun.id}:requirements`))
+    assert(frozenInputs?.payload.revisionAccess, 'new Run freezes current approved originals')
+    const childItem = (await workspace.getWorkItem(child.workItemId!))!
+    await commands.updateWorkItem(childItem.id, { runRefs: [childRun.id, restartedRun.id] }, { expectedRevision: childItem.revision })
+    taskRuntimeRegistry.set(child.id, restartedRun)
+    const replan = await prepareOfficeRevision(childContext, { baseArtifactId: finalized.artifactId, expectedDigest: finalized.digest,
+      operations: [slideTextRevision(base, text.slideId, text.shapeId, 'Other page unchanged; source: annual report')] })
+    const reintent = { ...nextIntent, planId: replan.planId, planDigest: replan.planDigest }
+    const reinput = { ...nextInput, toolUseId: 'amendment-reapproved', toolInput: reintent }
+    const rehandle = await prepareEffectExecution(reinput)
+    assert(rehandle)
+    await markEffectExecutionStarted(rehandle, reinput)
+    const output = await executeOfficeRevisionTool('revise_office_artifact', reintent, { sessionMeta: child, userDataRoot: root, effectTarget: rehandle.target })
+    const completed = await completeEffectExecution(rehandle, output)
+    assert.equal(completed?.status, 'confirmed')
+    const revision = JSON.parse((await finalizeOfficeRevisionToolResult(output, completed, root)).output)
+    const record = await getPersistedArtifactLifecycle(revision.artifactId, root)
+    assert.equal(record?.workItemId, child.workItemId)
+    assert.equal(record?.version, 3); assert.equal(record?.supersedesId, finalized.artifactId)
+    const inspected = await inspectScopedOffice(childContext, revision.artifactId)
+    assert(inspected.slideTexts!.some(shape => shape.text === 'Revised customer title'))
+    assert(inspected.slideTexts!.some(shape => shape.text.includes('source: annual report')))
+    assert.equal((await inspectScopedOffice(context, finalized.artifactId)).artifact.latest, false)
+    await syncTaskPlanLedger(root, plans.revoke(meta.id, pending.currentVersion!))
+    await finalizeOfficeRevisionToolResult(output, completed, root)
+    await purgeTaskPlanLedgerForSession(root, meta.id)
+    plans.deleteSession(meta.id)
+    await finalizeOfficeRevisionToolResult(output, completed, root)
+    await readTaskSnapshotDatabase(root, db => verifyArtifactLifecycle(db, root))
   })
   console.log(`Office revision lifecycle: ${passed}/${passed} passed; isolated actual stores and Effects, no Provider calls.`)
 }

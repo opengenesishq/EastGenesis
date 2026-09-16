@@ -50,6 +50,13 @@ export function validateTaskPlanSessionRecord(sessionId: string, value: unknown)
   validateSessionRecord(requiredId(sessionId, 'sessionId'), value)
 }
 
+/** A Run retains this immutable approval even if the private Session is later removed. */
+export function validateFrozenTaskPlanApproval(version: TaskPlanVersion, approval: TaskPlanApprovalEvent): void {
+  validatePlanVersion(version.binding.sessionId, version, version.version)
+  validatePlanVersionMetadata(version)
+  validateApprovalEvent(version.binding.sessionId, approval, version)
+}
+
 const STORE_DIRECTORY = 'task-plans'
 const STORE_FILE = 'task-plan-contracts.json'
 const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/
@@ -399,11 +406,22 @@ function normalizeMissionSource(input: TaskPlanMissionSource): TaskPlanMissionSo
 
 function normalizeRequirementSource(input: TaskPlanRequirementSource): TaskPlanRequirementSource {
   if (!input || typeof input !== 'object' || Array.isArray(input) ||
-      Object.keys(input).some(key => !['eventId', 'goalRevision', 'contractDigest'].includes(key)) ||
+      Object.keys(input).some(key => !['eventId', 'goalRevision', 'contractDigest', 'artifacts'].includes(key)) ||
       !/^goal-requirement:[a-f0-9]{64}$/.test(input.eventId) ||
       !Number.isSafeInteger(input.goalRevision) || input.goalRevision < 1 ||
       !/^[a-f0-9]{64}$/.test(input.contractDigest)) throw new Error('交付要求计划来源无效')
-  return { eventId: input.eventId, goalRevision: input.goalRevision, contractDigest: input.contractDigest }
+  const artifacts = input.artifacts?.map(artifact => {
+    if (!artifact || !Number.isSafeInteger(artifact.version) || artifact.version < 1 ||
+        !DIGEST_PATTERN.test(artifact.digest)) throw new Error('修订原稿版本无效')
+    return { artifactId: requiredId(artifact.artifactId, '原稿 ID'), workItemId: requiredId(artifact.workItemId, '原稿任务'),
+      lineageId: requiredId(artifact.lineageId, '原稿版本链'), digest: artifact.digest, version: artifact.version,
+      title: requiredText(artifact.title, '原稿标题', 2_000) }
+  })
+  if (artifacts && (artifacts.length > 100 || new Set(artifacts.map(item => item.artifactId)).size !== artifacts.length)) {
+    throw new Error('修订原稿列表重复或超过 100 项，请收窄范围')
+  }
+  return { eventId: input.eventId, goalRevision: input.goalRevision, contractDigest: input.contractDigest,
+    ...(artifacts ? { artifacts } : {}) }
 }
 
 function normalizeStep(input: TaskPlanDraftInput['steps'][number], index: number): TaskPlanStep {

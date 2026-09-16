@@ -123,6 +123,12 @@ export default function TaskPlanWorkbench({
       />
       {meta && (current || meta.goalId) && <TaskRequirementSummary binding={meta} plan={current} running={running} />}
       {expanded && current && <TaskPlanInstitutions version={current} />}
+      {expanded && !!current?.requirementSource?.artifacts?.length && <div className="task-plan-review" data-task-plan-revision-inputs>
+        <p><strong>{t('taskPlanRevisionArtifacts')}</strong></p>
+        <ul>{current.requirementSource.artifacts.map(file => <li key={file.artifactId}>
+          {file.title} · v{file.version}<small> · {file.digest.slice(7, 19)}</small>
+        </li>)}</ul>
+      </div>}
       {expanded && <PreparationPermission key={sessionId} sessionId={sessionId} running={running} />}
       {expanded && <TaskExecutionAuthority key={`authority:${sessionId}`} sessionId={sessionId} running={running} />}
       {expanded && showCouncil && <CouncilPanel sessionId={sessionId} />}

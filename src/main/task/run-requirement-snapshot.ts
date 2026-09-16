@@ -3,6 +3,7 @@ import type { WorkflowProjectionContext } from '../../shared/workflow-types'
 import type { WorkflowLedgerDatabase } from './workflow-ledger-db'
 import { readVerifiedCanonicalProjectWorkspaceViewFromDatabase } from '../project-workspace/ledger-canonical-view'
 import { digest } from './workflow-ledger-codec'
+import { approvedRequirementArtifactAccess } from './requirement-artifact-access'
 
 /** Captured only for a new live Run, before any tool/output exists. Historical
  * imports and old Runs must not acquire today's requirements retroactively. */
@@ -15,6 +16,8 @@ export function captureRunRequirements(db: WorkflowLedgerDatabase, run: TaskRunR
   const goal = view.goals.find(goal => goal.id === item.goalId)
   const criteria = (item.acceptanceSpec.length ? item.acceptanceSpec : goal?.contract.acceptance ?? []).map(item => item.criterion)
   if (!criteria.length) return undefined
+  const revisionAccess = goal ? approvedRequirementArtifactAccess(db, item, goal) : undefined
   return { schemaVersion: 1, projectId: item.projectId, goalId: item.goalId, workItemId: item.id,
-    workItemRevision: item.revision, goalRevision: goal?.revision, criteria, criteriaDigest: digest(criteria) }
+    workItemRevision: item.revision, goalRevision: goal?.revision, criteria, criteriaDigest: digest(criteria),
+    ...(revisionAccess ? { revisionAccess } : {}) }
 }

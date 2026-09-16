@@ -13,6 +13,7 @@ import { getPreparedOfficePlan } from './plans'
 import { readScopedOfficeArtifact, type OfficeContext } from './scope'
 import { officeRevisionOutputRelativePath } from './output-path'
 import { withDataLifecycleMutation } from '../data-lifecycle/data-lifecycle-mutation-lock'
+import { taskRuntimeRegistry } from '../task/task-runtime-registry'
 
 export async function buildOfficeRevisionEffectTarget(input: { sessionId?: string; toolInput: Record<string, unknown>; cwd: string }): Promise<OfficeRevisionEffectTarget> {
   if (!input.sessionId) officeError('OFFICE_SCOPE_MISMATCH', 'Office修订缺少可信会话身份。')
@@ -30,6 +31,7 @@ export async function buildOfficeRevisionEffectTarget(input: { sessionId?: strin
   return { kind: 'office_artifact_revision', schemaVersion: 1, artifactKind: loaded.record.kind as OfficeRevisionKind,
     sessionId: input.sessionId, ...loaded.scope, baseArtifactId: loaded.record.artifactId, baseDigest: loaded.record.digest,
     baseVersion: loaded.record.version, lineageId: loaded.record.lineageId, planId: prepared.view.planId,
+    ...(loaded.record.workItemId !== loaded.scope.workItemId ? { revisionRunId: taskRuntimeRegistry.get(input.sessionId)!.id } : {}),
     planDigest: prepared.view.planDigest, operations: structuredClone(prepared.draft.operations), unchangedScopeDigest: prepared.view.unchangedScopeDigest,
     rootPath: output.root, rootIdentity: { device: String(root.dev), inode: String(root.ino) }, relativePath: output.relativePath,
     workspacePath: output.fullPath, expectedSha256: prepared.outputDigest, expectedBytes: prepared.outputBytes,
@@ -47,6 +49,9 @@ export async function regenerateFrozenOfficeRevision(context: OfficeContext, tar
 export async function executeFrozenOfficeRevision(context: OfficeContext, args: Record<string, unknown>, value: EffectTarget | undefined, signal?: AbortSignal, assertWriteAuthorized?: () => void) {
   if (!value || value.kind !== 'office_artifact_revision') officeError('OFFICE_PLAN_MISMATCH', '缺少冻结的Office修订Effect。')
   const target = value, intent = normalizeOfficeIntent(args)
+  if (target.revisionRunId && taskRuntimeRegistry.get(context.meta.id)?.id !== target.revisionRunId) {
+    officeError('OFFICE_SCOPE_MISMATCH', '原稿修订授权不属于当前运行。')
+  }
   assertOfficeRevisionIntent(context.meta.id, args)
   if (context.meta.id !== target.sessionId || ['planId', 'planDigest', 'baseArtifactId', 'baseDigest'].some((key) => intent[key as keyof typeof intent] !== target[key as keyof typeof intent])) officeError('OFFICE_PLAN_MISMATCH', '执行参数与冻结预览不一致。')
   if (context.meta.taskStrategy !== 'execute') officeError('OFFICE_SCOPE_MISMATCH', '修订需要执行策略。')

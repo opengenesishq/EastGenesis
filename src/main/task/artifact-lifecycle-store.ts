@@ -1,3 +1,4 @@
+import { hasApprovedArtifactSupersession } from './requirement-artifact-access'
 import type {
   ArtifactLifecyclePurgeInput,
   ArtifactLifecyclePurgeResult,
@@ -365,13 +366,15 @@ function normalizeRegistration(
     storageKind: content.storageKind, ...storageReference, digest: assertSha256Digest(content.digest),
     sizeBytes: content.sizeBytes, locationId, retention, createdAt
   }
-  return buildRegistrationRecords(input, content, lifecycle)
+  const previous = lifecycle.supersedesId ? findArtifactLifecycle(db, lifecycle.supersedesId) : null
+  return buildRegistrationRecords(input, content, lifecycle, previous)
 }
 
 function buildRegistrationRecords(
   input: ArtifactLifecycleRegistrationInput,
   content: PreparedArtifactContent,
-  lifecycle: ArtifactLifecycleRecord
+  lifecycle: ArtifactLifecycleRecord,
+  previous: ArtifactLifecycleRecord | null
 ) {
   const artifact: WorkflowArtifactInput = {
     id: lifecycle.artifactId, projectId: lifecycle.projectId, goalId: lifecycle.goalId,
@@ -395,7 +398,8 @@ function buildRegistrationRecords(
     id: `artifact-supersedes:${lifecycle.artifactId}:${lifecycle.supersedesId}`,
     fromArtifactId: lifecycle.artifactId, toArtifactId: lifecycle.supersedesId,
     relation: 'supersedes' as const, projectId: lifecycle.projectId,
-    goalId: lifecycle.goalId, workItemId: lifecycle.workItemId,
+    ...(previous?.goalId === lifecycle.goalId ? { goalId: lifecycle.goalId } : {}),
+    ...(previous?.workItemId === lifecycle.workItemId ? { workItemId: lifecycle.workItemId } : {}),
     createdAt: lifecycle.createdAt, updatedAt: lifecycle.createdAt
   } : undefined
   return { artifact, lifecycle, location, edge }
@@ -428,7 +432,8 @@ function assertLineageTransition(db: WorkflowLedgerDatabase, lifecycle: Artifact
   if (previous.projectId !== lifecycle.projectId || previous.lineageId !== lifecycle.lineageId ||
       previous.kind !== lifecycle.kind || previous.version + 1 !== lifecycle.version ||
       (!isProjectPortableExportLineage(lifecycle) &&
-        (previous.workItemId !== lifecycle.workItemId || previous.goalId !== lifecycle.goalId))) {
+        (previous.workItemId !== lifecycle.workItemId || previous.goalId !== lifecycle.goalId) &&
+        !hasApprovedArtifactSupersession(db, previous, lifecycle))) {
     throw new WorkflowLedgerCorruptionError(`artifact ${lifecycle.artifactId} supersession lineage is incompatible`)
   }
   if (findSuccessor(db, previous.artifactId)) {
