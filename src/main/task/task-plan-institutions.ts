@@ -1,6 +1,7 @@
 import type { WorkItemType } from '../../shared/project-workspace-types'
 import type { TaskPlanDraftInput, TaskPlanInstitutionResponsibility, TaskPlanStepInput, TaskPlanVersion } from '../../shared/task-plan-types'
-import { projectInstitutionTemplate, type ProjectInstitutionTemplateRef } from '../../shared/project-institution-template'
+import { normalizeProjectInstitutionRoleMappings, projectInstitutionTemplate, type ProjectInstitutionTemplateRef,
+  type ProjectInstitutionRoleMapping } from '../../shared/project-institution-template'
 
 const INSTITUTION_BY_WORK_TYPE: Record<WorkItemType, string> = {
   research: 'hanlinyuan', analysis: 'hanlinyuan',
@@ -10,17 +11,23 @@ const INSTITUTION_BY_WORK_TYPE: Record<WorkItemType, string> = {
 }
 
 /** Enrich only the steps already planned. Never creates an Agent, route or extra approval. */
-export function bindTaskPlanInstitutions(draft: TaskPlanDraftInput, ref?: ProjectInstitutionTemplateRef): TaskPlanDraftInput {
+export function bindTaskPlanInstitutions(draft: TaskPlanDraftInput, ref?: ProjectInstitutionTemplateRef,
+  roleMappings: readonly ProjectInstitutionRoleMapping[] = []): TaskPlanDraftInput {
   const { institutionTemplate: _untrustedTemplate, ...plain } = draft
   const steps = plain.steps.map(({ institution: _untrustedInstitution, ...step }) => step)
   const template = projectInstitutionTemplate(ref)
-  if (template.ref.templateId === 'legacy-compatible') return { ...plain, steps }
+  const mappings = normalizeProjectInstitutionRoleMappings(roleMappings, template.ref)
+  if (template.ref.templateId === 'legacy-compatible' && !mappings.length) return { ...plain, steps }
   return {
     ...plain,
     institutionTemplate: { ...template.ref },
     steps: steps.map((step) => {
       const workItemType = institutionWorkItemType(step)
-      const role = template.roles.find((entry) => entry.id === INSTITUTION_BY_WORK_TYPE[workItemType])!
+      const mapped = mappings.find(mapping => mapping.sourceRoleId === step.role)
+      const role = template.roles.find(entry => entry.id === mapped?.institutionId) ??
+        (template.ref.templateId === 'legacy-compatible' ? template.roles.find(entry => entry.id === step.role) : undefined) ??
+        template.roles.find(entry => entry.id === INSTITUTION_BY_WORK_TYPE[workItemType]) ??
+        template.roles.find(entry => entry.id === 'neige')!
       return { ...step, workItemType, institution: { id: role.id, label: role.name, duty: role.duty } }
     })
   }

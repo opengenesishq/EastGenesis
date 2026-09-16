@@ -27,8 +27,8 @@ export async function enrichCanonicalTaskPlanInstitutions(
   if (!parent || parent.projectId !== meta.workspaceId || (meta.goalId !== undefined && parent.goalId !== meta.goalId)) {
     throw new Error('机构计划与当前项目任务归属不一致')
   }
-  const { template } = await readGoalInstitutionContext(rootDir, meta.workspaceId, parent.goalId, parent.id)
-  return bindTaskPlanInstitutions(draft, template)
+  const { template, roleMappings } = await readGoalInstitutionContext(rootDir, meta.workspaceId, parent.goalId, parent.id)
+  return bindTaskPlanInstitutions(draft, template, roleMappings)
 }
 
 /** Read host-owned inputs only. Compilation never opens resources or starts a Runtime. */
@@ -54,6 +54,7 @@ export async function buildCanonicalMissionTaskPlan(
     readGoalInstitutionContext(rootDir, workspaceId, goalId)
   ])
   const { workspace, template } = institutionContext
+  const roleMappings = options.legacyInstitutions ? [] : institutionContext.roleMappings
   if (!workspace || workspace.status !== 'active') throw new Error('Mission 所属 Project 不存在或不可用')
   if (!goal || goal.projectId !== workspaceId || goal.revision !== input.expectedGoalRevision) {
     throw new Error('Mission Goal 归属或 revision 已变化，请刷新后重新生成计划')
@@ -97,7 +98,9 @@ export async function buildCanonicalMissionTaskPlan(
     businessLineName: '产品发布府',
     ...(institutionTemplate ? { institutionTemplate } : {})
   })
-  const draft = missionCompilationToTaskPlanDraft(mission)
+  const compiled = missionCompilationToTaskPlanDraft(mission)
+  // Empty historical mappings preserve the exact compiler output and its approval digest.
+  const draft = roleMappings.length ? bindTaskPlanInstitutions(compiled, template, roleMappings) : compiled
   return {
     ...draft,
     riskLevel: contract.riskLevel,
@@ -128,6 +131,7 @@ export async function buildCanonicalMissionTaskPlan(
         workspaceId, goalId, workItemId, businessLineId, goalRevision: goal.revision,
         contract, resources: workspace.resources, rulesRef: workspace.rulesRef,
         budgetPolicy: workspace.budgetPolicy, permissionPolicy: workspace.permissionPolicy,
+        ...(roleMappings.length ? { roleMappings } : {}),
         ...(institutionTemplate ? { institutionTemplate } : {})
       })
     }

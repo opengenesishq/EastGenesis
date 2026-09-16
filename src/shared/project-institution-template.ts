@@ -110,9 +110,14 @@ export interface ProjectInstitutionMigrationPreview {
 
 export const PROJECT_INSTITUTION_MIGRATION_EVENT = 'institution-template-migrated'
 
+/** A future task's existing role ID may project to an institution; never an identity or permission rewrite. */
+export interface ProjectInstitutionRoleMapping { sourceRoleId: string; institutionId: string }
+export interface ProjectInstitutionRoleCandidate { id: string; label: string; recordedWorkCount: number }
+
 export interface ProjectInstitutionMigrationPreviewInput {
   scope: 'future_goals'
   target: ProjectInstitutionTemplateRef
+  roleMappings?: ProjectInstitutionRoleMapping[]
 }
 
 export interface ProjectInstitutionMigrationApplyInput extends ProjectInstitutionMigrationPreviewInput {
@@ -131,6 +136,9 @@ export interface ProjectInstitutionMigrationView extends ProjectInstitutionMigra
   preservedWorkItemIds: string[]
   recordedGoalCount: number
   canApply: boolean
+  currentRoleMappings: ProjectInstitutionRoleMapping[]
+  roleMappings: ProjectInstitutionRoleMapping[]
+  roleCandidates: ProjectInstitutionRoleCandidate[]
 }
 
 export interface ProjectInstitutionMigrationEventPayload {
@@ -142,6 +150,8 @@ export interface ProjectInstitutionMigrationEventPayload {
   preservedWorkItemIds: string[]
   expectedWorkspaceRevision: number
   previewDigest: string
+  fromRoleMappings?: ProjectInstitutionRoleMapping[]
+  toRoleMappings?: ProjectInstitutionRoleMapping[]
 }
 
 export interface ProjectInstitutionMigrationResult {
@@ -155,12 +165,44 @@ export function isProjectInstitutionMigrationEventPayload(value: unknown): value
   const payload = value as Partial<ProjectInstitutionMigrationEventPayload>
   return payload.schemaVersion === 1 && payload.scope === 'future_goals' &&
     isProjectInstitutionTemplateRef(payload.fromTemplate) && isProjectInstitutionTemplateRef(payload.toTemplate) &&
-    payload.fromTemplate.templateId !== payload.toTemplate.templateId &&
+    validMappingFields(payload) &&
+    (payload.fromTemplate.templateId !== payload.toTemplate.templateId ||
+      !sameProjectInstitutionRoleMappings(payload.fromRoleMappings ?? [], payload.toRoleMappings ?? [])) &&
     Number.isSafeInteger(payload.expectedWorkspaceRevision) && payload.expectedWorkspaceRevision! >= 1 &&
     typeof payload.previewDigest === 'string' && /^[a-f0-9]{64}$/.test(payload.previewDigest) &&
     isPreservedInstitutionIds(payload.preservedGoalIds) && isPreservedInstitutionIds(payload.preservedWorkItemIds) &&
     Object.keys(payload).every((key) => ['schemaVersion', 'scope', 'fromTemplate', 'toTemplate',
-      'preservedGoalIds', 'preservedWorkItemIds', 'expectedWorkspaceRevision', 'previewDigest'].includes(key))
+      'preservedGoalIds', 'preservedWorkItemIds', 'expectedWorkspaceRevision', 'previewDigest', 'fromRoleMappings', 'toRoleMappings'].includes(key))
+}
+
+export function normalizeProjectInstitutionRoleMappings(value: unknown, template: ProjectInstitutionTemplateRef): ProjectInstitutionRoleMapping[] {
+  if (!Array.isArray(value) || value.length > 64) throw new Error('机构角色映射必须是最多 64 项的列表。')
+  const roles = projectInstitutionTemplate(template).roles
+  const ids = new Set<string>()
+  return value.map((item: unknown) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('机构角色映射无效。')
+    const mapping = item as ProjectInstitutionRoleMapping
+    if (Object.keys(mapping).some(key => !['sourceRoleId', 'institutionId'].includes(key)) ||
+      typeof mapping.sourceRoleId !== 'string' || !mapping.sourceRoleId || mapping.sourceRoleId !== mapping.sourceRoleId.trim() ||
+      mapping.sourceRoleId.length > 200 || /[\x00-\x1f\x7f]/.test(mapping.sourceRoleId) || ids.has(mapping.sourceRoleId) ||
+      !roles.some(role => role.id === mapping.institutionId && role.participation !== 'user')) throw new Error('角色标识重复、无效，或目标机构不允许承接任务职责。')
+    ids.add(mapping.sourceRoleId)
+    return { sourceRoleId: mapping.sourceRoleId, institutionId: mapping.institutionId }
+  }).sort((left, right) => left.sourceRoleId < right.sourceRoleId ? -1 : left.sourceRoleId > right.sourceRoleId ? 1 : 0)
+}
+
+function validMappingFields(payload: Partial<ProjectInstitutionMigrationEventPayload>): boolean {
+  if (payload.fromRoleMappings === undefined && payload.toRoleMappings === undefined) return true
+  try {
+    const from = normalizeProjectInstitutionRoleMappings(payload.fromRoleMappings, payload.fromTemplate!)
+    const to = normalizeProjectInstitutionRoleMappings(payload.toRoleMappings, payload.toTemplate!)
+    return sameProjectInstitutionRoleMappings(from, payload.fromRoleMappings!) && sameProjectInstitutionRoleMappings(to, payload.toRoleMappings!)
+  } catch { return false }
+}
+
+function sameProjectInstitutionRoleMappings(left: readonly ProjectInstitutionRoleMapping[], right: readonly ProjectInstitutionRoleMapping[]): boolean {
+  return left.length === right.length && left.every((mapping, index) =>
+    mapping.sourceRoleId === right[index].sourceRoleId && mapping.institutionId === right[index].institutionId)
 }
 
 function isPreservedInstitutionIds(value: unknown): value is string[] {

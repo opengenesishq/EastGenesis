@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import type { TaskPlanRiskLevel, TaskPlanStateView, TaskPlanVersion } from '../../../../shared/types'
 import type { useT } from '../../i18n'
+import { useStore } from '../../store'
 import {
   lineList,
   newPlanStep,
@@ -63,6 +64,7 @@ function TaskPlanObjective({ t, form, setForm, canEdit }: EditorSectionProps): R
 }
 
 function TaskPlanStepsEditor({ t, form, setForm, canEdit }: EditorSectionProps): React.JSX.Element {
+  const english = useStore(state => state.settings.language) === 'en'
   const stepIds = useMemo(
     () => new Set(form.steps.map((step) => step.id.trim()).filter(Boolean)),
     [form.steps]
@@ -124,6 +126,18 @@ function TaskPlanStepsEditor({ t, form, setForm, canEdit }: EditorSectionProps):
             <input type="number" min="0" step="0.01" value={step.estimatedCostUsd} disabled={!canEdit}
               onChange={(event) => updatePlanStep(setForm, index, { estimatedCostUsd: event.target.value })} />
           </label>
+          <details className="task-plan-history" style={{ gridColumn: '1 / -1' }}>
+            <summary>{english ? 'Role responsibility (optional)' : '角色职责（可选）'}{step.role ? ` · ${step.role}` : ''}</summary>
+            <label className="task-plan-field">
+              <span>{english ? 'Original role ID' : '原职责角色 ID'}</span>
+              <input data-task-plan-step-role={index} value={step.role ?? ''} maxLength={200} disabled={!canEdit}
+                placeholder={english ? 'Use automatic assignment' : '留空使用自动分工'}
+                onChange={event => updatePlanStep(setForm, index, { role: event.target.value || undefined })}
+                onBlur={event => updatePlanStep(setForm, index, { role: event.target.value.trim() || undefined })} />
+            </label>
+            <p>{english ? 'Uses the institution mappings recorded for this goal. Changing this ID does not grant tools, command access or data permissions.'
+              : '使用此目标已记录的机构映射。填写角色 ID 不会授予工具、命令或数据权限。'}</p>
+          </details>
         </div>
       ))}
     </div>

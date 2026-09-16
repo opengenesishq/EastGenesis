@@ -2,10 +2,11 @@ import type { ProjectWorkspace, ProjectWorkspaceEvent } from '../../shared/proje
 import {
   PROJECT_INSTITUTION_MIGRATION_EVENT,
   projectInstitutionTemplate,
-  type ProjectInstitutionTemplateRef
+  type ProjectInstitutionTemplateRef,
+  type ProjectInstitutionRoleMapping
 } from '../../shared/project-institution-template'
 import { openProjectWorkspaceStore } from './store'
-import { assertInstitutionMigrationEvents } from './institution-migration'
+import { assertInstitutionMigrationEvents, currentInstitutionRoleMappings } from './institution-migration'
 
 /** Migration changes future Goals. The first migration covering an existing Goal freezes its prior template. */
 export function resolveGoalInstitutionTemplate(
@@ -14,6 +15,15 @@ export function resolveGoalInstitutionTemplate(
   goalId?: string,
   workItemId?: string
 ): ProjectInstitutionTemplateRef {
+  return resolveGoalInstitutionSettings(workspace, events, goalId, workItemId).template
+}
+
+export function resolveGoalInstitutionSettings(
+  workspace: ProjectWorkspace,
+  events: readonly ProjectWorkspaceEvent[],
+  goalId?: string,
+  workItemId?: string
+): { template: ProjectInstitutionTemplateRef; roleMappings: ProjectInstitutionRoleMapping[] } {
   if (!goalId?.trim() && !workItemId?.trim()) throw new Error('机构职责解析缺少原任务身份')
   const migrations = events.filter((event) => event.projectId === workspace.id && event.kind === PROJECT_INSTITUTION_MIGRATION_EVENT)
     .sort((left, right) => left.revision - right.revision)
@@ -22,13 +32,17 @@ export function resolveGoalInstitutionTemplate(
     ? (event.payload.preservedGoalIds as string[]).includes(goalId)
     : (event.payload.preservedWorkItemIds as string[]).includes(workItemId!))
   const template = original?.payload.fromTemplate as ProjectInstitutionTemplateRef | undefined
-  return { ...(template ?? projectInstitutionTemplate(workspace.institutionTemplate).ref) }
+  const roleMappings = original ? (original.payload.fromRoleMappings ?? []) as ProjectInstitutionRoleMapping[]
+    : currentInstitutionRoleMappings(workspace, migrations)
+  return { template: { ...(template ?? projectInstitutionTemplate(workspace.institutionTemplate).ref) },
+    roleMappings: roleMappings.map(mapping => ({ ...mapping })) }
 }
 
 /** Read the current project and its migration events from one durable snapshot. */
 export async function readGoalInstitutionContext(rootDir: string, projectId: string, goalId?: string, workItemId?: string): Promise<{
   workspace: ProjectWorkspace
   template: ProjectInstitutionTemplateRef
+  roleMappings: ProjectInstitutionRoleMapping[]
 }> {
   const state = await (await openProjectWorkspaceStore(rootDir)).getState()
   const workspace = state.workspaces.find((entry) => entry.id === projectId)
@@ -39,5 +53,5 @@ export async function readGoalInstitutionContext(rootDir: string, projectId: str
   if (workItemId && !state.workItems.some((item) => item.id === workItemId && item.projectId === projectId && (!goalId || item.goalId === goalId))) {
     throw new Error('机构职责与原任务归属不一致')
   }
-  return { workspace, template: resolveGoalInstitutionTemplate(workspace, state.events, goalId, workItemId) }
+  return { workspace, ...resolveGoalInstitutionSettings(workspace, state.events, goalId, workItemId) }
 }

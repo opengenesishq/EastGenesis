@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path'
 import type { Engine } from '../src/main/engine'
 import type { SessionMeta } from '../src/shared/types'
 import { DEFAULT_PROJECT_INSTITUTION_TEMPLATE, LEGACY_PROJECT_INSTITUTION_TEMPLATE,
-  PROJECT_INSTITUTION_MIGRATION_EVENT, type ProjectInstitutionTemplateRef } from '../src/shared/project-institution-template'
+  PROJECT_INSTITUTION_MIGRATION_EVENT, type ProjectInstitutionTemplateRef, type ProjectInstitutionRoleMapping } from '../src/shared/project-institution-template'
 import { openProjectWorkspaceStore } from '../src/main/project-workspace/store'
 import { openProjectWorkspaceCommandService } from '../src/main/project-workspace/command-service'
 import { createProjectWorkspaceReadService } from '../src/main/project-workspace/canonical-read-service'
@@ -71,9 +71,10 @@ async function main() {
       runs: await listTaskRuns(id, root),
       ledgerRuns: (await listPersistedWorkflowLedger({ projectId, limit: 500 }, root)).runs.items.filter(run => run.sessionId === id)
     })
-    const apply = async (target: ProjectInstitutionTemplateRef) => {
-      const preview = await workspace.previewInstitutionMigration(projectId, { scope: 'future_goals', target })
+    const apply = async (target: ProjectInstitutionTemplateRef, roleMappings?: ProjectInstitutionRoleMapping[]) => {
+      const preview = await workspace.previewInstitutionMigration(projectId, { scope: 'future_goals', target, roleMappings })
       return { preview, input: { scope: 'future_goals' as const, target,
+        roleMappings: preview.roleMappings,
         expectedWorkspaceRevision: preview.expectedWorkspaceRevision, previewDigest: preview.previewDigest } }
     }
 
@@ -199,6 +200,98 @@ async function main() {
       await commands.updateWorkItem(item.id, { description: 'changed after preview' }, { expectedRevision: item.revision })
       await assert.rejects(workspace.applyInstitutionMigration(projectId, itemPreview.input), /预览|变化|过期|stale|digest/)
       assert.deepEqual((await workspace.getWorkspace(projectId))!.institutionTemplate, LEGACY_PROJECT_INSTITUTION_TEMPLATE)
+    })
+    const customRole = await commands.createWorkItem({ projectId, title: '既有自定义职责', type: 'review',
+      role: 'custom-inspector', businessLineId: 'studio' })
+    const mappedRoles = [
+      { sourceRoleId: 'research', institutionId: 'qintianjian' },
+      { sourceRoleId: 'xichang', institutionId: 'duchayuan' },
+      { sourceRoleId: 'custom-inspector', institutionId: 'dalisi' }
+    ]
+    await check('explicit old and custom role mappings appear in a read-only preview and do not rewrite permissions or work', async () => {
+      const before = await workspace.exportManifest(projectId)
+      const beforeBytes = readFileSync(workspace.filePath, 'utf8')
+      const next = await apply(DEFAULT_PROJECT_INSTITUTION_TEMPLATE, mappedRoles)
+      assert(next.preview.roleCandidates.some(role => role.id === 'custom-inspector' && role.recordedWorkCount === 1))
+      assert.deepEqual(next.preview.currentRoleMappings, [])
+      assert.equal(readFileSync(workspace.filePath, 'utf8'), beforeBytes)
+      await workspace.applyInstitutionMigration(projectId, next.input)
+      assert.deepEqual(await reads.getWorkItem(customRole.id), customRole)
+      assert.deepEqual((await workspace.getWorkspace(projectId))!.permissionPolicy, before.workspace.permissionPolicy)
+      assert.deepEqual((await readGoalInstitutionContext(root, projectId, first.goal.id)).roleMappings, [])
+    })
+    const mappedFirst = await createGoal('mapped-first')
+    const mappedBefore = await snapshotTask(mappedFirst.meta.id, mappedFirst.goal.id)
+    await check('new Mission and manual custom role plans consume mappings while executor roles and work identities stay intact', async () => {
+      const step = mappedFirst.plan.currentVersion!.steps[0]
+      assert.equal(step.role, 'research')
+      assert.equal(step.executionRole, 'general')
+      assert.equal(step.institution!.id, 'qintianjian')
+      const draft = { objective: '检查记录', steps: [{ id: 'review', title: '检查记录', role: 'custom-inspector', executionRole: 'review' as const }] }
+      const mapped = await enrichCanonicalTaskPlanInstitutions(mappedFirst.meta, draft, root)
+      assert.equal(mapped.steps[0].role, 'custom-inspector')
+      assert.equal(mapped.steps[0].executionRole, 'review')
+      assert.equal(mapped.steps[0].institution!.id, 'dalisi')
+      const old = await enrichCanonicalTaskPlanInstitutions(first.meta, draft, root)
+      assert.equal(old.steps[0].institution, undefined)
+      const dag = approvedTaskPlanToDag(mappedFirst.meta.id, mappedFirst.plan.currentVersion!, mappedFirst.plan.projection)
+      assert.equal(dag.tasks[0].role, 'general')
+      assert(dag.tasks[0].prompt.includes('钦天监'))
+      await coordinator.assertExecution(mappedFirst.meta, 'execute mapped Mission')
+    })
+    await check('mapping-only migration is digest-bound, idempotent, and freezes existing Goals across later mapping versions', async () => {
+      const next = await apply(DEFAULT_PROJECT_INSTITUTION_TEMPLATE, [{ sourceRoleId: 'research', institutionId: 'hanlinyuan' }])
+      assert.equal(next.preview.canApply, true)
+      assert.deepEqual(next.preview.currentRoleMappings, (await readGoalInstitutionContext(root, projectId, mappedFirst.goal.id)).roleMappings)
+      const changedInput = { ...next.input, roleMappings: [{ sourceRoleId: 'research', institutionId: 'gongbu' }] }
+      await assert.rejects(workspace.applyInstitutionMigration(projectId, changedInput), /预览|变化/)
+      await workspace.applyInstitutionMigration(projectId, next.input)
+      const saved = readFileSync(workspace.filePath, 'utf8')
+      assert.equal((await workspace.applyInstitutionMigration(projectId, next.input)).replayed, true)
+      assert.equal(readFileSync(workspace.filePath, 'utf8'), saved)
+      await assert.rejects(workspace.applyInstitutionMigration(projectId, changedInput), /同一机构迁移预览/)
+      assert.deepEqual(await snapshotTask(mappedFirst.meta.id, mappedFirst.goal.id), mappedBefore)
+      await coordinator.assertExecution(mappedFirst.meta, 'continue mapped Mission after migration')
+      const mappedSecond = await createGoal('mapped-second')
+      assert.equal(mappedSecond.plan.currentVersion!.steps[0].institution!.id, 'hanlinyuan')
+      const reset = await apply(DEFAULT_PROJECT_INSTITUTION_TEMPLATE, [])
+      await workspace.applyInstitutionMigration(projectId, reset.input)
+      assert.equal((await readGoalInstitutionContext(root, projectId, mappedFirst.goal.id)).roleMappings.length, 3)
+      assert.deepEqual((await readGoalInstitutionContext(root, projectId, mappedSecond.goal.id)).roleMappings,
+        [{ sourceRoleId: 'research', institutionId: 'hanlinyuan' }])
+      await coordinator.assertExecution(mappedSecond.meta, 'continue second mapped Mission')
+    })
+    await check('legacy templates accept optional mappings for future Goals and mapping history survives project import', async () => {
+      const next = await apply(LEGACY_PROJECT_INSTITUTION_TEMPLATE, [{ sourceRoleId: 'verify', institutionId: 'dongchang' }])
+      await workspace.applyInstitutionMigration(projectId, next.input)
+      const legacyMapped = await createGoal('mapped-legacy')
+      assert.equal(legacyMapped.plan.currentVersion!.institutionTemplate!.templateId, 'legacy-compatible')
+      assert.equal(legacyMapped.plan.currentVersion!.steps.at(-1)!.institution!.id, 'dongchang')
+      await coordinator.assertExecution(legacyMapped.meta, 'execute legacy mapped Mission')
+      const manifest = await workspace.exportManifest(projectId)
+      const importedRoot = join(root, 'imported-role-mappings')
+      const imported = await openProjectWorkspaceStore(importedRoot)
+      await imported.importProjectSlice(manifest)
+      for (const goal of [first, mappedFirst, legacyMapped]) {
+        const source = await readGoalInstitutionContext(root, projectId, goal.goal.id)
+        const target = await readGoalInstitutionContext(importedRoot, projectId, goal.goal.id)
+        assert.deepEqual(target.roleMappings, source.roleMappings)
+        assert.deepEqual(target.template, source.template)
+      }
+      const oldFormat = structuredClone(manifest)
+      const firstEvent = oldFormat.events.find(event => event.kind === PROJECT_INSTITUTION_MIGRATION_EVENT)!
+      delete firstEvent.payload.fromRoleMappings; delete firstEvent.payload.toRoleMappings
+      await (await openProjectWorkspaceStore(join(root, 'imported-legacy-receipt'))).importProjectSlice(oldFormat)
+      const corrupt = structuredClone(manifest)
+      corrupt.events.filter(event => event.kind === PROJECT_INSTITUTION_MIGRATION_EVENT).at(-1)!.payload.toRoleMappings =
+        [{ sourceRoleId: 'verify', institutionId: 'huangdi' }]
+      await assert.rejects((await openProjectWorkspaceStore(join(root, 'bad-role-mapping'))).importProjectSlice(corrupt), /机构迁移记录损坏/)
+      for (const roleMappings of [
+        [{ sourceRoleId: 'xichang', institutionId: 'huangdi' }],
+        [{ sourceRoleId: 'xichang', institutionId: 'unknown-institution' }],
+        [{ sourceRoleId: 'xichang', institutionId: 'neige' }, { sourceRoleId: 'xichang', institutionId: 'gongbu' }]
+      ]) await assert.rejects(workspace.previewInstitutionMigration(projectId,
+        { scope: 'future_goals', target: DEFAULT_PROJECT_INSTITUTION_TEMPLATE, roleMappings }), /无效|重复|不允许/)
     })
     await check('historical template retention does not bypass actual resource or Goal changes', async () => {
       const current = (await workspace.getWorkspace(projectId))!

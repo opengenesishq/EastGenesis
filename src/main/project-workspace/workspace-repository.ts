@@ -93,7 +93,8 @@ export class WorkspaceRepository {
         const current = projectInstitutionTemplate(workspace.institutionTemplate).ref
         if (current.templateId !== next.templateId && (
           state.goals.some((goal) => goal.projectId === id) ||
-          state.workItems.some((item) => item.projectId === id)
+          state.workItems.some((item) => item.projectId === id) ||
+          state.events.some((event) => event.projectId === id && event.kind === PROJECT_INSTITUTION_MIGRATION_EVENT)
         )) {
           throw new ProjectWorkspaceError('institution_migration_preview_only',
             '已有任务的项目必须先预览机构迁移，再显式应用到后续新目标。')
@@ -132,10 +133,11 @@ export class WorkspaceRepository {
         if (preview.previewDigest !== input.previewDigest) {
           throw new ProjectWorkspaceError('institution_migration_preview_stale', '项目目标或任务已变化，请刷新机构迁移预览。')
         }
-        if (!preview.canApply) throw new ProjectWorkspaceError('institution_migration_unchanged', '当前项目已使用目标机构模板。')
+        if (!preview.canApply) throw new ProjectWorkspaceError('institution_migration_unchanged', '目标机构模板与角色映射均未变化。')
         const payload: ProjectInstitutionMigrationEventPayload = {
           schemaVersion: 1, scope: 'future_goals', fromTemplate: clone(preview.current.ref), toTemplate: clone(input.target),
           preservedGoalIds: preview.preservedGoalIds, preservedWorkItemIds: preview.preservedWorkItemIds,
+          fromRoleMappings: preview.currentRoleMappings, toRoleMappings: preview.roleMappings,
           expectedWorkspaceRevision: input.expectedWorkspaceRevision, previewDigest: input.previewDigest
         }
         workspace.institutionTemplate = clone(input.target)
