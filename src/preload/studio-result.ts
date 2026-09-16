@@ -1,13 +1,14 @@
 import { ipcRenderer } from 'electron'
 import type { StudioAuditTimelineQuery, StudioResultApi } from '../shared/studio-result-types'
-import type { StudioResultRerunInput } from '../shared/studio-result-rerun-types'
+import type { StudioResultRerunConfirmInput, StudioResultRerunInput } from '../shared/studio-result-rerun-types'
 
-const invoke = (action: 'get' | 'audit' | 'export' | 'save' | 'check_files' | 'rerun_preview', sessionId: string, query?: StudioAuditTimelineQuery | StudioResultRerunInput) =>
+const invoke = (action: 'get' | 'audit' | 'export' | 'save' | 'check_files' | 'rerun_preview' | 'rerun_confirm', sessionId: string, query?: StudioAuditTimelineQuery | StudioResultRerunInput | StudioResultRerunConfirmInput) =>
   ipcRenderer.invoke('appFeatures:invoke', 'studio-result', action, sessionId, query)
 
 export const studioResultApi: StudioResultApi = {
   checkStudioResultFiles: (sessionId: string) => invoke('check_files', sessionId),
   previewStudioResultRerun: (sessionId: string, input: StudioResultRerunInput) => invoke('rerun_preview', sessionId, input),
+  confirmStudioResultRerun: (sessionId: string, input: StudioResultRerunConfirmInput) => invoke('rerun_confirm', sessionId, input),
   getStudioResultSnapshot: (sessionId: string) => invoke('get', sessionId),
   queryStudioAuditTimeline: (sessionId: string, query?: StudioAuditTimelineQuery) =>
     invoke('audit', sessionId, query),

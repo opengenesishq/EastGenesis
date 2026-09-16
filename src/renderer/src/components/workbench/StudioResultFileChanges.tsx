@@ -35,6 +35,18 @@ export default function StudioResultFileChanges({ sessionId, snapshot, language,
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
     finally { setBusy(false) }
   }
+  const confirmRerun = async (): Promise<void> => {
+    if (!preview || preview.state !== 'ready') return
+    setBusy(true); setError('')
+    try {
+      const result = await window.agentDesk.confirmStudioResultRerun(sessionId, {
+        planDigest: preview.planDigest, workItemId: preview.sourceWorkItemId, previewDigest: preview.previewDigest
+      })
+      setError(result.state === 'started' ? '' : (result.reason ?? '局部重跑未启动。'))
+      await onRefresh()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+    finally { setBusy(false) }
+  }
   return (
     <section className="studio-result-section" data-studio-result-file-changes>
       <div className="studio-result-row-head">
@@ -73,6 +85,7 @@ export default function StudioResultFileChanges({ sessionId, snapshot, language,
           <p>{preview.state === 'ready' ? (en ? 'Ready after explicit child-task authorization.' : '预览可用；仍需对子任务明确授权后才能执行。') : preview.blockedReasons.join('；')}</p>
           {preview.outputs.length > 0 && <ul>{preview.outputs.map(file => <li key={file.artifactId}>{file.relativeOutputPath}</li>)}</ul>}
           {preview.protectedFiles.length > 0 && <p>{en ? 'Protected edited files: ' : '受保护的人工修改文件：'}{preview.protectedFiles.map(file => file.path).join('、')}</p>}
+          {preview.state === 'ready' && <button type="button" disabled={busy} onClick={() => void confirmRerun()}>{en ? 'Confirm and start repair task' : '确认并启动修复任务'}</button>}
         </div>}
         {changedFiles.length > 0 && <p className="studio-result-muted">{en ? 'No files were overwritten and no tasks were restarted.' : '本次检查未覆盖文件，也未重新启动任务。'}</p>}
       </div>}

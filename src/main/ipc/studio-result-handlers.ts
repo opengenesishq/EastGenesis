@@ -17,10 +17,10 @@ import { assertTrustedWorkflowLedgerSender } from './workflow-ledger-handlers'
 import { registerSessionProducedArtifacts } from '../task/session-artifact-producer'
 import { buildPortableDeliveryPackage, safeFileStem } from '../studio-result/studio-result-package'
 import { checkStudioResultFiles } from '../studio-result/studio-result-file-changes'
-import { buildStudioResultRerunPreview } from '../studio-result/studio-result-rerun-preview'
-import type { StudioResultRerunInput } from '../../shared/studio-result-rerun-types'
+import { buildStudioResultRerunPreview, confirmStudioResultRerun } from '../studio-result/studio-result-rerun-preview'
+import type { StudioResultRerunConfirmInput, StudioResultRerunInput } from '../../shared/studio-result-rerun-types'
 
-type StudioResultAction = 'get' | 'audit' | 'export' | 'save' | 'check_files' | 'rerun_preview'
+type StudioResultAction = 'get' | 'audit' | 'export' | 'save' | 'check_files' | 'rerun_preview' | 'rerun_confirm'
 
 export async function handleStudioResultIpc(
   event: IpcMainInvokeEvent,
@@ -41,6 +41,17 @@ export async function handleStudioResultIpc(
     const session = sessionManager.list().find(candidate => candidate.id === sessionId)
     if (!session) throw new Error(`Studio result Session was not found: ${sessionId}`)
     return buildStudioResultRerunPreview(app.getPath('userData'), session, rerunInput(rawQuery))
+  }
+  if (action === 'rerun_confirm') {
+    const session = sessionManager.list().find(candidate => candidate.id === sessionId)
+    if (!session) throw new Error(`Studio result Session was not found: ${sessionId}`)
+    const input = rerunConfirmInput(rawQuery)
+    return confirmStudioResultRerun(app.getPath('userData'), session, input, {
+      getSession: id => sessionManager.get(id),
+      requireAuthority: id => sessionManager.requireTaskExecutionAuthority(id),
+      createManaged: (options, lifecycle) => sessionManager.createManaged(options, { beforeStart: async meta => lifecycle.beforeStart(meta) }),
+      send: (id, prompt) => sessionManager.send(id, prompt)
+    })
   }
   if (action === 'audit') return studioAuditTimelineForSession(sessionId, auditQuery(rawQuery))
   const exported = buildStudioResultExport(await studioResultSnapshotForSession(sessionId))
@@ -171,7 +182,7 @@ async function saveStudioResult(
 }
 
 function normalizeAction(value: unknown): StudioResultAction {
-  if (value === 'get' || value === 'audit' || value === 'export' || value === 'save' || value === 'check_files' || value === 'rerun_preview') return value
+  if (value === 'get' || value === 'audit' || value === 'export' || value === 'save' || value === 'check_files' || value === 'rerun_preview' || value === 'rerun_confirm') return value
   throw new Error('Studio result action is invalid')
 }
 
@@ -181,6 +192,15 @@ function rerunInput(value: unknown): StudioResultRerunInput {
   if (Object.keys(record).some(key => !['planDigest', 'workItemId'].includes(key)) ||
       typeof record.planDigest !== 'string' || typeof record.workItemId !== 'string') throw new Error('局部重跑预览参数无效。')
   return { planDigest: record.planDigest, workItemId: record.workItemId }
+}
+
+function rerunConfirmInput(value: unknown): StudioResultRerunConfirmInput {
+  const input = rerunInput(value)
+  const previewDigest = (value as Record<string, unknown>).previewDigest
+  if (typeof previewDigest !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(previewDigest) || Object.keys(value as object).some(key => !['planDigest', 'workItemId', 'previewDigest'].includes(key))) {
+    throw new Error('局部重跑确认参数无效。')
+  }
+  return { ...input, previewDigest }
 }
 
 function auditQuery(value: unknown): StudioAuditTimelineQuery {
