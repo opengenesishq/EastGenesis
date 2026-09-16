@@ -22,6 +22,8 @@ const FilePanel = lazy(() => import('../workbench/FilePanel'))
 const DiffPanel = lazy(() => import('../workbench/DiffPanel'))
 const StudioResultPanel = lazy(() => import('../workbench/StudioResultPanel'))
 type Surface = 'chat' | 'logs' | 'files' | 'diff' | 'results'
+type WorkSelection = { kind: 'session'; sessionId: string }
+  | { kind: 'delivery'; projectId: string; workItemId?: string }
 
 export default function PalaceWorkPanel({ action, initialContext, onClose, onAction, onEdict }: {
   action: Exclude<PalaceAction, 'edict'>
@@ -38,10 +40,13 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
   const panel = useRef<HTMLElement>(null)
   const [surface, setSurface] = useState<Surface>(action === 'inspect' ? 'logs' : 'chat')
   const [roleId, setRoleId] = useState(initialContext?.roleId ?? 'all')
-  const [projectId, setProjectId] = useState(initialContext?.projectId ?? preferredProjectId ?? '')
-  const [deliveryWorkItemId, setDeliveryWorkItemId] = useState<string | undefined>(initialContext?.workItemId)
+  const [workSelection, setWorkSelection] = useState<WorkSelection>(() => {
+    const sessionId = initialContext ? initialContext.sessionId : activeId
+    if (sessionId) return { kind: 'session', sessionId }
+    return { kind: 'delivery', projectId: initialContext?.projectId ?? (initialContext ? '' : preferredProjectId ?? ''),
+      workItemId: initialContext?.projectId ? initialContext.workItemId : undefined }
+  })
   const [deliveryOpen, setDeliveryOpen] = useState(action === 'approve' || action === 'desk')
-  const [sessionId, setSessionId] = useState(initialContext ? initialContext.sessionId ?? '' : activeId ?? '')
   const [runRoute, setRunRoute] = useState<string>()
   const [openingTaskId, setOpeningTaskId] = useState<string>()
   const [navigationError, setNavigationError] = useState('')
@@ -51,7 +56,11 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
   // Embedded ChatView/FilePanel use activeId. Mount them only when it matches
   // this panel's explicit selection, so a global selection change cannot send
   // an approval, edit or instruction to another task under the old heading.
-  const selected = sessionId && sessionId === activeId ? sessions[sessionId] : undefined
+  const selected = workSelection.kind === 'session' && workSelection.sessionId === activeId ? sessions[workSelection.sessionId] : undefined
+  // A task's delivery and approvals share its live ownership. Project browsing
+  // is a separate selection, so it cannot carry another task's permissions.
+  const projectId = workSelection.kind === 'session' ? selected?.meta.workspaceId ?? '' : workSelection.projectId
+  const deliveryWorkItemId = workSelection.kind === 'session' ? selected?.meta.workItemId : workSelection.workItemId
   const definition = PALACE_ACTIONS.find((item) => item.id === action)!
   const inbox = useMemo(() => data.ledger ? adaptCrossProjectWorkInbox(data.ledger, data.projects) : undefined, [data.ledger, data.projects])
   const institutionRoles = useMemo(() => {
@@ -66,11 +75,16 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
     requestProjectWorkspaceNavigation(item.projectId, 'work-item', item.id)
     useStore.getState().setView('list')
   }
-  const openDelivery = (nextProjectId: string, workItemId?: string): void => {
-    setProjectId(nextProjectId)
-    setDeliveryWorkItemId(workItemId)
-    setDeliveryOpen(true)
+  const selectWork = (selection: WorkSelection): void => {
+    taskNavigation.current++
+    setOpeningTaskId(undefined)
+    setNavigationError('')
+    setWorkSelection(selection)
     setRunRoute(undefined)
+  }
+  const openDelivery = (nextProjectId: string, workItemId?: string): void => {
+    selectWork({ kind: 'delivery', projectId: nextProjectId, workItemId })
+    setDeliveryOpen(true)
   }
   const recoverRun = async (runId: string): Promise<void> => {
     const canonicalRun = data.ledger?.runs.items.find((run) => run.id === runId)
@@ -154,20 +168,18 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
     {action === 'urgent' && <div>{sessionIds.filter((id) => sessions[id].pendingPermissions.length > 0).map((id) => <button key={id} className="btn" onClick={() => onAction('approve', { sessionId: id, projectId: sessions[id].meta.workspaceId, workItemId: sessions[id].meta.workItemId })}>
       {sessions[id].meta.title} · {sessions[id].pendingPermissions.length} {zh ? '项授权待办' : 'pending permissions'}</button>)}</div>}
     {(action === 'approve' || action === 'desk') && <label className="palace-work-selector">{zh ? '项目交付与验收' : 'Project delivery and acceptance'}
-      <select value={activeProject?.id ?? ''} onChange={(event) => { setProjectId(event.target.value); setDeliveryWorkItemId(undefined) }}>
+      <select value={activeProject?.id ?? ''} onChange={(event) => selectWork({ kind: 'delivery', projectId: event.target.value })}>
         <option value="">{zh ? '选择项目' : 'Select a project'}</option>{data.projects.filter((project) => project.status === 'active').map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
       </select></label>}
-    {activeProject && deliveryOpen && <ProjectDeliveryWorkbench active projectId={activeProject.id} requestedWorkItemId={deliveryWorkItemId} />}
+    {activeProject && deliveryOpen && <ProjectDeliveryWorkbench key={`${activeProject.id}:${deliveryWorkItemId ?? ''}`} active projectId={activeProject.id} requestedWorkItemId={deliveryWorkItemId} />}
 
     {contextModes && <>
       <label className="palace-work-selector">{zh ? '现有任务 / Agent' : 'Existing task / Agent'}
         <select value={selected?.meta.id ?? ''} onChange={(event) => {
           const next = sessions[event.target.value]
-          if (!next) { setSessionId(''); return }
+          if (!next) { selectWork({ kind: 'delivery', projectId }); return }
           selectSession(next.meta.id)
-          setSessionId(next.meta.id)
-          setProjectId(next.meta.workspaceId ?? '')
-          setDeliveryWorkItemId(next.meta.workItemId)
+          selectWork({ kind: 'session', sessionId: next.meta.id })
         }}>
           <option value="">{zh ? '选择已有任务' : 'Choose an existing task'}</option>{sessionIds.map((id) => <option key={id} value={id}>{sessions[id].meta.title} · {sessions[id].meta.status}{sessions[id].pendingPermissions.length ? ` · ${sessions[id].pendingPermissions.length} ${zh ? '项授权' : 'permissions'}` : ''}</option>)}
         </select></label>
