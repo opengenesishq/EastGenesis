@@ -17,7 +17,11 @@ import { assertTrustedWorkflowLedgerSender } from './workflow-ledger-handlers'
 import { registerSessionProducedArtifacts } from '../task/session-artifact-producer'
 import { buildPortableDeliveryPackage, safeFileStem } from '../studio-result/studio-result-package'
 import { checkStudioResultFiles } from '../studio-result/studio-result-file-changes'
-import { buildStudioResultRerunPreview, confirmStudioResultRerun } from '../studio-result/studio-result-rerun-preview'
+import { buildStudioResultRerunPreview } from '../studio-result/studio-result-rerun-preview'
+import { confirmStudioResultRerun } from '../studio-result/studio-result-rerun-dispatch'
+import { getSessionInputService } from '../task/session-input-runtime'
+import { listTaskSnapshots } from '../task/task-snapshot'
+import { listPendingSessionCreations } from '../session-creation-journal'
 import type { StudioResultRerunConfirmInput, StudioResultRerunInput } from '../../shared/studio-result-rerun-types'
 
 type StudioResultAction = 'get' | 'audit' | 'export' | 'save' | 'check_files' | 'rerun_preview' | 'rerun_confirm'
@@ -48,10 +52,12 @@ export async function handleStudioResultIpc(
     const input = rerunConfirmInput(rawQuery)
     return confirmStudioResultRerun(app.getPath('userData'), session, input, {
       getSession: id => sessionManager.get(id),
+      identities: async () => [...sessionManager.list(), ...listHistory(), ...(await listTaskSnapshots()).map(value => value.meta),
+        ...listPendingSessionCreations().map(value => value.baseMeta)],
       requireAuthority: id => sessionManager.requireTaskExecutionAuthority(id),
-      createManaged: (options, lifecycle) => sessionManager.createManaged(options, { beforeStart: async meta => lifecycle.beforeStart(meta) }),
-      send: (id, prompt) => sessionManager.send(id, prompt)
-    })
+      createManaged: (options, lifecycle) => sessionManager.createManaged(options, lifecycle),
+      inputs: getSessionInputService(app.getPath('userData'))
+    }, `local-user:webcontents-${event.sender.id}`)
   }
   if (action === 'audit') return studioAuditTimelineForSession(sessionId, auditQuery(rawQuery))
   const exported = buildStudioResultExport(await studioResultSnapshotForSession(sessionId))
@@ -195,9 +201,10 @@ function rerunInput(value: unknown): StudioResultRerunInput {
 }
 
 function rerunConfirmInput(value: unknown): StudioResultRerunConfirmInput {
-  const input = rerunInput(value)
-  const previewDigest = (value as Record<string, unknown>).previewDigest
-  if (typeof previewDigest !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(previewDigest) || Object.keys(value as object).some(key => !['planDigest', 'workItemId', 'previewDigest'].includes(key))) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('局部重跑确认参数无效。')
+  const { planDigest, workItemId, previewDigest } = value as Record<string, unknown>
+  const input = rerunInput({ planDigest, workItemId })
+  if (typeof previewDigest !== 'string' || !/^[a-f0-9]{64}$/.test(previewDigest) || Object.keys(value).some(key => !['planDigest', 'workItemId', 'previewDigest'].includes(key))) {
     throw new Error('局部重跑确认参数无效。')
   }
   return { ...input, previewDigest }

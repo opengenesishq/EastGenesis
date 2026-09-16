@@ -98,9 +98,15 @@ export async function checkStudioResultFiles(
     verifyWorkflowLedger(db, { deferFileReadsForArtifactIds: observedChanges })
     const edges = readArtifactEdges(db).filter(edge => edge.projectId === projectId)
     const evidenceLinks = readEvidenceLinks(db).filter(link => link.projectId === projectId)
+    const plan = buildWorkflowChangeImpactPlan({ projectId, changedArtifactIds,
+      // A changed file's producer may write any of its outputs when rerun.
+      manuallyModifiedArtifactIds: changedArtifactIds,
+      artifacts, acceptances, edges, evidenceLinks })
     const fingerprint = digest({ projectId, files, edges, evidenceLinks,
       artifacts: artifacts.map(({ id, digest, version, workItemId }) => ({ id, digest, version, workItemId })),
-      acceptanceIds: acceptances.map(acceptance => acceptance.id).sort() })
+      // A newly created repair's own pending review must not invalidate the
+      // unchanged source observation that authorized that repair.
+      acceptanceIds: plan.acceptanceRechecks.map(acceptance => acceptance.acceptanceId).sort() })
     const acceptancesById = new Map(acceptances.map(acceptance => [acceptance.id, acceptance]))
     // Repeated checks of the same bytes must not churn Acceptance revisions. A
     // later verification decision requires a new invalidation of those bytes.
@@ -117,10 +123,6 @@ export async function checkStudioResultFiles(
         return { result: { ...result, checkedAt: now } }
       }
     }
-    const plan = buildWorkflowChangeImpactPlan({ projectId, changedArtifactIds,
-      // A changed file's producer may write any of its outputs when rerun.
-      manuallyModifiedArtifactIds: changedArtifactIds,
-      artifacts, acceptances, edges, evidenceLinks })
     const result: StudioResultFileCheck = { ...empty, planDigest: plan.planDigest,
       protectedArtifactIds: plan.protectedArtifactIds,
       rerunWorkItemIds: plan.rerunWorkItemIds,

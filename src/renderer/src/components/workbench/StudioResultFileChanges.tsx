@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import type { StudioResultSnapshot } from '../../../../shared/studio-result-types'
 import type { StudioResultFileCheck, StudioResultFileObservation } from '../../../../shared/studio-result-file-change-types'
-import type { StudioResultRerunPreview } from '../../../../shared/studio-result-rerun-types'
+import type { StudioResultRerunPreview, StudioResultRerunResult } from '../../../../shared/studio-result-rerun-types'
+import { useStore } from '../../store'
 
 export default function StudioResultFileChanges({ sessionId, snapshot, language, onRefresh }: {
   sessionId: string
@@ -13,10 +14,12 @@ export default function StudioResultFileChanges({ sessionId, snapshot, language,
   const [result, setResult] = useState<StudioResultFileCheck>()
   const [error, setError] = useState('')
   const [preview, setPreview] = useState<StudioResultRerunPreview>()
+  const [rerun, setRerun] = useState<StudioResultRerunResult>()
   const en = language === 'en'
   const check = async (): Promise<void> => {
     setBusy(true)
     setError('')
+    setPreview(undefined); setRerun(undefined)
     try {
       setResult(await window.agentDesk.checkStudioResultFiles(sessionId))
       await onRefresh()
@@ -30,20 +33,33 @@ export default function StudioResultFileChanges({ sessionId, snapshot, language,
   const unchecked = result?.files.filter(file => file.state === 'not_checkable').length ?? 0
   const previewRerun = async (workItemId: string): Promise<void> => {
     if (!result?.planDigest) return
-    setBusy(true); setError(''); setPreview(undefined)
+    setBusy(true); setError(''); setPreview(undefined); setRerun(undefined)
     try { setPreview(await window.agentDesk.previewStudioResultRerun(sessionId, { planDigest: result.planDigest, workItemId })) }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
     finally { setBusy(false) }
   }
   const confirmRerun = async (): Promise<void> => {
-    if (!preview || preview.state !== 'ready') return
+    if (busy || !preview || preview.state !== 'ready') return
     setBusy(true); setError('')
     try {
       const result = await window.agentDesk.confirmStudioResultRerun(sessionId, {
         planDigest: preview.planDigest, workItemId: preview.sourceWorkItemId, previewDigest: preview.previewDigest
       })
-      setError(result.state === 'started' ? '' : (result.reason ?? '局部重跑未启动。'))
+      setRerun(result)
+      if (result.sessionId) await useStore.getState().syncSession(result.sessionId).catch(() => false)
       await onRefresh()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+    finally { setBusy(false) }
+  }
+  const openRerun = async (): Promise<void> => {
+    if (!rerun?.sessionId || busy) return
+    setBusy(true); setError('')
+    try {
+      if (!await useStore.getState().syncSession(rerun.sessionId)) {
+        throw new Error(en ? 'Restore the original repair task from history to continue.' : '请从历史恢复原修复任务后继续。')
+      }
+      useStore.getState().selectSession(rerun.sessionId)
+      useStore.getState().setView('list')
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
     finally { setBusy(false) }
   }
@@ -82,12 +98,20 @@ export default function StudioResultFileChanges({ sessionId, snapshot, language,
         </div>}
         {preview && <div className="studio-result-rerun-preview" role="status">
           <strong>{en ? 'Rerun preview' : '局部重跑预览'}</strong>
-          <p>{preview.state === 'ready' ? (en ? 'Ready after explicit child-task authorization.' : '预览可用；仍需对子任务明确授权后才能执行。') : preview.blockedReasons.join('；')}</p>
+          <p>{preview.state === 'ready' ? (en ? 'Confirm to authorize the repair task to write only the output files below.' : '确认后，为修复任务单独授权，仅允许写入下方新版本文件。') : preview.blockedReasons.join('；')}</p>
+          <p>{en ? 'Model' : '模型'}：{preview.model} · {en ? 'Budget limit' : '预算上限'}：${preview.budgetUsd.toFixed(2)}</p>
           {preview.outputs.length > 0 && <ul>{preview.outputs.map(file => <li key={file.artifactId}>{file.relativeOutputPath}</li>)}</ul>}
           {preview.protectedFiles.length > 0 && <p>{en ? 'Protected edited files: ' : '受保护的人工修改文件：'}{preview.protectedFiles.map(file => file.path).join('、')}</p>}
-          {preview.state === 'ready' && <button type="button" disabled={busy} onClick={() => void confirmRerun()}>{en ? 'Confirm and start repair task' : '确认并启动修复任务'}</button>}
+          {preview.state === 'ready' && !rerun && <button type="button" disabled={busy} onClick={() => void confirmRerun()}>{en ? 'Authorize and start repair task' : '授权并启动修复任务'}</button>}
+          {rerun && <div data-studio-result-rerun-state={rerun.state}>
+            <p>{rerun.state === 'started' ? (en ? 'Repair task started. Follow its progress and results in the task.' : '修复任务已启动，可打开任务查看进度与成果。')
+              : rerun.state === 'existing' ? (en ? 'The original repair task is retained. No duplicate was dispatched.' : '已保留原修复任务，本次没有重复派发。')
+                : (rerun.reason ?? (en ? 'Repair task needs attention before it can continue.' : '修复任务需要处理后才能继续。'))}</p>
+            {rerun.state === 'existing' && rerun.reason && <p>{rerun.reason}</p>}
+            {rerun.sessionId && <button type="button" disabled={busy} onClick={() => void openRerun()}>{en ? 'Open repair task' : '打开修复任务'}</button>}
+          </div>}
         </div>}
-        {changedFiles.length > 0 && <p className="studio-result-muted">{en ? 'No files were overwritten and no tasks were restarted.' : '本次检查未覆盖文件，也未重新启动任务。'}</p>}
+        {changedFiles.length > 0 && !rerun && <p className="studio-result-muted">{en ? 'No files were overwritten and no tasks were restarted.' : '本次检查未覆盖文件，也未重新启动任务。'}</p>}
       </div>}
     </section>
   )
