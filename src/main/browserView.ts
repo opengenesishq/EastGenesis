@@ -23,8 +23,10 @@ import type { SearchAdapterResult } from './search/search-broker'
 import type { EffectTarget } from '../shared/effect-types'
 
 type BrowserMutationPage = NonNullable<Extract<EffectTarget, { kind: 'unsupported' }>['browserPage']>
+type BrowserMutationKind = NonNullable<BrowserMutationPage['actionTarget']>['kind']
 const MUTATION_WORLD_ID = 1003
 const DOCUMENT_TOKEN_KEY = '__caogenApprovedDocumentV1'
+const ACTION_TARGET_KEY = '__caogenApprovedActionTargetV1'
 function urlDigest(url: string): string { return createHash('sha256').update(url, 'utf8').digest('hex') }
 
 interface BrowserRecord {
@@ -126,29 +128,35 @@ class BrowserViewManager {
     return { ...record.state }
   }
 
-  async captureMutationPage(sessionId: string): Promise<BrowserMutationPage> {
+  async captureMutationPage(sessionId: string, kind: BrowserMutationKind = 'browser_evaluate', input: Record<string, unknown> = {}): Promise<BrowserMutationPage> {
     const record = this.requireRecord(sessionId)
     const wc = record.view.webContents
     if (wc.isLoadingMainFrame()) throw new Error('页面仍在加载，请完成后重新审批浏览器操作。')
     const revision = record.navigationRevision, url = wc.getURL()
-    const token = await wc.executeJavaScriptInIsolatedWorld(MUTATION_WORLD_ID, [{ code: `(() => {
+    const captured = await wc.executeJavaScriptInIsolatedWorld(MUTATION_WORLD_ID, [{ code: `(() => {
       const key = ${JSON.stringify(DOCUMENT_TOKEN_KEY)};
       if (!Object.prototype.hasOwnProperty.call(globalThis, key)) Object.defineProperty(globalThis, key, { value: ${JSON.stringify(randomUUID())} });
-      return globalThis[key];
+      ${mutationTargetRuntimeScript()}
+      return { documentToken: globalThis[key], ...globalThis[${JSON.stringify(ACTION_TARGET_KEY)}].capture(${JSON.stringify(kind)}, ${JSON.stringify(input.selector ?? null)}) };
     })()` }])
+    const token = captured?.documentToken
     if (this.records.get(sessionId) !== record || wc.isDestroyed() || wc.isLoadingMainFrame() || wc.getURL() !== url ||
-      record.navigationRevision !== revision || typeof token !== 'string' || !/^[a-f0-9-]{36}$/.test(token)) {
+      record.navigationRevision !== revision || typeof token !== 'string' || !/^[a-f0-9-]{36}$/.test(token) ||
+      typeof captured?.nodeToken !== 'string' || !Number.isSafeInteger(captured?.version) || captured.version < 1 || typeof captured?.snapshot !== 'string') {
       throw new Error('读取审批目标时浏览器页面已变化，请重新审批。')
     }
-    return { viewId: record.viewId, navigationRevision: revision, urlDigest: urlDigest(url), documentToken: token }
+    return { viewId: record.viewId, navigationRevision: revision, urlDigest: urlDigest(url), documentToken: token,
+      actionTarget: { kind, nodeToken: captured.nodeToken, version: captured.version, stateDigest: urlDigest(captured.snapshot) } }
   }
 
   async click(sessionId: string, selector: string, approvedPage: BrowserMutationPage): Promise<void> {
-    await this.executeApprovedMutation(sessionId, clickSelectorScript(selector), approvedPage)
+    const guard = mutationTargetCheckScript('browser_click', selector, approvedPage.actionTarget)
+    await this.executeApprovedMutation(sessionId, clickSelectorScript(selector, guard), approvedPage, 'browser_click', selector)
   }
 
   async typeText(sessionId: string, selector: string, text: string, approvedPage: BrowserMutationPage): Promise<void> {
-    await this.executeApprovedMutation(sessionId, typeTextScript(selector, text), approvedPage)
+    const guard = mutationTargetCheckScript('browser_type', selector, approvedPage.actionTarget)
+    await this.executeApprovedMutation(sessionId, typeTextScript(selector, text, guard), approvedPage, 'browser_type', selector)
   }
 
   async screenshot(sessionId: string, selector?: string): Promise<string | undefined> {
@@ -165,16 +173,19 @@ class BrowserViewManager {
   }
 
   async evaluate(sessionId: string, script: string, approvedPage: BrowserMutationPage): Promise<unknown> {
-    return this.executeApprovedMutation(sessionId, script, approvedPage)
+    return this.executeApprovedMutation(sessionId, script, approvedPage, 'browser_evaluate')
   }
 
-  private async executeApprovedMutation(sessionId: string, script: string, approvedPage: BrowserMutationPage): Promise<unknown> {
+  private async executeApprovedMutation(sessionId: string, script: string, approvedPage: BrowserMutationPage, kind: BrowserMutationKind, selector?: string): Promise<unknown> {
     const record = this.requireRecord(sessionId)
     const wc = record.view.webContents
     const url = wc.getURL()
     if (!approvedPage || typeof approvedPage.documentToken !== 'string' || !/^[a-f0-9-]{36}$/.test(approvedPage.documentToken) ||
       approvedPage.viewId !== record.viewId || approvedPage.navigationRevision !== record.navigationRevision ||
       approvedPage.urlDigest !== urlDigest(url) || wc.isLoadingMainFrame()) throw new Error('浏览器页面已变化，原审批失效；请重新查看并审批。')
+    if (approvedPage.actionTarget?.kind !== kind || !/^[a-f0-9]{64}$/.test(approvedPage.actionTarget.stateDigest)) {
+      throw new Error('浏览器操作缺少已审批的目标或表单版本，请重新审批。')
+    }
     // The document token is isolated from page-authored JS. Check it in the
     // same script that performs the action, closing the navigation race after
     // the main-process check, including replacement at the very same URL.
@@ -182,6 +193,7 @@ class BrowserViewManager {
       if (globalThis[${JSON.stringify(DOCUMENT_TOKEN_KEY)}] !== ${JSON.stringify(approvedPage.documentToken)} || location.href !== ${JSON.stringify(url)}) {
         throw new Error('浏览器页面已变化，原审批失效；请重新查看并审批。');
       }
+      ${mutationTargetCheckScript(kind, selector, approvedPage.actionTarget)}
       return (0, eval)(${JSON.stringify(script)});
     })()` }], true)
   }
@@ -552,20 +564,21 @@ function selectorBoundsScript(selector: string): string {
   })()`
 }
 
-function clickSelectorScript(selector: string): string {
+function clickSelectorScript(selector: string, guard: string): string {
   return `(() => {
     const selector = ${JSON.stringify(selector)};
     const el = document.querySelector(selector);
     if (!el) throw new Error('selector not found: ' + selector);
     el.scrollIntoView({ block: 'center', inline: 'center' });
     if (typeof el.focus === 'function') el.focus();
+    ${guard}
     if (typeof el.click === 'function') el.click();
     else el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
     return true;
   })()`
 }
 
-function typeTextScript(selector: string, text: string): string {
+function typeTextScript(selector: string, text: string, guard: string): string {
   return `(() => {
     const selector = ${JSON.stringify(selector)};
     const text = ${JSON.stringify(text)};
@@ -573,6 +586,7 @@ function typeTextScript(selector: string, text: string): string {
     if (!el) throw new Error('selector not found: ' + selector);
     el.scrollIntoView({ block: 'center', inline: 'center' });
     if (typeof el.focus === 'function') el.focus();
+    ${guard}
     const tag = el.tagName ? el.tagName.toLowerCase() : '';
     if (tag === 'input' || tag === 'textarea') {
       el.value = text;
@@ -587,6 +601,74 @@ function typeTextScript(selector: string, text: string): string {
     }
     throw new Error('selector is not a text input: ' + selector);
   })()`
+}
+
+function mutationTargetCheckScript(kind: BrowserMutationKind, selector: string | undefined, target: BrowserMutationPage['actionTarget']): string {
+  return `if (!globalThis[${JSON.stringify(ACTION_TARGET_KEY)}]?.check(${JSON.stringify(kind)}, ${JSON.stringify(selector ?? null)}, ${JSON.stringify(target ?? null)})) {
+    throw new Error('浏览器目标或表单已变化，原审批失效；请重新查看并审批。');
+  }`
+}
+
+/** Raw contents are held only in memory; only their digest is persisted by
+ * the host. Comparing the isolated cached bytes is synchronous with the
+ * action, without an asynchronous hash gap before a click or text edit. */
+function mutationTargetRuntimeScript(): string {
+  return `if (!Object.prototype.hasOwnProperty.call(globalThis, ${JSON.stringify(ACTION_TARGET_KEY)})) {
+    const identities = new WeakMap(), snapshots = new WeakMap(); let sequence = 0;
+    const identity = object => { if (!identities.has(object)) identities.set(object, String(++sequence)); return identities.get(object); };
+    const attributes = element => Array.from(element.attributes || [], attr => [attr.name, attr.value]).sort((a, b) => a[0].localeCompare(b[0]));
+    const field = element => {
+      const tag = element.tagName.toLowerCase();
+      if (tag.includes('-')) throw new Error('自定义表单控件无法核验提交值，请人工处理。');
+      return { node: identity(element), tag, attributes: attributes(element), disabled: element.matches(':disabled'),
+        value: typeof element.value === 'string' ? element.value : undefined,
+        checked: typeof element.checked === 'boolean' ? element.checked : undefined,
+        selected: tag === 'select' ? Array.from(element.options, option => ({ node: identity(option), value: option.value, selected: option.selected, disabled: option.disabled })) : undefined,
+        files: element.files ? Array.from(element.files, file => ({ node: identity(file), name: file.name, type: file.type, size: file.size, modified: file.lastModified })) : undefined };
+    };
+    const describe = element => ({ node: identity(element), tag: element.tagName, attributes: attributes(element),
+      content: element.innerHTML, value: typeof element.value === 'string' ? element.value : undefined,
+      checked: typeof element.checked === 'boolean' ? element.checked : undefined,
+      disabled: element.matches(':disabled'), editable: element.isContentEditable,
+      href: typeof element.href === 'string' ? element.href : undefined,
+      formAction: typeof element.formAction === 'string' ? element.formAction : undefined });
+    const observe = (kind, selector) => {
+      if (kind === 'browser_evaluate') {
+        const root = document.documentElement;
+        if (!root) throw new Error('页面没有可核验的文档。');
+        const controls = document.querySelectorAll('input,textarea,select,button');
+        if (controls.length > 5000) throw new Error('页面表单状态过大，请使用具体点击或输入工具。');
+        return { node: root, snapshot: JSON.stringify({ html: root.outerHTML, controls: Array.from(controls, field) }) };
+      }
+      if (typeof selector !== 'string' || !selector.trim()) throw new Error('浏览器操作缺少目标选择器。');
+      const element = document.querySelector(selector);
+      if (!element) throw new Error('审批目标已不存在，请重新查看页面。');
+      const owner = element.closest('button,input,a,label,[role="button"],[onclick]') || element;
+      const control = owner.tagName === 'LABEL' ? owner.control : undefined;
+      const form = element.form || owner.form || control?.form || element.closest('form');
+      // Read native control state directly: constructing FormData would fire
+      // page-authored formdata handlers during the read-only approval preview.
+      if (form && form.elements.length > 5000) throw new Error('关联表单状态过大，无法核验此次操作。');
+      const formState = form ? { node: identity(form), attributes: attributes(form), action: form.action, method: form.method,
+        enctype: form.enctype, target: form.target, noValidate: form.noValidate, controls: Array.from(form.elements, field) } : undefined;
+      return { node: element, snapshot: JSON.stringify({ target: describe(element), action: describe(owner), linkedControl: control ? describe(control) : undefined, form: formState }) };
+    };
+    const capture = (kind, selector) => {
+      const state = observe(kind, selector);
+      if (state.snapshot.length > 2000000) throw new Error('审批目标状态过大，请缩小操作范围或人工处理。');
+      let entries = snapshots.get(state.node); if (!entries) { entries = new Map(); snapshots.set(state.node, entries); }
+      const prior = entries.get(kind);
+      const version = prior ? prior.version + (prior.snapshot === state.snapshot ? 0 : 1) : 1;
+      entries.set(kind, { version, snapshot: state.snapshot });
+      return { nodeToken: identity(state.node), version, snapshot: state.snapshot };
+    };
+    const check = (kind, selector, expected) => {
+      if (!expected || expected.kind !== kind) return false;
+      const state = observe(kind, selector), prior = snapshots.get(state.node)?.get(kind);
+      return expected.nodeToken === identity(state.node) && prior?.version === expected.version && prior.snapshot === state.snapshot;
+    };
+    Object.defineProperty(globalThis, ${JSON.stringify(ACTION_TARGET_KEY)}, { value: Object.freeze({ capture, check }) });
+  }`
 }
 
 function waitForSelectorScript(selector: string, timeoutMs: number): string {

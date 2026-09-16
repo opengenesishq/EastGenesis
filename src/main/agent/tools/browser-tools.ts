@@ -27,7 +27,7 @@ export const BROWSER_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'browser_click',
-      description: '点击当前页面中的 CSS selector。',
+      description: '点击当前页面中的 CSS selector。审批绑定实际命中元素及关联表单；元素被替换、动作属性或表单值变化后需重新审批。',
       parameters: {
         type: 'object',
         properties: { selector: { type: 'string' } },
@@ -39,7 +39,7 @@ export const BROWSER_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'browser_type',
-      description: '向当前页面中的输入元素填写文本。',
+      description: '向当前页面中的输入元素填写文本。审批绑定输入元素和关联表单的当前状态，审批后目标或表单变化时需重新审批。',
       parameters: {
         type: 'object',
         properties: { selector: { type: 'string' }, text: { type: 'string' } },
@@ -77,7 +77,7 @@ export const BROWSER_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'browser_evaluate',
-      description: '在当前页面的隔离环境执行 JavaScript 表达式并返回 JSON 化结果。可访问 DOM，不可访问页面脚本变量；审批绑定当前页面，页面变化后需重新审批。',
+      description: '在当前页面的隔离环境执行 JavaScript 表达式并返回 JSON 化结果。可访问 DOM，不可访问页面脚本变量。因任意脚本无法确定操作范围，审批保守绑定整页 DOM 与表单状态，任一变化都需重新审批；只点按钮或填表时请使用 browser_click/browser_type。脚本、远端结果仍需人工核对。',
       parameters: {
         type: 'object',
         properties: { script: { type: 'string' } },

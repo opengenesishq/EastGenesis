@@ -151,7 +151,8 @@ async function buildRepositoryEffectTarget(
   if (['browser_click', 'browser_type', 'browser_evaluate'].includes(toolName)) {
     if (!input.sessionId) throw new Error('浏览器操作缺少当前会话，不能建立审批目标。')
     const { browserViewManager } = await import('../browser/browser-manager')
-    return { kind: 'unsupported', toolName, browserPage: await browserViewManager.captureMutationPage(input.sessionId) }
+    return { kind: 'unsupported', toolName, browserPage: await browserViewManager.captureMutationPage(
+      input.sessionId, toolName as 'browser_click' | 'browser_type' | 'browser_evaluate', input.toolInput) }
   }
   const guiTarget = await buildGuiPostconditionEffectTarget(toolName, input.toolInput)
   if (guiTarget) return guiTarget

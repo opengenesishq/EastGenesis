@@ -210,6 +210,106 @@ export async function run(_stage: string, root: string) {
       await assert.rejects(executeBrowserTool('browser_type', { selector: '#recipient', text: 'old page' }, meta.id, { ...context('forged'), effectTarget: target }), /原审批失效/)
       assert.equal(await wc.executeJavaScript('document.querySelector("#recipient").value'), '')
     })
+    const resetForm = async () => {
+      html = `<html><body data-sent="0"><aside id="news">Unrelated headline</aside>
+        <form id="compose" action="/send" method="post" onsubmit="event.preventDefault();document.body.dataset.sent=String(Number(document.body.dataset.sent)+1)"
+          onformdata="document.body.dataset.previewSideEffect='unexpected'">
+          <input id="recipient" name="recipient" value="approved@example.invalid">
+          <input id="hidden" type="hidden" name="token" value="fixture-private-form-value">
+          <input id="opt-in" type="checkbox" name="optIn" checked>
+          <select id="delivery" name="delivery"><option value="draft">Draft</option><option value="publish">Publish</option></select>
+          <button id="send" type="submit">Send</button></form>
+        <label id="send-label" for="send">Send label outside form</label>
+        <form id="unrelated"><input id="unrelated-field" name="other" value="unrelated"></form></body></html>`
+      await browserViewManager.navigate(meta.id, pageUrl); await loaded()
+    }
+    const staleTarget = /原审批失效|Script failed to execute|目标或输入已变化/
+    const assertNoSend = async () => assert.equal(await wc.executeJavaScript('document.body.dataset.sent'), '0')
+    await check('approval freezes same-document form payload and persists only its digest', async () => {
+      await resetForm()
+      const input = browserInput('browser_click', { selector: '#send' }, 'form-payload-version')
+      const handle = await prepareEffectExecution(input); assert(handle)
+      const approved = taskRuntimeRegistry.get(meta.id)!.effects!.find(effect => effect.id === handle.effectId)!
+      assert(approved.target.kind === 'unsupported' && approved.target.browserPage?.actionTarget?.stateDigest)
+      assert(!JSON.stringify(approved).includes('fixture-private-form-value'))
+      assert(!JSON.stringify(approved).includes('approved@example.invalid'))
+      assert.equal(await wc.executeJavaScript('document.body.dataset.previewSideEffect'), undefined)
+      await wc.executeJavaScript('document.querySelector("#hidden").value="different-secret"')
+      await assert.rejects(markEffectExecutionStarted(handle, input), staleTarget)
+      assert.equal(taskRuntimeRegistry.get(meta.id)!.effects!.find(effect => effect.id === handle.effectId)!.status, 'abandoned')
+      await assert.rejects(executeBrowserTool('browser_click', input.toolInput, meta.id, { ...context('changed-hidden'), effectTarget: approved.target }), staleTarget)
+      await assertNoSend()
+    })
+    await check('identical replacement nodes and changed form destination require fresh approval', async () => {
+      for (const mutation of [
+        'document.querySelector("#send").replaceWith(document.querySelector("#send").cloneNode(true))',
+        'document.querySelector("#recipient").replaceWith(document.querySelector("#recipient").cloneNode(true))',
+        'document.querySelector("#compose").action="/different-recipient"',
+        'document.querySelector("#send").formAction="/different-action"',
+        'document.querySelector("#opt-in").checked=false',
+        'document.querySelector("#delivery").value="publish"'
+      ]) {
+        await resetForm()
+        const target = (await descriptor('browser_click', { selector: '#send' })).target
+        await wc.executeJavaScript(mutation)
+        await assert.rejects(executeBrowserTool('browser_click', { selector: '#send' }, meta.id, { ...context('changed-target'), effectTarget: target }), staleTarget)
+        await assertNoSend()
+      }
+      await resetForm()
+      const labelTarget = (await descriptor('browser_click', { selector: '#send-label' })).target
+      await wc.executeJavaScript('document.querySelector("#recipient").value="label-changed"')
+      await assert.rejects(executeBrowserTool('browser_click', { selector: '#send-label' }, meta.id, { ...context('changed-label-form'), effectTarget: labelTarget }), staleTarget)
+      await assertNoSend()
+    })
+    await check('typing does not overwrite a changed value or reuse another form state', async () => {
+      for (const mutation of ['document.querySelector("#recipient").value="human-edit"', 'document.querySelector("#hidden").value="new-context"']) {
+        await resetForm()
+        const args = { selector: '#recipient', text: 'agent-edit' }
+        const target = (await descriptor('browser_type', args)).target
+        await wc.executeJavaScript(mutation)
+        const prior = await wc.executeJavaScript('document.querySelector("#recipient").value')
+        await assert.rejects(executeBrowserTool('browser_type', args, meta.id, { ...context('typing-stale'), effectTarget: target }), staleTarget)
+        assert.equal(await wc.executeJavaScript('document.querySelector("#recipient").value'), prior)
+      }
+    })
+    await check('unrelated page and other-form updates preserve the exact approved action', async () => {
+      await resetForm()
+      const args = { selector: '#send' }, approved = await descriptor('browser_click', args)
+      await wc.executeJavaScript('document.querySelector("#news").textContent="Updated headline";document.querySelector("#unrelated-field").value="other task"')
+      assert.equal((await descriptor('browser_click', args)).targetDigest, approved.targetDigest)
+      assert.equal((await executeBrowserTool('browser_click', args, meta.id, { ...context('unrelated-update'), effectTarget: approved.target })).ok, true)
+      assert.equal(await wc.executeJavaScript('document.body.dataset.sent'), '1')
+    })
+    await check('form changes at the execution boundary and focus handlers cannot slip past approval', async () => {
+      await resetForm()
+      const args = { selector: '#send' }, approved = await descriptor('browser_click', args)
+      const original = wc.executeJavaScriptInIsolatedWorld.bind(wc)
+      wc.executeJavaScriptInIsolatedWorld = async (...parameters) => {
+        await wc.executeJavaScript('document.querySelector("#recipient").value="raced-recipient"')
+        return original(...parameters)
+      }
+      try { await assert.rejects(executeBrowserTool('browser_click', args, meta.id, { ...context('same-document-race'), effectTarget: approved.target }), staleTarget) }
+      finally { wc.executeJavaScriptInIsolatedWorld = original }
+      await assertNoSend()
+      await resetForm()
+      await wc.executeJavaScript('document.querySelector("#send").addEventListener("focus",()=>{document.querySelector("#hidden").value="focus-changed"})')
+      // A hidden Electron window may suppress native focus. Deliver the real
+      // DOM event at the focus boundary without showing a user-facing window.
+      await wc.executeJavaScriptInIsolatedWorld(1003, [{ code: 'HTMLElement.prototype.focus=function(){this.dispatchEvent(new FocusEvent("focus"))};void 0' }])
+      const focusApproval = await descriptor('browser_click', args)
+      await assert.rejects(executeBrowserTool('browser_click', args, meta.id, { ...context('focus-race'), effectTarget: focusApproval.target }), staleTarget)
+      await assertNoSend()
+    })
+    await check('arbitrary evaluation conservatively binds the entire document and form state', async () => {
+      await resetForm()
+      const args = { script: "document.body.dataset.executed='yes'" }, approved = await descriptor('browser_evaluate', args)
+      await wc.executeJavaScript('document.querySelector("#unrelated-field").value="changed"')
+      await assert.rejects(executeBrowserTool('browser_evaluate', args, meta.id, { ...context('evaluate-conservative'), effectTarget: approved.target }), staleTarget)
+      assert.equal(await wc.executeJavaScript('document.body.dataset.executed'), undefined)
+      const current = await descriptor('browser_evaluate', args)
+      assert.equal((await executeBrowserTool('browser_evaluate', args, meta.id, { ...context('evaluate-current'), effectTarget: current.target })).ok, true)
+      assert.equal(await wc.executeJavaScript('document.body.dataset.executed'), 'yes')
+    })
     assert.equal((await verifyPersistedWorkflowLedger(root)).valid, true)
     console.log(`Browser research source: ${passed}/${passed} passed; physical Electron DOM, canonical stores, no network or Provider calls.`)
   } finally {

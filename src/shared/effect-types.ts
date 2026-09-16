@@ -549,6 +549,14 @@ export type EffectTarget =
         navigationRevision: number
         urlDigest: string
         documentToken: string
+        /** Only a digest of target/form contents is persisted. Old records
+         * without this binding cannot authorize another browser mutation. */
+        actionTarget?: {
+          kind: 'browser_click' | 'browser_type' | 'browser_evaluate'
+          nodeToken: string
+          version: number
+          stateDigest: string
+        }
       }
     }
 
