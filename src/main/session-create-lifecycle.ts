@@ -39,6 +39,7 @@ import type { WorkItem } from '../shared/project-workspace-types'
 import { reconcileTaskExecutionAuthorityMarker } from './permission/task-execution-authority-marker'
 import { assertSessionModelChange } from './session-model-change'
 import { normalizeSessionRoutingControl } from '../shared/session-routing-control'
+import { assertSessionExecutorEngine, normalizeSessionExecutorEngine } from '../shared/session-executor-selection'
 
 export interface SessionCreationDraft {
   opts: CreateSessionOptions
@@ -62,6 +63,13 @@ export function prepareSessionCreationDraft(
     ? resumeHistoryWorktreeRecord(resumeHistory)
     : undefined
   const opts = normalizedSessionCreationOptions(input, resumeHistory, historySource?.mode)
+  // Resuming the same work cannot erase its executor boundary. Forks make
+  // their own choice and never inherit an unrelated execution requirement.
+  const savedExecutor = historySource?.mode === 'resume' ? resumeHistory?.executorEngine : undefined
+  if (savedExecutor !== undefined && input.executorEngine !== undefined && savedExecutor !== input.executorEngine) {
+    throw new Error('恢复任务不能更改已保存的执行器约束。')
+  }
+  opts.executorEngine = normalizeSessionExecutorEngine(savedExecutor ?? input.executorEngine)
   const settings = getSettings()
   const driveMode = sessionDriveMode(opts, resumeHistory, settings)
   const drivePolicy = getCaoGenDrivePolicy(driveMode)
@@ -78,6 +86,7 @@ export function prepareSessionCreationDraft(
   }) : undefined
   const selectedProviderId = initialRoute?.providerId ?? requestedProviderId
   const provider = localPlanOnly ? undefined : explicitSessionProvider(selectedProviderId, selectedModel)
+  if (provider) assertSessionExecutorEngine(opts.executorEngine, resolveProviderEngine(provider))
   const unassigned = sessionUnassigned(opts, resumeHistory, parentMeta)
   const domainOwnership = resolveSessionDomainOwnership(opts, resumeHistory, parentMeta, unassigned)
   const projectId = sessionProjectId(
@@ -99,7 +108,7 @@ export function prepareSessionCreationDraft(
   }
   // A model-change receipt belongs to the original task. Reopening that
   // conversation must keep its identity, including an unfinished switch.
-  if (historySource?.mode === 'resume' && resumeHistory && (resumeWorktreeRecord || resumeHistory.modelChange || resumeHistory.routingControl)) {
+  if (historySource?.mode === 'resume' && resumeHistory && (resumeWorktreeRecord || resumeHistory.modelChange || resumeHistory.routingControl || resumeHistory.executorEngine)) {
     baseMeta.id = resumeHistory.id
     baseMeta.createdAt = resumeHistory.createdAt
   }
@@ -164,6 +173,7 @@ function createSessionDraftMeta(input: SessionDraftMetaInput): SessionMeta {
   })
   return {
     ...meta,
+    executorEngine: opts.executorEngine,
     costUsd: input.historyMode === 'resume' ? resumeHistory?.costUsd ?? meta.costUsd : meta.costUsd,
     businessLineId: opts.businessLineId,
     workspaceId: input.workspaceId,
@@ -530,9 +540,11 @@ export function sessionMetaForPlacement(
 export function sessionMetaForRecovery(meta: SessionMeta): SessionMeta {
   const ownership = assertSessionDomainOwnership(meta)
   const migratedMeta = migrateLegacyEngineRecord(meta as SessionMeta & { engine?: string }) as SessionMeta
+  assertSessionExecutorEngine(migratedMeta.executorEngine, migratedMeta.engine)
   return applySessionPlacement({
     ...migratedMeta,
     ...ownership,
+    executorEngine: normalizeSessionExecutorEngine(migratedMeta.executorEngine),
     taskStrategy: normalizeTaskStrategy(migratedMeta.taskStrategy)
   }, recoverySessionPlacement(migratedMeta))
 }

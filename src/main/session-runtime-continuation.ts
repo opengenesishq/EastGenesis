@@ -10,6 +10,7 @@ import { buildProviderNeutralContextDigest } from './task/provider-neutral-conte
 import { assertPortableTextBoundary } from './session-runtime-continuation-context'
 import { assertRuntimeContinuationAligned, persistRuntimeContinuation } from './session-runtime-continuation-store'
 import { getProvider, resolveProviderEngine } from './providers'
+import { assertSessionExecutorEngine } from '../shared/session-executor-selection'
 
 export interface RuntimeContinuationInput {
   session: Engine
@@ -40,6 +41,7 @@ export async function prepareRuntimeContinuation(input: RuntimeContinuationInput
   const provider = getProvider(route.providerId)
   if (!provider) throw new Error('已选 Provider 不再可用')
   const engine = resolveProviderEngine(provider)
+  assertSessionExecutorEngine(session.meta.executorEngine, engine)
   if (engine === session.meta.engine) {
     prepareSessionTurnRoute(session.meta, payload, route)
     return session

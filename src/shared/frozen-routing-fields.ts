@@ -43,12 +43,13 @@ export function readFrozenRuleReference(value: unknown, path: string): FrozenRou
 }
 
 export function readFrozenHardBounds(value: unknown, path: string): FrozenRoutingHardBounds {
-  const row = record(value, path, ['requiredCapabilities', 'minContextTokens', 'allowedProviderIds', 'locality'], ['remainingBudgetUsd', 'allowedRegions', 'allowedDomains', 'requiredPermissions'])
+  const row = record(value, path, ['requiredCapabilities', 'minContextTokens', 'allowedProviderIds', 'locality'], ['remainingBudgetUsd', 'allowedRegions', 'allowedDomains', 'requiredPermissions', 'executorEngine'])
   return { requiredCapabilities: unique(list(row.requiredCapabilities, `${path}.requiredCapabilities`,
     (value, path) => oneOf(value, path, ['tools', 'vision']), 2, 0), path, (value) => value),
     minContextTokens: integer(row.minContextTokens, `${path}.minContextTokens`, 1),
     allowedProviderIds: unique(list(row.allowedProviderIds, `${path}.allowedProviderIds`, readRoutingProviderId, 512, 0), path, (value) => value),
     locality: oneOf(row.locality, `${path}.locality`, ['any', 'local_only']),
+    ...(row.executorEngine === undefined ? {} : { executorEngine: oneOf(row.executorEngine, `${path}.executorEngine`, ['openai', 'anthropic', 'gemini']) }),
     ...(row.allowedRegions === undefined ? {} : { allowedRegions: unique(list(row.allowedRegions, `${path}.allowedRegions`, (value, at) => string(value, at, 128).toLowerCase(), 100, 0), path, (value) => value) }),
     ...(row.allowedDomains === undefined ? {} : { allowedDomains: unique(list(row.allowedDomains, `${path}.allowedDomains`, (value, at) => string(value, at, 253).toLowerCase(), 100, 0), path, (value) => value) }),
     ...(row.requiredPermissions === undefined ? {} : { requiredPermissions: unique(list(row.requiredPermissions, `${path}.requiredPermissions`, (value, at) => string(value, at, 128).toLowerCase(), 100, 0), path, (value) => value) }),

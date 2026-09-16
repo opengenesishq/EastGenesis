@@ -38,6 +38,13 @@ function assertRetryDomain(policy: FrozenRunRoutingPolicyV1): void {
 
 function assertHardDomain(policy: FrozenRunRoutingPolicyV1): void {
   const hard = policy.hardBounds
+  if (hard.executorEngine) {
+    const protocols = hard.executorEngine === 'openai' ? ['openai.chat-completions', 'openai.responses']
+      : hard.executorEngine === 'anthropic' ? ['anthropic.messages'] : ['google.generative-language']
+    if (policy.qualifiedTargets.some(target => !protocols.includes(target.protocol))) {
+      invalid('$.qualifiedTargets', 'Qualified target violates the selected executor requirement.')
+    }
+  }
   if (hard.allowedProviderIds.length && policy.qualifiedTargets.some((target) => !hard.allowedProviderIds.includes(target.providerId))) {
     invalid('$.qualifiedTargets', 'Qualified target violates the frozen provider allowlist.')
   }

@@ -15,6 +15,7 @@ import { getProviderConnectionIdentity } from '../providers'
 import type { FrozenNativeProtocol, FrozenRunRoutingPolicyV1 } from '../../shared/frozen-routing-types'
 import type { RoutingRetryReason } from '../../shared/routing-policy-types'
 import { resolveNativeExecutorProtocol } from './executor-compatibility'
+import { assertSessionExecutorEngine } from '../../shared/session-executor-selection'
 
 export type FrozenRetryProjection = Readonly<Pick<FrozenRunRoutingPolicyV1, 'initialTarget' | 'retryTargets' | 'effectivePolicy'>>
 export type NativeSessionRecoveryContext = Pick<NativeRecoveryCheck, 'anchor' | 'currentRequiredCapabilities'> & { initialExpertPolicy: RoutingExpertPolicy; frozenRetry?: FrozenRetryProjection }
@@ -86,6 +87,7 @@ export function assertNativeSessionRecoveryTarget(meta: SessionMeta, target: Nat
   assertRoutingExpertTargetAllowed(target.providerId, target.baseUrl, recovery.initialExpertPolicy)
   const provider = providers.find((item) => item.id === target.providerId)
   if (!provider) throw new ModelRouteError('ROUTING_MANUAL_TARGET_UNAVAILABLE', '本轮目标连接已不存在。')
+  assertSessionExecutorEngine(meta.executorEngine, provider.engine)
   assertNativeRecoveryTargetAllowed({ ...recovery, provider, model: target.model })
   // The recovery anchor bounds the logical turn.  The canonical Run policy is
   // the final physical-request gate and also detects a rotated/deleted

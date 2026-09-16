@@ -35,6 +35,7 @@ export function sessionHistoryEntry(meta: SessionMeta & { sdkSessionId: string }
     runtimeContinuation: meta.runtimeContinuation,
     modelChange: meta.modelChange,
     engine: meta.engine,
+    executorEngine: meta.executorEngine,
     taskStrategy: meta.taskStrategy,
     taskExecutionAuthorityRequired: meta.taskExecutionAuthorityRequired,
     permissionMode: meta.permissionMode,

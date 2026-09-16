@@ -19,6 +19,7 @@ import { resolveProviderRuntimeTarget } from '../provider/providerRuntimeTarget'
 import { resolveNativeExecutorProtocol } from '../model/executor-compatibility'
 import { hasExplicitModelChange } from '../session-model-change'
 import { evaluateSessionRoutingControl } from '../session-routing-control'
+import { assertSessionExecutorEngine, normalizeSessionExecutorEngine } from '../../shared/session-executor-selection'
 
 /** Build the immutable native text policy from the already trusted session route. */
 export function frozenPolicyForSessionRun(
@@ -34,6 +35,9 @@ export function frozenPolicyForSessionRun(
   // message identity; the physical Engine then remains on the same protocol.
   const previousPolicy = previousRun ? frozenRoutingPolicyForRun(previousRun) : undefined
   if (previousPolicy && !hasExplicitModelChange(meta, previousRun)) {
+    if (normalizeSessionExecutorEngine(meta.executorEngine) !== previousPolicy.hardBounds.executorEngine) {
+      throw new Error('当前执行器要求与既有运行不一致，不能改变已冻结的执行范围。')
+    }
     // Successor Runs inherit the immutable target, but the Engine still needs
     // a one-message route hand-off. Without this, native resolvers fall back
     // to the mutable scheduler after a rule/settings change.
@@ -98,7 +102,7 @@ export function frozenPolicyForSessionRun(
       userIntent: { kind: 'fixed', target: { providerId: provider.id, model: meta.model } },
       effectivePolicy: { selection: { kind: 'fixed', target: { providerId: provider.id, model: meta.model } }, strategy: getSettings().schedulerStrategy, failure: { kind: 'pause' } },
       initialTarget: { providerId: provider.id, model: meta.model, protocol }, qualifiedTargets: [target], retryTargets: [],
-      hardBounds: { requiredCapabilities: [...(line.requiredCapabilities ?? [])], minContextTokens: Math.max(1, meta.contextTokens ?? 1), allowedProviderIds: [provider.id], locality: settings.routingExpertPolicy.locality === 'local_only' ? 'local_only' : 'any', ...freezeExpertConstraints(settings.routingExpertPolicy) }
+      hardBounds: { ...freezeExecutor(meta), requiredCapabilities: [...(line.requiredCapabilities ?? [])], minContextTokens: Math.max(1, meta.contextTokens ?? 1), allowedProviderIds: [provider.id], locality: settings.routingExpertPolicy.locality === 'local_only' ? 'local_only' : 'any', ...freezeExpertConstraints(settings.routingExpertPolicy) }
     })
   }
   const stored = readStoredRoutingState(getRoutingSettingsBoundary().read().document)
@@ -179,7 +183,7 @@ export function frozenPolicyForSessionRun(
           effectivePolicy: { selection: { kind: 'global_auto' }, strategy: getSettings().schedulerStrategy, failure: legacyFailover },
           initialTarget: { providerId: provider.id, model: route.model, protocol }, qualifiedTargets,
           retryTargets: legacyFailover.kind === 'retry_allowed_targets' ? retryTargets : [],
-          hardBounds: { requiredCapabilities: [...(line.requiredCapabilities ?? []), ...(route.recoveryTask?.requiresTools ? ['tools' as const] : []), ...(route.recoveryTask?.requiresVision ? ['vision' as const] : [])], minContextTokens: Math.max(1, route.recoveryTask?.minContextTokens ?? meta.contextTokens ?? 1), allowedProviderIds: [...settings.routingExpertPolicy.allowedProviderIds], locality: settings.routingExpertPolicy.locality === 'local_only' ? 'local_only' : 'any', ...freezeExpertConstraints(settings.routingExpertPolicy) }
+          hardBounds: { ...freezeExecutor(meta), requiredCapabilities: [...(line.requiredCapabilities ?? []), ...(route.recoveryTask?.requiresTools ? ['tools' as const] : []), ...(route.recoveryTask?.requiresVision ? ['vision' as const] : [])], minContextTokens: Math.max(1, route.recoveryTask?.minContextTokens ?? meta.contextTokens ?? 1), allowedProviderIds: [...settings.routingExpertPolicy.allowedProviderIds], locality: settings.routingExpertPolicy.locality === 'local_only' ? 'local_only' : 'any', ...freezeExpertConstraints(settings.routingExpertPolicy) }
         })
       } catch { return undefined }
     }
@@ -205,6 +209,7 @@ function prepareFrozenContinuationRoute(
   const target = policy.initialTarget
   const provider = listProviders().find((item) => item.id === target.providerId)
   if (!provider) throw new Error(`冻结路由目标 ${target.providerId} 不再可用。`)
+  assertSessionExecutorEngine(meta.executorEngine, provider.engine)
   // A continuation preserves its target, but new input still has to fit that
   // target (for example, adding an image to a text-only conversation).
   resolveRuntimeSessionRoute({ meta: { ...meta, providerId: target.providerId, model: target.model, routingScope: 'fixed', routingControl: undefined },
@@ -358,7 +363,7 @@ export function frozenPolicyFromEvaluation(input: {
     baseStrategySource: context.baseStrategySource, userIntent: context.userIntent,
     effectivePolicy: { selection: result.effectivePolicy.selection, strategy: result.effectivePolicy.strategy, failure: result.effectivePolicy.failure }, initialTarget: { ...initial, protocol: input.protocolForTarget(initial) }, qualifiedTargets,
     retryTargets: result.effectivePolicy.failure.kind === 'retry_allowed_targets' ? result.allowedAlternatives.map((target) => ({ ...target, protocol: input.protocolForTarget(target) })) : [],
-    hardBounds: { requiredCapabilities: [...new Set([...(context.businessLine.requiredCapabilities ?? []), ...(result.task.requiresTools ? ['tools' as const] : []), ...(result.task.requiresVision ? ['vision' as const] : [])])], minContextTokens: Math.max(1, result.task.minContextTokens),
+    hardBounds: { ...freezeExecutor(meta), requiredCapabilities: [...new Set([...(context.businessLine.requiredCapabilities ?? []), ...(result.task.requiresTools ? ['tools' as const] : []), ...(result.task.requiresVision ? ['vision' as const] : [])])], minContextTokens: Math.max(1, result.task.minContextTokens),
       allowedProviderIds: [...snapshots.expertPolicy.allowedProviderIds], locality: snapshots.expertPolicy.locality === 'local_only' ? 'local_only' : 'any', ...freezeExpertConstraints(snapshots.expertPolicy) }
   }
   return sealFrozenRoutingPolicy(policy)
@@ -388,4 +393,9 @@ function ruleMayMatch(rule: { scope: { kind: string; businessLineId?: string }; 
 
 function freezeExpertConstraints(policy: import('../../shared/types').RoutingExpertPolicy) {
   return { allowedRegions: [...(policy.allowedRegions ?? [])], allowedDomains: [...(policy.allowedDomains ?? [])], requiredPermissions: [...(policy.requiredPermissions ?? [])] }
+}
+
+function freezeExecutor(meta: SessionMeta) {
+  const executorEngine = normalizeSessionExecutorEngine(meta.executorEngine)
+  return executorEngine ? { executorEngine } : {}
 }

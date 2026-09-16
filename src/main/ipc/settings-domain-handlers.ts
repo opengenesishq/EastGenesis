@@ -77,6 +77,7 @@ function routingService() {
       return meta.businessLineId === authority.businessLineId
         && meta.providerId === authority.providerId
         && meta.model === authority.model
+        && (meta.executorEngine ?? null) === (authority.executorEngine ?? null)
         && (meta.routingScope ?? 'global') === (authority.routingScope ?? 'global')
         && authority.routingControl !== undefined
         && digest(sessionRoutingControl(meta)) === digest(authority.routingControl)

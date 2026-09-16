@@ -15,9 +15,10 @@ import { captureSessionRouting } from '../routing-service/session-routing-captur
 import { evaluateRoutingRuleSet } from './routing-policy/routing-policy-evaluator'
 import { readStoredRoutingState } from '../routing-settings/routing-settings-state'
 import { evaluateNativeExecutorCompatibility, type ExecutorCompatibilityRequirements } from './executor-compatibility'
+import { normalizeSessionExecutorEngine } from '../../shared/session-executor-selection'
 
 export type ResolvedSessionRoute = Extract<SessionRouteResult, { kind: 'routed' }>
-type RoutingSession = Pick<SessionMeta, 'id' | 'sdkSessionId' | 'createdAt' | 'providerId' | 'model' | 'routingScope' | 'routingControl' | 'engine' | 'driveMode' | 'costUsd' | 'budgetUsd' | 'cwd' | 'sourceCwd' | 'contextTokens' | 'businessLineId'>
+type RoutingSession = Pick<SessionMeta, 'id' | 'sdkSessionId' | 'createdAt' | 'providerId' | 'model' | 'routingScope' | 'routingControl' | 'engine' | 'executorEngine' | 'driveMode' | 'costUsd' | 'budgetUsd' | 'cwd' | 'sourceCwd' | 'contextTokens' | 'businessLineId'>
 
 /** One routing policy serves session creation and every native protocol runtime. */
 export function resolveRuntimeSessionRoute(input: {
@@ -38,7 +39,7 @@ export function resolveRuntimeSessionRoute(input: {
   const scopedProviders = filterBusinessLineModels(input.providers ?? listProviders(), businessLine).filter((provider) =>
     meta.routingScope !== 'provider' || provider.id === meta.providerId
   )
-  const expectedEngine = input.allowAnyEngine ? undefined : meta.engine
+  const expectedEngine = normalizeSessionExecutorEngine(meta.executorEngine) ?? (input.allowAnyEngine ? undefined : meta.engine)
   if (meta.model !== AUTO_MODEL) return validateFixedBusinessLineModel(meta, payload, scopedProviders, businessLine, expectedEngine)
   if (meta.routingScope === 'fixed') throw new ModelRouteError('ROUTING_MANUAL_TARGET_UNAVAILABLE', '固定模型模式必须指定具体模型。')
   // Incompatible executors must be excluded before ranking, so a healthy
@@ -105,7 +106,7 @@ export function resolveCreationModelRoute(input: {
     id: '', createdAt: Date.now(), providerId: input.providerId, model: input.model, driveMode: input.driveMode,
     routingScope: input.opts.routingScope ?? (input.providerId ? 'provider' : 'global'),
     costUsd: 0, contextTokens: 0, budgetUsd: input.opts.budgetUsd,
-    cwd: input.opts.cwd, businessLineId: input.opts.businessLineId
+    cwd: input.opts.cwd, businessLineId: input.opts.businessLineId, executorEngine: input.opts.executorEngine
   } as SessionMeta
   const payload = { text: input.opts.initialPrompt?.trim() || input.opts.title?.trim() || '通用任务' }
   // A native Engine is constructed immediately after this function returns. If

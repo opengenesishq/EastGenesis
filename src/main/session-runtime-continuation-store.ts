@@ -8,6 +8,7 @@ import { validateRuntimeContinuationContext } from './session-runtime-continuati
 import { runtimeContinuationReceiptPath } from './session-runtime-continuation-path'
 import { assertSessionModelChange } from './session-model-change'
 import { normalizeSessionRoutingControl } from '../shared/session-routing-control'
+import { assertSessionExecutorEngine, normalizeSessionExecutorEngine } from '../shared/session-executor-selection'
 
 function receiptPath(sessionId: string): string {
   return runtimeContinuationReceiptPath(app.getPath('userData'), sessionId)
@@ -44,12 +45,18 @@ export function restoreRuntimeContinuation(meta: SessionMeta): void {
     }
   }
   validateRuntimeContinuationContext(committed, readTranscriptEntriesStrict(committed.sdkSessionId!))
+  const executorEngine = normalizeSessionExecutorEngine(committed.executorEngine ?? meta.executorEngine)
+  if (meta.executorEngine && committed.executorEngine && meta.executorEngine !== committed.executorEngine) {
+    throw new Error('运行时交接与保存的执行器约束不一致。')
+  }
+  assertSessionExecutorEngine(executorEngine, committed.engine)
   if (meta.model !== 'auto' || meta.routingScope !== 'global') throw new Error('旧会话固定目标与持久自动交接冲突，请恢复最新会话')
   for (const key of ['workspaceId', 'goalId', 'workItemId', 'businessLineId', 'createdAt'] as const) {
     if (committed[key] !== meta[key]) throw new Error(`运行时交接归属不匹配：${key}`)
   }
   Object.assign(meta, {
     engine: committed.engine, providerId: committed.providerId, modelRoutingDecision: committed.modelRoutingDecision,
+    executorEngine,
     routingControl: committed.routingControl ? normalizeSessionRoutingControl(committed.routingControl, committed) : undefined,
     modelChange: receiptChange ? structuredClone(receiptChange) : undefined,
     runtimeContinuation: record, responsesContext: undefined, resumeSessionAt: undefined,

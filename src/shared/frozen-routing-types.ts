@@ -1,4 +1,4 @@
-import type { SchedulerStrategy } from './types'
+import type { EngineKind, SchedulerStrategy } from './types'
 import type { ProviderConnectionIdentity } from './provider-connection-identity'
 import type { RoutingFailurePolicy, RoutingRuleScope, RoutingRuleSource, RoutingSelection, RoutingTargetRef, RoutingUserIntent } from './routing-policy-types'
 
@@ -26,6 +26,7 @@ export interface FrozenRoutingRuleReference {
   scope: RoutingRuleScope
 }
 export interface FrozenRoutingHardBounds {
+  executorEngine?: EngineKind
   requiredCapabilities: Array<'tools' | 'vision'>
   minContextTokens: number
   allowedProviderIds: string[]

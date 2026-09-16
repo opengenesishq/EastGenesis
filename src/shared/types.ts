@@ -745,6 +745,8 @@ export interface CreateSessionOptions extends BusinessLineBinding {
   resumeSessionAt?: string
   /** 兼容旧调用;新会话会忽略此值并从 Provider 解析引擎。 */
   engine?: EngineKind
+  /** 可选执行器约束；模型选择不得改变该执行器，旧 engine 提示仍按原规则兼容。 */
+  executorEngine?: EngineKind
   taskStrategy?: TaskStrategy
   /**
    * @deprecated 收编后此字段被后端忽略。

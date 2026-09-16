@@ -15,6 +15,8 @@ export interface SessionRuntimeContinuation {
 }
 
 export interface SessionRuntimeRoutingBinding {
+  /** Explicit executor requirement, independent of the currently adopted engine. */
+  executorEngine?: EngineKind
   routingControl?: import('./session-routing-control-types').SessionRoutingControl
   /** Concrete target is independent from the user's AUTO/model intent. */
   modelRoutingDecision?: ModelRoutingDecisionView

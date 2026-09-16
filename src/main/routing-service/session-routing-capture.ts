@@ -15,6 +15,7 @@ import { settingsForCaoGenDrive, driveRouteTuning, driveRiskAtLeast } from '../m
 import { resolveProviderRuntimeTarget } from '../provider/providerRuntimeTarget'
 import { isLocalProviderUrl } from '../model/routing-expert-policy'
 import { evaluateNativeExecutorCompatibility } from '../model/executor-compatibility'
+import { normalizeSessionExecutorEngine } from '../../shared/session-executor-selection'
 
 /** Main-owned capture used by canonical Session previews and first Run binding. */
 export function captureSessionRouting(input: { meta: SessionMeta; prompt: string; payload?: Pick<SendMessagePayload, 'images' | 'documents'> }): {
@@ -47,13 +48,14 @@ export function captureSessionRouting(input: { meta: SessionMeta; prompt: string
   const remaining = [budget.sessionRemainingUsd, budget.monthlyRemainingUsd].filter((value): value is number => value !== undefined)
   const snapshots: RoutingEvaluationSnapshots = { providers, expertPolicy: settings.routingExpertPolicy,
     budget: remaining.length === 0 ? undefined : { remainingUsd: Math.min(...remaining), hardLimit: true },
-    targetEligibility: buildTargetEligibility(catalog, task, settings.routingExpertPolicy, identities),
+    targetEligibility: buildTargetEligibility(catalog, task, settings.routingExpertPolicy, identities, normalizeSessionExecutorEngine(input.meta.executorEngine)),
     providerHealth: Object.fromEntries(providers.map((provider) => { const health = getHealth(provider.id); return [provider.id, { healthy: health.healthy, circuitState: health.circuitState, latencyEmaMs: health.latencyEmaMs }] })),
     connectionIdentities,
     scoringSignals: profiles.map((profile) => captureModelRouteScoringSignal(profile, { providers, connectionIdentities })) }
   return { context, snapshots, authority: { kind: 'session', sessionId: input.meta.id, revision: 0,
     businessLineId: line.id,
     providerId: input.meta.providerId, model: input.meta.model,
+    executorEngine: input.meta.executorEngine ?? null,
     routingScope: input.meta.routingScope ?? 'global', routingControl: sessionRoutingControl(input.meta), driveMode: input.meta.driveMode ?? null,
     connectionIdentities: Object.fromEntries(identities) } }
 }
@@ -95,7 +97,8 @@ function buildTargetEligibility(
   catalog: ReturnType<typeof buildRoutingCatalog>,
   task: ReturnType<typeof inferTaskProfile>,
   policy: Parameters<typeof providerAllowedByRoutingExpertPolicy>[1],
-  identities: ReadonlyMap<string, string | undefined>
+  identities: ReadonlyMap<string, string | undefined>,
+  expectedEngine?: SessionMeta['executorEngine']
 ): RoutingEvaluationSnapshots['targetEligibility'] {
   return catalog.map((entry) => {
     const reasons: string[] = []
@@ -107,7 +110,7 @@ function buildTargetEligibility(
     } catch (error) {
       reasons.push(`Provider endpoint binding is unavailable: ${error instanceof Error ? error.message : String(error)}`)
     }
-    const compatibility = evaluateNativeExecutorCompatibility({ provider: entry.provider, profile: entry.profile, requirements: task })
+    const compatibility = evaluateNativeExecutorCompatibility({ provider: entry.provider, profile: entry.profile, requirements: task, expectedEngine })
     reasons.push(...compatibility.modelReasons, ...compatibility.executorReasons)
     const connectionFingerprint = identities.get(entry.provider.id)
     if (!connectionFingerprint) reasons.push('Provider connection identity is unavailable.')

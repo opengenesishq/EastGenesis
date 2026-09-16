@@ -94,6 +94,8 @@ export async function executeRoutine(
                 providerId: current.providerId || undefined,
                 budgetUsd: current.budgetUsd,
                 engine: current.engine,
+                executorEngine: current.engine,
+                initialPrompt: current.prompt,
                 taskStrategy: current.permissionMode === 'plan' ? 'plan' : 'execute',
                 title: `Routine: ${current.name}`
               },
