@@ -36,7 +36,7 @@ export async function registerOfficeRevisionLifecycle(input: { run: TaskRunRecor
         baseArtifactId: target.baseArtifactId, baseDigest: target.baseDigest, unchangedScopeDigest: target.unchangedScopeDigest, checks: result.checks },
       createdAt: existing?.createdAt ?? effect.terminalAt ?? effect.updatedAt },
     evidence: { id: `evidence:office-revision:${effect.id}`, kind: 'delivery_check', title: `局部修订完整性：${target.title}`,
-      summary: '原稿摘要、精确选区、未选XML及ZIP部件内容已核验。公式重算、语义质量、来源支持和视觉排版未核验。',
+      summary: '原稿摘要、明确修改范围、保留内容和文件部件已核验。公式重算、语义质量、来源支持和视觉排版未核验。',
       verifier: 'office-revision-preservation', metadata: { checks: result.checks, planDigest: target.planDigest } },
     acceptance: { id: `acceptance:office-revision:${effect.id}`, criterionId: `criterion:office-revision:${effect.id}`,
       criterion: '当前任务的同lineage下一版本只改变已审阅选区，保留原稿和未选内容。', status: 'passed', verifier: 'office-revision-preservation' },

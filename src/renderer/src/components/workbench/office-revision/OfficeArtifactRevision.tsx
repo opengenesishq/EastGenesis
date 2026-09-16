@@ -12,7 +12,7 @@ export default function OfficeArtifactRevision({ snapshot }: { snapshot: StudioR
   if (!artifacts.length) return null
   const artifact = artifacts.find((item) => item.id === artifactId)
   return <section className="office-artifact-revision" data-office-artifact-revision>
-    <strong>指定修改</strong><p>选择这项任务的成果，预览一个段落、单元格或页面文本框的精确修改，再交给同一任务执行。</p>
+    <strong>指定修改</strong>
     <label>成果版本<select value={artifactId} onChange={(event) => setArtifactId(event.target.value)} data-office-artifact-select><option value="">选择成果…</option>{artifacts.map((item) => <option key={item.id} value={item.id}>{item.title} · 第 {item.version} 版 · {item.deliveryScope === 'current' ? '当前版本' : '旧版本，只读'}</option>)}</select></label>
     {artifact && <OfficeArtifactDetail key={`${snapshot.scope.sessionId}:${artifact.id}:${artifact.digest}`} sessionId={snapshot.scope.sessionId} artifact={artifact} />}
   </section>
@@ -71,6 +71,7 @@ export function RevisionPlanPreview({ plan, snapshot, disabled, onApply }: { pla
 }
 
 export function officeRevisionTargetLabel(snapshot: OfficeArtifactSnapshot | undefined, targetId: string): string {
+  if (targetId === 'presentation:slide-sequence') return '页面数量与顺序'
   const paragraph = snapshot?.paragraphs.find((item) => item.id === targetId)
   if (paragraph) return officeParagraphLabel(paragraph)
   const cell = snapshot?.cells.find((item) => `${item.sheetId}!${item.address}` === targetId)

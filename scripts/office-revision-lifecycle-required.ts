@@ -156,7 +156,7 @@ async function main() {
     const goal = (await workspace.getGoal(meta.goalId!))!, item = (await workspace.getWorkItem(meta.workItemId!))!
     await commands.reviseGoalRequirements(goal.id, { sessionId: meta.id, projectId: goal.projectId, workItemId: item.id,
       requestId: 'revise-existing', messageId: `session-input:${meta.id}:revise-existing`, payloadDigest: 'b'.repeat(64),
-      text: '第二页补来源', intent: { schemaVersion: 1, kind: 'revise_delivery_requirements',
+      text: '第二页补来源；控制在三页', intent: { schemaVersion: 1, kind: 'revise_delivery_requirements',
         expectedGoalRevision: goal.revision, expectedWorkItemRevision: item.revision } })
     const revisedGoal = (await workspace.getGoal(meta.goalId!))!
     const draft = await requirementContinuationDraft(meta, revisedGoal.revision, root)
@@ -219,6 +219,24 @@ async function main() {
     assert(inspected.slideTexts!.some(shape => shape.text === 'Revised customer title'))
     assert(inspected.slideTexts!.some(shape => shape.text.includes('source: annual report')))
     assert.equal((await inspectScopedOffice(context, finalized.artifactId)).artifact.latest, false)
+    const pagePlan = await prepareOfficeRevision(childContext, { baseArtifactId: revision.artifactId, expectedDigest: revision.digest,
+      operations: [{ kind: 'setSlideSequence', expectedNodeDigest: inspected.slideSequence!.nodeDigest,
+        slides: [...inspected.slides!.map(slide => ({ slideId: slide.id })), { title: 'Sources', body: 'Annual report, page 8' }] }] })
+    const pageIntent = { planId: pagePlan.planId, planDigest: pagePlan.planDigest, baseArtifactId: revision.artifactId, baseDigest: revision.digest }
+    const pageInput = { ...reinput, toolUseId: 'amendment-add-page', toolInput: pageIntent }
+    const pageHandle = await prepareEffectExecution(pageInput)
+    assert(pageHandle && isOfficeRevisionTarget(pageHandle.target))
+    await markEffectExecutionStarted(pageHandle, pageInput)
+    const pageOutput = await executeOfficeRevisionTool('revise_office_artifact', pageIntent, { sessionMeta: child, userDataRoot: root, effectTarget: pageHandle.target })
+    const pageEffect = await completeEffectExecution(pageHandle, pageOutput)
+    assert.equal(pageEffect?.status, 'confirmed')
+    const pageResult = JSON.parse((await finalizeOfficeRevisionToolResult(pageOutput, pageEffect, root)).output)
+    assert.equal(pageResult.version, 4)
+    assert.equal((await inspectScopedOffice(childContext, pageResult.artifactId)).coverage.slideCount, 3)
+    const pageEvidence = (await listWorkflowEvidence({ artifactId: pageResult.artifactId }, root)).find(item => item.verifier === 'office-request-requirements')
+    const pageReport = pageEvidence?.metadata?.report as { checks: Array<{ requirement: { kind: string }; status: string; actualPageCount?: number }> }
+    assert.equal(pageReport.checks.find(check => check.requirement.kind === 'page_count')?.actualPageCount, 3)
+    assert.equal(pageReport.checks.find(check => check.requirement.kind === 'page_count')?.status, 'passed')
     await syncTaskPlanLedger(root, plans.revoke(meta.id, pending.currentVersion!))
     await finalizeOfficeRevisionToolResult(output, completed, root)
     await purgeTaskPlanLedgerForSession(root, meta.id)

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { OfficeArtifactSnapshot, OfficeCellSnapshot, OfficeParagraphSnapshot, OfficeRevisionOperation, OfficeSlideTextSnapshot } from '../../../../../shared/office-revision-types'
 import { cellRevision, paragraphRevision, slideTextRevision } from './office-revision-model'
+import OfficeSlideSequenceEditor from './OfficeSlideSequenceEditor'
 
 export default function OfficeRevisionEditor({ snapshot, busy, onChange, onPreview }: {
   snapshot: OfficeArtifactSnapshot; busy: boolean; onChange(): void; onPreview(operation: OfficeRevisionOperation): Promise<void>
@@ -8,6 +9,7 @@ export default function OfficeRevisionEditor({ snapshot, busy, onChange, onPrevi
   const [paragraphId, setParagraphId] = useState(snapshot.paragraphs[0]?.id ?? '')
   const [cellKey, setCellKey] = useState(snapshot.cells[0] ? keyForCell(snapshot.cells[0]) : '')
   const [textKey, setTextKey] = useState(snapshot.slideTexts?.[0] ? keyForSlideText(snapshot.slideTexts[0]) : '')
+  const [presentationMode, setPresentationMode] = useState<'text' | 'pages'>('text')
   const paragraph = snapshot.paragraphs.find((item) => item.id === paragraphId)
   const cell = snapshot.cells.find((item) => keyForCell(item) === cellKey)
   const slideText = snapshot.slideTexts?.find((item) => keyForSlideText(item) === textKey)
@@ -19,11 +21,18 @@ export default function OfficeRevisionEditor({ snapshot, busy, onChange, onPrevi
         <ReplacementEditor key={paragraph.id} initial={paragraph.text} editable={paragraph.editable && snapshot.editability.editable && snapshot.artifact.latest} busy={busy} onChange={onChange} onPreview={(text) => onPreview(paragraphRevision(snapshot, paragraph.id, text))} />
       </div>}
     </> : snapshot.artifact.kind === 'presentation' ? <>
+      <div className="office-revision-modes" role="tablist" aria-label="汇报修改范围">
+        <button type="button" role="tab" aria-selected={presentationMode === 'text'} disabled={busy} onClick={() => select(() => setPresentationMode('text'))}>文字</button>
+        <button type="button" role="tab" aria-selected={presentationMode === 'pages'} disabled={busy} onClick={() => select(() => setPresentationMode('pages'))}>页面</button>
+      </div>
+      <div hidden={presentationMode !== 'pages'}><OfficeSlideSequenceEditor snapshot={snapshot} busy={busy} onChange={onChange} onPreview={onPreview} /></div>
+      <div hidden={presentationMode !== 'text'}>
       <label>页面与文本框<select value={textKey} disabled={busy} onChange={(event) => select(() => setTextKey(event.target.value))} data-office-slide-text-select>{snapshot.slideTexts?.map((item) => <option key={keyForSlideText(item)} value={keyForSlideText(item)}>{officeSlideTextLabel(snapshot, item)} · {item.editable ? '可修改' : '只读'} · {item.text.slice(0, 48)}</option>)}</select></label>
       {slideText && <div><pre>{slideText.text}</pre>{!slideText.editable && <p>{slideText.reason ?? '此文本框包含复杂结构，仅可预览。'}</p>}
         <p>保留原段落数量和文字样式。请核对新文字的换行与显示范围。</p>
         <ReplacementEditor key={textKey} initial={slideText.text} editable={slideText.editable && snapshot.editability.editable && snapshot.artifact.latest} busy={busy} onChange={onChange} onPreview={(text) => onPreview(slideTextRevision(snapshot, slideText.slideId, slideText.shapeId, text))} />
       </div>}
+      </div>
     </> : <>
       <label>工作表与单元格<select value={cellKey} disabled={busy} onChange={(event) => select(() => setCellKey(event.target.value))} data-office-cell-select>{snapshot.cells.map((item) => <option key={keyForCell(item)} value={keyForCell(item)}>{officeCellLabel(snapshot, item)} · {item.editable ? '可修改' : '只读'}</option>)}</select></label>
       {cell && <CellEditor key={cellKey} snapshot={snapshot} cell={cell} busy={busy} onChange={onChange} onPreview={onPreview} />}

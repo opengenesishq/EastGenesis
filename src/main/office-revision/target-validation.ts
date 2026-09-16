@@ -17,7 +17,8 @@ export function isOfficeRevisionTarget(value: unknown): value is OfficeRevisionE
     officeText(identity.device, 'device'); officeText(identity.inode, 'inode')
     const draft = normalizeOfficeDraft({ baseArtifactId: raw.baseArtifactId, expectedDigest: raw.baseDigest, operations: raw.operations })
     const operationKind = raw.artifactKind === 'document' ? 'replaceParagraphText' : raw.artifactKind === 'presentation' ? 'replaceSlideText' : 'setCellValue'
-    if (draft.operations.some((operation) => operation.kind !== operationKind)) return false
+    if (draft.operations.some((operation) => operation.kind !== operationKind &&
+      !(raw.artifactKind === 'presentation' && operation.kind === 'setSlideSequence'))) return false
     if (raw.artifactKind === 'presentation' && draft.operations.length !== 1) return false
     return Number.isSafeInteger(raw.baseVersion) && Number(raw.baseVersion) >= 1 && Number.isSafeInteger(raw.expectedBytes) && Number(raw.expectedBytes) > 0
   } catch { return false }

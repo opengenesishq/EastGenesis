@@ -7,6 +7,12 @@ import { executeFrozenOfficeRevision } from '../../office-revision/effect'
 export const OFFICE_REVISION_TOOL_NAMES = new Set(['inspect_office_artifact', 'plan_office_revision', 'revise_office_artifact'])
 const text = { type: 'string' }
 const operation = { oneOf: [
+  { type: 'object', additionalProperties: false, required: ['kind', 'expectedNodeDigest', 'slides'], properties: {
+    kind: { type: 'string', enum: ['setSlideSequence'] }, expectedNodeDigest: text,
+    slides: { type: 'array', minItems: 1, maxItems: 300, items: { oneOf: [
+      { type: 'object', additionalProperties: false, required: ['slideId'], properties: { slideId: text } },
+      { type: 'object', additionalProperties: false, required: ['title', 'body'], properties: { title: text, body: text } }
+    ] } } } },
   { type: 'object', additionalProperties: false, required: ['kind', 'paragraphId', 'expectedNodeDigest', 'text'], properties: {
     kind: { type: 'string', enum: ['replaceParagraphText'] }, paragraphId: text, expectedNodeDigest: text, text } },
   { type: 'object', additionalProperties: false, required: ['kind', 'sheetId', 'address', 'expectedNodeDigest', 'value'], properties: {
@@ -15,9 +21,9 @@ const operation = { oneOf: [
     kind: { type: 'string', enum: ['replaceSlideText'] }, slideId: text, shapeId: text, expectedNodeDigest: text, text } }
 ] }
 export const OFFICE_REVISION_TOOLS: ToolDefinition[] = [
-  { type: 'function', function: { name: 'inspect_office_artifact', description: '检查当前任务 Word/Excel/PowerPoint 成果选区；返回段落、已有单元格、页面与文本框身份和摘要。复杂结构与公式只读，不接受文件路径或任意项目。',
+  { type: 'function', function: { name: 'inspect_office_artifact', description: '检查当前任务 Word/Excel/PowerPoint 成果选区；返回段落、已有单元格、页面与文本框身份、slideSequence摘要和可调整性。复杂结构与公式只读，不接受文件路径或任意项目。',
     parameters: { type: 'object', additionalProperties: false, required: ['artifactId'], properties: { artifactId: text, expectedDigest: text } } } },
-  { type: 'function', function: { name: 'plan_office_revision', description: '只读生成精确局部修订预览。先 inspect 取得选区摘要；支持普通段落、literal 单元格及指定页面文本框文字。文本框须保留段落数量，其他页面和形状不变。不应用修改。',
+  { type: 'function', function: { name: 'plan_office_revision', description: '只读生成精确修订预览。先inspect取得选区摘要。支持段落、literal单元格和页面文本框（保留段落数量）。PowerPoint还可单独setSlideSequence：用slideSequence.nodeDigest，slides按新顺序列出保留的slideId或新增页title/body；省略的原页面将从新版本删除，原版本保留，共享媒体与保留页不变。不直接应用修改。',
     parameters: { type: 'object', additionalProperties: false, required: ['baseArtifactId', 'expectedDigest', 'operations'], properties: {
       baseArtifactId: text, expectedDigest: text, operations: { type: 'array', minItems: 1, maxItems: 128, items: operation } } } } },
   { type: 'function', function: { name: 'revise_office_artifact', description: '通过原工具权限/Effect应用已准备的精确修订计划，产生同lineage下一版本并保留旧稿。UI指定planDigest时必须原样使用。只在返回registered后才宣称应用完成。',

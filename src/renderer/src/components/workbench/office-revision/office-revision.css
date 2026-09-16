@@ -4,3 +4,16 @@
 .office-artifact-revision code{overflow-wrap:anywhere}.office-revision-comparison{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.office-revision-plan{margin-top:16px;padding:12px;border:1px solid var(--border);border-radius:8px}
 .office-revision-comparison>div{min-width:0}.office-revision-comparison>div>span{font-size:12px;color:var(--text-secondary)}.office-revision-checks{margin:10px 0;font-size:13px;line-height:1.6}.office-revision-checked{color:var(--text-secondary)}.office-revision-limitation{padding:8px 10px;border-left:3px solid var(--border);background:var(--bg-secondary);border-radius:4px}.office-revision-technical{margin-top:8px;color:var(--text-secondary)}.office-revision-technical summary{cursor:pointer}.office-revision-technical p{overflow-wrap:anywhere}.office-revision-result{margin-top:14px}
 @media(max-width:600px){.office-revision-comparison{grid-template-columns:1fr}}
+.office-revision-modes { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.office-revision-modes button { border: 0; background: none; color: inherit; padding: 6px 12px; border-bottom: 2px solid transparent; }
+.office-revision-modes button[aria-selected="true"] { border-bottom-color: var(--accent); font-weight: 600; }
+.office-slide-sequence-toolbar, .office-slide-sequence-row, .office-slide-sequence-actions { display: flex; align-items: center; gap: 6px; }
+.office-slide-sequence-toolbar { margin-bottom: 8px; }
+.office-slide-sequence ol { list-style: none; padding: 0; margin: 0 0 10px; max-height: 360px; overflow-y: auto; }
+.office-slide-sequence li { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.office-slide-sequence-row { justify-content: space-between; }
+.office-slide-sequence-row > span { min-width: 0; overflow-wrap: anywhere; }
+.office-slide-sequence-actions { flex-shrink: 0; }
+.office-slide-sequence-actions button, .office-slide-sequence-toolbar button { width: 30px; height: 30px; padding: 0; display: grid; place-items: center; }
+.office-slide-sequence-new { margin-top: 8px; }
+.office-slide-sequence-new input, .office-slide-sequence-new textarea { box-sizing: border-box; width: 100%; min-width: 0; color: var(--text-primary); background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font: inherit; }

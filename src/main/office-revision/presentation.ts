@@ -14,6 +14,7 @@ export interface PresentationInspection {
   slides: OfficeSlideSnapshot[]
   texts: OfficeSlideTextSnapshot[]
   locations: Map<string, TextLocation>
+  slideParts: Map<string, string>
 }
 
 export function slideTextKey(slideId: string, shapeId: string): string { return `${slideId}!${shapeId}` }
@@ -37,7 +38,7 @@ export function inspectPresentationPackage(parts: OfficePackage): PresentationIn
   if (relationshipIds.some((id) => !id) || new Set(relationshipIds).size !== relationshipIds.length) {
     officeError('OFFICE_UNSUPPORTED_STRUCTURE', 'PowerPoint 关系身份重复或缺失。')
   }
-  const result: PresentationInspection = { slides: [], texts: [], locations: new Map() }
+  const result: PresentationInspection = { slides: [], texts: [], locations: new Map(), slideParts: new Map() }
   const seenParts = new Set<string>(), seenIds = new Set<string>()
   for (const [index, slide] of list[0].children.entries()) {
     const rawId = slide.attributes.id, relationId = slide.attributes['r:id']
@@ -54,6 +55,7 @@ export function inspectPresentationPackage(parts: OfficePackage): PresentationIn
       officeError('OFFICE_UNSUPPORTED_STRUCTURE', 'PowerPoint 页面路径越界或重复。')
     }
     seenParts.add(part)
+    result.slideParts.set(`slide:${rawId}`, part)
     inspectSlide(parts, part, `slide:${rawId}`, index, result)
   }
   return result

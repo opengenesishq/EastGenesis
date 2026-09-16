@@ -348,7 +348,7 @@ export function permissionEffectScope(target: EffectTarget, targetDigest: string
       summary = `Office ${target.artifactKind} · ${target.relativePath}`
       break
     case 'office_artifact_revision':
-      summary = `Office ${target.title} · v${target.baseVersion} → v${target.baseVersion + 1} · ${target.operations.length}处选区：${target.operations.slice(0, 8).map((op) => op.kind === 'replaceParagraphText' ? op.paragraphId : op.kind === 'replaceSlideText' ? `${op.slideId}!${op.shapeId}` : `${op.sheetId}!${op.address}`).join(', ')} · 原稿 ${target.baseDigest.slice(0, 19)}`
+      summary = `Office ${target.title} · v${target.baseVersion} → v${target.baseVersion + 1} · ${target.operations.length}处选区：${target.operations.slice(0, 8).map((op) => op.kind === 'replaceParagraphText' ? op.paragraphId : op.kind === 'replaceSlideText' ? `${op.slideId}!${op.shapeId}` : op.kind === 'setSlideSequence' ? `页面调整为 ${op.slides.length} 页（保留 ${op.slides.filter(slide => 'slideId' in slide).length} 页，新增 ${op.slides.filter(slide => !('slideId' in slide)).length} 页；未列出的原页从新版本删除）` : `${op.sheetId}!${op.address}`).join(', ')} · 原稿 ${target.baseDigest.slice(0, 19)}`
       break
     default:
       summary = `效果 ${target.kind}`

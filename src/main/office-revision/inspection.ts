@@ -8,6 +8,7 @@ import { applyXmlPatches, readOfficePackage, unchangedOfficeScopeDigest, utf8, w
 import { normalizeOfficeDraft, officeOperationKey } from './input'
 import { officeBytesDigest } from './digest'
 import { officeError } from './errors'
+import { inspectSlideSequence, reviseSlideSequence } from './presentation-sequence'
 
 export const OFFICE_INSPECTION_LIMITS = { paragraphs: 2_000, cells: 10_000, slides: 300, textBoxes: 3_000, characters: 1_000_000 } as const
 
@@ -30,12 +31,14 @@ function inspectPackage(kind: OfficeRevisionKind, parts: OfficePackage) {
 export async function generateOfficeRevision(kind: OfficeRevisionKind, bytes: Buffer, operations: OfficeRevisionOperation[]) {
   // Revalidate at replay as well as at preview; frozen targets are persisted data.
   const normalized = normalizeOfficeDraft({ baseArtifactId: 'validated-package', expectedDigest: officeBytesDigest(bytes), operations }).operations
-  if (kind === 'presentation' && normalized.length !== 1) officeError('OFFICE_PLAN_MISMATCH', '每次 PowerPoint 修订请选择一个页面中的一个文本框。')
+  if (kind === 'presentation' && normalized.length !== 1) officeError('OFFICE_PLAN_MISMATCH', '每次 PowerPoint 修订请选择一个文本框，或单独调整页面数量与顺序。')
   const parts = readOfficePackage(bytes), inspection = inspectPackage(kind, parts)
   if (!inspection.complete) officeError('OFFICE_INCOMPLETE_COVERAGE', '原稿超过完整选区读取上限，不能执行局部修订。')
+  if (normalized[0].kind === 'setSlideSequence' && inspection.presentation) return reviseSlideSequence(parts, inspection.presentation, normalized[0])
   const patches = new Map<string, XmlPatch[]>(), changes: OfficeRevisionChange[] = []
   const add = (part: string, updates: XmlPatch[]): void => { patches.set(part, [...(patches.get(part) ?? []), ...updates]) }
   for (const operation of normalized) {
+    if (operation.kind === 'setSlideSequence') officeError('OFFICE_PLAN_MISMATCH', '页面调整只适用于 PowerPoint，且需单独预览。')
     let before: string, after: string
     if (operation.kind === 'replaceParagraphText' && inspection.document) {
       const patch = patchDocumentParagraph(inspection.document, operation)
@@ -78,6 +81,7 @@ export async function generateOfficeRevision(kind: OfficeRevisionKind, bytes: Bu
   }
   const verified = inspectPackage(kind, readback)
   for (const operation of normalized) {
+    if (operation.kind === 'setSlideSequence') officeError('OFFICE_PLAN_MISMATCH', '页面调整需单独执行。')
     const actual = operation.kind === 'replaceParagraphText'
       ? verified.document?.paragraphs.find((item) => item.id === operation.paragraphId)?.text
       : operation.kind === 'replaceSlideText'
@@ -92,13 +96,14 @@ export async function generateOfficeRevision(kind: OfficeRevisionKind, bytes: Bu
 export function officeArtifactSnapshot(loaded: ScopedOfficeArtifact): OfficeArtifactSnapshot {
   const kind = loaded.record.kind as OfficeRevisionKind
   if (!['document', 'spreadsheet', 'presentation'].includes(kind)) officeError('OFFICE_UNSUPPORTED_STRUCTURE', '成果类型不支持局部修订。')
-  const inspected = inspectPackage(kind, readOfficePackage(loaded.bytes))
+  const parts = readOfficePackage(loaded.bytes), inspected = inspectPackage(kind, parts)
+  const slideSequence = kind === 'presentation' ? inspectSlideSequence(parts) : undefined
   const paragraphs = inspected.document?.paragraphs ?? [], cells = inspected.spreadsheet?.cells ?? []
   const slides = inspected.presentation?.slides ?? [], texts = inspected.presentation?.texts ?? []
   const reasons = [
     ...(!loaded.latest ? ['原稿已有新版本，请选择当前版本。'] : []),
     ...(!inspected.complete ? ['原稿超过完整读取上限，当前只读。'] : []),
-    ...(![...paragraphs, ...cells, ...texts].some((item) => item.editable) ? ['原稿没有支持局部修改的普通选区。'] : [])
+    ...(!slideSequence?.editable && ![...paragraphs, ...cells, ...texts].some((item) => item.editable) ? ['原稿没有支持局部修改的普通选区。'] : [])
   ]
   return {
     schemaVersion: 1,
@@ -111,6 +116,7 @@ export function officeArtifactSnapshot(loaded: ScopedOfficeArtifact): OfficeArti
     paragraphs: boundedTextItems(paragraphs, OFFICE_INSPECTION_LIMITS.paragraphs),
     sheets: inspected.spreadsheet?.sheets ?? [], cells: boundedCells(cells),
     slides: slides.slice(0, OFFICE_INSPECTION_LIMITS.slides), slideTexts: boundedTextItems(texts, OFFICE_INSPECTION_LIMITS.textBoxes),
+    ...(slideSequence ? { slideSequence } : {}),
     checks: revisionChecks(kind, inspected.complete, false)
   }
 }

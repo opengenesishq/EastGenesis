@@ -33,8 +33,28 @@ function officeSlideText(value: unknown): string {
   return value
 }
 export function normalizeOfficeOperation(value: unknown): OfficeRevisionOperation {
-  const raw = officeRecord(value, ['kind', 'paragraphId', 'sheetId', 'address', 'slideId', 'shapeId', 'expectedNodeDigest', 'text', 'value'])
+  const raw = officeRecord(value, ['kind', 'paragraphId', 'sheetId', 'address', 'slideId', 'shapeId', 'expectedNodeDigest', 'text', 'value', 'slides'])
   const expectedNodeDigest = officeDigest(raw.expectedNodeDigest)
+  if (raw.kind === 'setSlideSequence') {
+    officeRecord(raw, ['kind', 'expectedNodeDigest', 'slides'])
+    if (!Array.isArray(raw.slides) || raw.slides.length < 1 || raw.slides.length > 300) officeError('OFFICE_PLAN_MISMATCH', '汇报必须保留 1 至 300 页。')
+    const slides = raw.slides.map(value => {
+      const slide = officeRecord(value, ['slideId', 'title', 'body'])
+      if (slide.slideId !== undefined) {
+        officeRecord(slide, ['slideId'])
+        const slideId = officeText(slide.slideId, 'slideId')
+        if (!/^slide:[1-9][0-9]*$/.test(slideId)) officeError('OFFICE_PLAN_MISMATCH', '页面身份无效。')
+        return { slideId }
+      }
+      officeRecord(slide, ['title', 'body'])
+      const title = officeLiteralText(slide.title), body = officeSlideText(slide.body)
+      if (!title.trim() || title.length > 300 || body.length > 8_000) officeError('OFFICE_PLAN_MISMATCH', '新页面需要标题（300 字内）和正文（8000 字内）。')
+      return { title, body }
+    })
+    const ids = slides.flatMap(slide => 'slideId' in slide ? [slide.slideId] : [])
+    if (new Set(ids).size !== ids.length) officeError('OFFICE_PLAN_MISMATCH', '同一原页面不能重复放入汇报。')
+    return { kind: raw.kind, expectedNodeDigest, slides }
+  }
   if (raw.kind === 'replaceParagraphText') {
     officeRecord(raw, ['kind', 'paragraphId', 'expectedNodeDigest', 'text'])
     const paragraphId = officeText(raw.paragraphId, 'paragraphId')
@@ -65,6 +85,7 @@ export function normalizeOfficeDraft(value: unknown): OfficeRevisionDraftInput {
   return { baseArtifactId: officeText(raw.baseArtifactId, 'baseArtifactId'), expectedDigest: officeDigest(raw.expectedDigest), operations }
 }
 export function officeOperationKey(operation: OfficeRevisionOperation): string {
+  if (operation.kind === 'setSlideSequence') return 'presentation:slide-sequence'
   if (operation.kind === 'replaceParagraphText') return operation.paragraphId
   if (operation.kind === 'replaceSlideText') return `${operation.slideId}!${operation.shapeId}`
   return `${operation.sheetId}!${operation.address}`
