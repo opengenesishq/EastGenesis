@@ -116,6 +116,7 @@ import { registerPalaceSceneBuilderIpc } from './ipc/palace-scene-builder-handle
 import { registerSessionInputIpc } from './ipc/session-input-handlers'
 import { registerPreparationPermissionIpc } from './ipc/preparation-permission-handlers'
 import { registerTaskExecutionAuthorityIpc } from './ipc/task-execution-authority-handlers'
+import { registerTaskBudgetIpc } from './ipc/task-budget-handlers'
 import { registerCouncilIpc } from './ipc/council-handlers'
 import type {
   BrowserBounds,
@@ -286,6 +287,7 @@ function effectIntentDescription(snapshot: TaskSnapshotRecord, effect: EffectRec
 export function registerIpc(): void {
   registerPreparationPermissionIpc()
   registerTaskExecutionAuthorityIpc()
+  registerTaskBudgetIpc()
   registerSessionInputIpc()
   registerCouncilIpc()
   configureMigrationOperationBackupRoot(migrationBackupRoot())

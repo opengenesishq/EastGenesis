@@ -9,7 +9,8 @@ export function requestBudgetSnapshot(document: RequestBudgetDocument, scope: Re
   let sessionUnknown = false
   let actualTextCostUsd: number | undefined
   const aggregates = (scope.aggregateBudgets ?? []).map((budget) => ({ ...budget, spent: budget.textSpentUsd, pending: 0, unknown: false,
-    floors: (budget.textCostFloors ?? []).map((floor) => ({ ...floor, spent: floor.observedUsd })) }))
+    recorded: budget.textSpentUsd, reservedUsd: 0, reservedCount: 0, unpricedReservedCount: 0, uncertainHeldUsd: 0, uncertainCount: 0,
+    floors: (budget.textCostFloors ?? []).map((floor) => ({ ...floor, spent: floor.observedUsd, recorded: floor.observedUsd })) }))
   const month = monthKeyFor(now)
   for (const session of document.sessions) {
     const own = sameBudgetSession(session, scope)
@@ -38,9 +39,24 @@ export function requestBudgetSnapshot(document: RequestBudgetDocument, scope: Re
         .map((entry) => entry.costUsd))
       const unprojected = Math.max(0, observed + unreflected - projected)
       aggregate.spent += unprojected
+      const recordedText = Math.max(observed, session.baselineTextUsd + entries.filter(entry => entry.kind === 'model' && entry.status === 'settled')
+        .reduce((sum, entry) => sum + (entry.actualUsd ?? 0), 0))
+      const recordedDelta = Math.max(0, recordedText - projected)
+      aggregate.recorded += recordedDelta + media.filter(entry => entry.status === 'settled').reduce((sum, entry) => sum + (entry.actualUsd ?? 0), 0)
+      const reserved = entries.filter(entry => entry.status === 'reserved')
+      const uncertain = entries.filter(entry => entry.status === 'unknown' ||
+        (entry.status === 'settled' && entry.actualUsd === undefined) || unknownCharge(entry))
+      aggregate.reservedUsd += sumCharges(reserved)
+      aggregate.reservedCount += reserved.length
+      aggregate.unpricedReservedCount += reserved.filter(entry => entry.actualUsd === undefined && entry.estimatedUsd === undefined).length
+      aggregate.uncertainHeldUsd += sumCharges(uncertain.filter(entry => entry.status !== 'reserved'))
+      aggregate.uncertainCount += uncertain.length
       for (const floor of aggregate.floors) {
         if (session.aggregateBudgetIds?.includes(floor.id) || (own && scope.aggregateBudgetIds?.includes(floor.id)) ||
-            session.sessionIds.some((id) => floor.sessionIds.includes(id))) floor.spent += unprojected
+            session.sessionIds.some((id) => floor.sessionIds.includes(id))) {
+          floor.spent += unprojected
+          floor.recorded += recordedDelta
+        }
       }
       aggregate.pending += sumCharges(pendingText) + sumCharges(media)
       aggregate.unknown ||= [...pendingText, ...media, ...unpricedText].some(unknownCharge)
@@ -54,9 +70,19 @@ export function requestBudgetSnapshot(document: RequestBudgetDocument, scope: Re
     }
   }
   return {
-    ...(aggregates.length ? { aggregateRemainingUsd: aggregates.map((budget) => remaining(budget.limitUsd,
+    ...(aggregates.length ? { aggregateRemainingUsd: aggregates.filter(budget => budget.limitUsd !== undefined).map((budget) => remaining(budget.limitUsd,
       budget.spent + budget.floors.reduce((sum, floor) => sum + Math.max(0, floor.minimumUsd - floor.spent), 0) + budget.pending,
-      budget.unknown)!) } : {}),
+      budget.unknown)!), aggregateUsage: aggregates.map(budget => ({
+        id: budget.id,
+        recordedSpentUsd: budget.recorded + budget.floors.reduce((sum, floor) => sum + Math.max(0, floor.minimumUsd - floor.recorded), 0),
+        accountedUsd: budget.spent + budget.floors.reduce((sum, floor) => sum + Math.max(0, floor.minimumUsd - floor.spent), 0) + budget.pending,
+        reservedUsd: budget.reservedUsd, reservedCount: budget.reservedCount,
+        unpricedReservedCount: budget.unpricedReservedCount,
+        uncertainHeldUsd: budget.uncertainHeldUsd, uncertainCount: budget.uncertainCount,
+        remainingUsd: budget.uncertainCount ? undefined : remaining(budget.limitUsd,
+          budget.spent + budget.floors.reduce((sum, floor) => sum + Math.max(0, floor.minimumUsd - floor.spent), 0) + budget.pending, false),
+        admissionBlocked: budget.limitUsd !== undefined && budget.unknown
+      })) } : {}),
     actualTextCostUsd, sessionSpentUsd, monthlySpentUsd, sessionUnknown, monthlyUnknown,
     sessionRemainingUsd: remaining(scope.sessionLimitUsd, sessionSpentUsd, sessionUnknown),
     monthlyRemainingUsd: remaining(scope.monthlyLimitUsd, monthlySpentUsd, monthlyUnknown)

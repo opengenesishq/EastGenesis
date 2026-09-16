@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import type { GoalBudget } from '../../shared/project-workspace-types'
-import type { HistoryEntry, SessionMeta } from '../../shared/types'
+import type { SessionMeta } from '../../shared/types'
 import { parseProjectWorkspaceState, projectWorkspaceFile } from '../project-workspace/persistence'
 import { readSupervisorStateSync } from '../task/supervisor-state'
 import { taskRuntimeRegistry } from '../task/task-runtime-registry'
@@ -8,13 +8,20 @@ import { ModelRouteError } from '../model/model-route-error'
 import type { RequestBudgetScope } from './request-budget-types'
 import { readBudgetDocument } from './request-budget-store'
 
-type BudgetOwner = Pick<SessionMeta, 'id' | 'workspaceId' | 'goalId' | 'workItemId' | 'sdkSessionId' | 'costUsd'>
+export type BudgetOwner = Pick<SessionMeta, 'id' | 'workspaceId' | 'goalId' | 'workItemId' | 'sdkSessionId' | 'costUsd'>
+
+interface GoalBudgetIdentity {
+  id: string; title: string; projectId: string
+  goalLimitUsd?: number; runLimitUsd?: number; effectiveLimitUsd?: number
+  missingUsageRunCount: number
+}
 
 /** Ordinary DAG children, retries and media calls share the same Goal purse.
  * Resolve it at the physical request boundary, not from renderer arguments or
  * a plan-time balance that multiple parallel requests can spend independently. */
-export function canonicalRequestBudgets(meta: BudgetOwner, history: HistoryEntry[], rootDir: string): {
+export function canonicalRequestBudgets(meta: BudgetOwner, history: BudgetOwner[], rootDir: string, includeUnbounded = false): {
   ids: string[]; budgets: NonNullable<RequestBudgetScope['aggregateBudgets']>
+  goal?: GoalBudgetIdentity
 } {
   if (!meta.goalId) return { ids: [], budgets: [] }
   try {
@@ -35,9 +42,12 @@ export function canonicalRequestBudgets(meta: BudgetOwner, history: HistoryEntry
     const ids = [id, ...(activeRun ? [`run:${activeRun.id}`] : [])]
     // A later Goal edit may tighten the purse, but cannot enlarge the budget
     // frozen on an already-running Run.
-    const limits = [usdLimit(goal.budget), usdLimit(activeRun?.budget)].filter((value): value is number => value !== undefined)
-    if (!limits.length) return { ids, budgets: [] }
-    if (runs.some((run) => !run.usage)) throw new Error('目标已有运行缺少完整费用记录，请先核对预算')
+    const goalLimitUsd = usdLimit(goal.budget), runLimitUsd = usdLimit(activeRun?.budget)
+    const limits = [goalLimitUsd, runLimitUsd].filter((value): value is number => value !== undefined)
+    const identity = { id: goal.id, title: goal.title, projectId: goal.projectId, goalLimitUsd, runLimitUsd,
+      effectiveLimitUsd: limits.length ? Math.min(...limits) : undefined, missingUsageRunCount: runs.filter(run => !run.usage).length }
+    if (!limits.length && !includeUnbounded) return { ids, budgets: [], goal: identity }
+    if (identity.missingUsageRunCount && !includeUnbounded) throw new Error('目标已有运行缺少完整费用记录，请先核对预算')
     const entries = [...history, meta].filter((entry) => entry.workspaceId === meta.workspaceId && entry.goalId === meta.goalId)
     const ledger = readBudgetDocument(rootDir)
     // Match Supervisor totals to durable Session ownership before deduplicating.
@@ -55,8 +65,8 @@ export function canonicalRequestBudgets(meta: BudgetOwner, history: HistoryEntry
       floors.set(key, floor)
     }
     const textCostFloors = [...floors.values()]
-    return { ids, budgets: [{ id, sessionIds: [...new Set(entries.map((entry) => entry.id))],
-      limitUsd: Math.min(...limits), textSpentUsd: totalCost(entries), textCostFloors }] }
+    return { ids, goal: identity, budgets: [{ id, sessionIds: [...new Set(entries.map((entry) => entry.id))],
+      limitUsd: identity.effectiveLimitUsd, textSpentUsd: totalCost(entries), textCostFloors }] }
   } catch (error) {
     throw new ModelRouteError('ROUTING_INVALID_BUDGET', `无法核对目标共享预算，未发送请求：${error instanceof Error ? error.message : String(error)}`)
   }

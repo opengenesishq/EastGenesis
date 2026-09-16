@@ -18,6 +18,7 @@ import { resolveSelectedBusinessLine } from '../../../shared/business-line-types
 import BusinessLineWorkbench from './business-lines/BusinessLineWorkbench'
 import { WORK_OS_NAVIGATION_EVENT, requestStudioSectionNavigation, type WorkOsNavigationTarget } from './work-os-navigation'
 import { requestTaskPlanNavigation } from './experience/task-plan-navigation'
+import TaskBudgetSummary from './workbench/TaskBudgetSummary'
 
 const StudioView = lazy(loadStudioView)
 const VideoStudioView = lazy(loadVideoStudioView)
@@ -211,6 +212,8 @@ export default function AppListView({
             />
           )}
           <TaskWorkspaceNavigation mode={experienceMode} surface={studioSurface} language={language} onChange={setStudioSurface} />
+          {activeId && activeSession?.goalId && !showNewSession && experienceMode !== 'video' &&
+            (experienceMode !== 'studio' || studioSurface !== 'workspace') && <TaskBudgetSummary sessionId={activeId} language={language} />}
           <div
             className="experience-pane"
             data-experience-mode={experienceMode}

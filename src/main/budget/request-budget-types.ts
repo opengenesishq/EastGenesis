@@ -2,7 +2,7 @@
 export interface RequestBudgetScope {
   /** Stable canonical memberships, including groups that do not yet have a limit. */
   aggregateBudgetIds?: string[]
-  aggregateBudgets?: Array<{ id: string; sessionIds: string[]; limitUsd: number; textSpentUsd: number;
+  aggregateBudgets?: Array<{ id: string; sessionIds: string[]; limitUsd?: number; textSpentUsd: number;
     textCostFloors?: Array<{ id: string; sessionIds: string[]; observedUsd: number; minimumUsd: number }> }>
   sessionId: string
   sdkSessionId?: string
@@ -45,6 +45,7 @@ export interface RequestBudgetDocument {
 
 export interface RequestBudgetSnapshot {
   aggregateRemainingUsd?: number[]
+  aggregateUsage?: RequestBudgetAggregateUsage[]
   /** Settled text only; excludes media and live reservations. Missing if any
    * completed text request lacks an actual priced usage result. */
   actualTextCostUsd?: number
@@ -54,6 +55,20 @@ export interface RequestBudgetSnapshot {
   monthlyRemainingUsd?: number
   sessionUnknown: boolean
   monthlyUnknown: boolean
+}
+
+/** A read projection of the same accounting used at request admission. */
+export interface RequestBudgetAggregateUsage {
+  id: string
+  recordedSpentUsd: number
+  accountedUsd: number
+  reservedUsd: number
+  reservedCount: number
+  unpricedReservedCount: number
+  uncertainHeldUsd: number
+  uncertainCount: number
+  remainingUsd?: number
+  admissionBlocked: boolean
 }
 
 export interface ReserveRequestBudgetInput {

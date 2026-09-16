@@ -109,7 +109,7 @@ function validateScope(scope: RequestBudgetScope): void {
   if (!optionalIds(scope.aggregateBudgetIds)) throw new Error('Invalid aggregate request budget membership')
   if (scope.aggregateBudgets !== undefined && (!Array.isArray(scope.aggregateBudgets) || scope.aggregateBudgets.some((budget) =>
     !budget.id || !Array.isArray(budget.sessionIds) || budget.sessionIds.some((id) => typeof id !== 'string' || !id) ||
-    !Number.isFinite(budget.limitUsd) || budget.limitUsd < 0 || !Number.isFinite(budget.textSpentUsd) || budget.textSpentUsd < 0 ||
+    typeof budget.limitUsd !== 'number' || !Number.isFinite(budget.limitUsd) || budget.limitUsd < 0 || !Number.isFinite(budget.textSpentUsd) || budget.textSpentUsd < 0 ||
     (budget.textCostFloors !== undefined && (!Array.isArray(budget.textCostFloors) || budget.textCostFloors.some((floor) =>
       !floor.id || !Array.isArray(floor.sessionIds) || !optionalIds(floor.sessionIds) ||
       !finiteMoney(floor.observedUsd) || !finiteMoney(floor.minimumUsd))))))) {
