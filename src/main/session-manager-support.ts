@@ -39,7 +39,8 @@ import type { WorkflowAcceptanceFailureResult } from './task/workflow-acceptance
 
 export interface SessionNotificationState {
   turnActive: boolean
-  permissionNotified: boolean
+  permissionRequestIds: Set<string>
+  pendingPermissionIds: Set<string>
   terminalNotified: boolean
 }
 

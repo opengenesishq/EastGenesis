@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { interruptSession } from './store/session-interrupt'
+import { createDesktopNotificationNavigation } from './store/desktop-notification-navigation'
 import { clearDeletedTaskLocalData } from './store/task-local-data-cleanup'
 import { AUTO_MODEL, CAOGEN_DRIVE_POLICIES } from '../../shared/types'
 import { DIRECT_SUBAGENT_LIMIT_MESSAGE, MAX_DIRECT_SUBAGENT_TASKS } from '../../shared/agent-capacity-policy'
@@ -1342,6 +1343,34 @@ export const useStore = create<AppStore>((set, get) => {
         activeId
       }
     })
+    const openNotification = createDesktopNotificationNavigation({
+      hasSession: (id) => Boolean(get().sessions[id]),
+      listSessions: () => window.agentDesk.listSessions(),
+      adoptSessions: (metas) => set((s) => {
+        const sessions = { ...s.sessions }, order = [...s.order]
+        for (const meta of metas) {
+          sessions[meta.id] = sessions[meta.id]
+            ? { ...sessions[meta.id], meta }
+            : drainPendingEvents(meta.id, newSessionState(meta))
+          if (!order.includes(meta.id)) order.push(meta.id)
+        }
+        return { sessions, order }
+      }),
+      navigationKey: () => {
+        const s = get()
+        return JSON.stringify([s.activeId, s.view, s.experienceMode, s.showSettings, s.showTaskRecovery,
+          s.showNewSession, s.studioSessionNavigationNonce])
+      },
+      openSession: (id) => {
+        set({ showSettings: false, settingsContext: null, showTaskRecovery: false, showCommandPalette: false, view: 'list' })
+        get().selectSession(id)
+      },
+      openRecovery: () => {
+        set({ showSettings: false, settingsContext: null, showNewSession: false, showCommandPalette: false, showTaskRecovery: true })
+        void get().hydrateTaskRecoveryCandidates().catch((error) => console.warn('Failed to refresh notification recovery destination', error))
+      }
+    })
+    window.agentDesk.onDesktopNotification((sessionId) => { void openNotification(sessionId) })
     // 渲染进程重载会丢掉未决权限请求 + 聊天记录;从主进程补回
     const transcriptHydration = transcriptHydrator.hydrateEager(metas, initialActiveId, {
       listPendingPermissions: (sessionId) => window.agentDesk.listPendingPermissions(sessionId),

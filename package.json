@@ -121,7 +121,8 @@
     "test:task-execution-authority:required": "tsx scripts/task-execution-authority-required.ts && tsx scripts/task-execution-authority-marker-required.ts && tsx scripts/task-execution-authority-purge-required.ts && tsx scripts/task-execution-authority-private-marker-required.ts && node scripts/task-execution-authority-ipc-required.mjs",
     "test:council-runtime:required": "node scripts/council-runtime-required.mjs && node scripts/council-lifecycle-required.mjs",
     "test:native-executor-receipt:required": "node scripts/native-executor-receipt-required.mjs",
-    "test:task-effect-recovery:required": "tsx scripts/task-effect-recovery-required.ts"
+    "test:task-effect-recovery:required": "tsx scripts/task-effect-recovery-required.ts",
+    "test:desktop-notification-navigation:required": "node scripts/desktop-notification-navigation-required.mjs"
   },
   "build": {
     "appId": "com.caogen.app",

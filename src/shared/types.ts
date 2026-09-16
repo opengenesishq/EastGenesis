@@ -2739,6 +2739,7 @@ export interface AgentDeskApi extends TaskEffectRecoveryApi, CouncilApi, Prepara
   quickbarPrepareFiles(input: QuickbarFileInput): Promise<QuickbarPayloadResult>
   onMenuCommand(cb: (command: MenuCommand) => void): () => void
   onQuickbarEvent(cb: (event: QuickbarEvent) => void): () => void
+  onDesktopNotification(cb: (sessionId: string) => void): () => void
   onSessionEvent(
     cb: (sessionId: string, event: AgentEvent, seq: number, eventId?: string, occurredAt?: number) => void
   ): () => void

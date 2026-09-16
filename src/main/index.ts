@@ -12,6 +12,7 @@ import {
 } from 'electron'
 import { existsSync } from 'node:fs'
 import { configureGpuCompatibility } from './gpu-compatibility'
+import { configureDesktopNotifications } from './desktopNotify'
 import { join } from 'node:path'
 import { registerIpc } from './ipc'
 import { sessionManager } from './sessionManager'
@@ -194,10 +195,12 @@ function hasRunningSessions(): boolean {
   return sessionManager.list().some((meta) => meta.status === 'starting' || meta.status === 'running')
 }
 
-function showMainWindow(): void {
+function showMainWindow(): BrowserWindow {
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow()
+  if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
+  return win
 }
 
 function updateTray(): void {
@@ -252,6 +255,7 @@ function sendMenuCommand(channel: string, value?: unknown): void {
 function ensureApplicationShell(): void {
   if (shellInstalled) return
   registerIpc()
+  configureDesktopNotifications({ getMainWindow: () => mainWindow, showMainWindow })
   createWindow()
   installApplicationMenu()
   shellInstalled = true

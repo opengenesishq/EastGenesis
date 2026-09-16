@@ -479,6 +479,12 @@ const api: AgentDeskApi = {
       ipcRenderer.removeListener('quickbar:event', listener)
     }
   },
+  onDesktopNotification: (cb) => {
+    const listener = (_e: IpcRendererEvent, sessionId: string): void => { cb(sessionId) }
+    ipcRenderer.on('desktop-notification:activate', listener)
+    ipcRenderer.send('desktop-notification:ready')
+    return () => { ipcRenderer.removeListener('desktop-notification:activate', listener) }
+  },
   onSessionEvent: (cb) => {
     const listener = (_e: IpcRendererEvent, payload: SessionEventPayload): void => {
       cb(payload.sessionId, payload.event, payload.seq, payload.eventId, payload.occurredAt)

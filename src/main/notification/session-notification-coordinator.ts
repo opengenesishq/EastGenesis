@@ -24,13 +24,17 @@ export class SessionNotificationCoordinator {
     if (event.kind === 'user-message') return this.startTurn(state)
     if (event.kind === 'status') return this.handleStatus(sessionId, event, state, label, meta)
     if (event.kind === 'permission-request') return this.handlePermission(sessionId, event, state, label)
+    if (event.kind === 'permission-resolved') {
+      state.pendingPermissionIds.delete(event.requestId)
+      return
+    }
     if (event.kind === 'turn-result') this.handleTurnResult(sessionId, event, state, label)
   }
 
   private state(sessionId: string): SessionNotificationState {
     let state = this.states.get(sessionId)
     if (!state) {
-      state = { turnActive: false, permissionNotified: false, terminalNotified: false }
+      state = { turnActive: false, permissionRequestIds: new Set(), pendingPermissionIds: new Set(), terminalNotified: false }
       this.states.set(sessionId, state)
     }
     return state
@@ -38,7 +42,7 @@ export class SessionNotificationCoordinator {
 
   private startTurn(state: SessionNotificationState): void {
     state.turnActive = true
-    state.permissionNotified = false
+    state.permissionRequestIds = new Set(state.pendingPermissionIds)
     state.terminalNotified = false
   }
 
@@ -69,9 +73,14 @@ export class SessionNotificationCoordinator {
     state: SessionNotificationState,
     label: string
   ): void {
-    if (state.permissionNotified) return
-    this.notify(sessionId, 'CaoGen: 等待权限', `${label} · ${trimText(event.request.toolName, 60)}`)
-    state.permissionNotified = true
+    const requestId = event.request.requestId
+    if (state.permissionRequestIds.has(requestId)) return
+    state.permissionRequestIds.add(requestId)
+    const needsAttention = state.pendingPermissionIds.size === 0
+    state.pendingPermissionIds.add(requestId)
+    if (needsAttention) {
+      this.notify(sessionId, 'CaoGen: 等待权限', `${label} · ${trimText(event.request.toolName, 60)} · 打开任务查看待办`)
+    }
   }
 
   private handleTurnResult(
