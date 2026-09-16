@@ -79,6 +79,10 @@ async function main(): Promise<void> {
     assert.equal((await searchMemories(root, { query: 'updatedprivate', ...taskA }))[0].entry.id, taskMemory.id)
     await deleteMemory(root, taskMemory.id, taskA)
     assert.equal((await searchMemories(root, { query: 'updatedprivate', ...taskA })).length, 0)
+    const workItemMemory = await addMemory(root, { ...base, ...a, workItemId: 'work-item-a', layer: 'working', body: 'workitemonly common' })
+    assert.ok((await searchMemories(root, { query: 'workitemonly', ...a, workItemId: 'work-item-a' })).some((hit) => hit.entry.id === workItemMemory.id))
+    assert.equal((await searchMemories(root, { query: 'workitemonly', ...a, workItemId: 'work-item-b' })).length, 0)
+    await deleteMemory(root, workItemMemory.id, { ...a, workItemId: 'work-item-a' })
 
     const decision = createTrustedUserLearningDecision('isolated-memory-fixture')
     const proposal = { kind: 'convention', title: 'Scoped proposal', body: 'approved alpha fact', source: 'fixture-source', reason: '' }
