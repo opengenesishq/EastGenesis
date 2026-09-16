@@ -61,7 +61,7 @@ function SessionSurface({
       aria-hidden={hidden}
       {...(hidden ? { inert: '' } : {})}
     >
-      {showNewSession || !hasActive ? <WelcomeView /> : <WorkbenchRoot key={activeId} />}
+      {showNewSession || !hasActive ? <WelcomeView /> : <WorkbenchRoot key={activeId} active={!hidden} />}
     </section>
   )
 }
@@ -258,6 +258,7 @@ function TaskWorkspaceNavigation({ mode, surface, language, onChange }: {
       <button type="button" className="btn btn-ghost btn-sm" aria-pressed={surface === 'session'} onClick={() => onChange('session')}>{zh ? '对话' : 'Conversation'}</button>
       <button type="button" className="btn btn-ghost btn-sm" onClick={() => { onChange('session'); openPanel('files') }}>{zh ? '文件' : 'Files'}</button>
       <button type="button" className="btn btn-ghost btn-sm" onClick={() => { onChange('session'); openPanel('diff') }}>{zh ? '代码与变更' : 'Code and changes'}</button>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={() => { onChange('session'); openPanel('execution') }}>{zh ? '执行记录' : 'Execution records'}</button>
       <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
         onChange('session')
         requestTaskPlanNavigation(session.meta.id)

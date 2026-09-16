@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { writeDurableFile } from '../durable-file'
@@ -6,6 +6,9 @@ import { acquireFileLock, enqueueMutation, releaseFileLock } from '../digital-wo
 import { withDataLifecycleMutation } from '../data-lifecycle/data-lifecycle-mutation-lock'
 import { assertMemoryProjectWritable } from './memory-project-lifecycle'
 import { assertMemorySessionWritable } from './memory-session-lifecycle'
+import { layeredMemoryExpired, readMemoryRetentionPolicies } from './memory-retention-policy'
+import { memoryProjectHash, memoryProjectIdHash } from './memory-project-identity'
+export { memoryProjectHash, memoryProjectIdHash } from './memory-project-identity'
 
 export type MemoryLayer = 'working' | 'project' | 'user'
 
@@ -71,16 +74,6 @@ interface MemoryFile {
 }
 
 const STORE_FILE = 'memory-index.json'
-const HASH_NAMESPACE = 'caogen-layered-memory-v1'
-
-export function memoryProjectHash(projectRoot: string): string {
-  return createHash('sha256').update(`${HASH_NAMESPACE}\0${path.resolve(projectRoot)}`).digest('hex')
-}
-
-export function memoryProjectIdHash(projectId: string): string {
-  return createHash('sha256').update(`${HASH_NAMESPACE}\0project-id\0${requireText(projectId, 'projectId')}`).digest('hex')
-}
-
 export interface MemoryScope {
   projectRoot?: string
   projectId?: string
@@ -140,6 +133,8 @@ export async function addMemory(rootDir: string, input: MemoryWriteInput): Promi
 export async function searchMemories(rootDir: string, input: MemorySearchInput): Promise<MemorySearchHit[]> {
   return mutateStore(rootDir, async () => {
     const file = await readStore(rootDir)
+    const retained = await expireConfiguredEntries(rootDir, file.entries)
+    file.entries = retained
     const queryVector = vectorize(input.query)
     const layers = new Set(input.layers ?? ['working', 'project', 'user'])
     const limit = clampLimit(input.limit)
@@ -162,10 +157,24 @@ export async function searchMemories(rootDir: string, input: MemorySearchInput):
 }
 
 export async function listMemories(rootDir: string, scope?: MemoryScope): Promise<LayeredMemoryEntry[]> {
-  return enqueueMutation(storePath(rootDir), async () => {
-    const entries = (await readStore(rootDir)).entries
+  return mutateStore(rootDir, async () => {
+    const entries = await expireConfiguredEntries(rootDir, (await readStore(rootDir)).entries)
     return scope ? entries.filter((entry) => inScope(entry, scope)) : entries
   })
+}
+
+/** Inventory/restore checks must inspect persisted rows without changing the snapshot being verified. */
+export function listMemoryEntriesForLifecycle(rootDir: string): Promise<LayeredMemoryEntry[]> {
+  return mutateStore(rootDir, async () => (await readStore(rootDir)).entries)
+}
+
+async function expireConfiguredEntries(rootDir: string, entries: LayeredMemoryEntry[]): Promise<LayeredMemoryEntry[]> {
+  const { policies } = await readMemoryRetentionPolicies(rootDir)
+  if (!policies.length) return entries
+  const now = Date.now()
+  const retained = entries.filter((entry) => !layeredMemoryExpired(entry, policies, now))
+  if (retained.length !== entries.length) await writeStore(rootDir, retained)
+  return retained
 }
 
 export async function deleteMemory(rootDir: string, entryId: string, scope?: MemoryScope): Promise<boolean> {
@@ -190,6 +199,7 @@ export async function updateMemory(
   return mutateStore(rootDir, async () => {
     if (scope) assertMemorySessionWritable(path.dirname(path.resolve(rootDir)), scope)
     const file = await readStore(rootDir)
+    file.entries = await expireConfiguredEntries(rootDir, file.entries)
     const index = file.entries.findIndex((entry) => entry.id === entryId)
     if (index === -1) return null
     const current = file.entries[index]
@@ -222,6 +232,7 @@ export async function archiveStaleMemories(rootDir: string, olderThanDays = 90, 
   return mutateStore(rootDir, async () => {
     const cutoff = now - olderThanDays * 24 * 60 * 60 * 1000
     const file = await readStore(rootDir)
+    file.entries = await expireConfiguredEntries(rootDir, file.entries)
     let archived = 0
     const next = file.entries.map((entry) => {
       if (entry.archivedAt) return entry

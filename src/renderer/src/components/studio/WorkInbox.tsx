@@ -215,7 +215,7 @@ export default function WorkInbox({ active }: { active: boolean }): React.JSX.El
       {projection && ledger && selectedRunRoute && <div className="cross-project-run-detail-wrap">
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSelectedRunRoute(null)}>关闭 Run 详情</button>
         <RunDetailPanel
-          input={{ runs: ledger.runs.items, workItems: ledger.workItems.items, acceptances: ledger.acceptances.items, artifacts: ledger.artifacts.items, evidenceLinks: ledger.evidenceLinks.items }}
+          input={{ runs: ledger.runs.items, workItems: ledger.workItems.items, acceptances: ledger.acceptances.items, artifacts: ledger.artifacts.items, evidenceLinks: ledger.evidenceLinks.items, events: ledger.events.items }}
           route={selectedRunRoute}
           onNavigate={setSelectedRunRoute}
           onRecover={recoverRun}

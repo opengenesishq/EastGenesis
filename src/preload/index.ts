@@ -443,6 +443,11 @@ const api: AgentDeskApi = {
   generateProjectContextTemplate: (projectPath: string) =>
     ipcRenderer.invoke('projectContext:template', projectPath),
   readProjectMemory: (sessionId: string) => ipcRenderer.invoke('memory:read', sessionId),
+  readMemoryRetention: (sessionId: string) => ipcRenderer.invoke('memory:retentionRead', sessionId),
+  previewMemoryRetention: (sessionId: string, input: import('../shared/memory-retention-types').MemoryRetentionInput) =>
+    ipcRenderer.invoke('memory:retentionPreview', sessionId, input),
+  saveMemoryRetention: (sessionId: string, input: import('../shared/memory-retention-types').MemoryRetentionSaveInput) =>
+    ipcRenderer.invoke('memory:retentionSave', sessionId, input),
   previewLegacyProjectMemory: (sessionId: string) => ipcRenderer.invoke('memory:legacyPreview', sessionId),
   importLegacyProjectMemory: (sessionId: string, input: LegacyMemoryImportInput) =>
     ipcRenderer.invoke('memory:legacyImport', sessionId, input),

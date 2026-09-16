@@ -2723,6 +2723,9 @@ export interface AgentDeskApi extends TaskEffectRecoveryApi, CouncilApi, Prepara
   writeProjectContext(projectPath: string, content: string): Promise<import('./project-context-types').ProjectContextOperationResult<ProjectContextReadResult>>
   generateProjectContextTemplate(projectPath: string): Promise<string>
   readProjectMemory(sessionId: string): Promise<ReadProjectMemoryResult>
+  readMemoryRetention(sessionId: string): Promise<import('./memory-retention-types').MemoryRetentionView>
+  previewMemoryRetention(sessionId: string, input: import('./memory-retention-types').MemoryRetentionInput): Promise<import('./memory-retention-types').MemoryRetentionPreview>
+  saveMemoryRetention(sessionId: string, input: import('./memory-retention-types').MemoryRetentionSaveInput): Promise<import('./memory-retention-types').MemoryRetentionView>
   previewLegacyProjectMemory(sessionId: string): Promise<LegacyMemoryPreview>
   importLegacyProjectMemory(sessionId: string, input: LegacyMemoryImportInput): Promise<LegacyMemoryImportResult>
   proposeMemoryDraft(sessionId: string, input: ProjectMemoryDraftInput): Promise<ProjectMemoryDraft>

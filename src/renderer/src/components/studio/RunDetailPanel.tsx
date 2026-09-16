@@ -33,10 +33,11 @@ export interface RunDetailPanelProps {
  */
 export default function RunDetailPanel({ input, route, onNavigate, onRecover, onRecoveryChanged, onOpenDelivery }: RunDetailPanelProps): React.JSX.Element {
   const detail = useMemo(() => projectRunDetail(input, route), [input, route])
+  const zh = useStore(state => state.settings.language) === 'zh'
   if (!detail) {
     return <section className="run-detail-panel run-detail-panel-empty" data-run-detail-panel="missing" role="status">
-      <strong>Run detail unavailable</strong>
-      <span>The Run is no longer present in the canonical Ledger selection.</span>
+      <strong>{zh ? '执行详情暂不可用' : 'Run detail unavailable'}</strong>
+      <span>{zh ? '当前账本中没有这次执行，请刷新记录或打开恢复中心。' : 'The Run is no longer present in the canonical Ledger selection.'}</span>
     </section>
   }
   // A different canonical Run owns a different action state. Unmounting the
@@ -55,14 +56,14 @@ function RunDetailContent({ detail, onNavigate, onRecover, onRecoveryChanged, on
   return <section className="run-detail-panel" data-run-detail-panel="true" data-run-id={detail.run.id} data-run-status={detail.run.status} data-run-section={activeSection} data-run-detail-section={activeSection} aria-labelledby="run-detail-title">
     <header className="run-detail-header">
       <div>
-        <span className="run-detail-kicker">Run detail</span>
-        <h2 id="run-detail-title">{detail.workItem?.title ?? `Run ${detail.run.id}`}</h2>
-        <span className="run-detail-identity">{detail.run.id} · {detail.run.status} · attempt {detail.run.attempt}</span>
+        <span className="run-detail-kicker">{zh ? '执行详情' : 'Run detail'}</span>
+        <h2 id="run-detail-title">{detail.workItem?.title ?? `${zh ? '执行' : 'Run'} ${detail.run.id}`}</h2>
+        <span className="run-detail-identity">{detail.run.id} · {zh ? `第 ${detail.run.attempt} 次尝试` : `attempt ${detail.run.attempt}`}</span>
       </div>
-      <span className={`run-detail-status run-detail-status-${detail.run.status}`}>{detail.run.status}</span>
+      <span className={`run-detail-status run-detail-status-${detail.run.status}`}>{statusLabel(detail.run.status, zh)}</span>
     </header>
 
-    <nav className="run-detail-nav" aria-label="Run detail sections">
+    <nav className="run-detail-nav" aria-label={zh ? '执行详情分类' : 'Run detail sections'}>
       {(['run', 'acceptance', 'recovery'] as const).map((section) => <button
         key={section}
         type="button"
@@ -71,39 +72,39 @@ function RunDetailContent({ detail, onNavigate, onRecover, onRecoveryChanged, on
         aria-current={activeSection === section ? 'page' : undefined}
         onClick={() => onNavigate?.(createRunDetailRoute(detail.run.id, section))}
         disabled={!onNavigate}
-      >{sectionLabel(section)}</button>)}
+      >{sectionLabel(section, zh)}</button>)}
     </nav>
 
     <div className="run-detail-grid">
       <article className="run-detail-card" data-run-detail-run>
-        <h3>Run</h3>
+        <h3>{zh ? '执行记录' : 'Run'}</h3>
         <dl>
-          <div><dt>Status</dt><dd>{detail.run.status}</dd></div>
-          <div><dt>Revision</dt><dd>{detail.run.revision}</dd></div>
-          <div><dt>Session</dt><dd>{detail.run.sessionId}</dd></div>
-          <div><dt>WorkItem</dt><dd>{detail.run.workItemId}</dd></div>
+          <div><dt>{zh ? '状态' : 'Status'}</dt><dd>{statusLabel(detail.run.status, zh)}</dd></div>
+          <div><dt>{zh ? '记录版本' : 'Revision'}</dt><dd>{detail.run.revision}</dd></div>
+          <div><dt>{zh ? '会话' : 'Session'}</dt><dd>{detail.run.sessionId}</dd></div>
+          <div><dt>{zh ? '任务' : 'WorkItem'}</dt><dd>{detail.run.workItemId}</dd></div>
         </dl>
       </article>
 
       <article className="run-detail-card" data-run-detail-acceptance>
-        <div className="run-detail-card-heading"><h3>Acceptance Gate</h3><span data-acceptance-gate-status={detail.acceptanceGate.status}>{detail.acceptanceGate.status}</span></div>
+        <div className="run-detail-card-heading"><h3>{zh ? '成果验收' : 'Acceptance Gate'}</h3><span data-acceptance-gate-status={detail.acceptanceGate.status}>{statusLabel(detail.acceptanceGate.status, zh)}</span></div>
         {detail.acceptance ? <>
-          <p className="run-detail-muted">{detail.acceptance.id} · revision {detail.acceptance.revision} · {detail.acceptance.criteria.length} criteria</p>
+          <p className="run-detail-muted">{zh ? `第 ${detail.acceptance.revision} 版 · ${detail.acceptance.criteria.length} 项要求` : `${detail.acceptance.id} · revision ${detail.acceptance.revision} · ${detail.acceptance.criteria.length} criteria`}</p>
           <ul className="run-detail-criteria">{detail.acceptance.criteria.map((criterion, index) => <li key={`${detail.acceptance?.id}-criterion-${index}`}>{criterion}</li>)}</ul>
-          {detail.acceptanceGate.missingEvidenceRefs.length > 0 && <p className="run-detail-blocker" role="alert">Evidence binding missing: {detail.acceptanceGate.missingEvidenceRefs.join(', ')}</p>}
-          {detail.acceptanceGate.blockers.includes('acceptance_failed') && <p className="run-detail-blocker" role="alert">Acceptance failed and requires review.</p>}
+          {detail.acceptanceGate.missingEvidenceRefs.length > 0 && <p className="run-detail-blocker" role="alert">{zh ? '验收证据关联缺失：' : 'Evidence binding missing: '}{detail.acceptanceGate.missingEvidenceRefs.join(', ')}</p>}
+          {detail.acceptanceGate.blockers.includes('acceptance_failed') && <p className="run-detail-blocker" role="alert">{zh ? '验收未通过，需要复核。' : 'Acceptance failed and requires review.'}</p>}
           <div className="run-detail-evidence" data-evidence-link-count={detail.evidenceLinks.length}>
-            <span>Canonical EvidenceLink bindings ({detail.evidenceLinks.length})</span>
-            {detail.evidenceLinks.length > 0 ? <ul>{detail.evidenceLinks.map((link) => <li key={link.linkId}><code>{link.evidenceId}</code> · {link.relation}</li>)}</ul> : <small>No EvidenceLink binding is present.</small>}
+            <span>{zh ? '已关联证据' : 'Canonical EvidenceLink bindings'} ({detail.evidenceLinks.length})</span>
+            {detail.evidenceLinks.length > 0 ? <ul>{detail.evidenceLinks.map((link) => <li key={link.linkId}><code>{link.evidenceId}</code> · {link.relation}</li>)}</ul> : <small>{zh ? '尚无关联证据。' : 'No EvidenceLink binding is present.'}</small>}
           </div>
-        </> : <p className="run-detail-blocker" role="alert">No canonical Acceptance is attached to this Run.</p>}
+        </> : <p className="run-detail-blocker" role="alert">{zh ? '这次执行尚未绑定可核对的验收要求。' : 'No canonical Acceptance is attached to this Run.'}</p>}
         {onOpenDelivery && detail.run.projectId && detail.run.workItemId && <button type="button" className="btn btn-ghost btn-sm" data-run-open-delivery onClick={() => onOpenDelivery(detail.run.projectId!, detail.run.workItemId)}>
-          Open delivery review
+          {zh ? '查看成果与验收' : 'Open delivery review'}
         </button>}
       </article>
 
       <article className="run-detail-card" data-run-detail-recovery>
-        <div className="run-detail-card-heading"><h3>{zh ? '运行恢复' : 'Recovery'}</h3><span data-recovery-state={detail.recovery.state}>{detail.recovery.state}</span></div>
+        <div className="run-detail-card-heading"><h3>{zh ? '运行恢复' : 'Recovery'}</h3><span data-recovery-state={detail.recovery.state}>{statusLabel(detail.recovery.state, zh)}</span></div>
         <p className="run-detail-muted">{recoveryDescription(detail.recovery.state, zh)}</p>
         <TaskEffectRecoveryPanel sessionId={detail.run.sessionId} runId={detail.run.id}
           taskId={detail.run.taskId} onChanged={onRecoveryChanged} />
@@ -133,8 +134,17 @@ function RunDetailContent({ detail, onNavigate, onRecover, onRecoveryChanged, on
   </section>
 }
 
-function sectionLabel(section: RunDetailSection): string {
-  return section === 'run' ? 'Run' : section === 'acceptance' ? 'Acceptance' : 'Recovery'
+function sectionLabel(section: RunDetailSection, zh: boolean): string {
+  return section === 'run' ? (zh ? '执行' : 'Run') : section === 'acceptance' ? (zh ? '验收' : 'Acceptance') : (zh ? '恢复' : 'Recovery')
+}
+
+function statusLabel(status: string, zh: boolean): string {
+  if (!zh) return status
+  const labels: Record<string, string> = { queued: '排队中', planning: '制定计划', executing: '执行中', verifying: '核验中',
+    waiting_approval: '等待审批', completed: '执行完成', failed: '未通过', recovering: '恢复中', waiting_reconciliation: '等待核对',
+    cancelled: '已取消', pending: '待验收', passed: '已通过', waived: '已豁免', missing: '未绑定', blocked: '待处理',
+    available: '可恢复', in_progress: '恢复中', reconciliation_required: '先核对操作', unavailable: '暂无恢复操作' }
+  return labels[status] ?? status
 }
 
 function recoveryDescription(state: 'available' | 'in_progress' | 'reconciliation_required' | 'unavailable', zh: boolean): string {

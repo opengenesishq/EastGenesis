@@ -19,6 +19,7 @@ import { palaceUrgentReports } from './palace-urgent-reports'
 import PalaceUrgentReports from './PalaceUrgentReports'
 import PalaceRawRecords from './PalaceRawRecords'
 import PalaceAudienceTasks from './PalaceAudienceTasks'
+import PalaceCourtOverview from './PalaceCourtOverview'
 import './palace-work-panel.css'
 
 const ChatView = lazy(() => import('../ChatView'))
@@ -146,9 +147,12 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
     } finally { if (request === taskNavigation.current) setOpeningTaskId(undefined) }
   }
   const contextModes = ['audience', 'study', 'inspect', 'council', 'approve'].includes(action)
-  const overviewModes = ['court', 'urgent', 'desk'].includes(action)
   const activeProject = data.projects.find((project) => project.id === projectId && project.status === 'active')
   const currentContext: PalaceActionContext = { sessionId: selected?.meta.id, projectId, workItemId: deliveryWorkItemId, roleId }
+  const openPermission = (id: string): void => {
+    const current = useStore.getState().sessions[id]
+    if (current?.pendingPermissions.length) onAction('approve', { sessionId: id, projectId: current.meta.workspaceId, workItemId: current.meta.workItemId })
+  }
   return <section ref={panel} tabIndex={-1} className="palace-work-panel no-drag" data-palace-work-panel={action}
     role="dialog" aria-label={zh ? definition.label : definition.labelEn} onKeyDown={(event) => {
       if (event.key === 'Escape' && event.target === event.currentTarget) onClose()
@@ -172,7 +176,10 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
       <button type="button" className="btn" onClick={() => onAction('approve', currentContext)}>{zh ? '处理奏折' : 'Review approvals'}</button>
       <button type="button" className="btn" onClick={() => onAction('study', currentContext)}>{zh ? '继续御书房工作' : 'Continue in the study'}</button>
     </div>}
-    {overviewModes && action !== 'urgent' && inbox && <>
+    {action === 'court' && data.ledger && <PalaceCourtOverview ledger={data.ledger} projects={data.projects} sessions={sessions} updatedAt={data.updatedAt}
+      zh={zh} openingTaskId={openingTaskId} onOpen={openInboxItem} onTask={item => void openInboxTask(item, 'study')}
+      onApprovals={item => void openInboxTask(item, 'approve')} onDelivery={openDelivery} onPermission={openPermission} />}
+    {action === 'desk' && inbox && <>
       <div className="palace-work-summary">{Object.entries(inbox.lanes).map(([lane, value]) => <span key={lane}>{laneLabel(lane, zh)} <strong>{value.items.length}</strong></span>)}</div>
       <p>{zh ? '与现代工作台显示相同任务和状态。' : 'Shows the same tasks and states as the modern workspace.'}</p>
       <InboxRows items={inbox.items}
@@ -181,10 +188,7 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
     </>}
     {action === 'urgent' && <PalaceUrgentReports reports={urgentReports} zh={zh} loading={data.loading} openingTaskId={openingTaskId}
       onOpen={openInboxItem} onTask={item => void openInboxTask(item, 'study')} onApprovals={item => void openInboxTask(item, 'approve')}
-      onDelivery={openDelivery} onPermission={id => {
-        const current = useStore.getState().sessions[id]
-        if (current?.pendingPermissions.length) onAction('approve', { sessionId: id, projectId: current.meta.workspaceId, workItemId: current.meta.workItemId })
-      }} />}
+      onDelivery={openDelivery} onPermission={openPermission} />}
     {(action === 'approve' || action === 'desk') && <label className="palace-work-selector">{zh ? '项目交付与验收' : 'Project delivery and acceptance'}
       <select value={activeProject?.id ?? ''} onChange={(event) => selectWork({ kind: 'delivery', projectId: event.target.value })}>
         <option value="">{zh ? '选择项目' : 'Select a project'}</option>{data.projects.filter((project) => project.status === 'active').map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
@@ -251,7 +255,7 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
     </>}
     {runRoute && data.ledger && <RunDetailPanel route={runRoute} onNavigate={setRunRoute} onOpenDelivery={openDelivery}
       onRecover={recoverRun} onRecoveryChanged={data.refresh}
-      input={{ runs: data.ledger.runs.items, workItems: data.ledger.workItems.items, artifacts: data.ledger.artifacts.items, acceptances: data.ledger.acceptances.items, evidenceLinks: data.ledger.evidenceLinks.items }} />}
+      input={{ runs: data.ledger.runs.items, workItems: data.ledger.workItems.items, artifacts: data.ledger.artifacts.items, acceptances: data.ledger.acceptances.items, evidenceLinks: data.ledger.evidenceLinks.items, events: data.ledger.events.items }} />}
   </section>
 }
 

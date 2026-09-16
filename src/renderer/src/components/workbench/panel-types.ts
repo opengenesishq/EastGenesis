@@ -6,6 +6,7 @@
  */
 export type PanelId =
   | 'result'
+  | 'execution'
   | 'diff'
   | 'terminal'
   | 'browser'

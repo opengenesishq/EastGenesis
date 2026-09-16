@@ -286,6 +286,7 @@ function DecisionButton({ label, action, record, disabled, onDecision }: {
 }
 
 function canRollback(record: LearningRecord): boolean {
+  if (record.kind === 'memory' && record.status === 'expired') return false
   return record.status !== 'draft' && record.status !== 'active' && record.status !== 'deleted'
 }
 

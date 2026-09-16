@@ -1017,6 +1017,7 @@ export const useStore = create<AppStore>((set, get) => {
   }
   type PanelActivator = (context?: PanelOpenContext) => void
   const panelActivators: Record<PanelId, PanelActivator> = {
+    execution: () => {},
     diff: () => {
       void get().refreshDiffPanel()
       void get().refreshGitStatus()

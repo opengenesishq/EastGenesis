@@ -1,6 +1,8 @@
 import { resolve } from 'node:path'
 import { resumeProjectPermanentDeletionEffects } from '../project-deletion-effect'
 import { resumeSessionDeletions } from './session-deletion-coordinator'
+import { sweepMemoryRetention } from '../memory/memory-retention'
+import { resolveMemoryRoot } from '../memory/memory-root'
 
 const SWEEP_INTERVAL_MS = 30_000
 
@@ -57,6 +59,11 @@ async function sweep(state: SchedulerState): Promise<void> {
 }
 
 async function performSweep(root: string): Promise<void> {
+  try {
+    await sweepMemoryRetention(resolveMemoryRoot(root))
+  } catch (error) {
+    console.error('[caogen] Memory retention expiry sweep failed:', error)
+  }
   try {
     await resumeProjectPermanentDeletionEffects(root)
   } catch (error) {

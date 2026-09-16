@@ -1,4 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { dirname, join, resolve } from 'node:path'
+import { withDataLifecycleMutation } from '../data-lifecycle/data-lifecycle-mutation-lock'
+import { readMemoryRetentionPolicies } from '../memory/memory-retention-policy'
+import { assertMemoryProjectWritable } from '../memory/memory-project-lifecycle'
+import { projectLearningNamespace } from '../project-aggregate/project-memory-adapter'
 import type {
   LearningActor,
   LearningAuditAction,
@@ -55,6 +60,18 @@ export async function createLearningDraft(
   learningRoot: string,
   input: LearningDraftInput,
   context: LearningProposalContext = {}
+): Promise<LearningRecord> {
+  return withDataLifecycleMutation(dirname(resolve(learningRoot)), async () => {
+    if (input.kind === 'memory') await expireConfiguredProjectMemory(projectRoot, learningRoot)
+    return createLearningDraftNow(projectRoot, learningRoot, input, context)
+  })
+}
+
+async function createLearningDraftNow(
+  projectRoot: string,
+  learningRoot: string,
+  input: LearningDraftInput,
+  context: LearningProposalContext
 ): Promise<LearningRecord> {
   const safeInput = redactSensitiveValue(input)
   const safeContext = redactSensitiveValue(context)
@@ -186,6 +203,19 @@ export async function approveLearningDraft(
   recordId: string,
   authority: TrustedLearningDecision
 ): Promise<LearningRecord> {
+  return withDataLifecycleMutation(dirname(resolve(learningRoot)), async () => {
+    requireTrustedUserLearningActor(authority)
+    await expireConfiguredProjectMemory(projectRoot, learningRoot)
+    return approveLearningDraftNow(projectRoot, learningRoot, recordId, authority)
+  })
+}
+
+async function approveLearningDraftNow(
+  projectRoot: string,
+  learningRoot: string,
+  recordId: string,
+  authority: TrustedLearningDecision
+): Promise<LearningRecord> {
   const actor = requireTrustedUserLearningActor(authority)
   let expired = false
   const record = await mutateLearningState(learningRoot, projectRoot, (state) => {
@@ -236,10 +266,28 @@ export async function rollbackLearningRecord(
   targetRecordId: string,
   authority: TrustedLearningDecision
 ): Promise<LearningRecord> {
+  return withDataLifecycleMutation(dirname(resolve(learningRoot)), async () => {
+    requireTrustedUserLearningActor(authority)
+    await expireConfiguredProjectMemory(projectRoot, learningRoot)
+    return rollbackLearningRecordNow(projectRoot, learningRoot, targetRecordId, authority)
+  })
+}
+
+async function rollbackLearningRecordNow(
+  projectRoot: string,
+  learningRoot: string,
+  targetRecordId: string,
+  authority: TrustedLearningDecision
+): Promise<LearningRecord> {
   const actor = requireTrustedUserLearningActor(authority)
   const record = await mutateLearningState(learningRoot, projectRoot, (state) => {
     const target = findRecord(state, targetRecordId)
     if (target.status === 'deleted') throw new Error('Deleted learning records cannot be restored')
+    if (target.kind === 'memory' && target.status === 'expired') throw new Error('Expired memory cannot be restored; propose a new reviewed memory instead')
+    if (target.kind === 'memory' && state.records.some((item) => item.logicalId === target.logicalId
+      && (item.status === 'deleted' || item.status === 'expired'))) {
+      throw new Error('Deleted or expired memory history cannot be restored; propose a new reviewed memory instead')
+    }
     const current = state.records.find((item) => item.logicalId === target.logicalId && item.status === 'active')
     const now = timestamp()
     if (current) transition(state, current, 'superseded', 'rolled_back', actor, now, `Rollback to ${target.id}`)
@@ -307,13 +355,51 @@ export async function expireDueLearningRecords(
   return expired
 }
 
+/** Explicitly configured age retention only; keeps payloads and the audit trail. */
+export async function expireProjectMemoryByAge(
+  projectRoot: string,
+  learningRoot: string,
+  days: number,
+  now = Date.now()
+): Promise<number> {
+  if (!Number.isInteger(days) || days < 1 || days > 36_500 || !Number.isFinite(now)) throw new Error('Memory retention age is invalid')
+  if (!learningStateExistsSync(learningRoot, projectRoot)) return 0
+  return mutateLearningState(learningRoot, projectRoot, (state) => {
+    const at = new Date(now).toISOString()
+    const cutoff = now - days * 86_400_000
+    let count = 0
+    for (const record of state.records) {
+      if (record.kind !== 'memory' || record.scope !== 'project' || (record.status !== 'active' && record.status !== 'draft')) continue
+      if (Date.parse(record.updatedAt) > cutoff) continue
+      transition(state, record, 'expired', 'expired',
+        { type: 'system', id: 'memory-retention', source: 'user-configured-age-policy' }, at,
+        `User configured memory retention: ${days} days since last revision`)
+      count++
+    }
+    return count
+  })
+}
+
 export async function listLearningProject(
   projectRoot: string,
   learningRoot: string
 ): Promise<LearningProjectSnapshot> {
+  await expireConfiguredProjectMemory(projectRoot, learningRoot)
   await expireDueLearningRecords(projectRoot, learningRoot)
   await reconcileLearningMaterialization(projectRoot, learningRoot)
   return snapshot(await readLearningState(learningRoot, projectRoot))
+}
+
+async function expireConfiguredProjectMemory(projectRoot: string, learningRoot: string): Promise<void> {
+  const userDataRoot = dirname(resolve(learningRoot))
+  await withDataLifecycleMutation(userDataRoot, async () => {
+    const { policies } = await readMemoryRetentionPolicies(join(userDataRoot, 'memory'))
+    const policy = policies.find((candidate) => candidate.target.layer === 'project'
+      && projectLearningNamespace(candidate.target.projectId) === resolve(projectRoot))
+    if (!policy || policy.target.layer !== 'project') return
+    assertMemoryProjectWritable(userDataRoot, policy.target.projectId)
+    await expireProjectMemoryByAge(projectRoot, learningRoot, policy.days)
+  })
 }
 
 export async function getLearningRecord(

@@ -3,12 +3,15 @@ import type {
   WorkflowArtifactRecord,
   WorkflowGoalRecord,
   WorkflowRunInboxRecord,
+  WorkflowEvidenceLinkRecord,
+  WorkflowEventRecord,
   WorkflowWorkItemRecord,
   WorkflowAcceptanceStatus,
   WorkflowGoalStatus,
   WorkflowWorkItemStatus
 } from './workflow-types'
 import type { TaskRunStatus } from './task-runtime-types'
+import { selectCurrentRunAcceptance } from './current-run-acceptance'
 
 /** The five stable user-facing lanes of the Work Inbox. */
 export type WorkInboxLane =
@@ -27,6 +30,8 @@ export interface WorkInboxProjectionInput {
   runs?: readonly WorkflowRunInboxRecord[]
   artifacts?: readonly WorkflowArtifactRecord[]
   acceptances?: readonly WorkflowAcceptanceRecord[]
+  events?: readonly WorkflowEventRecord[]
+  evidenceLinks?: readonly WorkflowEvidenceLinkRecord[]
 }
 
 export interface WorkInboxItem {
@@ -104,17 +109,28 @@ export function projectWorkInbox(input: WorkInboxProjectionInput): WorkInboxProj
   const artifacts = validateAndScope(input.artifacts ?? [], input.projectId, 'artifact')
   const acceptances = validateAndScope(input.acceptances ?? [], input.projectId, 'acceptance')
 
-  const runByWorkItem = latestBy(runs.filter((run) => Boolean(run.workItemId)), (run) => run.workItemId)
-  const acceptanceByWorkItem = latestBy(acceptances.filter((acceptance) => Boolean(acceptance.workItemId)), (acceptance) => acceptance.workItemId)
-  const artifactIdsByWorkItem = groupArtifactIds(artifacts)
+  const runById = new Map(runs.map(run => [run.id, run]))
   const representedWorkItemIds = new Set(workItems.map((item) => item.id))
   const items: WorkInboxItem[] = []
 
   for (const item of workItems) {
-    const run = runByWorkItem.get(item.id)
-    const acceptance = acceptanceByWorkItem.get(item.id)
-    const artifactIds = artifactIdsByWorkItem.get(item.id) ?? []
-    const lane = classifyWorkItem(item, run, acceptance, artifactIds.length > 0)
+    const currentRunId = item.currentRunId ?? item.runIds.at(-1)
+    const candidate = currentRunId ? runById.get(currentRunId) : undefined
+    const identityConflict = currentRunId !== undefined && (!item.runIds.includes(currentRunId) ||
+      (candidate !== undefined && (candidate.workItemId !== item.id || candidate.projectId !== item.projectId || candidate.goalId !== item.goalId)))
+    const missingRun = currentRunId !== undefined && candidate === undefined
+    const run = identityConflict ? undefined : candidate
+    const standaloneAcceptances = currentRunId === undefined ? acceptances.filter(acceptance =>
+      acceptance.workItemId === item.id && acceptance.projectId === item.projectId &&
+      (acceptance.goalId === undefined || acceptance.goalId === item.goalId)) : []
+    const acceptance = run ? selectCurrentRunAcceptance({ run, acceptances,
+      events: input.events, evidenceLinks: input.evidenceLinks }).acceptance
+      : standaloneAcceptances.length === 1 ? standaloneAcceptances[0] : undefined
+    const artifactIds = artifacts.filter(artifact => artifact.workItemId === item.id &&
+      artifact.projectId === item.projectId && (artifact.goalId === undefined || artifact.goalId === item.goalId) &&
+      (currentRunId === undefined || (!identityConflict && !missingRun && artifact.runId === currentRunId)))
+      .map(artifact => artifact.id).sort()
+    const lane = missingRun || identityConflict ? 'blocked' : classifyWorkItem(item, run, acceptance, artifactIds.length > 0)
     items.push({
       id: `work-item:${item.id}`,
       sourceKind: 'work_item',
@@ -122,11 +138,12 @@ export function projectWorkInbox(input: WorkInboxProjectionInput): WorkInboxProj
       projectId: item.projectId,
       goalId: item.goalId,
       workItemId: item.id,
-      runId: run?.id,
+      runId: currentRunId,
       title: item.title,
-      detail: item.description,
+      detail: identityConflict ? '当前运行的任务身份不一致，请恢复记录后继续。 / Current Run identity conflicts; recover the record to continue.'
+        : missingRun ? '当前运行记录缺失，请恢复记录后继续。 / Current Run is missing; recover the record to continue.' : item.description,
       lane,
-      status: run?.status ?? item.status,
+      status: missingRun || identityConflict ? 'blocked' : run?.status ?? item.status,
       acceptanceStatus: acceptance?.status,
       artifactIds,
       updatedAt: Math.max(item.updatedAt, run?.updatedAt ?? 0, acceptance?.updatedAt ?? 0)
@@ -195,6 +212,14 @@ function classifyWorkItem(
   acceptance: WorkflowAcceptanceRecord | undefined,
   hasArtifact: boolean
 ): WorkInboxLane {
+  if (run) {
+    if (BLOCKED_RUN_STATUSES.has(run.status)) return 'blocked'
+    if (run.status === 'waiting_approval') return 'needs_confirmation'
+    if (ACTIVE_RUN_STATUSES.has(run.status)) return 'running'
+    if (acceptance?.status === 'failed') return 'blocked'
+    if (run.status === 'completed') return acceptance?.status === 'passed' || acceptance?.status === 'waived'
+      ? 'completed' : 'ready_for_delivery'
+  }
   if (BLOCKED_WORK_ITEM_STATUSES.has(item.status) || (run && BLOCKED_RUN_STATUSES.has(run.status)) || acceptance?.status === 'failed') return 'blocked'
   if (item.status === 'waiting_approval' || run?.status === 'waiting_approval') return 'needs_confirmation'
   if (item.status === 'done' || run?.status === 'completed') {
@@ -225,34 +250,6 @@ function classifyGoal(goal: WorkflowGoalRecord): WorkInboxLane {
 function compareItems(left: WorkInboxItem, right: WorkInboxItem): number {
   const laneDelta = LANE_ORDER.indexOf(left.lane) - LANE_ORDER.indexOf(right.lane)
   return laneDelta || right.updatedAt - left.updatedAt || left.id.localeCompare(right.id)
-}
-
-function latestBy<T extends { id: string; updatedAt: number; revision?: number }>(
-  records: readonly T[],
-  key: (record: T) => string | undefined
-): Map<string, T> {
-  const result = new Map<string, T>()
-  for (const record of records) {
-    const groupingKey = key(record)
-    if (!groupingKey) continue
-    const previous = result.get(groupingKey)
-    if (!previous || (record.revision ?? 0) > (previous.revision ?? 0) || ((record.revision ?? 0) === (previous.revision ?? 0) && (record.updatedAt > previous.updatedAt || (record.updatedAt === previous.updatedAt && record.id > previous.id)))) {
-      result.set(groupingKey, record)
-    }
-  }
-  return result
-}
-
-function groupArtifactIds(artifacts: readonly WorkflowArtifactRecord[]): Map<string, string[]> {
-  const grouped = new Map<string, string[]>()
-  for (const artifact of artifacts) {
-    if (!artifact.workItemId) continue
-    const ids = grouped.get(artifact.workItemId) ?? []
-    ids.push(artifact.id)
-    grouped.set(artifact.workItemId, ids)
-  }
-  for (const ids of grouped.values()) ids.sort()
-  return grouped
 }
 
 function validateAndScope<T extends { id: string; projectId?: string; updatedAt: number }>(

@@ -131,14 +131,14 @@ assert.deepEqual(failed.acceptanceGate.blockers, ['acceptance_failed', 'evidence
 
 const passedWithoutLink = projectRunDetail(input('completed', acceptance('passed'), []), 'run/run-1/run')
 assert(passedWithoutLink)
-assert.equal(passedWithoutLink.acceptanceGate.status, 'blocked')
+assert.equal(passedWithoutLink.acceptanceGate.status, 'pending')
 assert.deepEqual(passedWithoutLink.acceptanceGate.missingEvidenceRefs, ['evidence-1'])
 assert.equal(passedWithoutLink.evidenceLinks.length, 0)
 
 const linkOnAnotherRun = evidenceLink('evidence-1', { runId: 'run-2' })
 const stillBlocked = projectRunDetail(input('completed', acceptance('passed'), [linkOnAnotherRun]), 'run/run-1/run')
 assert(stillBlocked)
-assert.equal(stillBlocked.acceptanceGate.status, 'blocked')
+assert.equal(stillBlocked.acceptanceGate.status, 'pending')
 assert.equal(stillBlocked.evidenceLinks.length, 0)
 
 const passed = projectRunDetail(input('completed', acceptance('passed'), [evidenceLink('evidence-1')]), 'run/run-1/run')

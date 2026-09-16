@@ -28,6 +28,7 @@ export const CHAT_TRANSLATIONS = {
   deskTerminal: { zh: '终端', en: 'Terminal' },
   deskBrowser: { zh: '浏览器', en: 'Browser' },
   deskFiles: { zh: '文件', en: 'Files' },
+  deskExecution: { zh: '执行记录', en: 'Execution records' },
   deskSideChat: { zh: '侧边聊天', en: 'Side chat' },
   providerOfficial: { zh: '未选择 Provider', en: 'No Provider selected' },
   unknownProvider: { zh: '未知 Provider', en: 'Unknown provider' },

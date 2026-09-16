@@ -22,7 +22,7 @@ const SIDE_MAX_WIDTH = 720
 const DOCK_MIN_HEIGHT = 220
 const DOCK_MAX_HEIGHT = 520
 
-type DeskToolKey = 'review' | 'terminal' | 'browser' | 'files' | 'sideChat' | 'memory'
+type DeskToolKey = 'review' | 'terminal' | 'browser' | 'files' | 'sideChat' | 'memory' | 'execution'
 
 interface DeskToolItem {
   key: DeskToolKey
@@ -128,7 +128,7 @@ function resizeWorkbenchFromKeyboard(
   apply(clamp(next, min, max))
 }
 
-function WorkbenchRoot(): React.JSX.Element {
+function WorkbenchRoot({ active = true }: { active?: boolean }): React.JSX.Element {
   const t = useT()
   const [routineEditor, setRoutineEditor] = useState<RoutineEditorState | null>(null)
   const activeId = useStore((s) => s.activeId)
@@ -228,6 +228,13 @@ function WorkbenchRoot(): React.JSX.Element {
   const sideOpen = activePanelId !== null && !terminalOpen
   const deskTools: DeskToolItem[] = [
     {
+      key: 'execution',
+      icon: 'summary',
+      label: t('deskExecution'),
+      active: activePanelId === 'execution',
+      onSelect: () => openPanel('execution')
+    },
+    {
       key: 'review',
       icon: 'review',
       label: t('deskReview'),
@@ -273,6 +280,8 @@ function WorkbenchRoot(): React.JSX.Element {
 
   const renderPanelContent = (id: PanelId): Record<string, unknown> => {
     switch (id) {
+      case 'execution':
+        return { sessionId: activeId, active: active && activePanelId === 'execution' }
       case 'result':
         return { sessionId: activeId, standalone: false }
       case 'pluginRegistry':

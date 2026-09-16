@@ -2,11 +2,13 @@ import type {
   WorkflowAcceptanceRecord,
   WorkflowArtifactRecord,
   WorkflowEvidenceLinkRecord,
+  WorkflowEventRecord,
   WorkflowRunSummary,
   WorkflowWorkItemRecord
 } from './workflow-types'
 import type { TaskRunStatus } from './task-runtime-types'
 import type { EffectRecord } from './effect-types'
+import { selectCurrentRunAcceptance, type RunAcceptanceSelection } from './current-run-acceptance'
 
 /** The three destinations that share one Run identity in the Studio. */
 export type RunDetailSection = 'run' | 'acceptance' | 'recovery'
@@ -23,6 +25,7 @@ export interface RunDetailCanonicalInput {
   acceptances?: readonly WorkflowAcceptanceRecord[]
   artifacts?: readonly WorkflowArtifactRecord[]
   evidenceLinks?: readonly WorkflowEvidenceLinkRecord[]
+  events?: readonly WorkflowEventRecord[]
 }
 
 export interface RunDetailEvidenceBinding {
@@ -135,12 +138,16 @@ export function projectRunDetail(
 
   const projectId = run.projectId
   const workItem = (input.workItems ?? []).find((candidate) =>
-    candidate.id === run.workItemId && sameProject(candidate.projectId, projectId)
+    candidate.id === run.workItemId && sameProject(candidate.projectId, projectId) && candidate.goalId === run.goalId
   )
-  const acceptance = selectAcceptance(input.acceptances ?? [], run, projectId)
+  assertUnique(input.acceptances ?? [], 'acceptance')
+  const acceptanceSelection = selectCurrentRunAcceptance({ run, acceptances: input.acceptances ?? [],
+    events: input.events, evidenceLinks: input.evidenceLinks })
+  const acceptance = acceptanceSelection.acceptance
   const artifacts = (input.artifacts ?? [])
     .filter((artifact) => sameProject(artifact.projectId, projectId) &&
-      (artifact.runId === run.id || artifact.workItemId === run.workItemId))
+      artifact.runId === run.id && (artifact.workItemId === undefined || artifact.workItemId === run.workItemId) &&
+      (artifact.goalId === undefined || artifact.goalId === run.goalId))
     .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
   const artifactIds = new Set(artifacts.map((artifact) => artifact.id))
   const relevantLinks = (input.evidenceLinks ?? [])
@@ -159,7 +166,7 @@ export function projectRunDetail(
     ...(link.criterionId ? { criterionId: link.criterionId } : {}),
     ...(link.artifactId ? { artifactId: link.artifactId } : {})
   }))
-  const acceptanceGate = projectAcceptanceGate(acceptance, evidenceLinks)
+  const acceptanceGate = projectAcceptanceGate(acceptanceSelection)
   return {
     schemaVersion: 1,
     route: parsed,
@@ -243,43 +250,18 @@ export function resolveRunRecoverySnapshotId(
   return candidates[0].id
 }
 
-function selectAcceptance(
-  acceptances: readonly WorkflowAcceptanceRecord[],
-  run: WorkflowRunSummary,
-  projectId: string | undefined
-): WorkflowAcceptanceRecord | undefined {
-  assertUnique(acceptances, 'acceptance')
-  const candidates = acceptances.filter((acceptance) =>
-    sameProject(acceptance.projectId, projectId) &&
-    acceptance.workItemId === run.workItemId &&
-    (!run.acceptanceId || acceptance.id === run.acceptanceId)
-  )
-  if (run.acceptanceId && !candidates.some((acceptance) => acceptance.id === run.acceptanceId)) return undefined
-  return candidates.sort((left, right) => right.revision - left.revision || right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))[0]
-}
-
 function projectAcceptanceGate(
-  acceptance: WorkflowAcceptanceRecord | undefined,
-  links: readonly RunDetailEvidenceBinding[]
+  selection: RunAcceptanceSelection
 ): RunAcceptanceGate {
+  const { acceptance, evidenceRefs, boundEvidenceRefs, missingEvidenceRefs } = selection
   if (!acceptance) return {
     status: 'missing', criteriaCount: 0, evidenceRefs: [], boundEvidenceRefs: [], missingEvidenceRefs: [], blockers: ['acceptance_missing']
   }
-  const evidenceRefs = [...new Set([
-    ...acceptance.evidenceRefs,
-    ...(acceptance.criterionEvidence ?? []).flatMap((item) => item.evidenceRefs)
-  ])].sort()
-  const linkEvidenceRefs = new Set(links.map((link) => link.evidenceId))
-  const boundEvidenceRefs = evidenceRefs.filter((id) => linkEvidenceRefs.has(id))
-  const missingEvidenceRefs = evidenceRefs.filter((id) => !linkEvidenceRefs.has(id))
   const blockers: RunAcceptanceGate['blockers'] = []
   if (acceptance.status === 'failed') blockers.push('acceptance_failed')
   if (missingEvidenceRefs.length > 0) blockers.push('evidence_missing')
-  const status: RunAcceptanceGateStatus = acceptance.status === 'passed' && missingEvidenceRefs.length > 0
-    ? 'blocked'
-    : acceptance.status
   return {
-    status,
+    status: acceptance.status,
     acceptanceId: acceptance.id,
     acceptanceRevision: acceptance.revision,
     criteriaCount: acceptance.criteria.length,

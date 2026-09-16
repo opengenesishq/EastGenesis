@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { listTaskSnapshots } from '../task/task-snapshot'
-import { listMemories, memoryProjectHash, memoryProjectIdHash, mutateMemoryEntries, type LayeredMemoryEntry } from '../memory/memory-manager'
+import { listMemoryEntriesForLifecycle, memoryProjectHash, memoryProjectIdHash, mutateMemoryEntries, type LayeredMemoryEntry } from '../memory/memory-manager'
 import { readMemorySessionIdentities, type MemorySessionIdentity } from '../memory/memory-session-inventory'
 import type { SessionDeletionMemoryScope } from './session-deletion-journal'
 
@@ -27,7 +27,7 @@ export async function purgeStandaloneSessionMemory(root: string, sessionId: stri
 export async function countStandaloneSessionMemory(root: string, sessionId: string, scope?: SessionDeletionMemoryScope): Promise<number> {
   if (scope?.ownership !== 'resolved') return 0
   if (hasRetainedOwner(root, sessionId, scope, await listTaskSnapshots(root))) return 0
-  return (await listMemories(join(root, 'memory'))).filter(entry => matches(entry, scope)).length
+  return (await listMemoryEntriesForLifecycle(join(root, 'memory'))).filter(entry => matches(entry, scope)).length
 }
 
 function hasRetainedOwner(root: string, deletedSessionId: string, scope: Extract<SessionDeletionMemoryScope, { ownership: 'resolved' }>, snapshots: readonly unknown[]): boolean {

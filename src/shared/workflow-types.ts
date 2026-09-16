@@ -386,7 +386,7 @@ export interface WorkflowRunRecord {
 /** The renderer-safe fields needed to place a Run in the Work Inbox. */
 export type WorkflowRunInboxRecord = Pick<WorkflowRunRecord,
   'id' | 'projectId' | 'goalId' | 'workItemId' | 'status' | 'revision' | 'createdAt' | 'updatedAt'
-> & Pick<WorkflowRunRecord, 'startedAt' | 'finishedAt'>
+> & Pick<WorkflowRunRecord, 'startedAt' | 'finishedAt' | 'acceptanceId' | 'acceptanceRevision'>
 
 export interface WorkflowProjectionContext {
   projectId?: string

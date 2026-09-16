@@ -54,6 +54,13 @@ function lazyPanel(loader: () => Promise<{ default: unknown }>): PanelComponent 
  */
 export const PANEL_REGISTRY: readonly PanelDefinition[] = [
   {
+    id: 'execution',
+    titleKey: 'deskExecution',
+    icon: 'summary',
+    component: lazyPanel(() => import('./TaskExecutionPanel')),
+    keepAlive: true
+  },
+  {
     id: 'result',
     titleKey: 'toggleDeskSummary',
     icon: 'summary',

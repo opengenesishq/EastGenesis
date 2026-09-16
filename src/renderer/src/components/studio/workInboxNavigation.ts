@@ -35,7 +35,9 @@ export function adaptCrossProjectWorkInbox(
     workItems: ledger.workItems.items,
     runs: ledger.runs.items,
     artifacts: ledger.artifacts.items,
-    acceptances: ledger.acceptances.items
+    acceptances: ledger.acceptances.items,
+    events: ledger.events.items,
+    evidenceLinks: ledger.evidenceLinks.items
   })
   const projectNames = new Map(projects.filter((project) => project.status === 'active').map((project) => [project.id, project.name]))
   const enrich = (item: WorkInboxItem): CrossProjectWorkInboxItem => ({

@@ -14,6 +14,8 @@ import { assertTrustedWorkflowLedgerSender } from './workflow-ledger-handlers'
 import { importLegacyProjectMemory, previewLegacyProjectMemory } from '../memory/legacy-memory-import'
 import type { LegacyMemoryImportInput } from '../../shared/legacy-memory-import-types'
 import { withDataLifecycleMutation } from '../data-lifecycle/data-lifecycle-mutation-lock'
+import { previewMemoryRetention, readMemoryRetention, saveMemoryRetention } from '../memory/memory-retention'
+import type { MemoryRetentionInput, MemoryRetentionSaveInput } from '../../shared/memory-retention-types'
 import {
   addMemory, archiveStaleMemories, deleteMemory, exportMemories, listMemories, searchMemories, updateMemory,
   type MemoryScope, type MemorySearchInput, type MemoryUpdateInput
@@ -26,6 +28,21 @@ export interface ProjectMemoryIpcOptions {
 }
 
 export function registerProjectMemoryIpc(options: ProjectMemoryIpcOptions): void {
+  ipcMain.handle('memory:retentionRead', async (event, sessionId: string) => {
+    assertTrustedWorkflowLedgerSender(event)
+    requiredTarget(options, sessionId)
+    return readMemoryRetention(options.memoryRoot(), await options.taskScopeForSession(sessionId))
+  })
+  ipcMain.handle('memory:retentionPreview', (event, sessionId: string, input: MemoryRetentionInput) => {
+    assertTrustedWorkflowLedgerSender(event)
+    requiredTarget(options, sessionId)
+    return withLayeredMemoryScope(options, sessionId, (scope, root) => previewMemoryRetention(root, scope, input))
+  })
+  ipcMain.handle('memory:retentionSave', (event, sessionId: string, input: MemoryRetentionSaveInput) => {
+    assertTrustedWorkflowLedgerSender(event)
+    requiredTarget(options, sessionId)
+    return withLayeredMemoryScope(options, sessionId, (scope, root) => saveMemoryRetention(root, scope, input))
+  })
   const scopeFor = async (sessionId?: string): Promise<MemoryScope> => sessionId === undefined
     ? {}
     : options.taskScopeForSession(sessionId)

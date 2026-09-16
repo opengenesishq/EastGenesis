@@ -2,18 +2,30 @@ import { join } from 'node:path'
 import type { ProjectAggregatePortableRuntime, ProjectAggregateSnapshot } from '../../shared/project-aggregate-types'
 import type { ProjectLayeredMemorySlice } from '../../shared/layered-memory-portability-types'
 import {
-  isMemoryEntry, listMemories, memoryProjectIdHash, mutateMemoryEntries, vectorize,
+  isMemoryEntry, listMemoryEntriesForLifecycle, memoryProjectIdHash, mutateMemoryEntries, vectorize,
   type LayeredMemoryEntry
 } from '../memory/memory-manager'
 import { assertNoCredentialMaterial, projectAggregateCanonicalJson, projectAggregateDigest, sanitizeProjectAggregateValue } from '../project-aggregate/codec'
+import { layeredMemoryExpired, readMemoryRetentionPolicies } from '../memory/memory-retention-policy'
+import { withDataLifecycleMutation } from './data-lifecycle-mutation-lock'
 
 type Context = Pick<ProjectAggregatePortableRuntime, 'sessionHistory' | 'activeSessions' | 'sessionCreationJournal' | 'taskSnapshots'>
 type Aggregate = Pick<ProjectAggregateSnapshot, 'projectId' | 'workItems' | 'workflow'>
 
 export async function collectProjectLayeredMemory(root: string, aggregate: Aggregate, context: Context): Promise<ProjectLayeredMemorySlice> {
   const hash = memoryProjectIdHash(aggregate.projectId)
-  const entries = (await listMemories(join(root, 'memory')))
-    .filter(entry => entry.layer !== 'user' && entry.projectHash === hash)
+  // Expire this Project before taking an export/backup snapshot. Restore verification
+  // uses the raw inventory below so it compares the exact imported source first.
+  const owned = await withDataLifecycleMutation(root, async () => {
+    const memoryRoot = join(root, 'memory')
+    const { policies } = await readMemoryRetentionPolicies(memoryRoot)
+    const now = Date.now()
+    return mutateMemoryEntries(memoryRoot, (values) => {
+      const entries = values.filter(entry => entry.layer === 'user' || entry.projectHash !== hash || !layeredMemoryExpired(entry, policies, now))
+      return { entries, result: entries.filter(entry => entry.layer !== 'user' && entry.projectHash === hash) }
+    })
+  })
+  const entries = owned
     .map(({ vector: _, ...entry }) => sanitizeProjectAggregateValue(entry) as Omit<LayeredMemoryEntry, 'vector'>)
     .sort(byId)
   const body = { schemaVersion: 1 as const, projectId: aggregate.projectId, entries,
@@ -56,7 +68,7 @@ export function validateProjectLayeredMemory(slice: ProjectLayeredMemorySlice | 
 
 export async function assertProjectLayeredMemoryImportable(root: string, slice: ProjectLayeredMemorySlice | undefined): Promise<void> {
   if (!slice) return
-  assertCompatible(await listMemories(join(root, 'memory')), slice)
+  assertCompatible(await listMemoryEntriesForLifecycle(join(root, 'memory')), slice)
 }
 
 export async function importProjectLayeredMemory(root: string, slice: ProjectLayeredMemorySlice | undefined): Promise<void> {
@@ -70,7 +82,7 @@ export async function importProjectLayeredMemory(root: string, slice: ProjectLay
 
 export async function verifyProjectLayeredMemory(root: string, slice: ProjectLayeredMemorySlice | undefined): Promise<void> {
   if (!slice) return
-  const entries = await listMemories(join(root, 'memory'))
+  const entries = await listMemoryEntriesForLifecycle(join(root, 'memory'))
   assertCompatible(entries, slice)
   const actual = entries.filter(entry => entry.layer !== 'user' && entry.projectHash === memoryProjectIdHash(slice.projectId))
   if (projectAggregateCanonicalJson(actual.sort(byId)) !== projectAggregateCanonicalJson(slice.entries.map(materialize).sort(byId))) {
@@ -87,7 +99,7 @@ export async function purgeProjectLayeredMemory(root: string, projectId: string)
 
 export async function countProjectLayeredMemory(root: string, projectId: string): Promise<number> {
   const hash = memoryProjectIdHash(projectId)
-  return (await listMemories(join(root, 'memory'))).filter(entry => entry.layer !== 'user' && entry.projectHash === hash).length
+  return (await listMemoryEntriesForLifecycle(join(root, 'memory'))).filter(entry => entry.layer !== 'user' && entry.projectHash === hash).length
 }
 
 function assertCompatible(existing: LayeredMemoryEntry[], slice: ProjectLayeredMemorySlice): void {

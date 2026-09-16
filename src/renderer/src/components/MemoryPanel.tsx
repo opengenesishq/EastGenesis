@@ -7,6 +7,7 @@ import type {
 } from '../../../shared/types'
 import LearningApprovalPanel from './LearningApprovalPanel'
 import LegacyMemoryImportPanel from './LegacyMemoryImportPanel'
+import MemoryRetentionPanel from './MemoryRetentionPanel'
 
 const EMPTY_FORM = { kind: 'note', title: '', body: '', reason: '' }
 type LoopOutcome = 'success' | 'partial' | 'failure'
@@ -304,6 +305,7 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
       </p>
 
       <LegacyMemoryImportPanel key={sessionId} sessionId={sessionId} onImported={load} />
+      <MemoryRetentionPanel key={`retention-${sessionId}`} sessionId={sessionId} onChanged={load} />
 
       <div className="memory-group">
         <h4 className="settings-h3">任务复盘</h4>
