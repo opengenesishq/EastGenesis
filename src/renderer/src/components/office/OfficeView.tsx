@@ -1181,6 +1181,8 @@ export default function OfficeView(): React.JSX.Element {
               <div className="office-selection-meta"><span>{settings.language === 'zh' ? role.duty : role.dutyEn}</span><span data-office-system-role-anchor={role.anchor}>{role.anchor}</span></div>
               <button className="btn btn-ghost btn-sm" type="button" data-palace-institution-patrol={role.id}
                 onClick={() => openPalaceAction('patrol', { roleId: role.id })}>{settings.language === 'zh' ? '巡视机构任务' : 'Inspect institution work'}</button>
+              <button className="btn btn-primary btn-sm" type="button" data-palace-institution-audience={role.id}
+                onClick={() => openPalaceAction('audience', { roleId: role.id })}>{settings.language === 'zh' ? '单独召见' : 'Meet an Agent'}</button>
               <OfficeRoleWorkItems roleId={role.id} workItems={projectSnapshot.workItems} projects={projectSnapshot.projects}
                 status={operationStatus.workItems} zh={settings.language === 'zh'} onSelectRole={selectSystemRole} onOpen={(item) => {
                   saveOfficeReturnContext({ businessView, selectedFacility })

@@ -18,6 +18,7 @@ import { preparePalaceTaskNavigation } from './palaceTaskNavigation'
 import { palaceUrgentReports } from './palace-urgent-reports'
 import PalaceUrgentReports from './PalaceUrgentReports'
 import PalaceRawRecords from './PalaceRawRecords'
+import PalaceAudienceTasks from './PalaceAudienceTasks'
 import './palace-work-panel.css'
 
 const ChatView = lazy(() => import('../ChatView'))
@@ -56,10 +57,13 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
   const taskNavigation = useRef(0)
   const sessionIds = Object.keys(sessions)
   const data = usePalaceWorkData(sessionIds)
+  const institutionItems = useMemo(() => palaceInstitutionWorkItems(roleId, data.items, data.plans), [roleId, data.items, data.plans])
   // Embedded ChatView/FilePanel use activeId. Mount them only when it matches
   // this panel's explicit selection, so a global selection change cannot send
   // an approval, edit or instruction to another task under the old heading.
-  const selected = workSelection.kind === 'session' && workSelection.sessionId === activeId ? sessions[workSelection.sessionId] : undefined
+  const selectedSession = workSelection.kind === 'session' && workSelection.sessionId === activeId ? sessions[workSelection.sessionId] : undefined
+  const selected = action !== 'audience' || roleId === 'all' || institutionItems.some(item => item.id === selectedSession?.meta.workItemId &&
+    item.projectId === selectedSession.meta.workspaceId && item.goalId === selectedSession.meta.goalId) ? selectedSession : undefined
   // A task's delivery and approvals share its live ownership. Project browsing
   // is a separate selection, so it cannot carry another task's permissions.
   const projectId = workSelection.kind === 'session' ? selected?.meta.workspaceId ?? '' : workSelection.projectId
@@ -72,7 +76,7 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
       ...projectInstitutionTemplate(LEGACY_PROJECT_INSTITUTION_TEMPLATE).roles].map((role) => [role.id, role]))
     return [...byId.values()]
   }, [])
-  const patrolItems = palaceInstitutionWorkItems(roleId, data.items, data.plans)
+  const patrolItems = institutionItems
   useEffect(() => { panel.current?.focus(); return () => { taskNavigation.current++ } }, [])
   const openWorkItem = (item: Pick<WorkItem, 'id' | 'projectId'>): void => {
     useStore.getState().openProjectWorkspace(item.projectId)
@@ -109,7 +113,7 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
       useStore.getState().setView('list')
     }
   }
-  const openInboxTask = async (item: CrossProjectWorkInboxItem, nextAction: 'study' | 'approve'): Promise<void> => {
+  const openInboxTask = async (item: CrossProjectWorkInboxItem, nextAction: 'study' | 'approve' | 'audience'): Promise<void> => {
     const request = ++taskNavigation.current
     const navigationKey = (): string => {
       const state = useStore.getState()
@@ -135,7 +139,8 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
           : (zh ? '原任务会话已不可用，请核对执行记录或从恢复中心继续。' : 'The original task session is unavailable. Review its execution or continue from Recovery.'))
         return
       }
-      onAction(nextAction, { sessionId: target.sessionId, projectId: target.binding?.workspaceId, workItemId: target.binding?.workItemId })
+      onAction(nextAction, { sessionId: target.sessionId, projectId: target.binding?.workspaceId, workItemId: target.binding?.workItemId,
+        ...(nextAction === 'audience' ? { roleId } : {}) })
     } catch (cause) {
       if (current()) setNavigationError(cause instanceof Error ? cause.message : String(cause))
     } finally { if (request === taskNavigation.current) setOpeningTaskId(undefined) }
@@ -186,7 +191,22 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
       </select></label>}
     {activeProject && deliveryOpen && <ProjectDeliveryWorkbench key={`${activeProject.id}:${deliveryWorkItemId ?? ''}`} active projectId={activeProject.id} requestedWorkItemId={deliveryWorkItemId} />}
 
+    {action === 'audience' && <>
+      <label className="palace-work-selector">{zh ? '召见机构' : 'Institution to meet'}<select data-palace-audience-institution value={roleId} onChange={event => {
+        setRoleId(event.target.value)
+        selectWork({ kind: 'delivery', projectId: '' })
+      }}>
+        <option value="all">{zh ? '直接选择已有 Agent' : 'Choose an existing Agent'}</option>{institutionRoles.map(role => <option key={role.id} value={role.id}>{zh ? role.name : role.nameEn}</option>)}
+      </select></label>
+      {roleId !== 'all' && <PalaceAudienceTasks items={institutionItems} zh={zh} loading={data.loading} openingTaskId={openingTaskId}
+        onWorkItem={openWorkItem} onMeet={item => {
+          const target = inbox?.items.find(row => row.workItemId === item.id && row.projectId === item.projectId && row.goalId === item.goalId)
+          if (target) void openInboxTask(target, 'audience')
+          else setNavigationError(zh ? '该任务的执行记录尚未载入，请刷新或查看工作项。' : 'The task execution is not loaded. Refresh or open its work item.')
+        }} />}
+    </>}
     {contextModes && <>
+      {(action !== 'audience' || roleId === 'all') &&
       <label className="palace-work-selector">{zh ? '现有任务 / Agent' : 'Existing task / Agent'}
         <select value={selected?.meta.id ?? ''} onChange={(event) => {
           const next = sessions[event.target.value]
@@ -195,11 +215,10 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
           selectWork({ kind: 'session', sessionId: next.meta.id })
         }}>
           <option value="">{zh ? '选择已有任务' : 'Choose an existing task'}</option>{sessionIds.map((id) => <option key={id} value={id}>{sessions[id].meta.title} · {sessions[id].meta.status}{sessions[id].pendingPermissions.length ? ` · ${sessions[id].pendingPermissions.length} ${zh ? '项授权' : 'permissions'}` : ''}</option>)}
-        </select></label>
+        </select></label>}
       {selected ? <p className="palace-work-identity">{selected.meta.title} · {selected.meta.id}<br />{zh ? '沿用同一会话、文件和授权。' : 'Continues the same session, files and permissions.'}</p> : <p>{zh ? '选择已有任务后继续；当前没有绑定任务。' : 'Choose an existing task to continue.'}</p>}
     </>}
     {action === 'council' && selected && <CouncilPanel sessionId={selected.meta.id} expanded />}
-    {action === 'audience' && selected && <CouncilPanel sessionId={selected.meta.id} expanded mode="audience" institutionId={roleId === 'all' ? undefined : roleId} />}
     {selected && (action === 'approve' || action === 'council') && <>
       <PermissionBar sessionId={selected.meta.id} requests={selected.pendingPermissions} />
       <TaskPlanWorkbench sessionId={selected.meta.id} strategy={selected.meta.taskStrategy ?? 'view'} running={['running', 'starting'].includes(selected.meta.status)} showCouncil={action !== 'council'} />
