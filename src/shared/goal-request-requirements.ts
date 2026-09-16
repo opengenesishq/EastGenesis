@@ -29,7 +29,7 @@ export function extractGoalRequestRequirements(objective: string): GoalRequestRe
       { pattern: new RegExp(`\\b(?:at most|no more than|up to|limit(?:ed)? to|within)\\s+(${NUMBER})[ -]+(?:pages?|slides?)\\b`, 'gi'), operator: 'lte' },
       { pattern: new RegExp(`\\b(?:at least|no fewer than)\\s+(${NUMBER})[ -]+(?:pages?|slides?)\\b`, 'gi'), operator: 'gte' },
       { pattern: new RegExp(`\\b(?:exactly|total(?: of)?)\\s+(${NUMBER})[ -]+(?:pages?|slides?)\\b`, 'gi'), operator: 'eq' },
-      { pattern: new RegExp(`(?:做成|制作|生成|输出|提供|交付|写成|改为|缩为|压缩为|扩展为)\\s*(?:一份|一个|总共)?\\s*(${NUMBER})\\s*页`, 'gi'), operator: 'eq' },
+      { pattern: new RegExp(`(?:做成|制作|生成|输出|提供|交付|写成|改为|改成|缩为|缩成|压缩为|压缩到|扩展为|扩展到|增加到|减少到|调整为|调整到)\\s*(?:一份|一个|总共)?\\s*(${NUMBER})\\s*页`, 'gi'), operator: 'eq' },
       { pattern: new RegExp(`\\b(?:create|make|prepare|deliver|produce|write)\\s+(?:(?:a|an|the)\\s+)?(${NUMBER})[ -]+(?:page|slide)\\b`, 'gi'), operator: 'eq' }
     ]
     for (const { pattern, operator } of pageRules) {

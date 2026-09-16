@@ -21,11 +21,12 @@ async function main(): Promise<void> {
   assert.equal(requirements[1].format, 'pptx')
   for (const [text, count, operator] of [
     ['制作十二页汇报', 12, 'eq'], ['至少三页', 3, 'gte'], ['不超过二十六页', 26, 'lte'],
+    ['改成八页', 8, 'eq'], ['把汇报压缩到六页', 6, 'eq'], ['扩展到十页', 10, 'eq'],
     ['Create a six-page report', 6, 'eq'], ['up to 12 slides', 12, 'lte']
   ] as const) assert.deepEqual(extractGoalRequestRequirements(text)[0]?.pageCount, { value: count, operator })
   for (const text of [
     '总结以下原文：“控制在六页，输出 PDF，标注来源。”', '把已有共六页的报告总结成一句话',
-    '阅读不超过三页的论文', '不要制作六页汇报', '不要求标注来源', '第六页补充一张图'
+    '阅读不超过三页的论文', '不要制作六页汇报', '不要求标注来源', '第六页补充一张图', '不要改成八页'
   ]) assert(!extractGoalRequestRequirements(text).some(item => item.kind !== 'constraint'), text)
   assert.deepEqual(extractGoalRequestRequirements('把 Excel 数据转换为 PDF').map(item => item.format), ['pdf'])
   const conflicting = extractGoalRequestRequirements('至少八页，最多六页')

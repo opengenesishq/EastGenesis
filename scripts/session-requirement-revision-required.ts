@@ -52,7 +52,7 @@ async function main() {
       preflight: async () => { await plans.assertInteractiveExecution(meta.id, '继续任务') } }
     const inputs = new SessionInputService(root, runtime)
     const goal = (await reads.getGoal(original.goal.id))!, item = (await reads.getWorkItem(original.workItem.id))!
-    const text = '第二页补来源；页数改为八页。'
+    const text = '第二页补来源；改成八页。'
     const preview = previewSessionRequirementRevision(goal, item, text)
     assert(preview.changed)
     assert(preview.goalContract.acceptance.some(entry => entry.criterion === '第二页补来源'))
