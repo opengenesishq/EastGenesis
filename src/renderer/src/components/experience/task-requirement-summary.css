@@ -1,0 +1,10 @@
+.task-requirement-summary { padding: 5px 18px 8px; border-bottom: 1px solid var(--border); font-size: 12px; overflow-wrap: anywhere; }
+.task-requirement-summary > header { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-height: 26px; }
+.task-requirement-summary > header > span { color: var(--text-dim); font-size: 11px; }
+.task-requirement-summary > header > button:last-child { margin-left: auto; }
+.task-requirement-summary p { margin: 4px 0 0 31px; line-height: 1.5; }
+.task-requirement-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; max-height: 4.5em; overflow: hidden; }
+.task-requirement-summary [role=alert] { color: var(--danger, #c44040); }
+.task-requirement-group { margin: 8px 0 0 31px; }
+.task-requirement-group ul { padding-left: 18px; margin: 4px 0; line-height: 1.5; }
+.task-requirement-group li + li { margin-top: 3px; }

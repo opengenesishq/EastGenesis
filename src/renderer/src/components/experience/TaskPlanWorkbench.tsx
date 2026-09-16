@@ -7,6 +7,7 @@ import TaskPlanInstitutions from './TaskPlanInstitutions'
 import PreparationPermission from '../composer/PreparationPermission'
 import TaskExecutionAuthority from '../composer/TaskExecutionAuthority'
 import CouncilPanel from './CouncilPanel'
+import TaskRequirementSummary from './TaskRequirementSummary'
 import { DisclosureChevron } from '../DisclosureChevron'
 import { TASK_PLAN_NAVIGATION_EVENT, takeTaskPlanNavigation } from './task-plan-navigation'
 import {
@@ -83,8 +84,10 @@ export default function TaskPlanWorkbench({
   }, [current, loadedVersionId])
 
   if (strategy !== 'plan' && !current && !navigationOpened) {
-    return showCouncil && meta?.workspaceId && meta.goalId && meta.workItemId && !meta.parentSessionId
-      ? <CouncilPanel sessionId={sessionId} /> : null
+    return meta?.workspaceId && meta.goalId && meta.workItemId ? <>
+      <TaskRequirementSummary binding={meta} running={running} />
+      {showCouncil && !meta.parentSessionId && <CouncilPanel sessionId={sessionId} />}
+    </> : null
   }
 
   const save = async (): Promise<void> => {
@@ -118,6 +121,7 @@ export default function TaskPlanWorkbench({
         expanded={expanded}
         onToggle={() => setExpanded((value) => !value)}
       />
+      {meta && (current || meta.goalId) && <TaskRequirementSummary binding={meta} plan={current} running={running} />}
       {expanded && current && <TaskPlanInstitutions version={current} />}
       {expanded && <PreparationPermission key={sessionId} sessionId={sessionId} running={running} />}
       {expanded && <TaskExecutionAuthority key={`authority:${sessionId}`} sessionId={sessionId} running={running} />}
