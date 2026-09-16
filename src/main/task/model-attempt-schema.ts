@@ -393,6 +393,7 @@ export function modelAttemptEventPayload(
     model: attempt.model,
     protocol: attempt.protocol,
     adapterVersion: attempt.adapterVersion,
+    ...(attempt.executorReceipt ? { executorReceipt: attempt.executorReceipt } : {}),
     contextDigest: attempt.contextDigest,
     routeReason: attempt.routeReason,
     projectId: attempt.projectId,

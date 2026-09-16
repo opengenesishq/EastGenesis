@@ -27,6 +27,7 @@ import {
 import type { TaskRunStatus } from '../../shared/types'
 import { canonicalJson, digest, GENESIS_DIGEST } from './workflow-ledger-codec'
 import type { WorkflowLedgerDatabase } from './workflow-ledger-db'
+import { normalizeModelExecutorReceipt } from './model-attempt-executor'
 import {
   appendModelAttemptEvent,
   compareModelAttemptToCursor,
@@ -61,7 +62,7 @@ const TASK_RUN_STATUSES = new Set<TaskRunStatus>([
 const TERMINAL_RUN_STATUSES = new Set<TaskRunStatus>(['completed', 'failed', 'cancelled'])
 const MODEL_ATTEMPT_RECORD_FIELDS = new Set([
   'schemaVersion', 'id', 'runId', 'requestId', 'stepId', 'projectId', 'goalId',
-  'workItemId', 'ordinal', 'providerId', 'model', 'protocol', 'adapterVersion',
+  'workItemId', 'ordinal', 'providerId', 'model', 'protocol', 'adapterVersion', 'executorReceipt',
   'contextDigest', 'routeReason', 'keyLabel', 'status', 'revision', 'startedAt',
   'completedAt', 'latencyMs', 'usage', 'costUsd', 'outcome', 'errorClass',
   'failoverFromAttemptId', 'startCommandId', 'startPayloadDigest',
@@ -129,6 +130,7 @@ export function startModelAttempt(db: WorkflowLedgerDatabase, input: ModelAttemp
     model: normalized.model,
     protocol: normalized.protocol,
     adapterVersion: normalized.adapterVersion,
+    ...(normalized.executorReceipt ? { executorReceipt: normalized.executorReceipt } : {}),
     contextDigest: normalized.contextDigest,
     routeReason: normalized.routeReason,
     keyLabel: normalized.keyLabel,
@@ -616,6 +618,7 @@ function normalizeStartInput(input: ModelAttemptStartInput): NormalizedStart {
     model: safeText(input.model, 'model', 240),
     protocol: safeText(input.protocol, 'protocol', 120),
     adapterVersion: safeText(input.adapterVersion, 'adapter version', 120),
+    ...(input.executorReceipt === undefined ? {} : { executorReceipt: normalizeModelExecutorReceipt(input.executorReceipt, input) }),
     contextDigest: sha256Digest(input.contextDigest, 'context digest'),
     routeReason: safeReason(input.routeReason),
     keyLabel: safeKeyLabel(input.keyLabel),
@@ -726,6 +729,7 @@ function validateStoredAttemptIdentity(record: ModelAttemptRecord): void {
     safeText(record.adapterVersion, 'adapter version', 120),
     'adapter version'
   )
+  normalizeModelExecutorReceipt(record.executorReceipt, record)
   assertCanonicalStored(
     record.contextDigest,
     sha256Digest(record.contextDigest, 'context digest'),

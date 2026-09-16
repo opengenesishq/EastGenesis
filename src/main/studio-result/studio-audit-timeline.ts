@@ -13,6 +13,7 @@ import type { HistoryEntry, SessionMeta, ToolExecutionRecord } from '../../share
 import { assertNoCredentialMaterial, projectAggregateDigest } from '../project-aggregate/codec'
 import { projectStudioRunCosts, recordedStudioAttemptCost, type StudioRunCost } from './studio-result-service'
 import { redactSensitiveText } from '../security/secret-redaction'
+import { normalizeModelExecutorReceipt } from '../task/model-attempt-executor'
 
 const FORMAT = 'caogen.studio-audit-timeline.v1' as const
 const DEFAULT_LIMIT = 50
@@ -68,6 +69,10 @@ export function buildStudioExecutionAudit(input: StudioAuditTimelineInput, snaps
     const records = attempts.filter(attempt => attempt.runId === run.id)
     return records.length === 0 || (run.taskRun.steps ?? []).some(step => !records.some(attempt => attempt.stepId === step.id))
   }).map(run => run.id)
+  const missingExecutors = selected.runs.filter(run => {
+    const records = attempts.filter(attempt => attempt.runId === run.id)
+    return missingModels.includes(run.id) || records.some(attempt => !attempt.executorReceipt)
+  }).map(run => run.id)
   const tools = selected.runs.flatMap(run => run.taskRun.toolExecutions ?? [])
   const permissions = tools.filter(tool => tool.permissionDecision === 'allow' || tool.permissionDecision === 'deny')
   const missingPermissions = selected.runs.filter(run => (run.taskRun.toolExecutions ?? []).some(tool => !tool.permissionDecision)).map(run => run.id)
@@ -82,8 +87,8 @@ export function buildStudioExecutionAudit(input: StudioAuditTimelineInput, snaps
     missingReferences: items.filter(item => item.integrity === 'missing_reference').length,
     coverage: {
       modelAttempts: coverage(selected.runs.filter(run => attempts.some(attempt => attempt.runId === run.id)).length, selected.runs.length, missingModels),
-      // TaskRun currently persists an execution domain and adapter, but no historical executor identity.
-      executors: coverage(0, selected.runs.length, selected.runs.map(run => run.id)),
+      executors: coverage(selected.runs.filter(run => attempts.some(attempt => attempt.runId === run.id && attempt.executorReceipt)).length,
+        selected.runs.length, missingExecutors),
       permissions: coverage(permissions.length, tools.length, missingPermissions)
     }
   }
@@ -304,6 +309,7 @@ function modelAttemptItem(
   const run = runs.get(attempt.runId)
   const reason = safeReason(attempt.routeReason)
   const costUsd = recordedStudioAttemptCost(attempt)
+  const executorReceipt = normalizeModelExecutorReceipt(attempt.executorReceipt, attempt)
   return {
     id: `model-attempt:${attempt.id}:${attempt.revision}`,
     occurredAt: attempt.completedAt ?? attempt.startedAt,
@@ -322,6 +328,7 @@ function modelAttemptItem(
     model: compact(attempt.model, 160),
     protocol: compact(attempt.protocol, 120),
     adapterVersion: compact(attempt.adapterVersion, 160),
+    ...(executorReceipt ? { executorReceipt, executionDomain: executorReceipt.executionDomain } : {}),
     requestId: attempt.requestId,
     ...(attempt.keyLabel ? { keyLabel: compact(attempt.keyLabel, 120) } : {}),
     ...(costUsd === undefined ? {} : { costUsd }),

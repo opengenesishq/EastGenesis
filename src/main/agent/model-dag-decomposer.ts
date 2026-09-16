@@ -8,6 +8,7 @@ import { resolveProviderRuntimeTarget } from '../provider/providerRuntimeTarget'
 import { getSettings } from '../settings'
 import type { OpenAIProtocol, TaskDagRole, TaskDecomposeInput } from '../../shared/types'
 import type { ModelDagDecomposer, ModelDagPayload, ModelDagTaskPayload } from './task-decomposer'
+import { createNativeModelExecutorReceipt } from '../task/model-attempt-executor'
 import {
   classifyRuntimeModelFailure,
   executePersistedModelAttempt,
@@ -236,6 +237,10 @@ async function fetchJson(
       model: config.model,
       protocol: config.protocol === 'chat' ? 'openai.chat-completions' : 'openai.responses',
       adapterVersion: 'model-dag-decomposer-v1',
+      executorReceipt: createNativeModelExecutorReceipt('model_dag_decomposer', {
+        providerId: config.providerId, model: config.model,
+        protocol: config.protocol === 'chat' ? 'openai.chat-completions' : 'openai.responses', adapterVersion: 'model-dag-decomposer-v1'
+      }),
       context: { url, body },
       routeReason: 'DAG decomposer selected configured reasoning model',
       keyIdentity: { providerId: config.providerId, token: config.token }

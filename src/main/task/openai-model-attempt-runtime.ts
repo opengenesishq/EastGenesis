@@ -1,5 +1,6 @@
 import type { ModelAttemptUsage } from '../../shared/model-attempt-types'
 import type { NativeRequestBudgetInput } from '../model/native-request-budget'
+import { createNativeModelExecutorReceipt } from './model-attempt-executor'
 import { isModelRouteError } from '../model/model-route-error'
 import { consumeWithNativeHttpRefusal } from '../model/native-http-refusal'
 import type { TaskRunRecord, UsageTotals } from '../../shared/types'
@@ -122,6 +123,9 @@ export class OpenAIModelAttemptTracker {
           model: input.model,
           protocol: input.protocol,
           adapterVersion: 'openai-engine-v1',
+          executorReceipt: createNativeModelExecutorReceipt('openai_engine', {
+            providerId: input.providerId, model: input.model, protocol: input.protocol, adapterVersion: 'openai-engine-v1'
+          }),
           context: { url: input.url, method: input.init.method ?? 'GET', body: input.init.body },
           contextDigest: input.canonicalContextDigest,
           routeReason: this.attemptRouteReason(failoverFromAttemptId),

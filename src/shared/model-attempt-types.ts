@@ -25,6 +25,22 @@ export interface ModelAttemptOwnership {
   workItemId: string
 }
 
+export type NativeModelExecutorComponent = 'openai_engine' | 'anthropic_engine' | 'google_genai_runtime' | 'model_dag_decomposer'
+
+/** Main-process execution provenance, not a claim that the remote model passed a capability probe. */
+export interface ModelExecutorReceipt {
+  readonly schemaVersion: 1
+  readonly source: 'native_runtime'
+  readonly executorId: string
+  /** Version embedded in this CaoGen build, never a Session/provider setting. */
+  readonly executorVersion: string
+  readonly component: NativeModelExecutorComponent
+  readonly engineKind: 'openai' | 'anthropic' | 'gemini'
+  readonly executionDomain: 'native_text'
+  /** Binds this executor to the Attempt's provider, model, protocol and adapter. */
+  readonly bindingDigest: string
+}
+
 export interface ModelAttemptStartInput {
   id: string
   commandId: string
@@ -35,6 +51,7 @@ export interface ModelAttemptStartInput {
   model: string
   protocol: string
   adapterVersion: string
+  executorReceipt?: ModelExecutorReceipt
   contextDigest: string
   routeReason: string
   keyLabel?: string
@@ -68,6 +85,8 @@ export interface ModelAttemptRecord extends ModelAttemptOwnership {
   model: string
   protocol: string
   adapterVersion: string
+  /** Absent on old records: historical executor identity is unknown. */
+  executorReceipt?: ModelExecutorReceipt
   contextDigest: string
   routeReason: string
   keyLabel?: string

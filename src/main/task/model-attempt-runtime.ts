@@ -9,6 +9,7 @@ import type {
   ModelAttemptRecord,
   ModelAttemptUsage
 } from '../../shared/model-attempt-types'
+import type { ModelExecutorReceipt } from '../../shared/model-attempt-types'
 import {
   completePersistedModelAttempt,
   getPersistedModelAttemptRetryAuthorization,
@@ -24,6 +25,7 @@ export interface RuntimeModelAttemptInput {
   model: string
   protocol: string
   adapterVersion: string
+  executorReceipt?: ModelExecutorReceipt
   context: unknown
   /** Provider-neutral digest supplied by the CaoGen context boundary. */
   contextDigest?: string
@@ -146,7 +148,10 @@ export async function beginPersistedModelAttempt(
   options: RuntimeModelAttemptBeginOptions = {}
 ): Promise<PersistedModelAttemptHandle> {
   const dependencies = { ...DEFAULT_DEPENDENCIES, ...options.dependencies }
-  const effectiveInput = await resolveRetryAuthorizedInput(input, dependencies)
+  // Freeze caller-owned request identities before the first asynchronous recovery lookup.
+  const effectiveInput = await resolveRetryAuthorizedInput({ ...input,
+    ...(input.executorReceipt ? { executorReceipt: structuredClone(input.executorReceipt) } : {})
+  }, dependencies)
   const attemptId = effectiveInput.id ?? dependencies.randomId()
   const startedAt = effectiveInput.startedAt ?? dependencies.now()
   try { reserveModelAttemptBudget({ ...effectiveInput, id: attemptId }) }
@@ -297,6 +302,7 @@ async function persistRuntimeStart(
       model: input.model,
       protocol: input.protocol,
       adapterVersion: input.adapterVersion,
+      ...(input.executorReceipt ? { executorReceipt: input.executorReceipt } : {}),
       contextDigest: input.contextDigest ?? stableModelContextDigest(input.context),
       routeReason: input.routeReason,
       keyLabel: stableModelKeyLabel(input.keyIdentity),

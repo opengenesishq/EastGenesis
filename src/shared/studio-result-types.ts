@@ -234,6 +234,7 @@ export interface StudioAuditTimelineItem {
   keyLabel?: string
   /** Persisted adapter version; this is not an executor identity. */
   adapterVersion?: string
+  executorReceipt?: import('./model-attempt-types').ModelExecutorReceipt
   executionDomain?: string
   requestId?: string
   permissionDecision?: 'allow' | 'deny'

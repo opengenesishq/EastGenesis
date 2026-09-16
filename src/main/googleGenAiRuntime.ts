@@ -19,6 +19,7 @@ export class GoogleGenAiRuntime extends AnthropicEngine {
       modelAttempts: new AnthropicModelAttemptTracker(undefined, {
         protocol: 'google.generative-language',
         adapterVersion: 'google-generative-language-v1beta',
+        executorComponent: 'google_genai_runtime',
         label: 'Google Generative Language'
       }),
       sessionIdPrefix: 'gemini',

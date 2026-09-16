@@ -84,6 +84,17 @@ export function buildStudioDeliveryChecklist(
     }
     for (const [name, count] of [...models].slice(0, MAX_ROWS)) lines.push(`- ${name}: ${count} 次记录 / recorded calls`)
     appendRemaining(lines, models.size)
+    const executors = new Map<string, number>()
+    for (const item of audit.items.filter(item => item.category === 'model_attempt')) {
+      const receipt = item.executorReceipt
+      const label = receipt
+        ? `${plain(receipt.executorId)} @ ${plain(receipt.executorVersion)} (${plain(receipt.component)}) → ${[item.providerId, item.model, item.protocol].filter(Boolean).map(plain).join(' / ')}`
+        : '历史执行器未记录 / Historical executor unavailable'
+      executors.set(label, (executors.get(label) ?? 0) + 1)
+    }
+    if (executors.size) lines.push('', '已记录执行器 / Recorded executors:', '')
+    for (const [name, count] of [...executors].slice(0, MAX_ROWS)) lines.push(`- ${name}: ${count} 次记录 / recorded calls`)
+    appendRemaining(lines, executors.size)
     const tools = audit.items.filter(item => item.category === 'tool')
     const allowed = tools.filter(item => item.permissionDecision === 'allow').length
     const denied = tools.filter(item => item.permissionDecision === 'deny').length

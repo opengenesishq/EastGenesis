@@ -1,4 +1,6 @@
 import type { ModelAttemptUsage } from '../../shared/model-attempt-types'
+import type { NativeModelExecutorComponent } from '../../shared/model-attempt-types'
+import { createNativeModelExecutorReceipt } from './model-attempt-executor'
 import type { NativeRequestBudgetInput } from '../model/native-request-budget'
 import type { TaskRunRecord } from '../../shared/types'
 import type { AnthropicMessagesResult } from '../anthropicMessagesAdapter'
@@ -19,12 +21,14 @@ interface ModelAttemptIdentity {
   protocol: string
   adapterVersion: string
   label: string
+  executorComponent: Extract<NativeModelExecutorComponent, 'anthropic_engine' | 'google_genai_runtime'>
 }
 
 const ANTHROPIC_IDENTITY: ModelAttemptIdentity = {
   protocol: ANTHROPIC_MESSAGES_PROTOCOL,
   adapterVersion: ANTHROPIC_MESSAGES_ADAPTER_VERSION,
-  label: 'Anthropic Messages'
+  label: 'Anthropic Messages',
+  executorComponent: 'anthropic_engine'
 }
 
 export interface AnthropicModelAttemptAuth {
@@ -127,6 +131,9 @@ export class AnthropicModelAttemptTracker {
       model: input.model,
       protocol: this.identity.protocol,
       adapterVersion: this.identity.adapterVersion,
+      executorReceipt: createNativeModelExecutorReceipt(this.identity.executorComponent, {
+        providerId: input.providerId, model: input.model, protocol: this.identity.protocol, adapterVersion: this.identity.adapterVersion
+      }),
       context: {
         endpoint: input.endpoint,
         method: input.method ?? 'POST',

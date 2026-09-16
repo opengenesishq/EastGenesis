@@ -1118,6 +1118,22 @@ function AuditTimelineRow({ item, labels }: { item: StudioAuditTimelineItem; lab
         {item.model && <span title={labels.model} data-studio-audit-model={item.model}>{item.model}</span>}
         {item.protocol && <span title={labels.protocol} data-studio-audit-protocol={item.protocol}>{item.protocol}</span>}
         {item.adapterVersion && <span title={labels.adapter} data-studio-audit-adapter={item.adapterVersion}>{item.adapterVersion}</span>}
+        {item.category === 'model_attempt' && (item.executorReceipt ? <>
+          <span title={labels.executor} data-studio-audit-executor={item.executorReceipt.executorId} data-studio-audit-executor-state="recorded">
+            {labels.executor}: {item.executorReceipt.executorId}
+          </span>
+          <span title={labels.executorVersion} data-studio-audit-executor-version={item.executorReceipt.executorVersion}>
+            {labels.executorVersion}: {item.executorReceipt.executorVersion}
+          </span>
+          <span title={labels.engineKind} data-studio-audit-executor-engine={item.executorReceipt.engineKind}>
+            {labels.engineKind}: {item.executorReceipt.engineKind}
+          </span>
+          <span title={labels.executorComponent} data-studio-audit-executor-component={item.executorReceipt.component}>
+            {labels.executorComponent}: {item.executorReceipt.component}
+          </span>
+        </> : <span title={labels.executorMissing} data-studio-audit-executor-state="unknown">
+          {labels.executor}: {labels.unknown}
+        </span>)}
         {item.executionDomain && <span title={labels.executionDomain} data-studio-audit-domain={item.executionDomain}>{item.executionDomain}</span>}
         {item.keyLabel && <code title={labels.keyLabel} data-studio-audit-key-label={item.keyLabel}>{item.keyLabel}</code>}
         {item.toolName && <span title={labels.tool} data-studio-audit-tool={item.toolName}>{item.toolName}</span>}
@@ -1206,6 +1222,7 @@ interface Labels {
   modelAttemptAuditIntegrityError: string; missingReferences: string; actor: string; run: string
   provider: string; model: string; protocol: string; keyLabel: string; tool: string
   adapter: string; executionDomain: string; recordedCost: string; partialCost: string
+  executor: string; executorVersion: string; engineKind: string; executorComponent: string; executorMissing: string
   operationReferences: string; request: string; effect: string; permissionDecision: string
   effectTarget: string; resultDigest: string
   deliveryReady: string; deliveryAttention: string
@@ -1227,6 +1244,8 @@ const ZH: Labels = {
   missingReferences: '发现 {count} 条缺失引用', actor: '执行者', run: '运行', provider: 'Provider', model: '模型', protocol: '协议',
   keyLabel: 'Key 标签', tool: '工具', effectTarget: 'Effect 目标类型', resultDigest: '结果摘要', deliveryReady: '可交付产物', deliveryAttention: '需处理产物',
   adapter: '适配器版本', executionDomain: '执行域', recordedCost: '已记录费用，可能包含估算', partialCost: '部分记录',
+  executor: '已记录执行器', executorVersion: '执行器版本', engineKind: '引擎', executorComponent: '运行组件',
+  executorMissing: '该模型调用没有保存执行器记录。',
   operationReferences: '查看操作关联', request: '请求', effect: '操作记录', permissionDecision: '权限决定记录'
 }
 
@@ -1246,6 +1265,8 @@ const EN: Labels = {
   modelAttemptAuditIntegrityError: 'Model attempt ledger integrity verification failed.', missingReferences: '{count} missing references found',
   actor: 'Actor', run: 'Run', provider: 'Provider', model: 'Model', protocol: 'Protocol', keyLabel: 'Key label', tool: 'Tool',
   adapter: 'Adapter version', executionDomain: 'Execution domain', recordedCost: 'Recorded cost; may include estimates', partialCost: 'partial records',
+  executor: 'Recorded executor', executorVersion: 'Executor version', engineKind: 'Engine', executorComponent: 'Runtime component',
+  executorMissing: 'No executor record was saved for this model call.',
   operationReferences: 'Operation references', request: 'Request', effect: 'Effect', permissionDecision: 'Permission decision record',
   effectTarget: 'Effect target kind', resultDigest: 'Result digest', deliveryReady: 'Ready artifacts', deliveryAttention: 'Need attention'
 }
