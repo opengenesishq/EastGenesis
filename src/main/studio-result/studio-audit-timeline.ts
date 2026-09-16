@@ -1,6 +1,8 @@
 import type { ModelAttemptRecord } from '../../shared/model-attempt-types'
 import type { ProjectAggregateSnapshot } from '../../shared/project-aggregate-types'
 import type {
+  StudioExecutionAudit,
+  StudioResultSnapshot,
   StudioAuditActor,
   StudioAuditTimelineItem,
   StudioAuditTimelinePage,
@@ -10,6 +12,7 @@ import type {
 import type { HistoryEntry, SessionMeta, ToolExecutionRecord } from '../../shared/types'
 import { assertNoCredentialMaterial, projectAggregateDigest } from '../project-aggregate/codec'
 import { projectStudioRunCosts, recordedStudioAttemptCost, type StudioRunCost } from './studio-result-service'
+import { redactSensitiveText } from '../security/secret-redaction'
 
 const FORMAT = 'caogen.studio-audit-timeline.v1' as const
 const DEFAULT_LIMIT = 50
@@ -27,10 +30,9 @@ export interface StudioAuditTimelineInput {
   query?: StudioAuditTimelineQuery
 }
 
-export function buildStudioAuditTimelinePage(input: StudioAuditTimelineInput): StudioAuditTimelinePage {
+function buildFullStudioAudit(input: StudioAuditTimelineInput, runId?: string) {
   const scope = auditScope(input.session)
-  const query = normalizeQuery(input.query)
-  const selected = selectOwnedRecords(input.session, input.aggregate, query.runId)
+  const selected = selectOwnedRecords(input.session, input.aggregate, runId)
   const attempts = (input.attempts ?? []).filter((attempt) => selected.runIds.has(attempt.runId))
   const costs = projectStudioRunCosts(selected.runs, attempts)
   const items = [
@@ -46,11 +48,52 @@ export function buildStudioAuditTimelinePage(input: StudioAuditTimelineInput): S
   const sourceDigest = digest({
     aggregateDigest: input.aggregate.aggregateDigest,
     scope,
-    runId: query.runId,
+    runId,
     attempts: attempts.map((attempt) => attempt.recordDigest),
     costs: [...costs],
     items
   })
+  assertNoCredentialMaterial(items)
+  return { scope, selected, attempts, items, sourceDigest }
+}
+
+/** Uses exactly the same frozen aggregate and Attempt input as the exported result. No UI page limit applies. */
+export function buildStudioExecutionAudit(input: StudioAuditTimelineInput, snapshot: StudioResultSnapshot): StudioExecutionAudit {
+  const { scope, selected, attempts, items, sourceDigest } = buildFullStudioAudit(input)
+  if (digest(scope) !== digest(snapshot.scope) || snapshot.verification.aggregateDigest !== input.aggregate.aggregateDigest ||
+      digest(selected.runs.map(run => run.id).sort()) !== digest(snapshot.runs.map(run => run.id).sort())) {
+    throw new Error('STUDIO_AUDIT_SCOPE_MISMATCH: result and audit must share one verified input')
+  }
+  const missingModels = selected.runs.filter(run => {
+    const records = attempts.filter(attempt => attempt.runId === run.id)
+    return records.length === 0 || (run.taskRun.steps ?? []).some(step => !records.some(attempt => attempt.stepId === step.id))
+  }).map(run => run.id)
+  const tools = selected.runs.flatMap(run => run.taskRun.toolExecutions ?? [])
+  const permissions = tools.filter(tool => tool.permissionDecision === 'allow' || tool.permissionDecision === 'deny')
+  const missingPermissions = selected.runs.filter(run => (run.taskRun.toolExecutions ?? []).some(tool => !tool.permissionDecision)).map(run => run.id)
+  const coverage = (recorded: number, total: number, missingRunIds: string[]) => ({
+    status: (recorded === 0 ? 'unavailable' : missingRunIds.length > 0 ? 'partial' : 'complete') as 'complete' | 'partial' | 'unavailable',
+    recorded, total, missingRunIds
+  })
+  const audit: StudioExecutionAudit = {
+    schemaVersion: 1, format: 'caogen.studio-execution-audit.v1', scope,
+    generatedAt: snapshot.generatedAt, aggregateDigest: input.aggregate.aggregateDigest,
+    resultDigest: snapshot.verification.resultDigest, sourceDigest, items, total: items.length,
+    missingReferences: items.filter(item => item.integrity === 'missing_reference').length,
+    coverage: {
+      modelAttempts: coverage(selected.runs.filter(run => attempts.some(attempt => attempt.runId === run.id)).length, selected.runs.length, missingModels),
+      // TaskRun currently persists an execution domain and adapter, but no historical executor identity.
+      executors: coverage(0, selected.runs.length, selected.runs.map(run => run.id)),
+      permissions: coverage(permissions.length, tools.length, missingPermissions)
+    }
+  }
+  assertNoCredentialMaterial(audit)
+  return audit
+}
+
+export function buildStudioAuditTimelinePage(input: StudioAuditTimelineInput): StudioAuditTimelinePage {
+  const query = normalizeQuery(input.query)
+  const { scope, items, sourceDigest } = buildFullStudioAudit(input, query.runId)
   const offset = query.cursor ? decodeCursor(query.cursor, sourceDigest, query.runId) : 0
   const pageItems = items.slice(offset, offset + query.limit)
   const hasMore = offset + pageItems.length < items.length
@@ -247,6 +290,7 @@ function runItem(run: AggregateRun, aggregate: ProjectAggregateSnapshot, cost: S
     entityType: 'run',
     entityId: run.id,
     ...cost,
+    ...(run.taskRun.routingPolicy?.executionDomain ? { executionDomain: run.taskRun.routingPolicy.executionDomain } : {}),
     resultDigest: prefixedDigest(projectAggregateDigest(run.taskRun)),
     integrity: 'verified'
   }
@@ -274,10 +318,12 @@ function modelAttemptItem(
     entityType: 'model_attempt',
     entityId: attempt.id,
     ...(reason ? { reason } : {}),
-    providerId: attempt.providerId,
-    model: attempt.model,
-    protocol: attempt.protocol,
-    ...(attempt.keyLabel ? { keyLabel: attempt.keyLabel } : {}),
+    providerId: compact(attempt.providerId, 160),
+    model: compact(attempt.model, 160),
+    protocol: compact(attempt.protocol, 120),
+    adapterVersion: compact(attempt.adapterVersion, 160),
+    requestId: attempt.requestId,
+    ...(attempt.keyLabel ? { keyLabel: compact(attempt.keyLabel, 120) } : {}),
     ...(costUsd === undefined ? {} : { costUsd }),
     resultDigest: prefixedDigest(attempt.recordDigest),
     integrity: 'verified'
@@ -299,7 +345,10 @@ function toolItems(run: AggregateRun, aggregate: ProjectAggregateSnapshot): Stud
     entityType: 'tool_execution',
     entityId: tool.id,
     toolName: tool.toolName,
-    ...(tool.permissionDecision ? { reason: `permission:${tool.permissionDecision}` } : {}),
+    ...(tool.permissionDecision ? { reason: `permission:${tool.permissionDecision}`, permissionDecision: tool.permissionDecision } : {}),
+    ...(tool.requestId ? { requestId: tool.requestId } : {}),
+    ...(tool.approvalResolvedEventId ? { approvalResolvedEventId: tool.approvalResolvedEventId } : {}),
+    ...(tool.effectId ? { effectId: tool.effectId } : {}),
     ...(safeDigest(tool.outputDigest) ? { resultDigest: safeDigest(tool.outputDigest) } : {}),
     integrity: 'verified'
   }))
@@ -321,6 +370,7 @@ function effectItems(run: AggregateRun, aggregate: ProjectAggregateSnapshot): St
       runId: run.id,
       entityType: 'effect',
       entityId: effect.id,
+      effectId: effect.id,
       toolName: effect.toolName,
       targetKind: effect.target.kind,
       resultDigest: prefixedDigest(effect.targetDigest),
@@ -332,13 +382,14 @@ function effectItems(run: AggregateRun, aggregate: ProjectAggregateSnapshot): St
       category: 'evidence',
       action: `effect_evidence.${evidence.kind}`,
       status: 'recorded',
-      actor: systemActor(evidence.verifier),
+      actor: evidence.kind === 'manual_confirmation' ? humanActor(evidence.verifier) : systemActor(evidence.verifier),
       projectId: aggregate.projectId,
       ...(run.goalId ? { goalId: run.goalId } : {}),
       workItemId: run.workItemId,
       runId: run.id,
       entityType: 'effect_evidence',
       entityId: evidence.id,
+      effectId: effect.id,
       toolName: effect.toolName,
       targetKind: effect.target.kind,
       resultDigest: prefixedDigest(evidence.digest),
@@ -362,6 +413,9 @@ function evidenceItems(
         Boolean(link.artifactId && selected.artifactIds.has(link.artifactId))
   ).map((link) => link.evidenceId))
   const workflow = aggregate.workflow.workflowEvidence.filter((evidence) =>
+    (!evidence.runId || selected.runIds.has(evidence.runId)) &&
+    (!evidence.workItemId || selected.workItemIds.has(evidence.workItemId))
+  ).filter((evidence) =>
     selected.runFiltered
       ? Boolean(evidence.runId && selected.runIds.has(evidence.runId)) || (!evidence.runId && linkedIds.has(evidence.evidenceId))
       : linkedIds.has(evidence.evidenceId) || Boolean(evidence.runId && selected.runIds.has(evidence.runId)) ||
@@ -517,7 +571,7 @@ function actorForRun(run: AggregateRun | undefined, aggregate: ProjectAggregateS
     : worker?.roleTemplateId
   return {
     kind: 'digital_worker',
-    label: worker?.displayName ?? binding.workerId,
+    label: compact(worker?.displayName ?? binding.workerId, 120),
     ...(roleLabel ? { role: compact(roleLabel, 120) } : {}),
     workerId: binding.workerId,
     assignmentId: assignment?.id ?? binding.assignmentId
@@ -582,7 +636,7 @@ function timestamp(value: number | string): number | undefined {
 }
 
 function compact(value: string, max: number): string {
-  return value.trim().replace(/\s+/g, ' ').slice(0, max)
+  return redactSensitiveText(value).trim().replace(/\s+/g, ' ').slice(0, max)
 }
 
 function digest(value: unknown): string {

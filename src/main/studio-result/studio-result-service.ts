@@ -11,6 +11,7 @@ import {
   type StudioResultDeliveryCategory,
   type StudioResultCostSummary,
   type StudioResultEvidence,
+  type StudioExecutionAudit,
   type StudioResultExportResult,
   type StudioResultIssue,
   type StudioResultRun,
@@ -273,7 +274,7 @@ function selectWorkflowEvidence(
   )
 }
 
-export function buildStudioResultExport(snapshot: StudioResultSnapshot): StudioResultExportResult {
+export function buildStudioResultExport(snapshot: StudioResultSnapshot, executionAudit?: StudioExecutionAudit): StudioResultExportResult {
   if (snapshot.state !== 'ready' || !snapshot.verification.canonicalAggregateVerified) {
     throw new Error('STUDIO_RESULT_UNBOUND: canonical Project ownership is required before export')
   }
@@ -281,6 +282,7 @@ export function buildStudioResultExport(snapshot: StudioResultSnapshot): StudioR
     schemaVersion: STUDIO_RESULT_SCHEMA_VERSION,
     format: STUDIO_RESULT_EXPORT_FORMAT,
     snapshot,
+    ...(executionAudit ? { executionAudit } : {}),
     verification: snapshot.verification
   }
   const exportDigest = sha256(withoutDigest)

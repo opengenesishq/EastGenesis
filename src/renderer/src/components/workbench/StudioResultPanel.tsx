@@ -9,6 +9,7 @@ import type {
   StudioResultArtifact,
   StudioResultArtifactLocation,
   StudioResultIssue,
+  StudioResultSaveResult,
   StudioResultSnapshot,
   WorkflowAcceptanceRecord,
   WorkflowEvidenceRecord
@@ -56,7 +57,7 @@ function BoundStudioResultPanel({ sessionId, standalone, onOpenSessionSurface }:
   const openSubagentPanel = useStore((state) => state.openSubagentPanel)
   const labels = language === 'zh' ? ZH : EN
   const [tab, setTab] = useState<ResultTab>('summary')
-  const { snapshot, loading, error, message, refresh, save } = useStudioResult(sessionId, labels, language)
+  const { snapshot, loading, saving, error, saveError, message, savedResult, refresh, save } = useStudioResult(sessionId, labels)
   const acceptanceReview = useResultAcceptanceReview(snapshot, refresh)
 
   const openTool: OpenResultTool = async (tool, value) => {
@@ -107,7 +108,8 @@ function BoundStudioResultPanel({ sessionId, standalone, onOpenSessionSurface }:
             className="studio-result-icon-button"
             aria-label={labels.export}
             title={labels.export}
-            disabled={snapshot?.state !== 'ready'}
+            disabled={snapshot?.state !== 'ready' || saving}
+            aria-busy={saving}
             onClick={() => void save()}
             data-studio-result-export
           >
@@ -117,7 +119,21 @@ function BoundStudioResultPanel({ sessionId, standalone, onOpenSessionSurface }:
       </header>
 
       {error && <div className="studio-result-notice studio-result-notice-error" role="alert">{labels.loadFailed}</div>}
+      {saveError && <div className="studio-result-notice studio-result-notice-error" role="alert">{language === 'en' ? 'Export failed: ' : '导出失败：'}{saveError}</div>}
+      {saving && <div className="studio-result-notice" role="status">{language === 'en' ? 'Preparing the delivery package…' : '正在准备交付包…'}</div>}
       {message && <div className="studio-result-notice" role="status">{message}</div>}
+      {savedResult?.filePath && <div className="studio-result-notice" data-studio-delivery-receipt>
+        <code className="preparation-directory">{savedResult.filePath}</code>
+        <p>{language === 'en'
+          ? `Included files: ${savedResult.includedArtifacts ?? '—'} · Omitted files: ${savedResult.omittedArtifacts ?? '—'} · Audit entries: ${savedResult.auditItems ?? '—'}`
+          : `已包含文件：${savedResult.includedArtifacts ?? '—'} · 未包含文件：${savedResult.omittedArtifacts ?? '—'} · 审计记录：${savedResult.auditItems ?? '—'}`}</p>
+        <p>{savedResult.acceptanceSummary?.total
+          ? language === 'en'
+            ? `Acceptance at export: ${savedResult.acceptanceSummary.passed} passed · ${savedResult.acceptanceSummary.waived} waived · ${savedResult.acceptanceSummary.pending + savedResult.acceptanceSummary.verifying} pending review · ${savedResult.acceptanceSummary.failed} failed`
+            : `导出时验收：${savedResult.acceptanceSummary.passed} 项通过 · ${savedResult.acceptanceSummary.waived} 项豁免 · ${savedResult.acceptanceSummary.pending + savedResult.acceptanceSummary.verifying} 项待处理 · ${savedResult.acceptanceSummary.failed} 项失败`
+          : (language === 'en' ? 'No acceptance decisions were recorded in this export.' : '本次导出没有验收记录。')}</p>
+        <p>{language === 'en' ? 'Open DELIVERY.md in the package for acceptance, sources, costs and outstanding work.' : '打开包内 DELIVERY.md 查看验收、来源、费用和待处理事项。'}</p>
+      </div>}
       {sessionId && snapshot?.state !== 'unbound' && <StudioResultFileChanges
         sessionId={sessionId} snapshot={snapshot} language={language} onRefresh={refresh} />}
 
@@ -146,14 +162,19 @@ function BoundStudioResultPanel({ sessionId, standalone, onOpenSessionSurface }:
   )
 }
 
-function useStudioResult(sessionId: string | null, labels: Labels, language: 'zh' | 'en') {
+function useStudioResult(sessionId: string | null, labels: Labels) {
   const [snapshot, setSnapshot] = useState<StudioResultSnapshot>()
   const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
+  const [saveError, setSaveError] = useState<string>()
   const [message, setMessage] = useState<string>()
+  const [savedResult, setSavedResult] = useState<StudioResultSaveResult>()
+  const saveInFlight = useRef(false)
+  const saveRequest = useRef(0)
   const refreshTimer = useRef<number | undefined>()
   const refreshRequest = useRef(0)
-  useEffect(() => () => { refreshRequest.current++ }, [])
+  useEffect(() => () => { refreshRequest.current++; saveRequest.current++ }, [])
   const savedLabel = labels.saved
   const refresh = useCallback(async (): Promise<void> => {
     const request = ++refreshRequest.current
@@ -217,35 +238,34 @@ function useStudioResult(sessionId: string | null, labels: Labels, language: 'zh
   }, [refresh, sessionId, snapshot])
 
   const save = useCallback(async (): Promise<void> => {
-    if (!sessionId || snapshot?.state !== 'ready') return
+    if (!sessionId || snapshot?.state !== 'ready' || saveInFlight.current) return
+    saveInFlight.current = true
+    const request = ++saveRequest.current
+    setSaving(true)
     setMessage(undefined)
-    setError(undefined)
+    setSaveError(undefined)
+    setSavedResult(undefined)
     try {
       const result = await window.agentDesk.saveStudioResultSnapshot(sessionId)
+      if (request !== saveRequest.current) return
       if (!result.canceled) {
-        // ART-005 (T08/P1-2):导出始终可用;verdict≠verifiable 时显著标注未验收项与缺失 Evidence,不伪造完成
-        const verdict = deriveDeliveryVerdict(snapshot)
-        if (verdict.verdict === 'verifiable') {
-          setMessage(savedLabel)
-        } else {
-          setMessage(
-            language === 'en'
-              ? `${savedLabel} (note: delivery not verified — pending ${verdict.pending} · verifying ${verdict.verifying} · failed ${verdict.failed}; see Evidence view)`
-              : `${savedLabel}（注意：交付未通过验收 —— 待验收 ${verdict.pending} · 验收中 ${verdict.verifying} · 失败 ${verdict.failed}，详见证据视图）`
-          )
-        }
+        setSavedResult(result)
+        setMessage(savedLabel)
       }
     } catch (cause) {
-      setError(errorMessage(cause))
+      if (request === saveRequest.current) setSaveError(errorMessage(cause))
+    } finally {
+      saveInFlight.current = false
+      if (request === saveRequest.current) setSaving(false)
     }
-  }, [labels, language, savedLabel, sessionId, snapshot?.state])
+  }, [savedLabel, sessionId, snapshot?.state])
   useEffect(() => {
     const record = readFirstTaskOnboardingRecord()
     if (snapshot && isActiveFirstTaskCandidate(record, sessionId) && isFirstTaskComplete(snapshot, record)) {
       patchFirstTaskOnboardingRecord({ completedAt: Date.now() })
     }
   }, [sessionId, snapshot])
-  return { snapshot, loading, error, message, refresh, save }
+  return { snapshot, loading, saving, error, saveError, message, savedResult, refresh, save }
 }
 
 interface ResultAcceptanceReviewState {
@@ -1097,16 +1117,24 @@ function AuditTimelineRow({ item, labels }: { item: StudioAuditTimelineItem; lab
         {item.providerId && <span title={labels.provider} data-studio-audit-provider={item.providerId}>{item.providerId}</span>}
         {item.model && <span title={labels.model} data-studio-audit-model={item.model}>{item.model}</span>}
         {item.protocol && <span title={labels.protocol} data-studio-audit-protocol={item.protocol}>{item.protocol}</span>}
+        {item.adapterVersion && <span title={labels.adapter} data-studio-audit-adapter={item.adapterVersion}>{item.adapterVersion}</span>}
+        {item.executionDomain && <span title={labels.executionDomain} data-studio-audit-domain={item.executionDomain}>{item.executionDomain}</span>}
         {item.keyLabel && <code title={labels.keyLabel} data-studio-audit-key-label={item.keyLabel}>{item.keyLabel}</code>}
         {item.toolName && <span title={labels.tool} data-studio-audit-tool={item.toolName}>{item.toolName}</span>}
         {item.targetKind && <span title={labels.effectTarget} data-studio-audit-target={item.targetKind}>{item.targetKind}</span>}
         {item.evidenceId && <code title={labels.evidence}>Evidence {shortId(item.evidenceId)}</code>}
         {item.acceptanceId && <code title={labels.acceptance}>Acceptance {shortId(item.acceptanceId)}</code>}
         {item.entityId && <code title={item.entityType}>{item.entityType ?? 'entity'} {shortId(item.entityId)}</code>}
-        {item.costUsd !== undefined && <span title={labels.cost} data-studio-audit-cost={item.costUsd}>${formatCost(item.costUsd)}</span>}
+        {item.costUsd !== undefined && <span title={labels.recordedCost} data-studio-audit-cost={item.costUsd}>${formatCost(item.costUsd)}{item.costCoverage === 'partial' ? ` (${labels.partialCost})` : ''}</span>}
         {item.resultDigest && <code title={labels.resultDigest} data-studio-audit-digest={item.resultDigest}>{shortDigest(item.resultDigest)}</code>}
       </div>
       {item.reason && <p className="studio-result-audit-reason" data-studio-audit-reason>{item.reason}</p>}
+      {(item.requestId || item.effectId || item.approvalResolvedEventId) && <details>
+        <summary>{labels.operationReferences}</summary>
+        {item.requestId && <p>{labels.request}: <code>{item.requestId}</code></p>}
+        {item.effectId && <p>{labels.effect}: <code>{item.effectId}</code></p>}
+        {item.approvalResolvedEventId && <p>{labels.permissionDecision}: <code>{item.approvalResolvedEventId}</code></p>}
+      </details>}
     </article>
   )
 }
@@ -1177,6 +1205,8 @@ interface Labels {
   auditLoading: string; auditLoadFailed: string; auditUnbound: string; projectAuditIntegrityError: string
   modelAttemptAuditIntegrityError: string; missingReferences: string; actor: string; run: string
   provider: string; model: string; protocol: string; keyLabel: string; tool: string
+  adapter: string; executionDomain: string; recordedCost: string; partialCost: string
+  operationReferences: string; request: string; effect: string; permissionDecision: string
   effectTarget: string; resultDigest: string
   deliveryReady: string; deliveryAttention: string
 }
@@ -1195,7 +1225,9 @@ const ZH: Labels = {
   auditLoading: '正在校验审计记录…', auditLoadFailed: '审计记录加载失败，请重新打开时间线。', auditUnbound: '当前对话没有可审计的 Project 归属。',
   projectAuditIntegrityError: 'Project 审计账本完整性校验失败。', modelAttemptAuditIntegrityError: '模型调用账本完整性校验失败。',
   missingReferences: '发现 {count} 条缺失引用', actor: '执行者', run: '运行', provider: 'Provider', model: '模型', protocol: '协议',
-  keyLabel: 'Key 标签', tool: '工具', effectTarget: 'Effect 目标类型', resultDigest: '结果摘要', deliveryReady: '可交付产物', deliveryAttention: '需处理产物'
+  keyLabel: 'Key 标签', tool: '工具', effectTarget: 'Effect 目标类型', resultDigest: '结果摘要', deliveryReady: '可交付产物', deliveryAttention: '需处理产物',
+  adapter: '适配器版本', executionDomain: '执行域', recordedCost: '已记录费用，可能包含估算', partialCost: '部分记录',
+  operationReferences: '查看操作关联', request: '请求', effect: '操作记录', permissionDecision: '权限决定记录'
 }
 
 const EN: Labels = {
@@ -1213,5 +1245,7 @@ const EN: Labels = {
   auditUnbound: 'This conversation has no auditable Project ownership.', projectAuditIntegrityError: 'Project audit ledger integrity verification failed.',
   modelAttemptAuditIntegrityError: 'Model attempt ledger integrity verification failed.', missingReferences: '{count} missing references found',
   actor: 'Actor', run: 'Run', provider: 'Provider', model: 'Model', protocol: 'Protocol', keyLabel: 'Key label', tool: 'Tool',
+  adapter: 'Adapter version', executionDomain: 'Execution domain', recordedCost: 'Recorded cost; may include estimates', partialCost: 'partial records',
+  operationReferences: 'Operation references', request: 'Request', effect: 'Effect', permissionDecision: 'Permission decision record',
   effectTarget: 'Effect target kind', resultDigest: 'Result digest', deliveryReady: 'Ready artifacts', deliveryAttention: 'Need attention'
 }

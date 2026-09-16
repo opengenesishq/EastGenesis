@@ -8,11 +8,12 @@ import { buildStudioResultExport, buildStudioResultSnapshot } from '../studio-re
 import {
   buildFailedStudioAuditTimeline,
   buildStudioAuditTimelinePage,
+  buildStudioExecutionAudit,
   buildUnboundStudioAuditTimeline
 } from '../studio-result/studio-audit-timeline'
-import { queryPersistedModelAttempts } from '../task/model-attempt-api'
+import { selectModelAttempts } from '../task/model-attempt-store'
 import type { ModelAttemptRecord } from '../../shared/model-attempt-types'
-import type { StudioAuditTimelineQuery } from '../../shared/studio-result-types'
+import type { StudioAuditTimelineQuery, StudioDeliverySummary, StudioExecutionAudit } from '../../shared/studio-result-types'
 import { assertTrustedWorkflowLedgerSender } from './workflow-ledger-handlers'
 import { registerSessionProducedArtifacts } from '../task/session-artifact-producer'
 import { buildPortableDeliveryPackage, safeFileStem } from '../studio-result/studio-result-package'
@@ -20,7 +21,7 @@ import { checkStudioResultFiles } from '../studio-result/studio-result-file-chan
 import { buildStudioResultRerunPreview } from '../studio-result/studio-result-rerun-preview'
 import { confirmStudioResultRerun } from '../studio-result/studio-result-rerun-dispatch'
 import { getSessionInputService } from '../task/session-input-runtime'
-import { listTaskSnapshots } from '../task/task-snapshot'
+import { listTaskSnapshots, readTaskSnapshotDatabase } from '../task/task-snapshot'
 import { listPendingSessionCreations } from '../session-creation-journal'
 import type { StudioResultRerunConfirmInput, StudioResultRerunInput } from '../../shared/studio-result-rerun-types'
 
@@ -60,9 +61,9 @@ export async function handleStudioResultIpc(
     }, `local-user:webcontents-${event.sender.id}`)
   }
   if (action === 'audit') return studioAuditTimelineForSession(sessionId, auditQuery(rawQuery))
-  const exported = buildStudioResultExport(await studioResultSnapshotForSession(sessionId))
+  const exported = await studioResultExportForSession(sessionId)
   if (action === 'export') return exported
-  return saveStudioResult(event.sender, exported.json, exported.exportDigest, exported.bundle.snapshot)
+  return saveStudioResult(event.sender, exported.json, exported.exportDigest, exported.bundle.snapshot, exported.bundle.executionAudit)
 }
 
 async function studioAuditTimelineForSession(sessionId: string, query: StudioAuditTimelineQuery) {
@@ -91,14 +92,16 @@ async function studioAuditTimelineForSession(sessionId: string, query: StudioAud
 }
 
 async function queryAllProjectModelAttempts(projectId: string): Promise<ModelAttemptRecord[]> {
-  const attempts: ModelAttemptRecord[] = []
-  let cursor: string | undefined
-  do {
-    const page = await queryPersistedModelAttempts({ projectId, limit: 500, ...(cursor ? { cursor } : {}) })
-    attempts.push(...page.attempts)
-    cursor = page.nextCursor
-  } while (cursor)
-  return attempts
+  return readTaskSnapshotDatabase(undefined, db => {
+    const attempts: ModelAttemptRecord[] = []
+    let cursor: string | undefined
+    do {
+      const page = selectModelAttempts(db, { projectId, limit: 500, ...(cursor ? { cursor } : {}) })
+      attempts.push(...page.attempts)
+      cursor = page.nextCursor
+    } while (cursor)
+    return attempts
+  })
 }
 
 export async function studioResultSnapshotForSession(sessionId: string) {
@@ -111,11 +114,26 @@ export async function studioResultSnapshotForSession(sessionId: string) {
   return buildStudioResultSnapshot(session, aggregate, [], Date.now(), attempts)
 }
 
+async function studioResultExportForSession(sessionId: string) {
+  const current = sessionManager.list().find(candidate => candidate.id === sessionId)
+  if (!current) throw new Error(`Studio result Session was not found: ${sessionId}`)
+  // Neither dialog latency nor live Session/model changes may mix report and audit inputs.
+  const session = structuredClone(current)
+  const aggregate = session.workspaceId
+    ? structuredClone(await createProductionProjectAggregateService().verifyLiveProject(session.workspaceId))
+    : undefined
+  const attempts = session.workspaceId ? structuredClone(await queryAllProjectModelAttempts(session.workspaceId)) : []
+  const snapshot = buildStudioResultSnapshot(session, aggregate, [], Date.now(), attempts)
+  const audit = aggregate ? buildStudioExecutionAudit({ session, aggregate, attempts }, snapshot) : undefined
+  return buildStudioResultExport(snapshot, audit)
+}
+
 async function saveStudioResult(
   sender: WebContents,
   json: string,
   exportDigest: string,
-  snapshot: Awaited<ReturnType<typeof studioResultSnapshotForSession>>
+  snapshot: Awaited<ReturnType<typeof studioResultSnapshotForSession>>,
+  audit?: StudioExecutionAudit
 ) {
   const win = BrowserWindow.fromWebContents(sender) ?? BrowserWindow.getAllWindows()[0]
   const title = snapshot.workItems[0]?.title ?? snapshot.goal?.title ?? snapshot.workspace?.name ?? 'delivery'
@@ -132,7 +150,8 @@ async function saveStudioResult(
   if (!creatingRun || !snapshot.scope.workspaceId) {
     throw new Error('STUDIO_RESULT_RUN_REQUIRED: canonical Project-owned Run is required before saving a delivery report')
   }
-  const packageBytes = await buildPortableDeliveryPackage(snapshot, json, exportDigest)
+  let deliverySummary: StudioDeliverySummary | undefined
+  const packageBytes = await buildPortableDeliveryPackage(snapshot, json, exportDigest, audit, value => { deliverySummary = value })
   await writeDurableFile(result.filePath, packageBytes, { replace: true })
   const [binding] = await registerSessionProducedArtifacts({
     sessionId: snapshot.scope.sessionId,
@@ -152,6 +171,8 @@ async function saveStudioResult(
       ].join(':'),
       mediaType: 'application/zip',
       producer: 'studio_result_export',
+      // Export receipt verifies package contents; it must not advance the task's business acceptance.
+      attachToStage: false,
       metadata: {
         exportDigest,
         resultDigest: snapshot.verification.resultDigest,
@@ -162,7 +183,7 @@ async function saveStudioResult(
         packageFormat: 'caogen.studio-delivery.v1'
       },
       evidenceKind: 'delivery_check',
-      evidenceSummary: 'The saved portable package contains the canonical result snapshot, delivery manifest and verified Artifact bytes where available.',
+      evidenceSummary: 'The saved portable package contains the frozen canonical result, complete sanitized execution audit with source coverage, delivery checklist and byte-verified eligible Artifacts.',
       evidenceVerifier: 'studio-result-export',
       acceptanceCriterion: 'The portable package must preserve the canonical result bytes, manifest, Artifact digests, ownership and available delivery files.',
       externalLocation: {
@@ -181,6 +202,7 @@ async function saveStudioResult(
     canceled: false,
     filePath: result.filePath,
     exportDigest,
+    ...deliverySummary,
     workflowArtifactId: binding.artifactId,
     workflowEvidenceId: binding.evidenceId,
     workflowAcceptanceId: binding.acceptanceId

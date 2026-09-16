@@ -232,6 +232,13 @@ export interface StudioAuditTimelineItem {
   model?: string
   protocol?: string
   keyLabel?: string
+  /** Persisted adapter version; this is not an executor identity. */
+  adapterVersion?: string
+  executionDomain?: string
+  requestId?: string
+  permissionDecision?: 'allow' | 'deny'
+  approvalResolvedEventId?: string
+  effectId?: string
   costUsd?: number
   costCoverage?: 'complete' | 'partial' | 'unavailable'
   toolName?: string
@@ -267,6 +274,40 @@ export interface StudioAuditTimelinePage {
   nextCursor?: string
   integrity: StudioAuditTimelineIntegrity
   errorCode?: 'PROJECT_INTEGRITY' | 'MODEL_ATTEMPT_INTEGRITY'
+}
+
+/** Coverage describes persisted sources, not successful execution or acceptance. */
+export interface StudioExecutionAuditCoverage {
+  status: 'complete' | 'partial' | 'unavailable'
+  /** Runs for model/executor coverage; tool executions for permission coverage. */
+  recorded: number
+  total: number
+  missingRunIds: string[]
+}
+
+export interface StudioExecutionAudit {
+  schemaVersion: 1
+  format: 'caogen.studio-execution-audit.v1'
+  scope: StudioResultScope
+  generatedAt: number
+  aggregateDigest: string
+  resultDigest: string
+  sourceDigest: string
+  items: StudioAuditTimelineItem[]
+  total: number
+  missingReferences: number
+  coverage: {
+    modelAttempts: StudioExecutionAuditCoverage
+    executors: StudioExecutionAuditCoverage
+    permissions: StudioExecutionAuditCoverage
+  }
+}
+
+export interface StudioDeliverySummary {
+  includedArtifacts: number
+  omittedArtifacts: number
+  auditItems: number
+  acceptanceSummary: { total: number; passed: number; waived: number; pending: number; verifying: number; failed: number }
 }
 
 export interface StudioResultCostSummary {
@@ -331,6 +372,7 @@ export interface StudioResultExportBundle {
   schemaVersion: typeof STUDIO_RESULT_SCHEMA_VERSION
   format: typeof STUDIO_RESULT_EXPORT_FORMAT
   snapshot: StudioResultSnapshot
+  executionAudit?: StudioExecutionAudit
   verification: StudioResultVerification
   exportDigest: string
 }
@@ -343,7 +385,7 @@ export interface StudioResultExportResult {
   bundle: StudioResultExportBundle
 }
 
-export interface StudioResultSaveResult {
+export interface StudioResultSaveResult extends Partial<StudioDeliverySummary> {
   canceled: boolean
   filePath?: string
   exportDigest?: string

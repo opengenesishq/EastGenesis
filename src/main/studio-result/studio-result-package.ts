@@ -2,7 +2,11 @@ import JSZip from 'jszip'
 import { createHash } from 'node:crypto'
 import { lstat, readFile } from 'node:fs/promises'
 import { basename, extname } from 'node:path'
-import type { StudioResultSnapshot } from '../../shared/studio-result-types'
+import type { StudioDeliverySummary, StudioExecutionAudit, StudioResultSnapshot } from '../../shared/studio-result-types'
+
+import { buildStudioDeliveryChecklist } from './studio-delivery-checklist'
+import { buildStudioResultExport } from './studio-result-service'
+import { projectAggregateCanonicalJson } from '../project-aggregate/codec'
 
 const PORTABLE_ARTIFACT_MAX_BYTES = 128 * 1024 * 1024
 const PORTABLE_PACKAGE_MAX_BYTES = 512 * 1024 * 1024
@@ -16,8 +20,19 @@ const PORTABLE_PACKAGE_MAX_BYTES = 512 * 1024 * 1024
 export async function buildPortableDeliveryPackage(
   snapshot: StudioResultSnapshot,
   resultJson: string,
-  exportDigest: string
+  exportDigest: string,
+  audit?: StudioExecutionAudit,
+  onSummary?: (summary: StudioDeliverySummary) => void
 ): Promise<Buffer> {
+  if (audit && (audit.aggregateDigest !== snapshot.verification.aggregateDigest ||
+      audit.resultDigest !== snapshot.verification.resultDigest || audit.generatedAt !== snapshot.generatedAt ||
+      projectAggregateCanonicalJson(audit.scope) !== projectAggregateCanonicalJson(snapshot.scope) || audit.total !== audit.items.length)) {
+    throw new Error('STUDIO_AUDIT_SCOPE_MISMATCH: audit does not belong to the frozen result')
+  }
+  const expected = buildStudioResultExport(snapshot, audit)
+  if (expected.exportDigest !== exportDigest || expected.json !== resultJson) {
+    throw new Error('STUDIO_EXPORT_DIGEST_MISMATCH: result bytes do not match the frozen export')
+  }
   const zip = new JSZip()
   zip.file('result.json', resultJson)
   const files: Array<Record<string, unknown>> = []
@@ -80,6 +95,23 @@ export async function buildPortableDeliveryPackage(
     files.push(entry)
   }
 
+  const auditJson = audit ? `${projectAggregateCanonicalJson(audit)}\n` : undefined
+  if (auditJson) zip.file('execution-audit.json', auditJson)
+  zip.file('DELIVERY.md', buildStudioDeliveryChecklist(snapshot, files, audit))
+  const activeAcceptances = snapshot.acceptances.filter(value => value.deliveryScope !== 'historical')
+  const summary: StudioDeliverySummary = {
+    includedArtifacts: files.filter(file => file.contentIncluded === true).length,
+    omittedArtifacts: files.filter(file => file.contentIncluded !== true).length,
+    auditItems: audit?.total ?? 0,
+    acceptanceSummary: {
+      total: activeAcceptances.length,
+      passed: activeAcceptances.filter(value => value.status === 'passed').length,
+      waived: activeAcceptances.filter(value => value.status === 'waived').length,
+      pending: activeAcceptances.filter(value => value.status === 'pending').length,
+      verifying: activeAcceptances.filter(value => value.status === 'verifying').length,
+      failed: activeAcceptances.filter(value => value.status === 'failed').length
+    }
+  }
   const manifest = {
     schemaVersion: 1,
     format: 'caogen.studio-delivery.v1',
@@ -90,6 +122,12 @@ export async function buildPortableDeliveryPackage(
     aggregateDigest: snapshot.verification.aggregateDigest,
     verification: snapshot.verification,
     summary: snapshot.summary,
+    deliverySummary: summary,
+    executionAudit: auditJson && audit ? {
+      path: 'execution-audit.json',
+      contentDigest: `sha256:${createHash('sha256').update(auditJson).digest('hex')}`,
+      sourceDigest: audit.sourceDigest, total: audit.total, missingReferences: audit.missingReferences, coverage: audit.coverage
+    } : { status: 'unavailable' },
     files,
     includedBytes
   }
@@ -98,6 +136,7 @@ export async function buildPortableDeliveryPackage(
   if (bytes.byteLength > PORTABLE_PACKAGE_MAX_BYTES + 8 * 1024 * 1024) {
     throw new Error('STUDIO_RESULT_PACKAGE_TOO_LARGE: portable delivery package exceeds the safe size limit')
   }
+  onSummary?.(summary)
   return bytes
 }
 
