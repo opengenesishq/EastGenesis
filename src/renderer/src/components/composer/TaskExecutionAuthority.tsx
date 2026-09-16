@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { TASK_EXECUTION_AUTHORITY_WRITE_TOOLS, type TaskExecutionAuthorityView } from '../../../../shared/task-execution-authority-types'
 import { useStore } from '../../store'
+import TaskTemporaryPermissions from './TaskTemporaryPermissions'
 import './preparation-permission.css'
 
 const CHANGED = 'caogen:task-execution-authority-changed'
@@ -91,6 +92,7 @@ export default function TaskExecutionAuthority({ sessionId, running }: {
     </div>
     {strategy !== 'execute' && <p>{zh ? '批准计划并进入执行后，可授权正式目录修改；起草可使用文件准备区。' : 'Approve the plan and enter execution to grant project file access. Drafts can use the preparation area.'}</p>}
     {error && <p role="alert">{error}</p>}
+    <TaskTemporaryPermissions key={sessionId} sessionId={sessionId} />
   </details>
 }
 
