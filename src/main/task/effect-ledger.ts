@@ -13,8 +13,11 @@ import type {
 import type { EffectDescriptor, EffectReconciliationResult } from './effect-reconciler'
 import { effectTargetsConflict } from './effect-target-conflict'
 import { normalizeToolName, stableValueDigest } from './tool-idempotency'
+import type { EffectResolution, EffectResolutionReceipt } from '../../shared/effect-recovery-types'
+import { redactSensitiveText } from '../security/secret-redaction'
 
 export const EFFECT_LEASE_TTL_MS = 30 * 60 * 1000
+export const EFFECT_MANUAL_RECHECK_VERIFIER = 'effect-user-recheck-v1'
 
 export interface EffectExecutionHandle {
   /** Optional application-owned data root; omitted for ordinary Agent tools. */
@@ -251,6 +254,12 @@ export function applyEffectReconciliation(
   const effect = (run.effects ?? []).find((item) => item.id === effectId)
   if (!effect) throw new Error(`未找到 EffectRecord:${effectId}`)
   if (effect.status === 'confirmed' || effect.status === 'failed' || effect.status === 'compensated') return run
+  // A user's explicit readback does not silently turn into retry authority on a later background refresh.
+  if (result.kind === 'not_applied' && effect.evidence.some(item => item.verifier === EFFECT_MANUAL_RECHECK_VERIFIER)) {
+    result = { kind: 'unresolved', verifier: EFFECT_MANUAL_RECHECK_VERIFIER,
+      evidenceDigest: stableValueDigest({ originalObservation: result.evidenceDigest, effectKey: effect.effectKey }),
+      reason: '核对未发现已执行结果；用户尚未确认未执行或放弃，继续禁止自动重放。' }
+  }
   const reconciliationEvidence = evidence(
     'reconciliation',
     now,
@@ -289,19 +298,25 @@ export function applyEffectReconciliation(
 export function manuallyResolveEffect(
   run: TaskRunRecord,
   effectId: string,
-  resolution: 'confirmed_applied' | 'confirmed_not_applied',
-  now = Date.now()
+  resolution: EffectResolution,
+  now = Date.now(),
+  note?: string
 ): TaskRunRecord {
   const effect = (run.effects ?? []).find((item) => item.id === effectId)
   if (!effect) throw new Error(`未找到 EffectRecord:${effectId}`)
   if (effect.status !== 'waiting_reconciliation') {
     throw new Error(`EffectRecord 不在等待对账状态:${effect.status}`)
   }
-  const manual = evidence('manual_confirmation', now, effect.generation, 'human-v1', {
+  if (!['confirmed_applied', 'confirmed_not_applied', 'abandoned_by_user'].includes(resolution)) throw new Error('无效的效果处置类型')
+  if (note !== undefined && (typeof note !== 'string' || !note.trim() || note.length > 2000)) throw new Error('核对说明须为 1-2000 字符')
+  const receipt: EffectResolutionReceipt = { resolution, expectedRevision: effect.revision,
+    targetDigest: effect.targetDigest, inputDigest: effect.inputDigest,
+    ...(note ? { note: redactSensitiveText(note.trim()) } : {}) }
+  const manual = { ...evidence('manual_confirmation', now, effect.generation, 'human-v1', {
     effectId,
     effectKey: effect.effectKey,
-    resolution
-  })
+    ...receipt
+  }), resolutionReceipt: receipt }
   const status: EffectStatus = resolution === 'confirmed_applied' ? 'confirmed' : 'abandoned'
   const extras = resolution === 'confirmed_not_applied'
     ? [manual, evidence('retry_authorized', now, effect.generation, 'human-v1', {

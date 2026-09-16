@@ -23,7 +23,6 @@ export default function WorkInbox({ active }: { active: boolean }): React.JSX.El
   const projects = useStore((state) => state.projectWorkspaces)
   const preferredProjectId = useStore((state) => state.preferredProjectWorkspaceId)
   const [intakeProjectId, setIntakeProjectId] = useState<string | null>(null)
-  const taskSnapshots = useStore((state) => state.taskSnapshots)
   const recoverTaskSnapshot = useStore((state) => state.recoverTaskSnapshot)
   const selectSession = useStore((state) => state.selectSession)
   const setStudioSurface = useStore((state) => state.setStudioSurface)
@@ -64,10 +63,11 @@ export default function WorkInbox({ active }: { active: boolean }): React.JSX.El
   const recoverRun = useCallback(async (runId: string): Promise<void> => {
     const canonicalRun = ledger?.runs.items.find((run) => run.id === runId)
     if (!canonicalRun) throw new Error('Run 已不在 canonical Ledger 中，已阻止恢复。')
+    const taskSnapshots = await window.agentDesk.listTaskSnapshots()
     const snapshotId = resolveRunRecoverySnapshotId(canonicalRun, taskSnapshots)
     await recoverTaskSnapshot(snapshotId, { activate: false })
     await refresh()
-  }, [ledger, refresh, recoverTaskSnapshot, taskSnapshots])
+  }, [ledger, refresh, recoverTaskSnapshot])
   const openDelivery = useCallback((projectId: string, workItemId?: string): void => {
     const project = projects.find((candidate) => candidate.id === projectId && candidate.status === 'active')
     if (!project) return
@@ -153,6 +153,7 @@ export default function WorkInbox({ active }: { active: boolean }): React.JSX.El
           route={selectedRunRoute}
           onNavigate={setSelectedRunRoute}
           onRecover={recoverRun}
+          onRecoveryChanged={refresh}
           onOpenDelivery={selectedRunProjectAvailable ? openDelivery : undefined}
         />
       </div>}

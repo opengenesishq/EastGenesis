@@ -7,6 +7,7 @@ import type { SessionInputApi } from './session-input-types'
 import type { PreparationPermissionApi } from './preparation-permission-types'
 import type { TaskExecutionAuthorityApi } from './task-execution-authority-types'
 import type { CouncilApi } from './council-types'
+import type { EffectResolution, TaskEffectRecoveryApi } from './effect-recovery-types'
 export type * from './preparation-permission-types'
 export type { SendMessagePayload } from './message-payload-types'
 export type * from './office-revision-types'
@@ -98,6 +99,7 @@ export type * from './terminal-operation-types'
 export type * from './browser-operation-types'
 export type * from './media-types'
 export type * from './session-query-types'
+export type * from './effect-recovery-types'
 export type {
   EffectEvidenceKind,
   EffectEvidenceRecord,
@@ -2517,7 +2519,7 @@ export type MenuCommand =
   | { type: 'select-session'; index: number }
 
 /** 通过 contextBridge 暴露给渲染进程的 API */
-export interface AgentDeskApi extends CouncilApi, PreparationPermissionApi, TaskExecutionAuthorityApi, SessionInputApi, WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, RemoteApi, MediaApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi, PalaceSceneBuilderApi {
+export interface AgentDeskApi extends TaskEffectRecoveryApi, CouncilApi, PreparationPermissionApi, TaskExecutionAuthorityApi, SessionInputApi, WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, RemoteApi, MediaApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi, PalaceSceneBuilderApi {
   listPendingPermissions(sessionId: string): Promise<PermissionRequestInfo[]>
   getTranscript(sessionId: string): Promise<TranscriptEntry[]>
   suggestFiles(sessionId: string, query: string): Promise<string[]>
@@ -2534,7 +2536,8 @@ export interface AgentDeskApi extends CouncilApi, PreparationPermissionApi, Task
     snapshotId: string,
     effectId: string,
     expectedRevision: number,
-    resolution: 'confirmed_applied' | 'confirmed_not_applied'
+    resolution: EffectResolution,
+    note?: string
   ): Promise<{ snapshot: TaskSnapshotRecord; resumedSession?: SessionMeta }>
   resolveTaskDagFinalization(
     executionId: string,

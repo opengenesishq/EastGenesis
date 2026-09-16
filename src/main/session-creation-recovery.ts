@@ -64,10 +64,10 @@ export function requiresEffectReconciliation(error: unknown): boolean {
 }
 
 export function sessionCreationResolutionBarrier(
-  resolution: 'confirmed_applied' | 'confirmed_not_applied',
+  resolution: import('../shared/effect-recovery-types').EffectResolution,
   acknowledge: (sessionId: string) => void
 ): ((effect: EffectRecord) => void) | undefined {
-  if (resolution !== 'confirmed_not_applied') return undefined
+  if (resolution === 'confirmed_applied') return undefined
   return (effect) => {
     if (effect.target.kind === 'git_worktree_create') acknowledge(effect.target.sessionId)
   }

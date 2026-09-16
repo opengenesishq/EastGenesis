@@ -81,6 +81,8 @@ export interface EffectEvidenceRecord {
   observedAt: number
   verifier: string
   generation: number
+  /** Optional for historical records; manual decisions bind the exact observed version. */
+  resolutionReceipt?: import('./effect-recovery-types').EffectResolutionReceipt
 }
 
 export interface FileSystemIdentity {

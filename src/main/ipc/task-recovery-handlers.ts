@@ -36,6 +36,17 @@ export function registerTaskRecoveryIpc(): void {
     }
   )
   ipcMain.handle('taskSnapshots:list', () => sessionManager.listTaskSnapshots())
+  ipcMain.handle('taskSnapshots:effectRecovery', (_event, sessionId: unknown, runId: unknown, taskId: unknown) => {
+    if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('必须指定会话 ID')
+    if (runId !== undefined && (typeof runId !== 'string' || !runId.trim())) throw new Error('运行 ID 无效')
+    if (taskId !== undefined && (typeof taskId !== 'string' || !taskId.trim())) throw new Error('任务 ID 无效')
+    return sessionManager.getTaskEffectRecovery(sessionId, runId, taskId)
+  })
+  ipcMain.handle('taskSnapshots:recheckEffect', (_event, snapshotId: unknown, effectId: unknown, expectedRevision: unknown) => {
+    if (typeof snapshotId !== 'string' || !snapshotId.trim() || typeof effectId !== 'string' || !effectId.trim() ||
+      !Number.isSafeInteger(expectedRevision) || (expectedRevision as number) < 1) throw new Error('核对必须绑定具体操作与版本')
+    return sessionManager.recheckTaskEffect(snapshotId, effectId, expectedRevision as number)
+  })
   ipcMain.handle('taskSnapshots:recover', (_event, snapshotId: unknown) => {
     if (typeof snapshotId !== 'string' || !snapshotId.trim()) throw new Error('必须指定任务快照 ID')
     return sessionManager.recoverTaskSnapshot(snapshotId)

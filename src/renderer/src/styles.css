@@ -10355,6 +10355,33 @@ textarea {
   color: var(--text-dim);
 }
 
+[data-task-effect-recovery] .task-recovery-effect-copy {
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+
+[data-task-effect-recovery] label {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+[data-task-effect-recovery] textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  font: inherit;
+}
+
+[data-task-effect-recovery] .task-recovery-effect-actions {
+  justify-content: flex-start;
+}
+
 .task-recovery-effect-actions {
   display: flex;
   flex-wrap: wrap;

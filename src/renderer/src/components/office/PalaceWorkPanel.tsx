@@ -3,7 +3,7 @@ import { useStore, type SessionState } from '../../store'
 import { PALACE_ACTIONS, palaceInstitutionWorkItems, type PalaceAction, type PalaceActionContext } from './palaceActions'
 import { usePalaceWorkData } from './usePalaceWorkData'
 import { adaptCrossProjectWorkInbox, type CrossProjectWorkInboxItem } from '../studio/workInboxNavigation'
-import { createRunDetailRoute } from '../../../../shared/run-detail-projection'
+import { createRunDetailRoute, resolveRunRecoverySnapshotId } from '../../../../shared/run-detail-projection'
 import type { WorkItem } from '../../../../shared/types'
 import { projectInstitutionTemplate, DEFAULT_PROJECT_INSTITUTION_TEMPLATE, LEGACY_PROJECT_INSTITUTION_TEMPLATE } from '../../../../shared/project-institution-template'
 import { requestProjectWorkspaceNavigation } from '../studio/projectWorkspaceNavigation'
@@ -66,6 +66,14 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
     setDeliveryWorkItemId(workItemId)
     setDeliveryOpen(true)
     setRunRoute(undefined)
+  }
+  const recoverRun = async (runId: string): Promise<void> => {
+    const canonicalRun = data.ledger?.runs.items.find((run) => run.id === runId)
+    if (!canonicalRun) throw new Error(zh ? '运行记录已不可用，请刷新。' : 'Run is unavailable. Refresh the records.')
+    const snapshots = await window.agentDesk.listTaskSnapshots()
+    const snapshotId = resolveRunRecoverySnapshotId(canonicalRun, snapshots)
+    await useStore.getState().recoverTaskSnapshot(snapshotId, { activate: false })
+    await data.refresh()
   }
   const openInboxItem = (item: CrossProjectWorkInboxItem): void => {
     if (item.runId) setRunRoute(createRunDetailRoute(item.runId))
@@ -168,6 +176,7 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
         }}>{zh ? '继续处理' : 'Continue work'}</button></article>)}
     </>}
     {runRoute && data.ledger && <RunDetailPanel route={runRoute} onNavigate={setRunRoute} onOpenDelivery={openDelivery}
+      onRecover={recoverRun} onRecoveryChanged={data.refresh}
       input={{ runs: data.ledger.runs.items, workItems: data.ledger.workItems.items, artifacts: data.ledger.artifacts.items, acceptances: data.ledger.acceptances.items, evidenceLinks: data.ledger.evidenceLinks.items }} />}
   </section>
 }

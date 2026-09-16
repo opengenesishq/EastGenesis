@@ -2,6 +2,7 @@ import { artifactCategoryLabel, artifactVerificationStatus } from './studio-resu
 import OfficeArtifactRevision from './office-revision/OfficeArtifactRevision'
 import StudioResultFileChanges from './StudioResultFileChanges'
 import ResearchSourceDetails from './ResearchSourceDetails'
+import TaskEffectRecoveryPanel from '../TaskEffectRecoveryPanel'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   StudioAuditTimelineItem,
@@ -136,6 +137,7 @@ function BoundStudioResultPanel({ sessionId, standalone, onOpenSessionSurface }:
       </div>}
       {sessionId && snapshot?.state !== 'unbound' && <StudioResultFileChanges
         sessionId={sessionId} snapshot={snapshot} language={language} onRefresh={refresh} />}
+      {sessionId && <TaskEffectRecoveryPanel sessionId={sessionId} onChanged={refresh} />}
 
       {!sessionId ? (
         <ResultEmpty title={labels.noConversation} detail={labels.noConversationDetail} />

@@ -6,6 +6,7 @@ import type {
   WorkflowWorkItemRecord
 } from './workflow-types'
 import type { TaskRunStatus } from './task-runtime-types'
+import type { EffectRecord } from './effect-types'
 
 /** The three destinations that share one Run identity in the Studio. */
 export type RunDetailSection = 'run' | 'acceptance' | 'recovery'
@@ -65,7 +66,9 @@ export interface RunRecoverySnapshotIdentity {
   id: string
   sessionId: string
   taskId: string
-  run?: Pick<WorkflowRunSummary, 'id' | 'sessionId' | 'taskId' | 'status'>
+  run?: Pick<WorkflowRunSummary, 'id' | 'sessionId' | 'taskId' | 'status'> & {
+    effects?: ReadonlyArray<Pick<EffectRecord, 'status'>>
+  }
 }
 
 /**
@@ -209,7 +212,7 @@ export function projectRunDetail(
 }
 
 /**
- * Resolve a failed canonical Run to exactly one matching local snapshot.
+ * Resolve a failed or reconciled Run to exactly one matching local snapshot.
  * Ambiguous, stale, cross-session, and cross-task records fail closed before
  * the renderer can invoke recoverTaskSnapshot.
  */
@@ -217,18 +220,26 @@ export function resolveRunRecoverySnapshotId(
   run: Pick<WorkflowRunSummary, 'id' | 'sessionId' | 'taskId' | 'status'>,
   snapshots: readonly RunRecoverySnapshotIdentity[]
 ): string {
-  if (run.status !== 'failed') throw new RunDetailProjectionError('Run is not failed and cannot be recovered')
+  if (run.status !== 'failed' && run.status !== 'waiting_reconciliation') {
+    throw new RunDetailProjectionError('Run is not awaiting recovery')
+  }
   const candidates = snapshots.filter((snapshot) =>
     snapshot.id.trim() !== '' && snapshot.run?.id === run.id &&
     snapshot.sessionId === run.sessionId && snapshot.taskId === run.taskId &&
     snapshot.run.sessionId === run.sessionId && snapshot.run.taskId === run.taskId &&
-    snapshot.run.status === 'failed'
+    snapshot.run.status === run.status
   )
   if (candidates.length !== 1) {
     throw new RunDetailProjectionError(candidates.length === 0
       ? 'No recovery snapshot matches the canonical Run identity'
       : 'Multiple recovery snapshots match the canonical Run identity')
   }
+  if (run.status === 'waiting_reconciliation' && candidates[0].run?.effects?.some(effect =>
+    effect.status === 'prepared' || effect.status === 'executing' || effect.status === 'waiting_reconciliation')) {
+    throw new RunDetailProjectionError('请先核对未决操作，再继续任务。 / Check outstanding operations before continuing.')
+  }
+  // The main process additionally checks pending model requests, permissions,
+  // supervisor gates and recovery receipts before any execution can resume.
   return candidates[0].id
 }
 

@@ -1,4 +1,7 @@
 import { app, BrowserWindow, powerSaveBlocker } from 'electron'
+import type { EffectResolution, TaskEffectRecoveryView } from '../shared/effect-recovery-types'
+import { buildTaskEffectRecoveryView } from './task/effect-recovery-view'
+import { isInteractiveOperationActive } from './task/operation-effect-gateway'
 import { createHash, randomUUID } from 'node:crypto'
 import { createEngine } from './engine'
 import { preparePlacedSessionEngine } from './session-engine-creation'
@@ -94,6 +97,7 @@ import { reconcileSnapshotWithReceipts } from './task/task-recovery'
 import {
   reconcileExistingPersistedTaskSnapshot,
   resolvePersistedTaskEffect,
+  recheckPersistedTaskEffect,
   runHasUnresolvedEffects
 } from './task/effect-runtime'
 import { prepareTaskSnapshotRecovery } from './task/task-snapshot-recovery-lifecycle'
@@ -1883,10 +1887,13 @@ class SessionManager {
     snapshotId: string,
     effectId: string,
     expectedRevision: number,
-    resolution: 'confirmed_applied' | 'confirmed_not_applied'
+    resolution: EffectResolution,
+    note?: string
   ): Promise<{ snapshot: TaskSnapshotRecord; resumedSession?: SessionMeta }> {
     const beforePersist = sessionCreationResolutionBarrier(resolution, (id) => this.acknowledgeSessionCreation(id, true))
-    const snapshot = await resolvePersistedTaskEffect(snapshotId, effectId, expectedRevision, resolution, { beforePersist })
+    const snapshot = await resolvePersistedTaskEffect(snapshotId, effectId, expectedRevision, resolution, {
+      beforePersist, note, assertStopped: snapshot => this.assertEffectRecoveryStopped(snapshot) })
+    if (this.taskRuns.get(snapshot.sessionId)?.id === snapshot.run?.id && snapshot.run) this.taskRuns.set(snapshot.sessionId, snapshot.run)
     const effect = snapshot.run?.effects?.find((candidate) => candidate.id === effectId)
     let resumedSession: SessionMeta | undefined
     if (effect?.target.kind === 'git_worktree_create') {
@@ -1895,8 +1902,33 @@ class SessionManager {
       }
     }
     const operationId = snapshot.run?.operation?.operationId
-    if (operationId) await this.dagFinalizationCoordinator.resumeForOperation(operationId)
+    if (operationId && resolution !== 'abandoned_by_user') await this.dagFinalizationCoordinator.resumeForOperation(operationId)
     return { snapshot, ...(resumedSession ? { resumedSession } : {}) }
+  }
+
+  async getTaskEffectRecovery(sessionId: string, runId?: string, taskId?: string): Promise<TaskEffectRecoveryView> {
+    return buildTaskEffectRecoveryView(await listTaskSnapshots(), sessionId, runId, taskId, snapshot => this.effectRecoveryActive(snapshot))
+  }
+
+  async recheckTaskEffect(snapshotId: string, effectId: string, expectedRevision: number): Promise<TaskSnapshotRecord> {
+    const snapshot = await recheckPersistedTaskEffect(snapshotId, effectId, expectedRevision, {
+      assertStopped: snapshot => this.assertEffectRecoveryStopped(snapshot) })
+    if (this.taskRuns.get(snapshot.sessionId)?.id === snapshot.run?.id && snapshot.run) this.taskRuns.set(snapshot.sessionId, snapshot.run)
+    const effect = snapshot.run?.effects?.find(item => item.id === effectId)
+    if (effect?.status === 'confirmed' && (effect.target.kind === 'git_worktree_create' || effect.target.kind === 'git_worktree_remove')) {
+      this.updateWorktreeState(effect.target.sessionId, effect.target.registryRecord.state)
+      if (effect.target.kind === 'git_worktree_create') await this.resumeResolvedTopLevelSessionCreation(effect.target.sessionId)
+    }
+    return snapshot
+  }
+
+  private effectRecoveryActive(snapshot: TaskSnapshotRecord): boolean {
+    const status = this.sessions.get(snapshot.sessionId)?.meta.status
+    return status === 'running' || status === 'starting' || isInteractiveOperationActive(snapshot)
+  }
+
+  private assertEffectRecoveryStopped(snapshot: TaskSnapshotRecord): void {
+    if (this.effectRecoveryActive(snapshot)) throw new Error('操作仍在执行，请先暂停当前任务，再核对原操作结果')
   }
 
   resolveTaskDagFinalization(

@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import type { EffectRecord, TaskRunRecord, TaskSnapshotRecord } from '../../shared/types'
+import type { EffectResolution } from '../../shared/effect-recovery-types'
 import { projectConfirmedManagedWorktreeTarget } from '../managed-worktree-lifecycle'
 import { isObservedMediaCancellationNotApplied } from '../media/media-cancel-reconciliation'
 import {
   abandonPreparedEffect,
+  EFFECT_MANUAL_RECHECK_VERIFIER,
   applyEffectReconciliation,
   completeEffect,
   hasUnresolvedEffects,
@@ -439,17 +441,20 @@ export async function resolvePersistedTaskEffect(
   snapshotId: string,
   effectId: string,
   expectedRevision: number,
-  resolution: 'confirmed_applied' | 'confirmed_not_applied',
-  options: { beforePersist?(effect: EffectRecord): void | Promise<void> } = {}
+  resolution: EffectResolution,
+  options: { beforePersist?(effect: EffectRecord): void | Promise<void>; assertStopped?(snapshot: TaskSnapshotRecord): void;
+    rootDir?: string; note?: string } = {}
 ): Promise<TaskSnapshotRecord> {
   return withSessionQueue(snapshotId, async () => {
-    const snapshot = await getTaskSnapshot(snapshotId)
+    const snapshot = await getTaskSnapshot(snapshotId, options.rootDir)
     if (!snapshot?.run) throw new Error('任务快照没有可处置的效果账本')
     const effect = snapshot.run.effects?.find((item) => item.id === effectId)
     if (!effect) throw new Error(`未找到 EffectRecord:${effectId}`)
     if (effect.revision !== expectedRevision) {
       throw new Error(`stale_revision: EffectRecord 已从 ${expectedRevision} 更新到 ${effect.revision}`)
     }
+    assertEffectRecoveryIdentity(snapshot, effect)
+    options.assertStopped?.(snapshot)
     const managedWorktreeEffect = isManagedWorktreeEffect(effect)
     if (managedWorktreeEffect && !effectRecordIntegrityMatches(effect)) {
       throw new Error('managed worktree EffectRecord 摘要校验失败，已拒绝人工处置')
@@ -467,13 +472,59 @@ export async function resolvePersistedTaskEffect(
       )
     }
     await options.beforePersist?.(effect)
-    const run = manuallyResolveEffect(snapshot.run, effectId, resolution)
-    const persisted = await saveTaskSnapshot({ ...snapshot, updatedAt: Date.now(), run })
+    const run = manuallyResolveEffect(snapshot.run, effectId, resolution, Date.now(), options.note)
+    options.assertStopped?.(snapshot)
+    const persisted = await saveTaskSnapshot({ ...snapshot, updatedAt: Date.now(), run }, options.rootDir)
     const persistedRun = persisted.run ?? run
     taskRuntimeRegistry.set(run.sessionId, persistedRun)
-    await registerConfirmedRunArtifactLifecycles(persistedRun)
+    await registerConfirmedRunArtifactLifecycles(persistedRun, options.rootDir)
     return persisted
   })
+}
+
+/** Probe exactly one recorded operation. A negative or unknown observation never grants a replay. */
+export async function recheckPersistedTaskEffect(snapshotId: string, effectId: string, expectedRevision: number,
+  options: { rootDir?: string; assertStopped?(snapshot: TaskSnapshotRecord): void } = {}): Promise<TaskSnapshotRecord> {
+  return withSessionQueue(snapshotId, async () => {
+    const snapshot = await getTaskSnapshot(snapshotId, options.rootDir)
+    if (!snapshot?.run) throw new Error('任务快照没有可核对的效果账本')
+    const effect = requireEffect(snapshot.run, effectId)
+    if (effect.revision !== expectedRevision) throw new Error(`stale_revision: EffectRecord 已从 ${expectedRevision} 更新到 ${effect.revision}`)
+    if (effect.status !== 'waiting_reconciliation') throw new Error('该操作已不在等待核对状态，请刷新')
+    assertEffectRecoveryIdentity(snapshot, effect)
+    options.assertStopped?.(snapshot)
+    const probe = effect.reconcilability === 'queryable'
+      ? await reconcileEffect(effect, {}, options.rootDir)
+      : { kind: 'unresolved' as const, evidenceDigest: stableValueDigest({ effectId, expectedRevision, targetDigest: effect.targetDigest }),
+          verifier: 'effect-manual-review-v1', reason: '此操作没有结果查询服务，请核对原系统后人工确认或放弃；不会自动重放。' }
+    let result = probe.kind === 'confirmed' ? probe : { ...probe, kind: 'unresolved' as const,
+      verifier: EFFECT_MANUAL_RECHECK_VERIFIER,
+      reason: probe.kind === 'not_applied' ? `只读核对未发现已执行结果：${probe.reason}。仍需人工确认，尚未授权重试。` : probe.reason }
+    options.assertStopped?.(snapshot)
+    assertEffectRecoveryIdentity(snapshot, effect)
+    if (result.kind === 'confirmed' && isManagedWorktreeEffect(effect)) {
+      const projection = projectConfirmedManagedWorktreeTarget(effect.target)
+      if ('error' in projection) result = { kind: 'unresolved', verifier: 'effect-worktree-projection-v1',
+        evidenceDigest: stableValueDigest({ observation: result.evidenceDigest, projectionError: projection.error }),
+        reason: `原 worktree 结果已查到，但本地记录尚未同步：${projection.error}` }
+    }
+    const run = applyEffectReconciliation(snapshot.run, effectId, result)
+    const persisted = run === snapshot.run ? snapshot : await saveTaskSnapshot({ ...snapshot, updatedAt: run.updatedAt, run }, options.rootDir)
+    if (persisted.run) {
+      taskRuntimeRegistry.set(persisted.run.sessionId, persisted.run)
+      await registerConfirmedRunArtifactLifecycles(persisted.run, options.rootDir)
+    }
+    return persisted
+  })
+}
+
+function assertEffectRecoveryIdentity(snapshot: TaskSnapshotRecord, effect: EffectRecord): void {
+  if (!snapshot.run || snapshot.taskId !== snapshot.run.taskId || snapshot.run.sessionId !== snapshot.sessionId || effect.sessionId !== snapshot.sessionId ||
+      effect.runId !== snapshot.run.id || !effectRecordIntegrityMatches(effect)) {
+    throw new Error('EffectRecord 身份或内容摘要已变化，已拒绝处置')
+  }
+  const live = taskRuntimeRegistry.get(snapshot.sessionId)
+  if (live?.id === snapshot.run.id && live.revision > snapshot.run.revision) throw new Error('任务运行记录已更新，请刷新后重新核对')
 }
 
 function isManagedWorktreeEffect(effect: EffectRecord): effect is EffectRecord & {

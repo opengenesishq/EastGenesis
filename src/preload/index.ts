@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import type {
+  EffectResolution,
   AgentDeskApi,
   AppSettings,
   CheckpointRestoreMode,
@@ -104,14 +105,18 @@ const api: AgentDeskApi = {
     snapshotId: string,
     effectId: string,
     expectedRevision: number,
-    resolution: 'confirmed_applied' | 'confirmed_not_applied'
+    resolution: EffectResolution,
+    note?: string
   ) => ipcRenderer.invoke(
     'taskSnapshots:resolveEffect',
     snapshotId,
     effectId,
     expectedRevision,
-    resolution
+    resolution,
+    note
   ),
+  getTaskEffectRecovery: (sessionId, runId, taskId) => ipcRenderer.invoke('taskSnapshots:effectRecovery', sessionId, runId, taskId),
+  recheckTaskEffect: (snapshotId, effectId, expectedRevision) => ipcRenderer.invoke('taskSnapshots:recheckEffect', snapshotId, effectId, expectedRevision),
   resolveTaskDagFinalization,
   deleteTaskSnapshot: (snapshotId: string) =>
     ipcRenderer.invoke('taskSnapshots:delete', snapshotId),

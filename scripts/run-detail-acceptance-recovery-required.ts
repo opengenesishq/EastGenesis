@@ -103,6 +103,16 @@ assert.throws(() => resolveRunRecoverySnapshotId(run('completed'), [matchingSnap
 assert.throws(() => resolveRunRecoverySnapshotId(failedRun, [{ ...matchingSnapshot, taskId: 'other-task' }]), RunDetailProjectionError)
 assert.throws(() => resolveRunRecoverySnapshotId(failedRun, [matchingSnapshot, { ...matchingSnapshot, id: 'snapshot-2' }]), RunDetailProjectionError)
 
+const reconciliationRun = run('waiting_reconciliation')
+const reconciledSnapshot = { ...matchingSnapshot, run: { ...matchingSnapshot.run,
+  status: 'waiting_reconciliation' as const, effects: [{ status: 'confirmed' as const }] } }
+assert.equal(resolveRunRecoverySnapshotId(reconciliationRun, [reconciledSnapshot]), 'snapshot-1')
+for (const status of ['prepared', 'executing', 'waiting_reconciliation'] as const) {
+  assert.throws(() => resolveRunRecoverySnapshotId(reconciliationRun, [{ ...reconciledSnapshot,
+    run: { ...reconciledSnapshot.run, effects: [{ status }] } }]), RunDetailProjectionError)
+}
+assert.throws(() => resolveRunRecoverySnapshotId(reconciliationRun, [{ ...reconciledSnapshot, taskId: 'other-task' }]), RunDetailProjectionError)
+
 const runDetailSource = readFileSync(resolve(process.cwd(), 'src/renderer/src/components/studio/RunDetailPanel.tsx'), 'utf8')
 const inboxSource = readFileSync(resolve(process.cwd(), 'src/renderer/src/components/studio/WorkInbox.tsx'), 'utf8')
 assert(runDetailSource.includes('onRecover?:'), 'Run detail must accept a parent-owned recovery callback')
@@ -165,8 +175,8 @@ const report = {
   schemaVersion: 1,
   kind: 'caogen.run-detail-acceptance-recovery-contract-report',
   status: 'passed',
-  checks: 22,
-  passed: 22,
+  checks: 27,
+  passed: 27,
   scope: 'pure canonical Run detail projection; no Provider network I/O',
   coverage: [
     'stable run/acceptance/recovery route round-trip',
@@ -177,6 +187,7 @@ const report = {
     'Acceptance and EvidenceLink records are never fabricated for stale routes',
     'duplicate canonical Run identities fail closed',
     'failed Run resolves to one exact local recovery snapshot identity',
+    'reconciled Run can continue explicitly while unresolved effects and cross-task snapshots are rejected',
     'non-failed, cross-task, and ambiguous recovery snapshots fail closed'
   ],
   limitations: ['does not prove Electron click path', 'does not call recoverTaskSnapshot', 'does not prove real Provider recovery'],

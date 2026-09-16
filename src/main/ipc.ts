@@ -3,6 +3,8 @@ import { attachmentRoot, isInsideAttachmentRoot, normalizeSendPayload } from './
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { sessionManager } from './sessionManager'
+import { getTaskSnapshot } from './task/task-snapshot'
+import type { EffectResolution } from '../shared/effect-recovery-types'
 import { sessionReadyHandler } from './ipc/session-ready-handler'
 import { previewOutboundContext } from './project-workspace/outbound-context-policy'
 import { applySessionModelSwitch } from './ipc/session-model-switch-handler'
@@ -337,15 +339,17 @@ export function registerIpc(): void {
       snapshotId: string,
       effectId: string,
       expectedRevision: number,
-      resolution: 'confirmed_applied' | 'confirmed_not_applied'
+      resolution: EffectResolution,
+      note?: string
     ) => {
       return resolveTaskSnapshotEffect(event.sender, snapshotId, effectId, expectedRevision, resolution, {
         listTaskSnapshots: () => sessionManager.listTaskSnapshots(),
+        getTaskSnapshot: id => getTaskSnapshot(id),
         resolveTaskEffect: (...args) => sessionManager.resolveTaskEffect(...args),
         updateWorktreeState: (sessionId, state) => sessionManager.updateWorktreeState(sessionId, state),
         describeTarget: effectTargetDescription,
         describeIntent: effectIntentDescription
-      })
+      }, note)
     }
   )
 
