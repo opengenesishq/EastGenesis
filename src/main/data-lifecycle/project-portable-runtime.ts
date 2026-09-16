@@ -61,6 +61,8 @@ import {
   validateProjectExternalFileManifests
 } from './project-external-file-manifest'
 import { validateSubmissionReceiptBindings } from './submission-receipt-portability'
+import { assertProjectLayeredMemoryImportable, collectProjectLayeredMemory, importProjectLayeredMemory,
+  validateProjectLayeredMemory, verifyProjectLayeredMemory } from './layered-memory-portability'
 
 const QUERY_LIMIT = 500
 const PORTABLE_RUNTIME_ARRAY_FIELDS = [
@@ -89,6 +91,7 @@ export interface ProjectPortableRuntimeResult {
   artifactSourceFiles: number
   effectArtifacts: number
   externalFiles: number
+  layeredMemory: number
 }
 
 export async function collectProjectPortableRuntime(
@@ -121,6 +124,7 @@ export async function collectProjectPortableRuntime(
   ])
   const effectArtifacts = collectProjectEffectArtifacts(rootDir, aggregate, taskSnapshots)
   const externalFiles = await collectProjectExternalFileManifests(aggregate, artifactSlice.lifecycles)
+  const layeredMemory = await collectProjectLayeredMemory(rootDir, aggregate, { ...sessions, taskSnapshots })
   const body = sanitizeProjectAggregateValue({
     schemaVersion: 1 as const,
     ...sessions,
@@ -132,7 +136,8 @@ export async function collectProjectPortableRuntime(
     artifactBlobs,
     artifactSourceFiles,
     effectArtifacts,
-    externalFiles
+    externalFiles,
+    layeredMemory
   }) as Omit<ProjectAggregatePortableRuntime, 'runtimeDigest'>
   return { ...body, runtimeDigest: projectAggregateDigest(body) }
 }
@@ -153,6 +158,7 @@ export function validateProjectPortableRuntime(
   validateArtifactRuntime(bundle, runtime, runIds)
   validateProjectEffectArtifacts(bundle, runtime)
   validateProjectExternalFileManifests(bundle, runtime)
+  validateProjectLayeredMemory(runtime.layeredMemory, bundle.aggregate, runtime)
   return structuredClone(runtime)
 }
 
@@ -318,6 +324,7 @@ export async function importProjectPortableRuntime(
 ): Promise<ProjectPortableRuntimeResult> {
   const runtime = validateProjectPortableRuntime(bundle)
   if (!runtime) return emptyResult()
+  await assertProjectLayeredMemoryImportable(rootDir, runtime.layeredMemory)
   importProjectSessionPortableSlice(rootDir, bundle.projectId, runtime)
   await reconcileAllTaskPlans(rootDir)
   importProjectEffectArtifacts(bundle, runtime, rootDir)
@@ -349,6 +356,7 @@ export async function importProjectPortableRuntime(
     importArtifactLifecycleSlice(db, reboundLifecycles, runtime.artifactPurges, runtime.artifactRetentionRevisions)
     importModelAttemptRecords(db, runtime.modelAttempts)
   })
+  await importProjectLayeredMemory(rootDir, runtime.layeredMemory)
   await verifyProjectPortableRuntime(bundle, rootDir)
   return runtimeResult(runtime)
 }
@@ -359,6 +367,7 @@ export async function assertProjectPortableRuntimeImportable(
 ): Promise<void> {
   const runtime = validateProjectPortableRuntime(bundle)
   if (!runtime) return
+  await assertProjectLayeredMemoryImportable(rootDir, runtime.layeredMemory)
   assertProjectSessionPortableSliceImportable(rootDir, bundle.projectId, runtime)
   assertProjectEffectArtifactsImportable(bundle, runtime, rootDir)
   const snapshotIds = new Set((await listTaskSnapshots(rootDir)).map((snapshot) => snapshot.id))
@@ -405,6 +414,7 @@ export async function verifyProjectPortableRuntime(
 ): Promise<ProjectPortableRuntimeResult> {
   const runtime = validateProjectPortableRuntime(bundle)
   if (!runtime) return emptyResult()
+  await verifyProjectLayeredMemory(rootDir, runtime.layeredMemory)
   verifyProjectSessionPortableSlice(rootDir, bundle.projectId, runtime)
   verifyProjectEffectArtifacts(bundle, runtime, rootDir)
   const sourceSnapshots = runtime.taskSnapshots.slice().sort(bySnapshot)
@@ -680,7 +690,8 @@ function runtimeResult(runtime: ProjectAggregatePortableRuntime): ProjectPortabl
     artifactBlobs: runtime.artifactBlobs.length,
     artifactSourceFiles: runtime.artifactSourceFiles?.length ?? 0,
     effectArtifacts: runtime.effectArtifacts?.length ?? 0,
-    externalFiles: runtime.externalFiles?.length ?? 0
+    externalFiles: runtime.externalFiles?.length ?? 0,
+    layeredMemory: runtime.layeredMemory?.entries.length ?? 0
   }
 }
 
@@ -695,7 +706,8 @@ function emptyResult(): ProjectPortableRuntimeResult {
     artifactBlobs: 0,
     artifactSourceFiles: 0,
     effectArtifacts: 0,
-    externalFiles: 0
+    externalFiles: 0,
+    layeredMemory: 0
   }
 }
 

@@ -56,6 +56,7 @@ import {
   countProjectConnectorCacheResiduals,
   purgeProjectConnectorCaches
 } from '../project-workspace/project-connector-cache'
+import { countProjectLayeredMemory, purgeProjectLayeredMemory } from './layered-memory-portability'
 
 export interface ProjectDeletionCoordinatorOptions {
   /** Stable caller-owned operation ID for Effect reconciliation; direct callers omit it. */
@@ -266,7 +267,12 @@ async function executeDeletionLocked(
   if (current() < phaseIndex('learning_purged')) {
     assertDeletionAllowed(root, entry)
     purgeCanonicalLearning(root, entry.projectId)
+    await purgeProjectLayeredMemory(root, entry.projectId)
     await advance('learning_purged')
+  } else if (await countProjectLayeredMemory(root, entry.projectId)) {
+    // Resume journals written by versions that did not include the layered store.
+    assertDeletionAllowed(root, entry)
+    await purgeProjectLayeredMemory(root, entry.projectId)
   }
 
   await purgeWorkspacePhase(root, progress)
@@ -492,6 +498,7 @@ async function scanProjectDeletionResiduals(
     supervisor: supervisor.length,
     aggregateSeal: createProductionProjectAggregateService(root).seals.readProject(entry.projectId) ? 1 : 0,
     learning: existsSync(canonicalLearningPath(root, entry.projectId)) ? 1 : 0,
+    layeredMemory: await countProjectLayeredMemory(root, entry.projectId),
     routines: automation.routines,
     routineRuns: automation.runs,
     workspace: workspace ? 1 : 0,

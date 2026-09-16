@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { writeDurableFile } from '../durable-file'
 import { acquireFileLock, enqueueMutation, releaseFileLock } from '../digital-worker/persistence'
+import { withDataLifecycleMutation } from '../data-lifecycle/data-lifecycle-mutation-lock'
+import { assertMemoryProjectWritable } from './memory-project-lifecycle'
 
 export type MemoryLayer = 'working' | 'project' | 'user'
 
@@ -72,6 +74,10 @@ export function memoryProjectHash(projectRoot: string): string {
   return createHash('sha256').update(`${HASH_NAMESPACE}\0${path.resolve(projectRoot)}`).digest('hex')
 }
 
+export function memoryProjectIdHash(projectId: string): string {
+  return createHash('sha256').update(`${HASH_NAMESPACE}\0project-id\0${requireText(projectId, 'projectId')}`).digest('hex')
+}
+
 export interface MemoryScope {
   projectRoot?: string
   projectId?: string
@@ -81,7 +87,7 @@ export interface MemoryScope {
 
 function scopeHash(scope: MemoryScope): string | undefined {
   if (scope.projectId !== undefined) {
-    return createHash('sha256').update(`${HASH_NAMESPACE}\0project-id\0${requireText(scope.projectId, 'projectId')}`).digest('hex')
+    return memoryProjectIdHash(scope.projectId)
   }
   return scope.projectRoot ? memoryProjectHash(scope.projectRoot) : undefined
 }
@@ -102,6 +108,7 @@ export async function addMemory(rootDir: string, input: MemoryWriteInput): Promi
   if ((sessionId || workItemId) && input.layer !== 'working') throw new Error('只有工作记忆可以绑定当前任务')
   if (workItemId && !input.projectId) throw new Error('工作项记忆必须绑定正式项目')
   return mutateStore(rootDir, async () => {
+    if (input.projectId) assertMemoryProjectWritable(path.dirname(path.resolve(rootDir)), input.projectId)
     const file = await readStore(rootDir)
     const now = new Date().toISOString()
     const entry: LayeredMemoryEntry = {
@@ -226,9 +233,23 @@ export async function exportMemories(rootDir: string): Promise<string> {
   return JSON.stringify({ version: 1, entries }, null, 2)
 }
 
+/** Atomic participant operation for Project import/purge; callers must validate ownership first. */
+export async function mutateMemoryEntries<T>(
+  rootDir: string,
+  operation: (entries: LayeredMemoryEntry[]) => { entries: LayeredMemoryEntry[]; result: T }
+): Promise<T> {
+  return mutateStore(rootDir, async () => {
+    const file = await readStore(rootDir)
+    const next = operation(structuredClone(file.entries))
+    normalizeStore({ version: 1, entries: next.entries })
+    if (JSON.stringify(next.entries) !== JSON.stringify(file.entries)) await writeStore(rootDir, next.entries)
+    return next.result
+  })
+}
+
 async function mutateStore<T>(rootDir: string, operation: () => Promise<T>): Promise<T> {
   const filePath = storePath(rootDir)
-  return enqueueMutation(filePath, async () => {
+  return withDataLifecycleMutation(path.dirname(path.resolve(rootDir)), () => enqueueMutation(filePath, async () => {
     const lockPath = `${filePath}.lock`
     const descriptor = acquireFileLock(lockPath)
     try {
@@ -236,7 +257,7 @@ async function mutateStore<T>(rootDir: string, operation: () => Promise<T>): Pro
     } finally {
       releaseFileLock(lockPath, descriptor)
     }
-  })
+  }))
 }
 
 async function readStore(rootDir: string): Promise<MemoryFile> {
@@ -269,7 +290,7 @@ function normalizeStore(value: unknown): MemoryFile {
   }
 }
 
-function isMemoryEntry(value: unknown): value is LayeredMemoryEntry {
+export function isMemoryEntry(value: unknown): value is LayeredMemoryEntry {
   if (!isRecord(value)) return false
   return (
     typeof value.id === 'string' &&

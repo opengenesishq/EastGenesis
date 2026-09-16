@@ -259,6 +259,22 @@ export const LOCAL_DATA_LIFECYCLE_MAP: LocalDataLifecycleEntry[] = [
     gaps: ['Legacy buckets and canonical Learning do not share one retention clock or project purge transaction.']
   },
   {
+    id: 'layered-memory',
+    title: 'Project and task working memory, legacy path memory, and user memory',
+    paths: ['userData/memory/memory-index.json'],
+    sourceModules: ['src/main/memory/memory-manager.ts', 'src/main/memory/memory-project-lifecycle.ts',
+      'src/main/data-lifecycle/layered-memory-portability.ts', 'src/main/data-lifecycle/project-portable-runtime.ts',
+      'src/main/data-lifecycle/project-deletion-coordinator.ts'],
+    owner: { scope: 'mixed', key: 'canonical projectId hash plus optional WorkItem/Session identity; legacy root hash or user layer' },
+    sensitivity: 'confidential',
+    backup: { behavior: 'aggregate_export', status: 'partial' },
+    retention: { rule: 'Canonical Project-owned records join Project purge and its deletion backup; archive changes retrieval only. User and unresolved legacy ownership remain separate.', status: 'partial' },
+    export: { mode: 'redacted', status: 'partial' },
+    deletion: { softDelete: 'record', purge: 'project_cascade', externalDelete: 'not_applicable', status: 'partial' },
+    implementationStatus: 'partial', projectObjects: ['Memory'],
+    gaps: ['Project export/import preserves exact WorkItem/Session identity and excludes user/other-Project memory. Path-only and missing ownership cannot be assigned from a shared directory and remain untouched; standalone Session memory purge and unified age retention remain open.']
+  },
+  {
     id: 'learning-materializations', title: 'Approved Skill materializations',
     paths: ['projectRoot/.caogen/skills/<skill>/SKILL.md'],
     sourceModules: ['src/main/learning/learning-materialization.ts', 'src/main/learning/learning-lifecycle.ts', 'src/main/skill/skill-optimizer.ts', 'src/main/data-lifecycle/project-external-file-manifest.ts'],

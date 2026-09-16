@@ -26,6 +26,7 @@ import type { ProjectDependency, ProjectMilestone } from './project-portfolio-ty
 import type { MediaProjectSlice } from './media-types'
 import type { ProjectSubmissionReceiptSlice } from './submission-receipt-portability-types'
 import type { ProjectPreparationSlice } from './preparation-portability-types'
+import type { ProjectLayeredMemorySlice } from './layered-memory-portability-types'
 
 export const PROJECT_AGGREGATE_SCHEMA_VERSION = 1 as const
 export const PROJECT_AGGREGATE_FORMAT = 'caogen.project-aggregate.v1' as const
@@ -242,6 +243,8 @@ export interface ProjectAggregatePortableRuntime {
   submissionReceipts?: ProjectSubmissionReceiptSlice
   /** Optional for bundles created before isolated preparation drafts were portable. */
   preparation?: ProjectPreparationSlice
+  /** Optional for older exports. Preserves Project and task memory identity without global/user records. */
+  layeredMemory?: ProjectLayeredMemorySlice
   taskSnapshots: TaskSnapshotRecord[]
   modelAttempts: ModelAttemptRecord[]
   artifactLifecycles: unknown[]
