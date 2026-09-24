@@ -59,7 +59,6 @@ import { dataRetentionApi } from './data-retention'
 import { projectTestApi } from './project-test'
 import { projectDebugApi } from './project-debug'
 import { projectRefactorApi } from './project-refactor'
-import { digitalWorkerApi } from './digital-worker'
 import { modelAttemptRecoveryApi } from './model-attempt-recovery'
 import { learningApi } from './learning'
 import { supervisorApi } from './supervisor'
@@ -140,7 +139,6 @@ const api: AgentDeskApi = {
   ...projectTestApi,
   ...projectDebugApi,
   ...projectRefactorApi,
-  ...digitalWorkerApi,
   ...modelAttemptRecoveryApi,
   ...learningApi,
   ...supervisorApi,

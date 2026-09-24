@@ -53,7 +53,7 @@ export type * from './office-revision-types'
 /** 主进程、预加载与渲染进程共享的编译期类型。 */
 import type { EffectRecord, EffectStatus, InteractiveOperationKind, InteractiveOperationSource, MigrationImportOperationResult, TaskRunOperationMetadata } from './effect-types'
 import type { TaskDagAutoMergeView, TaskDagFinalizationRecord, TaskDagFinalizationResolution, TaskDagFinalizationView } from './task-dag-finalization-types'
-import type { DigitalWorkerApi, DigitalWorkerBinding } from './digital-worker-types'
+import type { DigitalWorkerBinding } from './digital-worker-types'
 import type { ModelAttemptRecoveryApi } from './model-attempt-types'
 import type { WorkflowLedgerApi } from './workflow-types'
 import type { ProjectWorkspaceApi } from './project-workspace-types'
@@ -2535,7 +2535,7 @@ export type MenuCommand =
   | { type: 'select-session'; index: number }
 
 /** 通过 contextBridge 暴露给渲染进程的 API */
-export interface AgentDeskApi extends FeedbackApi, TaskActivityApi, WorkspaceHandoffApi, SideChatApi, VoiceInputApi, TaskWindowApi, TaskEffectRecoveryApi, PreparationPermissionApi, TaskExecutionAuthorityApi, TaskBudgetApi, SessionInputApi, WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi {
+export interface AgentDeskApi extends FeedbackApi, TaskActivityApi, WorkspaceHandoffApi, SideChatApi, VoiceInputApi, TaskWindowApi, TaskEffectRecoveryApi, PreparationPermissionApi, TaskExecutionAuthorityApi, TaskBudgetApi, SessionInputApi, WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi {
   inspectLocalRuntimes(): Promise<import('./local-runtime-types').LocalRuntimeStatus>
   listPendingPermissions(sessionId: string): Promise<PermissionRequestInfo[]>
   getTranscript(sessionId: string): Promise<TranscriptEntry[]>

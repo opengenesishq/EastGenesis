@@ -17,8 +17,6 @@ export const ROUTINE_TRANSLATIONS = {
   routineTemplatePick: { zh: '选择模板', en: 'Choose a template' },
   routineProjectLabel: { zh: '归属项目', en: 'Project' },
   routineDirectoryOnly: { zh: '仅使用执行目录', en: 'Use the working directory only' },
-  routineWorkerLabel: { zh: '执行员工', en: 'Assigned worker' },
-  routineProjectOwner: { zh: '项目负责人', en: 'Project owner' },
   routineGoalTemplate: { zh: '目标契约模板', en: 'Goal contract template' },
   routineNoRunGoal: { zh: '不创建每次运行目标', en: 'Do not create a goal for each run' },
   routineDirectoryLabel: { zh: '执行目录', en: 'Working directory' },

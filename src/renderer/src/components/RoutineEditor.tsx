@@ -7,7 +7,6 @@ import RoutineScheduleFields from './routines/RoutineScheduleFields'
 import './routines/routine-editor.css'
 import type {
   CreateRoutineInput,
-  DigitalWorker,
   EngineInfo,
   EngineKind,
   Goal,
@@ -51,9 +50,7 @@ export default function RoutineEditor({ routine = null, initialSessionId, onClos
   const [name, setName] = useState(routine?.name ?? '')
   const [prompt, setPrompt] = useState(routine?.prompt ?? '')
   const [projectId, setProjectId] = useState(routine?.projectId ?? preferredProjectWorkspaceId ?? '')
-  const [digitalWorkerId, setDigitalWorkerId] = useState(routine?.digitalWorkerId ?? '')
   const [goalTemplateId, setGoalTemplateId] = useState(routine?.goalTemplateId ?? '')
-  const [digitalWorkers, setDigitalWorkers] = useState<DigitalWorker[]>([])
   const [goalTemplates, setGoalTemplates] = useState<Goal[]>([])
   const [projectCwd, setProjectCwd] = useState(routine?.projectCwd ?? '')
   const [schedule, setSchedule] = useState(routine?.schedule ?? '')
@@ -84,24 +81,15 @@ export default function RoutineEditor({ routine = null, initialSessionId, onClos
 
   useEffect(() => {
     if (!projectId) {
-      setDigitalWorkers([])
       setGoalTemplates([])
-      setDigitalWorkerId('')
       setGoalTemplateId('')
       return
     }
-    void Promise.all([
-      window.agentDesk.listDigitalWorkers({ projectId, status: 'active' }),
-      window.agentDesk.listProjectGoals(projectId, { includeArchived: true })
-    ]).then(([workers, goals]) => {
-      setDigitalWorkers(workers)
+    void window.agentDesk.listProjectGoals(projectId, { includeArchived: true }).then((goals) => {
       setGoalTemplates(goals)
-      setDigitalWorkerId((current) => workers.some((worker) => worker.id === current) ? current : '')
       setGoalTemplateId((current) => goals.some((goal) => goal.id === current) ? current : '')
     }).catch(() => {
-      setDigitalWorkers([])
       setGoalTemplates([])
-      setDigitalWorkerId('')
       setGoalTemplateId('')
     })
   }, [projectId])
@@ -159,7 +147,7 @@ export default function RoutineEditor({ routine = null, initialSessionId, onClos
           prompt: prompt.trim(),
           projectId: projectId || null,
           goalTemplateId: goalTemplateId || null,
-          digitalWorkerId: digitalWorkerId || null,
+          digitalWorkerId: null,
           projectCwd: projectCwd.trim(),
           schedule: schedule.trim(),
           timeZone,
@@ -184,7 +172,6 @@ export default function RoutineEditor({ routine = null, initialSessionId, onClos
           content: prompt.trim(),
           projectId: projectId || undefined,
           goalTemplateId: goalTemplateId || undefined,
-          digitalWorkerId: digitalWorkerId || undefined,
           projectCwd: projectCwd.trim(),
           schedule: schedule.trim(),
           timeZone,
@@ -275,22 +262,6 @@ export default function RoutineEditor({ routine = null, initialSessionId, onClos
             <option key={project.id} value={project.id}>{project.name}</option>
           ))}
         </select>
-
-        {projectId && digitalWorkers.length > 0 && (
-          <>
-            <label className="field-label">{t('routineWorkerLabel')}</label>
-            <select
-              className="select select-block"
-              value={digitalWorkerId}
-              onChange={(event) => setDigitalWorkerId(event.target.value)}
-            >
-              <option value="">{t('routineProjectOwner')}</option>
-              {digitalWorkers.map((worker) => (
-                <option key={worker.id} value={worker.id}>{worker.displayName}</option>
-              ))}
-            </select>
-          </>
-        )}
 
         {projectId && goalTemplates.length > 0 && (
           <>

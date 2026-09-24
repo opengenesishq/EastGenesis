@@ -3,7 +3,6 @@ import type { TaskPlanStateView } from '../../../../shared/types'
 import { useT } from '../../i18n'
 import { useStore } from '../../store'
 import TaskPlanEditor from './TaskPlanEditor'
-import TaskPlanInstitutions from './TaskPlanInstitutions'
 import PreparationPermission from '../composer/PreparationPermission'
 import TaskExecutionAuthority from '../composer/TaskExecutionAuthority'
 import TaskRequirementSummary from './TaskRequirementSummary'
@@ -116,7 +115,6 @@ export default function TaskPlanWorkbench({
         onToggle={() => setExpanded((value) => !value)}
       />
       {meta && (current || meta.goalId) && <TaskRequirementSummary binding={meta} plan={current} running={running} />}
-      {expanded && current && <TaskPlanInstitutions version={current} />}
       {expanded && !!current?.requirementSource?.artifacts?.length && <div className="task-plan-review" data-task-plan-revision-inputs>
         <p><strong>{t('taskPlanRevisionArtifacts')}</strong></p>
         <ul>{current.requirementSource.artifacts.map(file => <li key={file.artifactId}>

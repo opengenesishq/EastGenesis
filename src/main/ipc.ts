@@ -111,7 +111,6 @@ import { registerTaskRecoveryIpc } from './ipc/task-recovery-handlers'
 import { assertTrustedWorkflowLedgerSender, registerWorkflowLedgerIpc } from './ipc/workflow-ledger-handlers'
 import { registerProjectWorkspaceIpc } from './ipc/project-workspace-handlers'
 import { registerDataRetentionIpc } from './ipc/data-retention-handlers'
-import { registerDigitalWorkerIpc } from './ipc/digital-worker-handlers'
 import { registerSupervisorIpc } from './ipc/supervisor-handlers'
 import { registerLearningIpc } from './ipc/learning-handlers'
 import { registerAttachmentMutationIpc } from './ipc/attachment-mutation-ipc'
@@ -353,7 +352,7 @@ export function registerIpc(): void {
   registerSessionInputIpc()
   registerSideChatIpc()
   configureMigrationOperationBackupRoot(migrationBackupRoot())
-  for (const register of [registerTaskRecoveryIpc, registerWorkflowLedgerIpc, registerProjectWorkspaceIpc, registerDataRetentionIpc, registerDigitalWorkerIpc, registerSupervisorIpc, registerInteractiveMutationIpc, registerAppFeatureIpc, registerProviderGatewayIpc, registerFileIntelligenceIpc, registerPermissionGrantIpc]) register()
+  for (const register of [registerTaskRecoveryIpc, registerWorkflowLedgerIpc, registerProjectWorkspaceIpc, registerDataRetentionIpc, registerSupervisorIpc, registerInteractiveMutationIpc, registerAppFeatureIpc, registerProviderGatewayIpc, registerFileIntelligenceIpc, registerPermissionGrantIpc]) register()
   // Search adapters are resolved only by an explicit main-process factory. The
   // default production wiring therefore fails closed with no_credentials until
   // a provider-aware factory is intentionally supplied.
