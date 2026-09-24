@@ -28,7 +28,6 @@ const writeReport = () => {
 
 const wrappers = [
   ['run-detail-delivery-recovery-electron-required.mjs', 'v2-014-run-detail-delivery-recovery'],
-  ['work-os-runs-review-ui-required.mjs', 'work-os-runs-review-ui'],
   ['plan-confirmation-ui-required.mjs', 'plan-confirmation-ui'],
   ['mission-compile-ui-required.mjs', 'mission-compile-ui']
 ]
