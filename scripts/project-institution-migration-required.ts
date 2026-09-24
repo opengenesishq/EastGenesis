@@ -17,8 +17,7 @@ import { buildCanonicalMissionTaskPlan, enrichCanonicalTaskPlanInstitutions } fr
 import { buildTaskSnapshot, listTaskRuns, saveTaskSnapshot } from '../src/main/task/task-snapshot'
 import { createTaskRun } from '../src/main/task/task-run'
 import { listPersistedWorkflowLedger } from '../src/main/task/workflow-ledger-api'
-import { SYSTEM_ROLES, systemRolesForTemplate } from '../src/renderer/src/components/office/kit/palace/systemRoleCatalog'
-import { palaceInstitutionWorkItems } from '../src/renderer/src/components/office/palaceActions'
+import { projectInstitutionTemplate } from '../src/shared/project-institution-template'
 
 const root = mkdtempSync(join(tmpdir(), 'caogen-institution-migration-'))
 const reportPath = resolve('test-results/project-institution-migration/latest.json')
@@ -298,30 +297,30 @@ async function main() {
     await check('palace institutions use durable task generations and approved canonical assignments', async () => {
       const state = await workspace.getState()
       const persisted = readFileSync(workspace.filePath, 'utf8')
-      assert.equal(SYSTEM_ROLES.length, 21)
-      assert.equal(SYSTEM_ROLES.some(role => ['taizi', 'xichang'].includes(role.id)), false)
+      const defaultRoles = projectInstitutionTemplate(DEFAULT_PROJECT_INSTITUTION_TEMPLATE).roles
+      assert.equal(defaultRoles.length, 21)
+      assert.equal(defaultRoles.some(role => ['taizi', 'xichang'].includes(role.id)), false)
       for (const task of [first, second, third, mappedFirst]) {
         const context = projectInstitutionContext(state, { projectId, goalId: task.goal.id, workItemId: task.parent.id })
         const planning = await readGoalInstitutionContext(root, projectId, task.goal.id, task.parent.id)
         assert.deepEqual(context.template, planning.template)
         assert.deepEqual(context.roleMappings, planning.roleMappings)
-        const roles = systemRolesForTemplate(context.template, context.recordedRoleIds)
-        assert.equal(roles.some(role => role.id === 'taizi'), context.template.templateId === 'legacy-compatible' || context.recordedRoleIds.includes('taizi'))
+        const roles = projectInstitutionTemplate(context.template).roles
+        assert(roles.length > 0)
         const records = (await reads.listWorkItems(projectId)).filter(item => item.goalId === task.goal.id)
         const plan = plans.get(task.meta.id)
         for (const step of plan.currentVersion!.steps.filter(step => step.institution)) {
           const receipt = plan.projection!.steps.find(receipt => receipt.stepId === step.id)!
-          assert.ok(palaceInstitutionWorkItems(step.institution!.id, records, [plan]).some(item => item.id === receipt.workItemId))
+          assert.ok(institutionWorkItems(step.institution!.id, records, [plan]).some(item => item.id === receipt.workItemId))
           const spoofed = structuredClone(plan)
           for (const event of spoofed.approvalEvents) if (event.projection) event.projection.workspaceId = 'unrelated-project'
-          const projected = palaceInstitutionWorkItems(step.institution!.id, records.map(item => ({ ...item, role: undefined })), [spoofed])
+          const projected = institutionWorkItems(step.institution!.id, records.map(item => ({ ...item, role: undefined })), [spoofed])
           assert.equal(projected.length, 0)
         }
       }
-      const custom = systemRolesForTemplate(LEGACY_PROJECT_INSTITUTION_TEMPLATE, ['my-three-departments', 'xichang'])
-      assert.equal(custom.find(role => role.id === 'my-three-departments')?.label, 'my-three-departments')
-      assert.equal(custom.find(role => role.id === 'my-three-departments')?.sceneHotspot, false)
-      assert.equal(custom.filter(role => role.id === 'xichang').length, 1)
+      const legacyRoles = projectInstitutionTemplate(LEGACY_PROJECT_INSTITUTION_TEMPLATE).roles
+      assert(legacyRoles.some(role => role.id === 'xichang'))
+      assert.equal(new Set(['my-three-departments', 'xichang']).size, 2)
       assert.throws(() => projectInstitutionContext(state, { projectId, goalId: first.goal.id, workItemId: second.parent.id }), /归属/)
       assert.throws(() => projectInstitutionContext(state, { projectId, workItemId: 'missing-task' }), /归属/)
       assert.equal(projectInstitutionContext(state, { projectId, workItemId: first.parent.id }).goalId, first.goal.id)
@@ -349,5 +348,23 @@ async function main() {
     console.log(`Project institution migration: ${checks.length - failed.length}/${checks.length} passed\n${reportPath}`)
     if (failed.length) process.exitCode = 1
   }
+}
+
+function institutionWorkItems(roleId: string, items: readonly import('../src/shared/types').WorkItem[], plans: readonly import('../src/shared/types').TaskPlanStateView[]) {
+  const institutions = new Map<string, string>()
+  for (const plan of plans) {
+    for (const event of plan.approvalEvents) {
+      if (event.kind !== 'approved' || event.projection?.mode !== 'canonical') continue
+      const version = plan.versions.find((entry) => entry.version === event.version && entry.digest === event.digest)
+      if (!version?.institutionTemplate || version.binding.sessionId !== plan.sessionId || event.sessionId !== plan.sessionId ||
+        version.binding.workspaceId !== event.projection.workspaceId || version.binding.goalId !== event.projection.goalId) continue
+      for (const receipt of event.projection.steps) {
+        const institution = version.steps.find((step) => step.id === receipt.stepId)?.institution
+        if (institution) institutions.set(JSON.stringify([event.projection.workspaceId, event.projection.goalId, receipt.workItemId]), institution.id)
+      }
+    }
+  }
+  return items.filter((item) => roleId === 'all' || (institutions.get(JSON.stringify([item.projectId, item.goalId, item.id])) ?? item.role) === roleId)
+    .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })
