@@ -51,7 +51,7 @@ import {
   countMediaProjectFiles,
   purgeLegacyMediaProviderOutputFiles,
   purgeMediaProjectFiles
-} from '../media/media-ffmpeg'
+} from '../media/media-files'
 import {
   countProjectConnectorCacheResiduals,
   purgeProjectConnectorCaches

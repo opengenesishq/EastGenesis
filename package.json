@@ -143,7 +143,6 @@
       "!node_modules/node-pty/src/**",
       "!node_modules/node-pty/third_party/**",
       "!node_modules/node-pty/typings/**",
-      "!node_modules/ffmpeg-static/**",
       "!node_modules/@fontsource/noto-sans-sc/**",
       "!node_modules/lucide-react/**",
       "!node_modules/**/*.map",
@@ -227,14 +226,6 @@
         "to": "COMMERCIAL-LICENSE.md"
       },
       {
-        "from": "node_modules/ffmpeg-static/ffmpeg",
-        "to": "ffmpeg/ffmpeg"
-      },
-      {
-        "from": "node_modules/ffmpeg-static/LICENSE",
-        "to": "ffmpeg/LICENSE"
-      },
-      {
         "from": "node_modules/@fontsource/noto-sans-sc/files/noto-sans-sc-chinese-simplified-400-normal.woff",
         "to": "office-font/NotoSansSC-Regular.woff"
       },
@@ -266,7 +257,6 @@
         "!node_modules/node-pty/src/**",
         "!node_modules/node-pty/third_party/**",
         "!node_modules/node-pty/typings/**",
-        "!node_modules/ffmpeg-static/**",
         "!node_modules/@fontsource/noto-sans-sc/**",
         "!node_modules/lucide-react/**",
         "!node_modules/**/*.map",
@@ -390,7 +380,6 @@
     "jszip": "^3.10.1",
     "luxon": "3.7.2",
     "monaco-editor": "0.56.0",
-    "node-cron": "^4.6.0",
     "node-gyp-build": "^4.8.4",
     "node-pty": "^1.1.0",
     "pdfkit": "^0.19.1",
@@ -426,9 +415,6 @@
   "devDependencies": {
     "@electron/asar": "^3.4.1",
     "@fontsource/noto-sans-sc": "^5.3.0",
-    "@react-three/drei": "^9.122.0",
-    "@react-three/fiber": "^8.18.0",
-    "@react-three/postprocessing": "^2.19.1",
     "@types/js-yaml": "^4.0.9",
     "@types/luxon": "3.7.5",
     "@types/node": "^22.10.0",
@@ -442,16 +428,13 @@
     "electron": "41.10.3",
     "electron-builder": "^26.15.3",
     "electron-vite": "^3.0.0",
-    "ffmpeg-static": "5.3.0",
     "highlight.js": "^11.11.1",
     "lucide-react": "^0.468.0",
-    "postprocessing": "^6.39.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.1.0",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
-    "three": "^0.169.0",
     "tsx": "^4.20.6",
     "vite": "^6.0.3",
     "zustand": "^5.0.2"
