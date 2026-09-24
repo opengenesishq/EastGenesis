@@ -11,8 +11,5 @@
 .voice-draft-panel textarea { display: block; width: 100%; box-sizing: border-box; resize: vertical; margin-top: 5px; }
 .voice-draft-recording { display: flex; align-items: center; gap: 8px; padding: 12px 0; }
 .voice-draft-dot { width: 9px; height: 9px; background: #d84848; border-radius: 50%; animation: voice-recording-pulse 1.2s ease-in-out infinite; }
-.realtime-voice-status { display: flex; flex-direction: column; gap: 5px; padding: 10px 0; }
-.realtime-voice-status span { display: flex; align-items: center; gap: 6px; }
-.realtime-voice-transcript { max-height: 130px; overflow: auto; padding: 8px; background: var(--bg-secondary, #8881); border-radius: 6px; white-space: pre-wrap; }
 @keyframes voice-recording-pulse { 50% { opacity: .4; } }
 @media (prefers-reduced-motion: reduce) { .voice-draft-dot { animation: none; } }

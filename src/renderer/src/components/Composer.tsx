@@ -30,7 +30,6 @@ import './composer/session-inputs.css'
 import { useAutosizeTextarea } from './useAutosizeTextarea'
 import { COMPOSER_DRAFTS_DELETED_EVENT, isDeletedComposerDraft } from '../store/composer-draft-persistence'
 import VoiceDraftInput from './VoiceDraftInput'
-import RealtimeVoiceInput from './RealtimeVoiceInput'
 import './composer/desktop-composer.css'
 import { COMPOSER_DRAFT_ADDED_EVENT, takeComposerDraftAdditions } from '../store/composer-draft-inbox'
 
@@ -155,7 +154,6 @@ export default function Composer({ running, onModelRequest }: { running: boolean
   const [dragActive, setDragActive] = useState(false)
   const [modelRequestSessionId, setModelRequestSessionId] = useState<string | null>(null)
   const [requirementRevision, setRequirementRevision] = useState<{ sessionId: string; text: string }>()
-  const [voiceMode, setVoiceMode] = useState<'dictation' | 'conversation' | null>(null)
   const currentSessionId = useRef(activeId)
   currentSessionId.current = activeId
   const attachments = activeId ? attachmentsBySession[activeId] ?? [] : []
@@ -730,18 +728,13 @@ export default function Composer({ running, onModelRequest }: { running: boolean
             <span>{activeSession?.meta.model && activeSession.meta.model !== 'auto' ? activeSession.meta.model : t('autoRoute')}</span><ChevronDown size={13} />
           </button>
         {activeId && <VoiceDraftInput key={activeId} contextId={activeId}
-          disabled={attachmentsDisabled || voiceMode === 'conversation'}
-          onOpenChange={open => setVoiceMode(open ? 'dictation' : null)}
+          disabled={attachmentsDisabled}
           onOpenSettings={() => useStore.getState().setShowSettings(true, 'voice')}
           onInsert={transcript => {
             if (currentSessionId.current !== activeId) return
             setText(current => current ? `${current}\n${transcript}` : transcript)
             textareaRef.current?.focus()
           }} />}
-        {activeId && <RealtimeVoiceInput key={`voice:${activeId}`} sessionId={activeId}
-          disabled={attachmentsDisabled || voiceMode === 'dictation'}
-          onOpenChange={open => setVoiceMode(open ? 'conversation' : null)}
-          onInputsChanged={() => { void sessionInputs.refresh().catch(() => undefined) }} />}
         <button
           className="btn btn-primary composer-send"
           aria-label={uploadingAttachment ? zh ? '添加中' : 'Adding' : running && !localInput ? zh ? '保存补充要求' : 'Save addition' : t('send')}

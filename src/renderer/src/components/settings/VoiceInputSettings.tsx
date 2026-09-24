@@ -1,7 +1,6 @@
 import type { ProviderView } from '../../../../shared/types'
 import type { VoiceInputSettings as VoiceSettings } from '../../../../shared/voice-input-types'
 import { PreferenceRow } from './DesktopPreferences'
-import LocalSpeechSettings from './LocalSpeechSettings'
 
 export default function VoiceInputSettings({ value, providers, zh, onChange, onAddProvider }: {
   value?: VoiceSettings; providers: ProviderView[]; zh: boolean;
@@ -32,8 +31,7 @@ export default function VoiceInputSettings({ value, providers, zh, onChange, onA
         </select>
       </PreferenceRow>
     </div>
-    <p className="settings-hint">{zh ? '目前支持提供音频转写接口的 OpenAI 兼容连接；具体支持以厂商为准。听写点击“转成文字”后上传；持续语音明确开启后按句自动上传，结束或切任务即停止。播报时暂停收音，可打断继续说；这属于分段转写与系统播报，不是厂商原生全双工。调用会计入用量，未返回费用时显示未计价。' : 'Use an OpenAI-compatible audio transcription endpoint. Dictation uploads on confirmation; an explicitly started voice conversation uploads phrases automatically until ended or you switch tasks. Listening pauses during speech; interrupt to resume. This is segmented ASR with system speech, not provider-native full duplex. Usage is recorded; missing costs remain unpriced.'}</p>
+    <p className="settings-hint">{zh ? '目前支持提供音频转写接口的 OpenAI 兼容连接；具体支持以厂商为准。听写点击“转成文字”后上传。调用会计入用量，未返回费用时显示未计价。' : 'Use an OpenAI-compatible audio transcription endpoint. Dictation uploads on confirmation. Usage is recorded; missing costs remain unpriced.'}</p>
     {!compatible.length && <button type="button" className="btn btn-ghost" onClick={onAddProvider}>{zh ? '添加厂商' : 'Add provider'}</button>}
-    <LocalSpeechSettings value={value} zh={zh} onChange={onChange} />
   </>
 }
