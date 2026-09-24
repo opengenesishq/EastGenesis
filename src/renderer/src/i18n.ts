@@ -809,11 +809,6 @@ const DICT: Dict = {
   permissionRuleExpiresAt: { zh: '到期时间', en: 'Expires at' },
   permissionRuleDelete: { zh: '删除规则', en: 'Delete rule' },
   permissionRuleMissingSelector: { zh: '每条权限规则至少需要工具、路径、语义范围或风险条件之一。', en: 'Each permission rule needs at least one tool, path, semantic scope, or risk condition.' },
-  guiAutomationEnabled: { zh: '启用 GUI 自动化工具', en: 'Enable GUI automation tools' },
-  guiAutomationHint: {
-    zh: '默认关闭。临时授权只匹配当前会话、项目、GUI 动作和精确目标，重启即失效；目标不明确的操作仍须逐次审批。',
-    en: 'Off by default. Temporary grants match only the current session, project, GUI action, and exact target; they expire on restart. Actions without a stable target still require per-action approval.'
-  },
   allowTemporary: { zh: '精确操作允许 5 分钟', en: 'Allow exact operation for 5 min' },
   guiActiveGrants: { zh: '当前临时授权', en: 'Active temporary grants' },
   guiGrantRevoke: { zh: '撤销', en: 'Revoke' },

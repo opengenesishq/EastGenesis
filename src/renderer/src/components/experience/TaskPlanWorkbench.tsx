@@ -6,7 +6,6 @@ import TaskPlanEditor from './TaskPlanEditor'
 import TaskPlanInstitutions from './TaskPlanInstitutions'
 import PreparationPermission from '../composer/PreparationPermission'
 import TaskExecutionAuthority from '../composer/TaskExecutionAuthority'
-import CouncilPanel from './CouncilPanel'
 import TaskRequirementSummary from './TaskRequirementSummary'
 import { DisclosureChevron } from '../DisclosureChevron'
 import { TASK_PLAN_NAVIGATION_EVENT, takeTaskPlanNavigation } from './task-plan-navigation'
@@ -21,15 +20,13 @@ interface TaskPlanWorkbenchProps {
   strategy: 'view' | 'plan' | 'execute'
   running: boolean
   compact?: boolean
-  showCouncil?: boolean
 }
 
 export default function TaskPlanWorkbench({
   sessionId,
   strategy,
   running,
-  compact = false,
-  showCouncil = true
+  compact = false
 }: TaskPlanWorkbenchProps): React.JSX.Element | null {
   const t = useT()
   const state = useStore((store) => store.taskPlans[sessionId])
@@ -84,10 +81,7 @@ export default function TaskPlanWorkbench({
   }, [current, loadedVersionId])
 
   if (strategy !== 'plan' && !current && !navigationOpened) {
-    return meta?.workspaceId && meta.goalId && meta.workItemId ? <>
-      <TaskRequirementSummary binding={meta} running={running} />
-      {showCouncil && !meta.parentSessionId && <CouncilPanel sessionId={sessionId} />}
-    </> : null
+    return meta?.workspaceId && meta.goalId && meta.workItemId ? <TaskRequirementSummary binding={meta} running={running} /> : null
   }
 
   const save = async (): Promise<void> => {
@@ -131,7 +125,6 @@ export default function TaskPlanWorkbench({
       </div>}
       {expanded && <PreparationPermission key={sessionId} sessionId={sessionId} running={running} />}
       {expanded && <TaskExecutionAuthority key={`authority:${sessionId}`} sessionId={sessionId} running={running} />}
-      {expanded && showCouncil && <CouncilPanel sessionId={sessionId} />}
       {state?.approvalStatus === 'approved' && state.projection && (
         <div className={`task-plan-projection task-plan-projection-${state.projection.mode}`}
           data-task-plan-projection={state.projection.mode}>

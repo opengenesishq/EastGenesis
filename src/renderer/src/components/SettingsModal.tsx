@@ -30,7 +30,6 @@ import GitPreferences from './settings/GitPreferences'
 import type {
   CaoGenDriveMode,
   EngineInfo,
-  GuiAutomationGrantView,
   McpProbeResult,
   PermissionRuleConfig,
   PermissionRuleRiskOperator,
@@ -180,7 +179,6 @@ export default function SettingsPage(): React.JSX.Element {
   )) as Partial<typeof draft>
   const hasDraftChanges = Object.keys(draftChanges).length > 0
   const [health, setHealth] = useState<ProviderHealthView[]>([])
-  const [guiGrants, setGuiGrants] = useState<GuiAutomationGrantView[]>([])
   const [toolGrants, setToolGrants] = useState<ToolCapabilityGrantView[]>([])
   const [checkingProviderId, setCheckingProviderId] = useState('')
   const [providerProbe, setProviderProbe] = useState<ProviderProbeState>(null)
@@ -204,8 +202,8 @@ export default function SettingsPage(): React.JSX.Element {
     [sessionOrder, sessions]
   )
   const permissionGrants = useMemo(
-    () => [...guiGrants, ...toolGrants].sort((left, right) => left.expiresAt - right.expiresAt),
-    [guiGrants, toolGrants]
+    () => [...toolGrants].sort((left, right) => left.expiresAt - right.expiresAt),
+    [toolGrants]
   )
 
   useEffect(() => {
@@ -222,13 +220,7 @@ export default function SettingsPage(): React.JSX.Element {
 
   useEffect(() => {
     if (tab === 'permissions') {
-      void Promise.all([
-        window.agentDesk.listGuiAutomationGrants(),
-        window.agentDesk.listToolCapabilityGrants()
-      ]).then(([gui, tools]) => {
-        setGuiGrants(gui)
-        setToolGrants(tools)
-      })
+      void window.agentDesk.listToolCapabilityGrants().then(setToolGrants)
     }
   }, [tab])
 
@@ -1319,23 +1311,6 @@ export default function SettingsPage(): React.JSX.Element {
                   )}
                 </div>
 
-                <label className="settings-check">
-                  <input
-                    type="checkbox"
-                    checked={draft.guiAutomationEnabled}
-                    onChange={(e) =>
-                      setDraft((d) => ({
-                        ...d,
-                        guiAutomationEnabled: e.target.checked,
-                        guiAutomationTemporaryGrantUntil: e.target.checked
-                          ? d.guiAutomationTemporaryGrantUntil
-                          : 0
-                      }))
-                    }
-                  />
-                  {t('guiAutomationEnabled')}
-                </label>
-                <p className="settings-hint">{t('guiAutomationHint')}</p>
                 {permissionGrants.length > 0 && (
                   <div className="gui-grant-section">
                     <div className="gui-grant-heading">
@@ -1343,13 +1318,7 @@ export default function SettingsPage(): React.JSX.Element {
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
-                        onClick={() => void Promise.all([
-                          window.agentDesk.revokeAllGuiAutomationGrants(),
-                          window.agentDesk.revokeAllToolCapabilityGrants()
-                        ]).then(() => {
-                          setGuiGrants([])
-                          setToolGrants([])
-                        })}
+                        onClick={() => void window.agentDesk.revokeAllToolCapabilityGrants().then(() => setToolGrants([]))}
                       >
                         {t('guiGrantRevokeAll')}
                       </button>
@@ -1365,13 +1334,9 @@ export default function SettingsPage(): React.JSX.Element {
                           <button
                             type="button"
                             className="btn btn-ghost btn-sm"
-                            onClick={() => void (grant.kind === 'gui'
-                              ? window.agentDesk.revokeGuiAutomationGrant(grant.id).then((revoked) => {
-                                  if (revoked) setGuiGrants((current) => current.filter((item) => item.id !== grant.id))
-                                })
-                              : window.agentDesk.revokeToolCapabilityGrant(grant.id).then((revoked) => {
-                                  if (revoked) setToolGrants((current) => current.filter((item) => item.id !== grant.id))
-                                }))}
+                            onClick={() => void window.agentDesk.revokeToolCapabilityGrant(grant.id).then((revoked) => {
+                              if (revoked) setToolGrants((current) => current.filter((item) => item.id !== grant.id))
+                            })}
                           >
                             {t('guiGrantRevoke')}
                           </button>

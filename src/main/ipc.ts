@@ -24,7 +24,6 @@ import { registerTemporaryTaskIpc } from './temporary-task/temporary-task-servic
 import { registerProjectHistoryIpc } from './ipc/project-history-handlers'
 import { inspectLocalRuntimes } from './local-runtime-status'
 import { listMigrationHistory, previewMigrationRollback, assertMigrationRollbackReview } from './migration-history'
-import { registerExternalBrowserIpc } from './ipc/external-browser-handlers'
 import { registerActivityIpc } from './ipc/activity-handlers'
 import { workspaceBrowserRegistry } from './workspace-browser-context'
 import { assertTrustedWorkflowLedgerSender as assertTrustedWorkspaceTerminalSender } from './ipc/workflow-ledger-handlers'
@@ -149,7 +148,6 @@ import { registerSessionInputIpc } from './ipc/session-input-handlers'
 import { registerPreparationPermissionIpc } from './ipc/preparation-permission-handlers'
 import { registerTaskExecutionAuthorityIpc } from './ipc/task-execution-authority-handlers'
 import { registerTaskBudgetIpc } from './ipc/task-budget-handlers'
-import { registerCouncilIpc } from './ipc/council-handlers'
 import { registerSideChatIpc } from './ipc/side-chat-handlers'
 import type {
   BrowserBounds,
@@ -348,13 +346,11 @@ export function registerIpc(): void {
   registerFeedbackIpc()
   registerTemporaryTaskIpc()
   registerProjectHistoryIpc()
-  registerExternalBrowserIpc()
   registerActivityIpc()
   registerPreparationPermissionIpc()
   registerTaskExecutionAuthorityIpc()
   registerTaskBudgetIpc()
   registerSessionInputIpc()
-  registerCouncilIpc()
   registerSideChatIpc()
   configureMigrationOperationBackupRoot(migrationBackupRoot())
   for (const register of [registerTaskRecoveryIpc, registerWorkflowLedgerIpc, registerProjectWorkspaceIpc, registerDataRetentionIpc, registerDigitalWorkerIpc, registerSupervisorIpc, registerInteractiveMutationIpc, registerAppFeatureIpc, registerProviderGatewayIpc, registerFileIntelligenceIpc, registerPermissionGrantIpc]) register()

@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { GuiAutomationGrantView, ToolCapabilityGrantView } from '../../../../shared/types'
+import type { ToolCapabilityGrantView } from '../../../../shared/types'
 import { useStore } from '../../store'
 
-type TemporaryGrant = GuiAutomationGrantView | ToolCapabilityGrantView
+type TemporaryGrant = ToolCapabilityGrantView
 const CHANGED = 'caogen:task-temporary-permissions-changed'
 
 async function taskGrants(sessionId: string): Promise<TemporaryGrant[]> {
-  const [gui, tools] = await Promise.all([
-    window.agentDesk.listGuiAutomationGrants(), window.agentDesk.listToolCapabilityGrants()
-  ])
-  return [...gui, ...tools].filter(grant => grant.sessionId === sessionId && grant.expiresAt > Date.now())
+  const tools = await window.agentDesk.listToolCapabilityGrants()
+  return tools.filter(grant => grant.sessionId === sessionId && grant.expiresAt > Date.now())
     .sort((left, right) => left.expiresAt - right.expiresAt || left.id.localeCompare(right.id))
 }
 
@@ -70,9 +68,7 @@ export default function TaskTemporaryPermissions({ sessionId }: { sessionId: str
       // Read a fresh task-filtered inventory for "all"; never invoke global revoke-all.
       const targets = selected ? [selected] : await taskGrants(sessionId)
       if (targets.some(grant => grant.sessionId !== sessionId)) throw new Error(zh ? '授权不属于当前任务。' : 'Grant belongs to another task.')
-      const results = await Promise.allSettled(targets.map(grant => grant.kind === 'gui'
-        ? window.agentDesk.revokeGuiAutomationGrant(grant.id)
-        : window.agentDesk.revokeToolCapabilityGrant(grant.id)))
+      const results = await Promise.allSettled(targets.map(grant => window.agentDesk.revokeToolCapabilityGrant(grant.id)))
       const failures = results.filter(result => result.status === 'rejected')
       window.dispatchEvent(new CustomEvent(CHANGED, { detail: sessionId }))
       await refresh()

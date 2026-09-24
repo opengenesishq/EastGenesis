@@ -49,7 +49,6 @@ import type {
   TaskDecomposeInput,
   UpdateRoutineInput
 } from '../shared/types'
-import type { ExternalBrowserConnectInput } from '../shared/external-browser-types'
 import { resolveTaskDagFinalization } from './task-dag-finalization'
 import { workflowLedgerApi } from './workflow-ledger'
 import { preparationPermissionApi } from './preparation-permission'
@@ -67,11 +66,9 @@ import { supervisorApi } from './supervisor'
 import { taskPlanApi } from './task-plan'
 import { migrationApi } from './migration'
 import { studioResultApi } from './studio-result'
-import { mediaApi } from './media'
 import { sessionEntrypointApi } from './session-entrypoints'
 import { assistantSearchApi } from './assistant-search'
 import { sessionInputApi } from './session-input'
-import { councilApi } from './council'
 import { taskWindowApi } from './task-window'
 import { voiceInputApi } from './voice-input'
 import type { SideChatApi } from '../shared/side-chat-types'
@@ -89,12 +86,6 @@ const sideChatApi: SideChatApi = {
 const api: AgentDeskApi = {
   clearSessionGoalMode: sessionId => ipcRenderer.invoke('session-goal-mode:clear', sessionId),
   inspectLocalRuntimes: () => ipcRenderer.invoke('environment:runtimes'),
-  listExternalBrowserConnections: () => ipcRenderer.invoke('externalBrowser:list'),
-  connectExternalBrowser: (input: ExternalBrowserConnectInput) => ipcRenderer.invoke('externalBrowser:connect', input),
-  reconnectExternalBrowser: (connectionId: string) => ipcRenderer.invoke('externalBrowser:reconnect', connectionId),
-  listExternalBrowserTabs: (connectionId: string) => ipcRenderer.invoke('externalBrowser:tabs', connectionId),
-  selectExternalBrowserTab: (connectionId: string, tabId: string) => ipcRenderer.invoke('externalBrowser:selectTab', connectionId, tabId),
-  revokeExternalBrowser: (connectionId: string) => ipcRenderer.invoke('externalBrowser:revoke', connectionId),
   ...localSitePreviewApi,
   ...workspaceBehaviorApi,
   ...mcpOAuthApi,
@@ -117,7 +108,6 @@ const api: AgentDeskApi = {
   ...sideChatApi,
   ...voiceInputApi,
   ...taskWindowApi,
-  ...councilApi,
   ...preparationPermissionApi,
   ...taskExecutionAuthorityApi,
   ...taskBudgetApi,
@@ -156,7 +146,6 @@ const api: AgentDeskApi = {
   ...supervisorApi,
   ...taskPlanApi,
   ...studioResultApi,
-  ...mediaApi,
   recoverTaskSnapshot: (snapshotId: string) =>
     ipcRenderer.invoke('taskSnapshots:recover', snapshotId),
   resolveTaskEffect: (
@@ -220,9 +209,6 @@ const api: AgentDeskApi = {
   getRoutingRuleSet: () => ipcRenderer.invoke('settings-domain:routing:get'),
   previewRoutingRuleSet: (input) => ipcRenderer.invoke('settings-domain:routing:preview', input),
   saveRoutingRuleSet: (input) => ipcRenderer.invoke('settings-domain:routing:save', input),
-  listGuiAutomationGrants: () => invokeMain('permissions:grants:list', 'gui'),
-  revokeGuiAutomationGrant: (grantId) => invokeMain('permissions:grants:revoke', 'gui', grantId),
-  revokeAllGuiAutomationGrants: () => invokeMain('permissions:grants:revoke', 'gui'),
   listToolCapabilityGrants: () => invokeMain('permissions:grants:list', 'tool'),
   revokeToolCapabilityGrant: (grantId) => invokeMain('permissions:grants:revoke', 'tool', grantId),
   revokeAllToolCapabilityGrants: () => invokeMain('permissions:grants:revoke', 'tool'),

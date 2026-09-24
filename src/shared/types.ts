@@ -46,7 +46,6 @@ import type { SessionInputApi } from './session-input-types'
 import type { PreparationPermissionApi } from './preparation-permission-types'
 import type { TaskExecutionAuthorityApi } from './task-execution-authority-types'
 import type { TaskBudgetApi } from './task-budget-types'
-import type { CouncilApi } from './council-types'
 import type { EffectResolution, TaskEffectRecoveryApi } from './effect-recovery-types'
 export type * from './preparation-permission-types'
 export type { SendMessagePayload } from './message-payload-types'
@@ -78,14 +77,12 @@ import type { ProjectDataLifecycleApi } from './data-lifecycle-types'
 import type { PluginInstallResult, PluginUninstallResult } from './plugin-types'
 import type { TerminalEffectApi } from './terminal-operation-types'
 import type { BrowserNavigationEffectApi, BrowserViewState } from './browser-operation-types'
-import type { MediaApi, ProviderMediaPricing } from './media-types'
+import type { ProviderMediaPricing } from './media-types'
 import type { SessionEntrypointApi } from './session-entrypoint-types'
 import type { AssistantSearchApi } from './assistant-search-types'
-import type { ExternalBrowserBridgeApi } from './external-browser-types'
 import type { TaskActivityApi } from './activity-types'
 export type * from './image-canvas-types'
 export type * from './activity-types'
-export type * from './external-browser-types'
 export type * from './palace-scene-builder-types'
 export type * from './assistant-search-types'
 import type { NotificationConnectorInput, NotificationConnectorView } from './notification-connector-types'
@@ -2538,7 +2535,7 @@ export type MenuCommand =
   | { type: 'select-session'; index: number }
 
 /** 通过 contextBridge 暴露给渲染进程的 API */
-export interface AgentDeskApi extends FeedbackApi, TaskActivityApi, ExternalBrowserBridgeApi, WorkspaceHandoffApi, SideChatApi, VoiceInputApi, TaskWindowApi, TaskEffectRecoveryApi, CouncilApi, PreparationPermissionApi, TaskExecutionAuthorityApi, TaskBudgetApi, SessionInputApi, WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, MediaApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi {
+export interface AgentDeskApi extends FeedbackApi, TaskActivityApi, WorkspaceHandoffApi, SideChatApi, VoiceInputApi, TaskWindowApi, TaskEffectRecoveryApi, PreparationPermissionApi, TaskExecutionAuthorityApi, TaskBudgetApi, SessionInputApi, WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi {
   inspectLocalRuntimes(): Promise<import('./local-runtime-types').LocalRuntimeStatus>
   listPendingPermissions(sessionId: string): Promise<PermissionRequestInfo[]>
   getTranscript(sessionId: string): Promise<TranscriptEntry[]>
@@ -2609,9 +2606,6 @@ export interface AgentDeskApi extends FeedbackApi, TaskActivityApi, ExternalBrow
   getRoutingRuleSet(): Promise<import('./routing-policy-types').RoutingRuleReadResult>
   previewRoutingRuleSet(input: import('./routing-policy-types').RoutingRulePreviewInput): Promise<import('./routing-policy-types').RoutingRulePreviewResult>
   saveRoutingRuleSet(input: import('./routing-policy-types').RoutingRuleSaveInput): Promise<import('./routing-policy-types').RoutingRuleSaveResult>
-  listGuiAutomationGrants(): Promise<GuiAutomationGrantView[]>
-  revokeGuiAutomationGrant(grantId: string): Promise<boolean>
-  revokeAllGuiAutomationGrants(): Promise<number>
   listToolCapabilityGrants(): Promise<ToolCapabilityGrantView[]>
   revokeToolCapabilityGrant(grantId: string): Promise<boolean>
   revokeAllToolCapabilityGrants(): Promise<number>

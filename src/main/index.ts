@@ -58,8 +58,6 @@ import {
   stopDataRetentionExpiryScheduler
 } from './data-lifecycle/retention-expiry-scheduler'
 import type { Routine } from '../shared/types'
-import { registerMediaProtocol, registerMediaProtocolPrivileges } from './media/media-protocol'
-import { startMediaReconciliationScheduler, stopMediaReconciliationScheduler } from './media/media-reconciliation-scheduler'
 import { recoverProjectConnectorLifecycles } from './project-workspace/project-connector-lifecycle'
 import {
   startProjectConnectorAutoRefreshScheduler,
@@ -79,7 +77,6 @@ let unsubscribeTraySessionEvents: (() => void) | null = null
 let unsubscribeDesktopSettings: (() => void) | null = null
 let shellInstalled = false
 
-registerMediaProtocolPrivileges()
 
 // Apply before app readiness starts the GPU process; normal WebGL remains accelerated.
 configureGpuCompatibility(app.commandLine)
@@ -413,7 +410,6 @@ void app.whenReady().then(async () => {
   // IPC handlers are safe to register before session hydration; they expose the
   // current (possibly empty) session set until recovery completes.
   ensureApplicationShell()
-  registerMediaProtocol()
   if (temporaryTaskRuntime) {
     await sessionManager.whenInitialized()
     return
@@ -454,7 +450,6 @@ void app.whenReady().then(async () => {
   const routineRoot = join(app.getPath('userData'), 'routines')
   try { initializeRoutineSessionLifecycle(routineRoot, app.getPath('userData')) } catch (e) { console.error('[caogen] routine lifecycle init failed:', e) }
   try { await reconcileRoutineRunsAtStartup(routineRoot, app.getPath('userData')) } catch (e) { console.error('[caogen] routine reconciliation failed:', e) }
-  try { startMediaReconciliationScheduler(app.getPath('userData')) } catch (e) { console.error('[caogen] media reconciliation scheduler failed to start:', e) }
   try { installTray() } catch (e) { console.error('[caogen] tray install failed:', e) }
   // Routine 定时调度:每 30s 轮询,到点起会话执行(补齐"定时自动执行"承诺)
   try {
@@ -486,7 +481,6 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   disposeRoutineSessionLifecycle()
-  stopMediaReconciliationScheduler()
   stopProjectConnectorAutoRefreshScheduler()
 })
 
@@ -501,7 +495,6 @@ app.on('before-quit', (event) => {
   unsubscribeDesktopSettings?.()
   unsubscribeDesktopSettings = null
   stopRoutineScheduler()
-  stopMediaReconciliationScheduler()
   stopProjectConnectorAutoRefreshScheduler()
   stopDataRetentionExpiryScheduler()
   stopProviderProfileWebDavAutoSync()

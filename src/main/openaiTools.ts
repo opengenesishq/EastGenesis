@@ -23,7 +23,6 @@ import {
   runSearchReplace,
   searchReplacementArgs
 } from './agent/tools/search-replace'
-import { GUI_TOOLS } from './agent/tools/gui-tools'
 import { formatViewResult, runView } from './agent/tools/view'
 import { formatSearchSymbolResult, runSearchSymbol } from './agent/tools/search-symbol'
 import { formatSearchCodeResult, runSearchCode } from './agent/tools/search-code'
@@ -32,7 +31,6 @@ import { formatDependenciesResult, runGetDependencies } from './agent/tools/get-
 import { GIT_TOOLS, executeGitTool, isGitToolName } from './agent/tools/git-tools'
 import { BROWSER_TOOLS } from './agent/tools/browser-tools'
 import { P2_TOOLS, executeP2Tool, isP2ToolName } from './agent/tools/p2-tools'
-import { MEDIA_TOOLS } from './agent/tools/media-tool-definitions'
 import { OFFICE_REVISION_TOOLS } from './agent/tools/office-revision-tools'
 import { executeContextBoundTool } from './agent/tools/context-bound-tools'
 import type { ToolDefinition } from './agent/tools/tool-types'
@@ -763,8 +761,7 @@ export const OPENAI_CODING_TOOLS: ToolDefinition[] = [
   ...GIT_TOOLS,
   ...BROWSER_TOOLS,
   ...P2_TOOLS,
-  ...MEDIA_TOOLS, ...OFFICE_REVISION_TOOLS,
-  ...GUI_TOOLS
+  ...OFFICE_REVISION_TOOLS
 ]
 
 /** 只读工具(plan 模式仅放行这些;default 模式免审批) */
