@@ -46,7 +46,6 @@ import {
 } from './retention-authority'
 import { withDataLifecycleMutation } from './data-lifecycle-mutation-lock'
 import { prepareProjectMemoryRetentionExport } from '../memory/memory-retention'
-import { getRemoteContinuationStore } from '../remote/store'
 import { getMediaStore } from '../media/media-store'
 import {
   countMediaProjectFiles,
@@ -236,7 +235,6 @@ async function executeDeletionLocked(
     await new AssignmentOwnerJournal(root).purgeProject(entry.projectId)
     await new SupervisorStateStore(root).purgeProject(entry.projectId)
     await getProjectPortfolioStore(root).purgeProject(entry.projectId)
-    await getRemoteContinuationStore(root).purgeProject(entry.projectId)
     await purgeProjectConnectorCaches(root, entry.projectId)
     const mediaStore = getMediaStore(root)
     const legacyRemoteOutputs = await mediaStore.listUnsharedLegacyRemoteOutputPaths(entry.projectId)

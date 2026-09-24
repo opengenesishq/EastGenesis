@@ -19,10 +19,6 @@ import PersonalTaskRecoveryPanel from './experience/PersonalTaskRecoveryPanel'
 import { PersonalTaskSubmissionError } from '../lib/personal-task-submission'
 import AssistantStartNotice from './experience/AssistantStartNotice'
 import FirstLaunchProviderOnboarding from './experience/FirstLaunchProviderOnboarding'
-import RemoteIntakeReceipts from './experience/RemoteIntakeReceipts'
-import { submitWelcomeRemote } from './experience/welcome-remote-task'
-import { handoffWelcomeRemoteDraft } from './experience/welcome-remote-draft-handoff'
-import { taskWindowSessionId } from '../task-window-context'
 import { useAutosizeTextarea } from './useAutosizeTextarea'
 import VoiceDraftInput from './VoiceDraftInput'
 import {
@@ -53,7 +49,7 @@ function useLocalComputeActivation(
 ) {
   const [status, setStatus] = useState<'idle' | 'checking' | 'ready' | 'unavailable'>('idle')
   const ensure = useCallback(async (startInstalled = false): Promise<LocalComputeActivationResult> => {
-    if (!enabled || useStore.getState().welcomeDraft.executionTarget?.kind === 'remote') return { status: 'unavailable', checkedAt: Date.now(), reason: 'runtime-stopped' }
+    if (!enabled) return { status: 'unavailable', checkedAt: Date.now(), reason: 'runtime-stopped' }
     if (hasAvailableCompute(useStore.getState().providers)) {
       return { status: 'activated', checkedAt: Date.now() }
     }
@@ -64,7 +60,7 @@ function useLocalComputeActivation(
           setStatus('unavailable')
           return result
         }
-        if (useStore.getState().welcomeDraft.executionTarget?.kind !== 'remote') updateWelcomeDraft({
+        updateWelcomeDraft({
           computeSelectionSource: 'default',
           providerId: result.provider.id,
           model: AUTO_MODEL
@@ -142,18 +138,6 @@ function useWelcomeSubmitAction(
   ): Promise<void> => {
     const prompt = promptInput.trim()
     if (!prompt || busy) return
-    const selectedDraft = useStore.getState().welcomeDraft
-    if (selectedDraft.executionTarget?.kind === 'remote') {
-      feedback.setBusy(true); feedback.setError(''); feedback.setRecoveryKind(null); feedback.setComputeReason(null)
-      try {
-        if (taskWindowSessionId()) {
-          await handoffWelcomeRemoteDraft(selectedDraft, prompt)
-          feedback.setError(useStore.getState().settings.language === 'zh' ? '草稿已交给主工作台，请在主窗口确认后发送。' : 'Draft passed to the main workspace. Confirm and send it there.')
-        } else await submitWelcomeRemote(selectedDraft, prompt)
-      } catch (cause) { feedback.setError(cause instanceof Error ? cause.message : 'Remote submission unconfirmed') }
-      finally { feedback.setBusy(false) }
-      return
-    }
     await runFirstTaskSubmissionExclusive(async () => {
       feedback.setBusy(true)
       const draft = { ...input.sessionDraft, taskStrategy: selectedStrategy }
@@ -335,13 +319,11 @@ function WelcomeComposerBar({
 }): React.JSX.Element {
   const zh = useStore(state => state.settings.language === 'zh')
   const voiceDraftId = useRef(`draft:${crypto.randomUUID()}`)
-  const remote = welcomeDraft.executionTarget?.kind === 'remote'
-  const awaitingModel = !remote && !computeAvailable && localComputeStatus !== 'ready'
+  const awaitingModel = !computeAvailable && localComputeStatus !== 'ready'
   const selectedModel = fixedModelOptions.some(option => option.value === welcome.model) ? welcome.model : ''
   return (
     <div className="welcome-composer-bar">
       <div className="welcome-model-picker" data-welcome-model-picker>
-        {remote ? <span className="welcome-remote-note">{zh ? '远端模型' : 'Remote model'}</span> : <>
           {providers.length > 1 && <select
             className="welcome-model-select welcome-provider-select"
             data-welcome-routing-control="provider"
@@ -363,19 +345,18 @@ function WelcomeComposerBar({
             <option value="" disabled>{fixedModelOptions.length ? (zh ? '选择模型' : 'Choose a model') : (zh ? '先连接模型' : 'Connect a model first')}</option>
             {fixedModelOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
-        </>}
       </div>
-      {!remote && <button type="button" className="welcome-advanced-trigger" aria-label={zh ? '打开模型设置' : 'Open model settings'} title={zh ? '模型与连接设置' : 'Model and connection settings'} onClick={onOpenSettings}><SlidersHorizontal size={15} aria-hidden="true" /></button>}
-      {!remote && <VoiceDraftInput contextId={voiceDraftId.current} disabled={actions.busy}
+      <button type="button" className="welcome-advanced-trigger" aria-label={zh ? '打开模型设置' : 'Open model settings'} title={zh ? '模型与连接设置' : 'Model and connection settings'} onClick={onOpenSettings}><SlidersHorizontal size={15} aria-hidden="true" /></button>
+      <VoiceDraftInput contextId={voiceDraftId.current} disabled={actions.busy}
         onOpenSettings={() => useStore.getState().setShowSettings(true, 'voice')}
         onInsert={transcript => {
           const current = useStore.getState().welcomeDraft.text
           welcome.update({ text: current ? `${current}\n${transcript}` : transcript })
-        }} />}
+        }} />
       <button
         type="button"
         className={`welcome-send${awaitingModel ? ' welcome-send-connect' : ''}`}
-        aria-label={awaitingModel ? (zh ? '连接模型' : 'Connect a model') : remote && taskWindowSessionId() ? (zh ? '交给主工作台' : 'Pass to main workspace') : (zh ? '发送并执行' : 'Send and run')}
+        aria-label={awaitingModel ? (zh ? '连接模型' : 'Connect a model') : (zh ? '发送并执行' : 'Send and run')}
         title={awaitingModel ? (zh ? '连接模型后继续当前任务' : 'Connect a model to continue') : (zh ? '发送并执行' : 'Send and run')}
         disabled={actions.busy || (!awaitingModel && !welcome.text.trim()) || (!computeAvailable && localComputeStatus === 'checking')}
         onClick={() => {
@@ -420,8 +401,6 @@ function WelcomeComposer({
 }): React.JSX.Element {
   const t = useT()
   const zh = useStore(state => state.settings.language === 'zh')
-  const remote = welcomeDraft.executionTarget?.kind === 'remote'
-  const [attachmentNotice, setAttachmentNotice] = useState('')
   useAutosizeTextarea(textareaRef, welcome.text)
   return (
     <div className="welcome-compose-dock">
@@ -435,9 +414,6 @@ function WelcomeComposer({
           rows={1}
           onChange={(event) => welcome.update({ text: event.target.value })}
           onKeyDown={onKeyDown}
-          onPaste={event => { if (remote && event.clipboardData.files.length) { event.preventDefault(); setAttachmentNotice(zh ? '远端任务暂不支持粘贴文件，正文已保留。' : 'Remote tasks do not accept pasted files; your text is preserved.') } }}
-          onDragOver={event => { if (remote && event.dataTransfer.types.includes('Files')) event.preventDefault() }}
-          onDrop={event => { if (remote && event.dataTransfer.files.length) { event.preventDefault(); setAttachmentNotice(zh ? '远端任务暂不支持本机文件，正文已保留。' : 'Remote tasks do not accept local files; your text is preserved.') } }}
           data-composer-autosize="true"
           autoFocus
         />
@@ -452,9 +428,7 @@ function WelcomeComposer({
           welcomeDraft={welcomeDraft}
         />
       </div>
-      {attachmentNotice && <p role="alert" className="welcome-remote-note">{attachmentNotice}<button type="button" onClick={() => setAttachmentNotice('')}>{zh ? '知道了' : 'Dismiss'}</button></p>}
-      <RemoteIntakeReceipts refreshKey={actions.busy} />
-      {!remote && <PersonalTaskRecoveryPanel refreshKey={actions.busy} />}
+      <PersonalTaskRecoveryPanel refreshKey={actions.busy} />
       <AssistantStartNotice
         busy={actions.busy}
         computeReason={actions.computeReason}
@@ -501,8 +475,7 @@ export default function WelcomeView(): React.JSX.Element {
     providersLoaded,
     computeAvailable,
     activateLocalCompute,
-    welcome.update,
-    welcomeDraft.executionTarget?.kind !== 'remote'
+    welcome.update
   )
   const sessionDraft = buildWelcomeSessionDraft(
     welcome,

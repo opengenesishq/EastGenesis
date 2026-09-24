@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useT } from '../../i18n'
 import { useStore } from '../../store'
-import SkillRecordingWizard from '../../pages/Skills/SkillRecordingWizard'
 import McpOAuthCard from './McpOAuthCard'
 import PluginCatalogPanel from './PluginCatalogPanel'
 
@@ -326,7 +325,6 @@ export default function PluginRegistryPanel({
   const t = useT()
   const labels = mergeLabels(labelOverrides, t)
   const zh = useStore(state => state.settings.language === 'zh')
-  const [recordingOpen, setRecordingOpen] = useState(false)
   const [surface, setSurface] = useState<'installed' | 'catalog'>('installed')
   const [query, setQuery] = useState('')
   const [kindFilter, setKindFilter] = useState<KindFilter>('all')
@@ -377,14 +375,12 @@ export default function PluginRegistryPanel({
 
   return (
     <div className={cx('plugin-registry-panel', className)}>
-      {recordingOpen && <SkillRecordingWizard onClose={() => setRecordingOpen(false)} onSaved={onRefresh} />}
       <header className="plugin-registry-header">
         <div className="plugin-registry-heading">
           <div className="plugin-registry-title">{labels.title}</div>
           <div className="plugin-registry-subtitle">{labels.subtitle}</div>
         </div>
         <div className="plugin-registry-actions">
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRecordingOpen(true)}>{zh ? '+ 录制技能' : '+ Record a skill'}</button>
           {onInstall && (
             <button
               className="btn btn-ghost btn-sm"

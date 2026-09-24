@@ -1,4 +1,4 @@
-import type { LocalSitePreview } from './site-deployment-types'
+import type { LocalSitePreview } from './local-site-preview-types'
 
 export interface LocalSiteOwner {
   sessionId: string

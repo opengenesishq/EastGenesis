@@ -15,8 +15,7 @@ export const DESKTOP_SHORTCUTS = [
   { id: 'goToDefinition', zh: '转到定义', en: 'Go to definition', defaultKey: 'F12', group: 'workbench' },
   { id: 'completeCode', zh: '代码补全', en: 'Complete code', defaultKey: 'Control+Space', group: 'workbench' },
   { id: 'sendMessage', zh: '发送任务消息', en: 'Send task message', defaultKey: 'Enter', group: 'input' },
-  { id: 'submitMultiline', zh: '提交多行指令 / 侧聊', en: 'Submit multiline request / side chat', defaultKey: 'CommandOrControl+Enter', group: 'input' },
-  { id: 'quickbar', zh: '全局快捷输入', en: 'Global quick input', defaultKey: 'CommandOrControl+Shift+Space', group: 'input' }
+  { id: 'submitMultiline', zh: '提交多行指令 / 侧聊', en: 'Submit multiline request / side chat', defaultKey: 'CommandOrControl+Enter', group: 'input' }
 ] as const
 
 export type DesktopShortcutAction = typeof DESKTOP_SHORTCUTS[number]['id']

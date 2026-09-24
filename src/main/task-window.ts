@@ -1,12 +1,10 @@
-import { app, BrowserWindow, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
+import { BrowserWindow, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
 import { sessionManager } from './sessionManager'
 import { registerDesktopWindow } from './desktop-window-registry'
 import { activateDesktopTask } from './desktopNotify'
 import { assertTrustedWorkflowLedgerSender } from './ipc/workflow-ledger-handlers'
-import type { RemoteWelcomeDraftInput, TaskWindowState } from '../shared/task-window-types'
-import { RemoteWelcomeDraftStore, assertRemoteWelcomeDraftHost, normalizeRemoteWelcomeDraft } from './task-window-drafts'
-import { getRemoteHostService } from './remote-hosts/runtime'
+import type { TaskWindowState } from '../shared/task-window-types'
 
 const windows = new Map<string, BrowserWindow>()
 let opener: ((id: string) => Promise<TaskWindowState>) | undefined
@@ -14,7 +12,6 @@ let opener: ((id: string) => Promise<TaskWindowState>) | undefined
 /** Each live Session has at most one detached view. Execution belongs to SessionManager. */
 export function registerTaskWindows(getMainWindow: () => BrowserWindow | null): void {
   opener = (id) => openWindow(id, getMainWindow)
-  const drafts = new RemoteWelcomeDraftStore(join(app.getPath('userData'), 'private', 'remote-welcome-drafts.json'))
   function senderWindow(event: IpcMainInvokeEvent): BrowserWindow {
     assertTrustedWorkflowLedgerSender(event)
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -43,28 +40,6 @@ export function registerTaskWindows(getMainWindow: () => BrowserWindow | null): 
   ipcMain.handle('task-window:show-main', (event, id: unknown) => {
     senderWindow(event)
     activateDesktopTask(requireSession(id))
-  })
-  ipcMain.handle('task-window:remote-draft-send', async (event, value: RemoteWelcomeDraftInput) => {
-    const source = sessionForWindow(senderWindow(event)), main = getMainWindow()
-    if (!source || !main || main.isDestroyed()) throw new Error('请从独立任务窗口交接到可用主窗口。')
-    requireSession(source)
-    const input = normalizeRemoteWelcomeDraft(value)
-    const hosts = await getRemoteHostService().listRemoteHosts()
-    if (sessionForWindow(senderWindow(event)) !== source || main !== getMainWindow() || main.isDestroyed()) throw new Error('窗口已变化，草稿未交接。')
-    assertRemoteWelcomeDraftHost(input, hosts.hosts.find(host => host.id === input.hostId))
-    const receipt = drafts.enqueue(input, source)
-    if (main.isMinimized()) main.restore()
-    main.show(); main.focus(); main.webContents.send('task-window:remote-drafts-changed')
-    return receipt
-  })
-  ipcMain.handle('task-window:remote-drafts', event => {
-    if (senderWindow(event) !== getMainWindow()) throw new Error('请在主窗口接收草稿。')
-    return drafts.pending()
-  })
-  ipcMain.handle('task-window:remote-draft-ack', (event, requestId: string) => {
-    if (senderWindow(event) !== getMainWindow()) throw new Error('请在主窗口确认草稿。')
-    drafts.acknowledge(requestId)
-    getMainWindow()?.webContents.send('task-window:remote-drafts-changed')
   })
   sessionManager.subscribe(({ sessionId }) => {
     const win = windows.get(sessionId)

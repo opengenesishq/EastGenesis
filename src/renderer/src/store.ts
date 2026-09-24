@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import { useLocalSitesNavigation } from './store/local-sites-navigation'
-import { useRemoteTaskNavigation } from './store/remote-task-navigation'
 import { useActivityStore } from './store/activity-store'
 import { interruptSession } from './store/session-interrupt'
 import { createDesktopNotificationNavigation } from './store/desktop-notification-navigation'
@@ -54,8 +53,6 @@ import type {
   PreviewAnnotation,
   PreviewAnnotationLocator,
   ProviderView,
-  QuickbarDispatchOptions,
-  QuickbarDispatchResult,
   Routine,
   RoutineRunRecord,
   WriteTextFileResult,
@@ -117,7 +114,6 @@ import {
   type FileEditorTab,
   type FileEditorTabsState
 } from './store/file-editor-tabs'
-import { ensureQuickbarSession, stageQuickbarPayload } from './store/quickbar-draft'
 import { ENABLE_PALACE_EXPERIENCE } from './brand'
 let seq = 0
 let fileRequestSeq = 0
@@ -752,10 +748,6 @@ export interface AppStore extends BusinessLineSlice, ExperienceModeSlice, Settin
   forkFromCheckpoint(checkpointId: string, sourceText: string): void
   selectSession(id: string): void
   sendMessage(input: string | SendMessagePayload, sessionId?: string): Promise<void>
-  sendQuickbarText(options: QuickbarDispatchOptions): Promise<QuickbarDispatchResult | undefined>
-  sendQuickbarClipboard(options: QuickbarDispatchOptions): Promise<QuickbarDispatchResult | undefined>
-  sendQuickbarScreenshot(options: QuickbarDispatchOptions): Promise<QuickbarDispatchResult | undefined>
-  sendQuickbarFiles(options: QuickbarDispatchOptions): Promise<QuickbarDispatchResult | undefined>
   interrupt(sessionId?: string): Promise<void>
   closeSession(id: string): Promise<void>
   respondPermission(sessionId: string, requestId: string, allow: boolean, message?: string): Promise<void>
@@ -1203,9 +1195,6 @@ export const useStore = create<AppStore>((set, get) => {
     notificationsEnabled: true,
     preventDisplaySleep: true,
     autoSkillLearningEnabled: false,
-    desktopCompanion: {
-      enabled: false, size: 'medium', alwaysOnTop: true, reducedMotion: false, legacyMigrated: false
-    },
     office: {
       qualityMode: 'auto', showBadges: true, liveliness: 1, catEars: false,
       spaceTheme: 'control-room', outfitPalette: 'role-default', hairStyle: 'role-default', teamLayout: 'grid'
@@ -1742,7 +1731,6 @@ export const useStore = create<AppStore>((set, get) => {
   },
 
   selectSession(id) {
-    useRemoteTaskNavigation.getState().close()
     useLocalSitesNavigation.getState().setVisible(false)
     useActivityStore.getState().setVisible(false)
     const previousId = get().activeId
@@ -1784,72 +1772,6 @@ export const useStore = create<AppStore>((set, get) => {
       setState: set,
       nextId: genId
     }, input)
-  },
-
-  async sendQuickbarText(options) {
-    try {
-      const text = options.note?.trim()
-      if (!text) return { ok: false, error: '请输入任务内容。' }
-      const target = await ensureQuickbarSession(get, options)
-      stageQuickbarPayload(get, target.sessionId, { text })
-      return { ok: true, sessionId: target.sessionId }
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) }
-    }
-  },
-
-  async sendQuickbarClipboard(options) {
-    try {
-      const target = await ensureQuickbarSession(get, options)
-      const result = await window.agentDesk.quickbarReadClipboard({
-        cwd: target.cwd,
-        note: options.note,
-        includeWindowContext: false
-      })
-      if (!result.ok || !result.payload) return { ok: false, sessionId: target.sessionId, error: result.error }
-      stageQuickbarPayload(get, target.sessionId, result.payload)
-      return { ok: true, sessionId: target.sessionId }
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) }
-    }
-  },
-
-  async sendQuickbarScreenshot(options) {
-    try {
-      const target = await ensureQuickbarSession(get, options)
-      const result = await window.agentDesk.quickbarCaptureScreenshot({
-        sessionId: target.sessionId,
-        cwd: target.cwd,
-        sourceId: options.sourceId,
-        expectedSourceName: options.expectedSourceName,
-        includeOcr: options.includeOcr,
-        note: options.note,
-        includeWindowContext: true
-      })
-      if (!result.ok || !result.payload) return { ok: false, sessionId: target.sessionId, error: result.error }
-      if (result.sessionId !== target.sessionId) throw new Error('截图附件的目标任务不匹配，请重新截图。')
-      stageQuickbarPayload(get, target.sessionId, result.payload, result.imagePreviews)
-      return { ok: true, sessionId: target.sessionId, warning: result.warning }
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) }
-    }
-  },
-
-  async sendQuickbarFiles(options) {
-    try {
-      const target = await ensureQuickbarSession(get, options)
-      const result = await window.agentDesk.quickbarPrepareFiles({
-        cwd: target.cwd,
-        paths: options.paths ?? [],
-        note: options.note,
-        includeWindowContext: false
-      })
-      if (!result.ok || !result.payload) return { ok: false, sessionId: target.sessionId, error: result.error }
-      stageQuickbarPayload(get, target.sessionId, result.payload)
-      return { ok: true, sessionId: target.sessionId }
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) }
-    }
   },
 
   async interrupt(sessionId) {
@@ -3513,7 +3435,6 @@ export const useStore = create<AppStore>((set, get) => {
     set({ rewindPanel: { open: false } })
   },
   setShowNewSession(v, projectId) {
-    if (v) useRemoteTaskNavigation.getState().close()
     if (v) { useLocalSitesNavigation.getState().setVisible(false); useActivityStore.getState().setVisible(false) }
     if (v) {
       get().updateWelcomeDraft({

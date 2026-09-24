@@ -6,7 +6,6 @@ import { useThemeEffect } from './theme'
 import type { MenuCommand } from '../../shared/types'
 import CommandPalette from './components/CommandPalette'
 import TaskRecoveryModal from './components/TaskRecoveryModal'
-import Quickbar from './components/Quickbar'
 import AppListView from './components/AppListView'
 import { requestConversationFind } from './components/conversation-find'
 import { APP_ICON_URL, APP_NAME } from './brand'
@@ -91,48 +90,6 @@ export default function App(): React.JSX.Element {
     void init()
   }, [init])
   useEffect(() => {
-    const bridge = window.desktopCompanionWorkbench
-    if (!bridge || !hydrated) return
-    let disposed = false
-    let navigationId = ''
-    const receiving = new Set<string>()
-    const offNavigation = bridge.onNavigate((navigation) => {
-      navigationId = navigation.requestId
-      void (async () => {
-        if (navigation.sessionId && !useStore.getState().sessions[navigation.sessionId]) await useStore.getState().syncSession(navigation.sessionId)
-        if (disposed || navigationId !== navigation.requestId) return
-        const state = useStore.getState()
-        if (navigation.sessionId && state.sessions[navigation.sessionId]?.meta.status !== 'closed' && state.sessions[navigation.sessionId]) state.selectSession(navigation.sessionId)
-        state.setShowSettings(false)
-        state.setShowNewSession(false)
-        // The main app has one conversation workspace. Legacy companion
-        // navigation targets are acknowledged here but never reopen the
-        // removed palace/office surface.
-        state.setView('list')
-        await bridge.acknowledgeNavigation(navigation.requestId)
-      })().catch(() => console.error('[companion] 工作台导航未完成，将在窗口就绪后重试。'))
-    })
-    const offDraft = bridge.onDesktopCompanionDraft((delivery) => {
-      if (receiving.has(delivery.requestId)) return
-      receiving.add(delivery.requestId)
-      void (async () => {
-        // Refresh the authoritative task identity before appending, including tasks created in another window.
-        const exists = await useStore.getState().syncSession(delivery.sessionId)
-        if (disposed) return
-        const session = useStore.getState().sessions[delivery.sessionId]
-        if (!exists || !session || session.meta.status === 'closed') throw new Error('任务已不可用，请从主工作台打开后重新加入草稿。')
-        if ((['id', 'createdAt', 'workspaceId', 'goalId', 'workItemId'] as const).some(key => session.meta[key] !== delivery.binding[key])) throw new Error('任务归属已经变化，未加入草稿。')
-        appendPersistentComposerDraft(window.localStorage, delivery.sessionId, delivery.text, delivery.requestId)
-        void bridge.acknowledgeDesktopCompanionDraft({ ...delivery, status: 'delivered' }).catch(() => console.error('[companion] 草稿已保存，等待重试回执。'))
-      })().catch(error => {
-        void bridge.acknowledgeDesktopCompanionDraft({ ...delivery, status: 'rejected', error: error instanceof Error ? error.message : String(error) }).catch(() => console.error('[companion] 草稿拒绝回执未送达。'))
-      }).finally(() => receiving.delete(delivery.requestId))
-    })
-    // Register listeners before declaring readiness, including on a reopened main window.
-    void bridge.readyDesktopCompanionReceiver().catch(() => console.error('[companion] 工作台接收端尚未就绪。'))
-    return () => { disposed = true; offNavigation(); offDraft() }
-  }, [hydrated])
-  useEffect(() => {
     if (typeof window.agentDesk === 'undefined') return
     return window.agentDesk.onMenuCommand(handleMenuCommand)
   }, [handleMenuCommand])
@@ -187,7 +144,6 @@ export default function App(): React.JSX.Element {
       )}
       {showCommandPalette && <CommandPalette />}
       {!showSettings && <TaskRecoveryModal />}
-      {!showSettings && <Quickbar />}
     </div>
   )
 }

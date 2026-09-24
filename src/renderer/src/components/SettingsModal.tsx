@@ -59,16 +59,11 @@ import DataRetentionSettings from './settings/DataRetentionSettings'
 import RoutingRulesPanel from './settings/RoutingRulesPanel'
 import DesktopPreferences from './settings/DesktopPreferences'
 import VoiceInputSettings from './settings/VoiceInputSettings'
-import QuickbarSettings from './settings/QuickbarSettings'
-import RemoteConnectionSettings from './settings/RemoteConnectionSettings'
-import SshSettings from './settings/SshSettings'
 import NotificationPreferences from './settings/NotificationPreferences'
 import TerminalPreferences from './settings/TerminalPreferences'
 import WorkspaceBehaviorPreferences from './settings/WorkspaceBehaviorPreferences'
 import ArchivedTaskSettings from './settings/ArchivedTaskSettings'
 import LocalProfileSettings from './settings/LocalProfileSettings'
-import RemoteHostsSettings from './settings/RemoteHostsSettings'
-import ComputerHistoryPanel from './settings/ComputerHistoryPanel'
 import LocalRuntimeSettings from './settings/LocalRuntimeSettings'
 import WslSettings from './settings/WslSettings'
 import FeedbackSettings from './settings/FeedbackSettings'
@@ -83,10 +78,10 @@ type ProviderProbeState = {
   error?: ProviderModelFetchError
 } | null
 
-/** Keep old deep links usable after retiring the project/persona/companion tabs. */
+/** Keep old deep links usable after retiring the project/persona/companion and 1.0 scope-cut tabs. */
 function normalizeSettingsTab(value: SettingsTab | string): SettingsTab {
   if (value === 'office') return 'appearance'
-  if (value === 'project' || value === 'persona' || value === 'companion') return 'general'
+  if (value === 'project' || value === 'persona' || value === 'companion' || value === 'appshots' || value === 'remote' || value === 'ssh' || value === 'remote-hosts' || value === 'computer-history') return 'general'
   return value as SettingsTab
 }
 const PERMISSION_CAPABILITY_OPTIONS: Array<{ value: ToolSemanticCapability; labelKey: string }> = [
@@ -428,16 +423,11 @@ export default function SettingsPage(): React.JSX.Element {
     { id: 'profile', label: settings.language === 'zh' ? '个人资料' : 'Local profile', icon: Ghost },
     { id: 'appearance', label: settings.language === 'zh' ? '外观' : 'Appearance', icon: Palette },
     { id: 'voice', label: settings.language === 'zh' ? '语音' : 'Voice', icon: Mic },
-    { id: 'remote', label: settings.language === 'zh' ? '手机与远程连接' : 'Mobile & remote', icon: Monitor },
-    { id: 'ssh', label: 'SSH', icon: Monitor },
     { id: 'terminal', label: settings.language === 'zh' ? '文件与终端' : 'Files & terminal', icon: Monitor },
     { id: 'git', label: 'Git', icon: FolderCog },
     { id: 'status', label: settings.language === 'zh' ? '状态' : 'Status', icon: Monitor },
     { id: 'browser', label: settings.language === 'zh' ? '浏览器' : 'Browser', icon: Monitor },
     { id: 'archived', label: settings.language === 'zh' ? '已归档任务' : 'Archived tasks', icon: Clock3 },
-    { id: 'remote-hosts', label: settings.language === 'zh' ? '控制其他主机' : 'Control other hosts', icon: Monitor },
-    { id: 'computer-history', label: settings.language === 'zh' ? '电脑历史' : 'Computer history', icon: Clock3 },
-    { id: 'appshots', label: settings.language === 'zh' ? '快捷输入与截图' : 'Quick input & screenshots', icon: Monitor },
     { id: 'models', label: settings.language === 'zh' ? '模型偏好' : 'Model preferences', icon: Cpu },
     { id: 'environment', label: settings.language === 'zh' ? '环境' : 'Environment', icon: Monitor },
     { id: 'permissions', label: t('tabPermissions'), icon: ShieldCheck },
@@ -449,10 +439,10 @@ export default function SettingsPage(): React.JSX.Element {
     { id: 'feedback', label: settings.language === 'zh' ? '反馈与诊断' : 'Feedback & diagnostics', icon: Monitor }
   ]
   const TAB_GROUPS: Array<{ label: string; ids: SettingsTab[] }> = [
-    { label: settings.language === 'zh' ? '个人' : 'Personal', ids: ['general', 'profile', 'migrate', 'appearance', 'voice', 'appshots', 'usage'] },
+    { label: settings.language === 'zh' ? '个人' : 'Personal', ids: ['general', 'profile', 'migrate', 'appearance', 'voice', 'usage'] },
     { label: settings.language === 'zh' ? '模型与集成' : 'Models & integrations', ids: ['providers', 'routing', 'models', 'permissions', 'plugins', 'notifications'] },
-    { label: settings.language === 'zh' ? '工作空间' : 'Workspace', ids: ['browser', 'environment', 'git', 'terminal', 'remote', 'remote-hosts', 'ssh', 'control'] },
-    { label: t('settingsGroupData'), ids: ['archived', 'computer-history', 'data', 'status', 'feedback'] }
+    { label: settings.language === 'zh' ? '工作空间' : 'Workspace', ids: ['browser', 'environment', 'git', 'terminal', 'control'] },
+    { label: t('settingsGroupData'), ids: ['archived', 'data', 'status', 'feedback'] }
   ]
   const searchTerm = settingsSearch.trim().toLocaleLowerCase()
   const searchTerms: Partial<Record<SettingsTab, string>> = {
@@ -463,14 +453,9 @@ export default function SettingsPage(): React.JSX.Element {
     profile: 'profile name avatar emoji 个人资料 显示名 头像 首字 图标',
     appearance: 'theme font layout keyboard shortcuts 外观 主题 字体 布局 缩放 快捷键',
     voice: 'voice microphone audio transcription 语音 麦克风 转写',
-    remote: 'phone remote pairing device HTTPS 手机 远程 配对 连接 设备 撤销',
-    ssh: 'ssh terminal server host key 终端 服务器 主机 公钥 指纹 远程',
     terminal: 'terminal scrollback cursor font size external editor file tabs 终端 回看 光标 字号 外部 编辑器 文件 标签 位置',
     git: 'git branch prefix commit pull request template 分支 前缀 提交 模板',
     archived: 'archive history restore 已归档 历史 恢复 任务',
-    'remote-hosts': 'hosts remote pairing control other computer 主机 远程 控制其他电脑 配对 信任 撤销',
-    'computer-history': 'computer history apps privacy delete 电脑 历史 应用 来源 暂停 删除',
-    appshots: 'appshots screenshot quickbar shortcuts 快捷键 截图 快捷输入 屏幕录制',
     models: 'model preferences defaults fallback 模型 偏好 默认 调度 回退',
     environment: 'environment npm pip mirrors 环境 镜像',
     permissions: 'permission access terminal browser workspace',
@@ -583,14 +568,9 @@ export default function SettingsPage(): React.JSX.Element {
             {tab === 'profile' && <LocalProfileSettings value={draft.desktopPersonalization} language={draft.language} onChange={value => set('desktopPersonalization', value)} />}
             {tab === 'appearance' && <DesktopPreferences draft={draft} onChange={patchDraft} appearance />}
             {tab === 'voice' && <VoiceInputSettings value={draft.voiceInput} providers={providers} zh={settings.language === 'zh'} onChange={value => set('voiceInput', value)} onAddProvider={() => openProviderEditor('new')} />}
-            {tab === 'appshots' && <QuickbarSettings value={draft.quickbar} zh={settings.language === 'zh'} onChange={value => set('quickbar', value)} />}
-            {tab === 'remote' && <RemoteConnectionSettings />}
-            {tab === 'ssh' && <SshSettings />}
             {tab === 'terminal' && <><WorkspaceBehaviorPreferences draft={draft} onChange={patchDraft} /><TerminalPreferences draft={draft} onChange={patchDraft} /></>}
             {tab === 'git' && <GitPreferences draft={draft} onChange={value => set('gitPreferences', value)} />}
             {tab === 'archived' && <ArchivedTaskSettings />}
-            {tab === 'remote-hosts' && <RemoteHostsSettings />}
-            {tab === 'computer-history' && <ComputerHistoryPanel />}
             {tab === 'feedback' && <FeedbackSettings />}
             {tab === 'status' && <DesktopStatus />}
             {tab === 'browser' && <BrowserPreferences />}

@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BrowserDownloadRecord, BrowserHistoryResult, BrowserPreferencesSnapshot, BrowserSiteRule } from '../../../../shared/browser-preferences-types'
 import { useStore } from '../../store'
-import BrowserExtensionSettings from './BrowserExtensionSettings'
-import BrowserDebugSettings from './BrowserDebugSettings'
 import './browser-preferences.css'
 
 const message = (error: unknown): string => error instanceof Error ? error.message : String(error)
@@ -89,8 +87,6 @@ export default function BrowserPreferences(): React.JSX.Element {
   }
   const value = snapshot?.preferences
   return <section className="browser-preferences" data-browser-preferences>
-    <BrowserExtensionSettings />
-    <BrowserDebugSettings />
     <p className="desktop-preference-intro">{zh ? '这些设置立即生效，适用于 EastGenesis 内置浏览器。外部 Chrome/Edge 使用自身的历史、下载和网站权限设置。' : 'Changes apply immediately to the EastGenesis embedded browser. External Chrome/Edge retain their own browser settings.'}</p>
     {error && <p className="notice notice-error" role="alert">{error}</p>}{notice && <p className="settings-hint" role="status">{notice}</p>}
     {!value ? <button className="btn btn-ghost" onClick={() => void load()}>{zh ? '载入浏览器设置' : 'Load browser settings'}</button> : <>

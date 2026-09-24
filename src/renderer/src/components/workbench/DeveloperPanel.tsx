@@ -8,7 +8,7 @@ const FilePanel = lazy(() => import('./FilePanel'))
 const TestPanel = lazy(() => import('./TestPanel'))
 const DebugPanel = lazy(() => import('./DebugPanel'))
 const RefactorPanel = lazy(() => import('./RefactorPanel'))
-const SiteDeploymentPanel = lazy(() => import('./SiteDeploymentPanel'))
+const LocalSitesPanel = lazy(() => import('./LocalSitesPanel'))
 
 type DeveloperView = 'files' | 'tests' | 'debug' | 'refactor' | 'sites'
 const DEVELOPER_VIEWS: DeveloperView[] = ['files', 'tests', 'debug', 'refactor', 'sites']
@@ -23,7 +23,7 @@ export default function DeveloperPanel(): React.JSX.Element {
   const [sitesVisited, setSitesVisited] = useState(false)
   const activeId = useStore(state => state.activeId)
   const siteRequest = useLocalSitesNavigation(state => state.taskSitesRequest)
-  useEffect(() => { if (siteRequest?.sessionId === activeId) { if (siteRequest.view === 'sites') setSitesVisited(true); setView(siteRequest.view) } }, [activeId, siteRequest])
+  useEffect(() => { if (siteRequest?.sessionId === activeId) setView(siteRequest.view) }, [activeId, siteRequest])
   const selectView = (next: DeveloperView): void => {
     if (next === 'tests') setTestsVisited(true)
     if (next === 'debug') setDebugVisited(true)
@@ -48,7 +48,7 @@ export default function DeveloperPanel(): React.JSX.Element {
         </DeveloperTab>
         <DeveloperTab active={view === 'sites'} label={zh ? '网站' : 'Sites'} view="sites" onSelect={selectView}><Globe2 size={14} aria-hidden="true" /></DeveloperTab>
       </div>
-      {sitesVisited && <div className="developer-panel-view" style={{ display: view === 'sites' ? 'flex' : 'none' }} aria-hidden={view !== 'sites'}><Suspense fallback={<p>{zh ? '加载网站部署…' : 'Loading deployments…'}</p>}><SiteDeploymentPanel /></Suspense></div>}
+      {sitesVisited && <div className="developer-panel-view" style={{ display: view === 'sites' ? 'flex' : 'none' }} aria-hidden={view !== 'sites'}><Suspense fallback={<p>{zh ? '加载网站…' : 'Loading sites…'}</p>}><LocalSitesPanel /></Suspense></div>}
       <div className="developer-panel-view" style={{ display: view === 'files' ? 'flex' : 'none' }} aria-hidden={view !== 'files'}>
         <Suspense fallback={<div className="workspace-diff-empty">{t('loadingDiff')}</div>}>
           <FilePanel />

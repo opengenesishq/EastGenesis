@@ -1,26 +1,17 @@
-import type { SiteDeploymentApi } from './site-deployment-types'
+import type { LocalSitePreviewApi } from './local-site-preview-types'
 import type { WorkspaceBehaviorApi } from './workspace-behavior-types'
-import type { BrowserExtensionApi } from './browser-extension-types'
-import type { ChatSnapshotShareApi } from './chat-snapshot-share-types'
 import type { McpOAuthApi } from './mcp-oauth-types'
-import type { HistoryQuestionApi } from './history-question-types'
 import type { WslApi } from './wsl-types'
 import type { MemoryPreferencesApi } from './memory-preferences-types'
 import type { MigrationSubscriptionApi } from './migration-subscription-types'
-import type { BrowserDebugApi } from './browser-debug-types'
-import type { TaskHandoffApi } from './task-handoff-api'
 import type { PluginCatalogApi } from './plugin-catalog-types'
 export interface AgentDeskApi extends PluginCatalogApi {}
-export interface AgentDeskApi extends TaskHandoffApi {}
-export interface AgentDeskApi extends MigrationSubscriptionApi, BrowserDebugApi {}
+export interface AgentDeskApi extends MigrationSubscriptionApi {}
 export interface AgentDeskApi extends MemoryPreferencesApi {}
 export interface AgentDeskApi extends WslApi {}
-export interface AgentDeskApi extends WorkspaceBehaviorApi, BrowserExtensionApi, ChatSnapshotShareApi, McpOAuthApi, HistoryQuestionApi {}
-import type { CompanionAppearanceApi } from './companion-appearance-types'
-import type { BrowserStyleApi } from './browser-style-types'
+export interface AgentDeskApi extends LocalSitePreviewApi, WorkspaceBehaviorApi, McpOAuthApi {}
 import type { RoutineInboxApi } from './routine-inbox-types'
-import type { HostedSiteApi } from './hosted-site-types'
-export interface AgentDeskApi extends CompanionAppearanceApi, BrowserStyleApi, RoutineInboxApi, HostedSiteApi {}
+export interface AgentDeskApi extends RoutineInboxApi {}
 import type { LocalDevServerApi } from './local-dev-server-types'
 import type { BrowserManagementApi } from './browser-preferences-types'
 import type { PullRequestWorkspaceApi } from './pull-request-workspace-types'
@@ -30,23 +21,14 @@ export interface AgentDeskApi extends BrowserTabApi {}
 import type { LocalSiteCatalogApi } from './local-site-catalog-types'
 import type { WorktreePullRequestDraftApi } from './worktree-pr-draft-types'
 export interface AgentDeskApi extends LocalSiteCatalogApi, WorktreePullRequestDraftApi {}
-import type { SshApi } from './ssh-types'
 import type { TaskSourceApi } from './task-source-types'
 import type { GoalModeApi } from './session-goal-mode'
 export interface AgentDeskApi extends GoalModeApi {}
 export interface AgentDeskApi extends TaskSourceApi {}
-import type { RemoteHostApi } from './remote-host-types'
-export interface AgentDeskApi extends RemoteHostApi {}
-import type { GuiPreviewWorkbenchApi } from './gui-preview-types'
-import type { ComputerHistoryApi } from './computer-history-types'
-export interface AgentDeskApi extends SshApi, GuiPreviewWorkbenchApi, ComputerHistoryApi {}
 import type { FeedbackApi } from './feedback-types'
-import type { SkillRecordingApi } from './skill-recording-types'
-export interface AgentDeskApi extends SkillRecordingApi {}
 import type { ProjectHistoryApi } from './project-history'
 
 export interface AgentDeskApi extends ProjectHistoryApi {}
-import type { RemoteConnectionApi } from './remote-connection-types'
 import type { WorkspaceHandoffApi, WorkspaceHandoffReceipt } from './workspace-handoff-types'
 export type * from './workspace-handoff-types'
 import type { SideChatApi, SideChatBinding } from './side-chat-types'
@@ -79,7 +61,6 @@ import type { ProjectWorkspaceApi } from './project-workspace-types'
 import type { BusinessLineBinding, BusinessLineSettings } from './business-line-types'
 import type { SessionRuntimeRoutingBinding } from './session-runtime-continuation-types'
 import type { ProjectPortfolioApi } from './project-portfolio-types'
-import type { RemoteApi } from './remote-types'
 import type { OutboundContextManifest } from './project-workspace-types'
 import type { LearningApi } from './learning-types'
 import type { LegacyMemoryImportInput, LegacyMemoryImportResult, LegacyMemoryPreview } from './legacy-memory-import-types'
@@ -100,10 +81,8 @@ import type { BrowserNavigationEffectApi, BrowserViewState } from './browser-ope
 import type { MediaApi, ProviderMediaPricing } from './media-types'
 import type { SessionEntrypointApi } from './session-entrypoint-types'
 import type { AssistantSearchApi } from './assistant-search-types'
-import type { PalaceSceneBuilderApi } from './palace-scene-builder-types'
 import type { ExternalBrowserBridgeApi } from './external-browser-types'
 import type { TaskActivityApi } from './activity-types'
-import type { TaskImageCanvasApi } from './image-canvas-types'
 export type * from './image-canvas-types'
 export type * from './activity-types'
 export type * from './external-browser-types'
@@ -151,7 +130,6 @@ export type * from './digital-worker-types'
 export type * from './watercolor-character'
 export type * from './project-workspace-types'
 export type * from './project-portfolio-types'
-export type * from './remote-types'
 export type * from './project-connector-catalog'
 export { PROJECT_CONNECTOR_CATALOG } from './project-connector-catalog'
 export { MANAGED_PERSONAL_WORKSPACE_ID } from './project-workspace-types'
@@ -1349,8 +1327,6 @@ export interface AppSettings extends BusinessLineSettings {
   /** Local font families for interface text and code/terminal surfaces. */
   desktopFonts?: import('./desktop-fonts').DesktopFontSettings
   /** Optional desktop companion window preference. */
-  desktopCompanion: import('./desktop-companion-types').DesktopCompanionSettings
-  quickbar?: import('./quickbar-settings').QuickbarSettings
   voiceInput?: VoiceInputSettings
   /** CaoGen Drive 默认档位;新会话默认继承此档位。 */
   driveMode: CaoGenDriveMode
@@ -1612,105 +1588,6 @@ export interface ImageOcrResult {
 export interface SaveImageAttachmentBytesInput {
   data: string | ArrayBuffer
   mime?: string
-}
-
-export type QuickbarTargetMode = 'current' | 'new'
-export type QuickbarEventSource = 'global-shortcut' | 'renderer' | 'menu'
-
-export interface QuickbarState {
-  visible: boolean
-  accelerator: string
-  registered: boolean
-  registrationError?: string
-  platform?: string
-  screenCapturePermission?: 'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown'
-}
-
-export interface QuickbarEvent {
-  kind: 'visibility'
-  visible: boolean
-  source: QuickbarEventSource
-}
-
-export interface QuickbarWindowContext {
-  id: string
-  name: string
-  kind: 'screen' | 'window'
-  title?: string
-  processName?: string
-  pid?: number
-  platform?: string
-  minimized?: boolean
-}
-
-export interface QuickbarContextResult {
-  ok: boolean
-  cwd: string
-  capturedAt: number
-  current?: QuickbarWindowContext
-  windows: QuickbarWindowContext[]
-  error?: string
-}
-
-export interface QuickbarClipboardInput {
-  cwd?: string
-  note?: string
-  includeWindowContext?: boolean
-}
-
-export interface QuickbarScreenshotInput {
-  sessionId: string
-  cwd?: string
-  sourceId?: string
-  expectedSourceName?: string
-  includeOcr?: boolean
-  note?: string
-  maxWidth?: number
-  includeWindowContext?: boolean
-}
-
-export interface QuickbarFileInput {
-  cwd?: string
-  paths: string[]
-  note?: string
-  includeWindowContext?: boolean
-}
-
-export interface QuickbarPayloadResult {
-  ok: boolean
-  payload?: SendMessagePayload
-  context?: QuickbarContextResult
-  screenshotPath?: string
-  sessionId?: string
-  imagePreviews?: Record<string, string>
-  warning?: string
-  files?: Array<{
-    path: string
-    kind: 'file' | 'directory' | 'other'
-    exists: boolean
-    bytes?: number
-    error?: string
-  }>
-  error?: string
-}
-
-export interface QuickbarDispatchOptions {
-  target: QuickbarTargetMode
-  /** Captured when the user selects a target; never resolved from activeId after an await. */
-  sessionId?: string
-  cwd?: string
-  sourceId?: string
-  expectedSourceName?: string
-  includeOcr?: boolean
-  paths?: string[]
-  note?: string
-}
-
-export interface QuickbarDispatchResult {
-  ok: boolean
-  sessionId?: string
-  error?: string
-  warning?: string
 }
 
 export interface ProviderInput {
@@ -2661,7 +2538,7 @@ export type MenuCommand =
   | { type: 'select-session'; index: number }
 
 /** 通过 contextBridge 暴露给渲染进程的 API */
-export interface AgentDeskApi extends TaskImageCanvasApi, FeedbackApi, TaskActivityApi, ExternalBrowserBridgeApi, SiteDeploymentApi, RemoteConnectionApi, WorkspaceHandoffApi, SideChatApi, VoiceInputApi, TaskWindowApi, TaskEffectRecoveryApi, CouncilApi, PreparationPermissionApi, TaskExecutionAuthorityApi, TaskBudgetApi, SessionInputApi, WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, RemoteApi, MediaApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi, PalaceSceneBuilderApi {
+export interface AgentDeskApi extends FeedbackApi, TaskActivityApi, ExternalBrowserBridgeApi, WorkspaceHandoffApi, SideChatApi, VoiceInputApi, TaskWindowApi, TaskEffectRecoveryApi, CouncilApi, PreparationPermissionApi, TaskExecutionAuthorityApi, TaskBudgetApi, SessionInputApi, WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, MediaApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi {
   inspectLocalRuntimes(): Promise<import('./local-runtime-types').LocalRuntimeStatus>
   listPendingPermissions(sessionId: string): Promise<PermissionRequestInfo[]>
   getTranscript(sessionId: string): Promise<TranscriptEntry[]>
@@ -2880,16 +2757,8 @@ export interface AgentDeskApi extends TaskImageCanvasApi, FeedbackApi, TaskActiv
   deleteLayeredMemory(entryId: string, sessionId?: string): Promise<boolean>
   pickDirectory(): Promise<string | null>
   pathForFile(file: File): string
-  quickbarGetState(): Promise<QuickbarState>
   setDesktopShortcutCapture(active: boolean): Promise<void>
-  quickbarSetVisible(visible: boolean): Promise<QuickbarState>
-  quickbarGetWindowContext(cwd?: string, sourceId?: string): Promise<QuickbarContextResult>
-  quickbarReadClipboard(input?: QuickbarClipboardInput): Promise<QuickbarPayloadResult>
-  quickbarCaptureScreenshot(input: QuickbarScreenshotInput): Promise<QuickbarPayloadResult>
-  quickbarPickFiles(): Promise<string[]>
-  quickbarPrepareFiles(input: QuickbarFileInput): Promise<QuickbarPayloadResult>
   onMenuCommand(cb: (command: MenuCommand) => void): () => void
-  onQuickbarEvent(cb: (event: QuickbarEvent) => void): () => void
   onDesktopNotification(cb: (sessionId: string) => void): () => void
   onSessionEvent(
     cb: (sessionId: string, event: AgentEvent, seq: number, eventId?: string, occurredAt?: number) => void

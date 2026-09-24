@@ -1,36 +1,22 @@
-import { siteDeploymentApi } from './site-deployment'
+import { localSitePreviewApi } from './local-site-preview'
 import { workspaceBehaviorApi } from './workspace-behavior'
-import { browserExtensionApi } from './browser-extension'
-import { chatSnapshotShareApi } from './chat-snapshot-share'
 import { mcpOAuthApi } from './mcp-oauth'
-import { historyQuestionApi } from './history-question'
 import { wslApi } from './wsl'
 import { memoryPreferencesApi } from './memory-preferences'
 import { migrationSubscriptionApi } from './migration-subscriptions'
-import { browserDebugApi } from './browser-debug'
-import { taskHandoffApi } from './task-handoff'
 import { pluginCatalogApi } from './plugin-catalog'
-import { companionAppearanceApi } from './companion-appearance'
-import { browserStyleApi } from './browser-style'
 import { routineInboxApi } from './routine-inbox'
-import { hostedSiteApi } from './hosted-site'
 import { localDevServerApi } from './local-dev-server'
 import { browserManagementApi } from './browser-management'
 import { pullRequestWorkspaceApi } from './pull-request-workspace'
 import { browserTabsApi } from './browser-tabs'
 import { localSiteCatalogApi } from './local-site-catalog'
 import { worktreePullRequestDraftApi } from './worktree-pr-draft'
-import { sshApi } from './ssh'
 import { taskSourceApi } from './task-sources'
-import { remoteHostsApi } from './remote-hosts'
-import { isGuiPreview, guiPreviewApi, guiPreviewWorkbenchApi } from './gui-preview'
-import { computerHistoryApi } from './computer-history'
 import { feedbackApi } from './feedback'
-import { skillRecordingApi } from './skill-recording'
 import { temporaryTaskApi } from './temporary-task'
 import { projectHistoryApi } from './project-history'
 import { taskActivityApi } from './activity'
-import { imageCanvasApi } from './image-canvas'
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import type {
   EffectResolution,
@@ -56,9 +42,6 @@ import type {
   ProviderModelFetchInput,
   ProviderInput,
   ProviderProfileImportDecision,
-  QuickbarClipboardInput,
-  QuickbarFileInput,
-  QuickbarScreenshotInput,
   SaveImageAttachmentBytesInput,
   SendMessagePayload,
   SessionEventPayload,
@@ -73,7 +56,6 @@ import { preparationPermissionApi } from './preparation-permission'
 import { taskExecutionAuthorityApi } from './task-execution-authority'
 import { taskBudgetApi } from './task-budget'
 import { projectWorkspaceApi } from './project-workspace'
-import { remoteContinuationApi } from './remote-continuation'
 import { dataRetentionApi } from './data-retention'
 import { projectTestApi } from './project-test'
 import { projectDebugApi } from './project-debug'
@@ -88,12 +70,10 @@ import { studioResultApi } from './studio-result'
 import { mediaApi } from './media'
 import { sessionEntrypointApi } from './session-entrypoints'
 import { assistantSearchApi } from './assistant-search'
-import { palaceSceneBuilderApi } from './palace-scene-builder'
 import { sessionInputApi } from './session-input'
 import { councilApi } from './council'
 import { taskWindowApi } from './task-window'
 import { voiceInputApi } from './voice-input'
-import { desktopCompanionApi, desktopCompanionWorkbenchApi, isDesktopCompanion } from './desktop-companion'
 import type { SideChatApi } from '../shared/side-chat-types'
 
 const sideChatApi: SideChatApi = {
@@ -115,39 +95,25 @@ const api: AgentDeskApi = {
   listExternalBrowserTabs: (connectionId: string) => ipcRenderer.invoke('externalBrowser:tabs', connectionId),
   selectExternalBrowserTab: (connectionId: string, tabId: string) => ipcRenderer.invoke('externalBrowser:selectTab', connectionId, tabId),
   revokeExternalBrowser: (connectionId: string) => ipcRenderer.invoke('externalBrowser:revoke', connectionId),
-  ...siteDeploymentApi,
+  ...localSitePreviewApi,
   ...workspaceBehaviorApi,
-  ...browserExtensionApi,
-  ...chatSnapshotShareApi,
   ...mcpOAuthApi,
-  ...historyQuestionApi,
   ...wslApi,
   ...memoryPreferencesApi,
   ...migrationSubscriptionApi,
-  ...browserDebugApi,
-  ...taskHandoffApi,
   ...pluginCatalogApi,
-  ...companionAppearanceApi,
-  ...browserStyleApi,
   ...routineInboxApi,
-  ...hostedSiteApi,
   ...localDevServerApi,
   ...browserManagementApi,
   ...pullRequestWorkspaceApi,
-  ...sshApi,
   ...taskSourceApi,
   ...browserTabsApi,
   ...localSiteCatalogApi,
   ...worktreePullRequestDraftApi,
-  ...remoteHostsApi,
-  ...guiPreviewWorkbenchApi,
-  ...computerHistoryApi,
   ...feedbackApi,
-  ...skillRecordingApi,
   ...temporaryTaskApi,
   ...projectHistoryApi,
   ...taskActivityApi,
-  ...imageCanvasApi,
   ...sideChatApi,
   ...voiceInputApi,
   ...taskWindowApi,
@@ -158,7 +124,6 @@ const api: AgentDeskApi = {
   ...sessionInputApi,
   ...sessionEntrypointApi,
   ...assistantSearchApi,
-  ...palaceSceneBuilderApi,
   listPendingPermissions: (sessionId: string) =>
     ipcRenderer.invoke('sessions:pendingPermissions', sessionId),
   getTranscript: (sessionId: string) => ipcRenderer.invoke('sessions:transcript', sessionId),
@@ -181,9 +146,6 @@ const api: AgentDeskApi = {
   listTaskSnapshots: () => ipcRenderer.invoke('taskSnapshots:list'),
   ...workflowLedgerApi,
   ...projectWorkspaceApi,
-  ...remoteContinuationApi,
-  getRemoteConnectionSettings: () => ipcRenderer.invoke('remote-connection:get'),
-  saveRemoteConnectionSettings: settings => ipcRenderer.invoke('remote-connection:save', settings),
   ...dataRetentionApi,
   ...projectTestApi,
   ...projectDebugApi,
@@ -577,26 +539,6 @@ const api: AgentDeskApi = {
   deleteLayeredMemory: (entryId: string, sessionId?: string) => ipcRenderer.invoke('memory:layeredDelete', entryId, sessionId),
   pickDirectory: () => ipcRenderer.invoke('dialog:pickDirectory'),
   pathForFile: (file: File) => webUtils.getPathForFile(file),
-  quickbarGetState: () => ipcRenderer.invoke('quickbar:getState'),
-  quickbarSetVisible: (visible: boolean) => ipcRenderer.invoke('quickbar:setVisible', visible),
-  quickbarGetWindowContext: (cwd?: string, sourceId?: string) =>
-    ipcRenderer.invoke('quickbar:getWindowContext', cwd, sourceId),
-  quickbarReadClipboard: (input?: QuickbarClipboardInput) =>
-    ipcRenderer.invoke('quickbar:readClipboard', input),
-  quickbarCaptureScreenshot: (input: QuickbarScreenshotInput) =>
-    ipcRenderer.invoke('quickbar:captureScreenshot', input),
-  quickbarPickFiles: () => ipcRenderer.invoke('quickbar:pickFiles'),
-  quickbarPrepareFiles: (input: QuickbarFileInput) =>
-    ipcRenderer.invoke('quickbar:prepareFiles', input),
-  onQuickbarEvent: (cb) => {
-    const listener = (_e: IpcRendererEvent, event: Parameters<typeof cb>[0]): void => {
-      cb(event)
-    }
-    ipcRenderer.on('quickbar:event', listener)
-    return () => {
-      ipcRenderer.removeListener('quickbar:event', listener)
-    }
-  },
   onDesktopNotification: (cb) => {
     const listener = (_e: IpcRendererEvent, sessionId: string): void => { cb(sessionId) }
     ipcRenderer.on('desktop-notification:activate', listener)
@@ -627,9 +569,4 @@ function invokeMain<T>(channel: string, ...args: unknown[]): Promise<T> {
   return ipcRenderer.invoke(channel, ...args) as Promise<T>
 }
 
-if (isGuiPreview) contextBridge.exposeInMainWorld('guiPreview', guiPreviewApi)
-else if (isDesktopCompanion) contextBridge.exposeInMainWorld('desktopCompanion', desktopCompanionApi)
-else {
-  contextBridge.exposeInMainWorld('agentDesk', api)
-  if (!taskWindowApi.taskWindowSessionId) contextBridge.exposeInMainWorld('desktopCompanionWorkbench', desktopCompanionWorkbenchApi)
-}
+contextBridge.exposeInMainWorld('agentDesk', api)

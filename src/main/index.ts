@@ -33,10 +33,7 @@ import {
   initializeRoutineSessionLifecycle,
   reconcileRoutineRunsAtStartup
 } from './routines/routine-session-lifecycle'
-import { stopRemoteWebhookServer } from './remote/webhook-server'
-import { stopRemoteContinuationReconciler } from './remote/reconciler'
 import { initAutoUpdater } from './updater'
-import { configureQuickbar, disposeQuickbar, registerQuickbarGlobalShortcut } from './quickbar'
 import { listProjects } from './projects'
 import { ensureProjectSkillReadiness } from './learning/learning-lifecycle'
 import { configurePluginRuntimeAuthorization } from './plugin/plugin-runtime-authorization'
@@ -68,13 +65,10 @@ import {
   startProjectConnectorAutoRefreshScheduler,
   stopProjectConnectorAutoRefreshScheduler
 } from './project-workspace/project-connector-scheduler'
-import { registerDesktopCompanion, disposeDesktopCompanion } from './desktop-companion'
-import { registerGuiPreviewWindows, disposeGuiPreviewWindows } from './gui-preview/gui-preview-window'
 import { registerDesktopWindow, desktopWindowRole } from './desktop-window-registry'
 import { getSettings, subscribeSettingsChanges } from './settings'
 import { shortcutFor, type DesktopShortcutAction } from '../shared/desktop-shortcuts'
 import { registerDesktopShortcutCapture } from './desktop-shortcut-capture'
-import { initializeRemoteConnection } from './remote/connection-controller'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -278,8 +272,6 @@ function ensureApplicationShell(): void {
   registerDesktopShortcutCapture()
   configureDesktopNotifications({ getMainWindow: () => mainWindow, showMainWindow })
   registerTaskWindows(() => mainWindow)
-  registerDesktopCompanion({ getMainWindow: () => mainWindow, showMainWindow, onVisibilityChange: updateTray })
-  registerGuiPreviewWindows(() => mainWindow)
   createWindow()
   installApplicationMenu()
   let shortcutSnapshot = JSON.stringify(getSettings().desktopShortcuts)
@@ -291,7 +283,6 @@ function ensureApplicationShell(): void {
     if (next !== shortcutSnapshot) {
       shortcutSnapshot = next
       installApplicationMenu()
-      registerQuickbarGlobalShortcut()
     }
   })
   shellInstalled = true
@@ -463,15 +454,7 @@ void app.whenReady().then(async () => {
   const routineRoot = join(app.getPath('userData'), 'routines')
   try { initializeRoutineSessionLifecycle(routineRoot, app.getPath('userData')) } catch (e) { console.error('[caogen] routine lifecycle init failed:', e) }
   try { await reconcileRoutineRunsAtStartup(routineRoot, app.getPath('userData')) } catch (e) { console.error('[caogen] routine reconciliation failed:', e) }
-  await initializeRemoteConnection()
   try { startMediaReconciliationScheduler(app.getPath('userData')) } catch (e) { console.error('[caogen] media reconciliation scheduler failed to start:', e) }
-  try { configureQuickbar({ getMainWindow: () => mainWindow, showMainWindow }) } catch (e) { console.error('[caogen] quickbar config failed:', e) }
-  try {
-    const quickbarState = registerQuickbarGlobalShortcut()
-    if (!quickbarState.registered) {
-      console.warn('[caogen] quickbar shortcut unavailable:', quickbarState.registrationError)
-    }
-  } catch (e) { console.error('[caogen] quickbar shortcut failed:', e) }
   try { installTray() } catch (e) { console.error('[caogen] tray install failed:', e) }
   // Routine 定时调度:每 30s 轮询,到点起会话执行(补齐"定时自动执行"承诺)
   try {
@@ -503,13 +486,8 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   disposeRoutineSessionLifecycle()
-  disposeQuickbar()
-  disposeDesktopCompanion()
-  disposeGuiPreviewWindows()
-  stopRemoteContinuationReconciler()
   stopMediaReconciliationScheduler()
   stopProjectConnectorAutoRefreshScheduler()
-  void stopRemoteWebhookServer().catch((error) => console.error('[caogen] remote webhook stop failed:', error))
 })
 
 app.on('before-quit', (event) => {
@@ -523,7 +501,6 @@ app.on('before-quit', (event) => {
   unsubscribeDesktopSettings?.()
   unsubscribeDesktopSettings = null
   stopRoutineScheduler()
-  stopRemoteContinuationReconciler()
   stopMediaReconciliationScheduler()
   stopProjectConnectorAutoRefreshScheduler()
   stopDataRetentionExpiryScheduler()
@@ -535,7 +512,6 @@ app.on('before-quit', (event) => {
   // 退出前等待任务快照落盘,再释放项目索引 watcher/SQLite 句柄。
   void (async () => {
     await finishTemporaryTaskChildren()
-    await stopRemoteWebhookServer()
     await sessionManager.disposeAll()
     await Promise.all([
       disposeProjectIndexers(),

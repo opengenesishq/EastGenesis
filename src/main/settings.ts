@@ -4,7 +4,6 @@ import { normalizeWorkspaceBehavior } from '../shared/workspace-behavior-types'
 import { normalizeDesktopGitPreferences } from '../shared/desktop-git-preferences'
 import { normalizeNotificationPreferences, normalizeTerminalPreferences } from '../shared/desktop-behavior-preferences'
 import { normalizeDesktopPersonalization } from '../shared/desktop-personalization'
-import { normalizeQuickbarSettings } from '../shared/quickbar-settings'
 import { normalizeSuggestedPrompts } from '../shared/suggested-prompt-settings'
 import { normalizeSessionFollowUpBehavior } from '../shared/session-follow-up'
 import { normalizeMemoryPreferences } from '../shared/memory-preferences-types'
@@ -28,7 +27,6 @@ import type {
   RoutingExpertPolicy,
   SchedulerStrategy
 } from '../shared/types'
-import { normalizeDesktopCompanionSettings } from '../shared/desktop-companion-settings'
 import { normalizeDesktopFonts } from '../shared/desktop-fonts'
 import { normalizeDesktopShortcuts, validateDesktopShortcuts } from '../shared/desktop-shortcuts'
 
@@ -62,7 +60,6 @@ const DEFAULTS: AppSettings = {
   browserDebug: normalizeBrowserDebugPreferences(undefined),
   desktopFonts: normalizeDesktopFonts(undefined),
   desktopShortcuts: {},
-  desktopCompanion: normalizeDesktopCompanionSettings(undefined),
   driveMode: 'core',
   defaultTaskStrategy: 'execute',
   ...normalizeBusinessLineSettings({ experienceMode: 'assistant' }),
@@ -351,8 +348,6 @@ export function normalizeSettingsDocument(document: RoutingSettingsDocument): Ap
     wsl: normalizeWslPreferences(raw.wsl),
     workspaceBehavior: normalizeWorkspaceBehavior(raw.workspaceBehavior),
     gitPreferences: normalizeDesktopGitPreferences(raw.gitPreferences),
-    quickbar: normalizeQuickbarSettings(raw.quickbar),
-    desktopCompanion: normalizeDesktopCompanionSettings(raw.desktopCompanion),
     desktopFonts: normalizeDesktopFonts(raw.desktopFonts),
     desktopShortcuts: normalizeDesktopShortcuts(raw.desktopShortcuts),
     suggestedPrompts: normalizeSuggestedPrompts(raw.suggestedPrompts),
@@ -439,8 +434,6 @@ export function updateSettings(patch: Partial<AppSettings>): AppSettings {
     wsl: normalizeWslPreferences(patch.wsl === undefined ? prev.wsl : patch.wsl),
     workspaceBehavior: normalizeWorkspaceBehavior(patch.workspaceBehavior === undefined ? prev.workspaceBehavior : patch.workspaceBehavior),
     gitPreferences: normalizeDesktopGitPreferences(patch.gitPreferences === undefined ? prev.gitPreferences : patch.gitPreferences),
-    quickbar: normalizeQuickbarSettings(patch.quickbar === undefined ? prev.quickbar : patch.quickbar),
-    desktopCompanion: normalizeDesktopCompanionSettings(patch.desktopCompanion === undefined ? prev.desktopCompanion : patch.desktopCompanion),
     desktopFonts: normalizeDesktopFonts(patch.desktopFonts === undefined ? prev.desktopFonts : patch.desktopFonts),
     desktopShortcuts: patch.desktopShortcuts === undefined ? prev.desktopShortcuts : validateDesktopShortcuts(patch.desktopShortcuts),
     suggestedPrompts: normalizeSuggestedPrompts(patch.suggestedPrompts === undefined ? prev.suggestedPrompts : patch.suggestedPrompts),

@@ -1,7 +1,0 @@
-.companion-images { margin-top: 20px; max-width: 600px; }.companion-images h4 { margin: 0 0 12px; }
-.companion-image-preview { width: 180px; height: 200px; display: grid; place-items: center; margin: 12px 0; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 12px; }
-.companion-image-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.companion-image-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); padding: 10px 0; }
-.companion-image-row span { min-width: 0; overflow-wrap: anywhere; }.companion-image-row small { display: block; color: var(--text-secondary); margin-top: 4px; }
-.companion-custom-image { width: 100%; height: 100%; object-fit: contain; user-select: none; pointer-events: none; }
-.companion-brand-image { width: 100%; height: 100%; object-fit: contain; user-select: none; pointer-events: none; }

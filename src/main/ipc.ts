@@ -1,45 +1,31 @@
-import { registerSiteDeploymentIpc } from './ipc/site-deployment-handlers'
 import { registerWorkspaceBehaviorIpc } from './ipc/workspace-behavior-handlers'
-import { registerBrowserExtensionIpc } from './ipc/browser-extension-handlers'
-import { registerChatSnapshotShareIpc } from './ipc/chat-snapshot-share-handlers'
 import { registerMcpOAuthIpc } from './ipc/mcp-oauth-handlers'
-import { registerHistoryQuestionIpc } from './ipc/history-question-handlers'
 import { registerWslIpc } from './ipc/wsl-handlers'
 import { registerMemoryPreferencesIpc } from './ipc/memory-preferences-handlers'
 import { registerMigrationSubscriptionIpc, rememberMigrationImport } from './ipc/migration-subscription-handlers'
-import { registerBrowserDebugIpc } from './ipc/browser-debug-handlers'
-import { registerTaskHandoffIpc } from './ipc/task-handoff-handlers'
 import { registerPluginCatalogIpc } from './ipc/plugin-catalog-ipc'
 import { readStoredMigrationScan } from './migration-scan-store'
 import { assertTaskExecutionEnvironment } from './wsl/binding'
 import { registerBrowserTabIpc } from './ipc/browser-tab-handlers'
 import type { BrowserTabTarget } from '../shared/browser-tab-types'
 import { registerLocalSiteCatalogIpc } from './ipc/local-site-catalog-handlers'
+import { registerLocalSitePreviewIpc } from './ipc/local-site-preview-handlers'
 import { registerLocalDevServerIpc } from './ipc/local-dev-server-handlers'
-import { registerCompanionAppearanceIpc } from './ipc/companion-appearance-handlers'
-import { registerBrowserStyleIpc } from './ipc/browser-style-handlers'
 import { registerRoutineInboxIpc } from './ipc/routine-inbox-handlers'
-import { registerHostedSiteIpc } from './ipc/hosted-site-handlers'
 import { registerBrowserManagementIpc } from './ipc/browser-management-handlers'
 import { registerPullRequestWorkspaceIpc } from './ipc/pull-request-workspace-handlers'
 import { registerWorktreePullRequestDraftIpc } from './ipc/worktree-pr-draft-handlers'
-import { registerSshIpc } from './ssh/service'
 import { registerTaskSourceIpc } from './ipc/task-source-handlers'
 import { clearSessionGoalMode } from './task/session-goal-mode'
 import { taskSessionForWindow } from './task-window'
 import { desktopWindowRole } from './desktop-window-registry'
-import { registerRemoteHostsIpc } from './remote-hosts/ipc'
-import { registerComputerHistoryIpc } from './ipc/computer-history-handlers'
 import { registerFeedbackIpc } from './ipc/feedback-handlers'
-import { registerSkillRecordingIpc } from './ipc/skill-recording-handlers'
 import { registerTemporaryTaskIpc } from './temporary-task/temporary-task-service'
 import { registerProjectHistoryIpc } from './ipc/project-history-handlers'
 import { inspectLocalRuntimes } from './local-runtime-status'
 import { listMigrationHistory, previewMigrationRollback, assertMigrationRollbackReview } from './migration-history'
-import { registerRemoteConnectionIpc } from './remote/connection-controller'
 import { registerExternalBrowserIpc } from './ipc/external-browser-handlers'
 import { registerActivityIpc } from './ipc/activity-handlers'
-import { registerImageCanvasIpc } from './ipc/image-canvas-handlers'
 import { workspaceBrowserRegistry } from './workspace-browser-context'
 import { assertTrustedWorkflowLedgerSender as assertTrustedWorkspaceTerminalSender } from './ipc/workflow-ledger-handlers'
 import { rememberWorkspaceTerminalDirectory, registerWorkspaceTerminalIpc } from './ipc/workspace-terminal-ipc'
@@ -159,8 +145,6 @@ import { createRoutineDefinition, updateRoutineDefinition } from './routines/rou
 import { listRoutineRuns } from './routines/routine-runner'
 import { reviewRoutineRun } from './routines/routine-review'
 import { listRoutineTemplates } from './routines/routine-templates'
-import { registerQuickbarIpc } from './quickbar'
-import { registerPalaceSceneBuilderIpc } from './ipc/palace-scene-builder-handlers'
 import { registerSessionInputIpc } from './ipc/session-input-handlers'
 import { registerPreparationPermissionIpc } from './ipc/preparation-permission-handlers'
 import { registerTaskExecutionAuthorityIpc } from './ipc/task-execution-authority-handlers'
@@ -342,21 +326,14 @@ function effectIntentDescription(snapshot: TaskSnapshotRecord, effect: EffectRec
 
 export function registerIpc(): void {
   registerWorkspaceBehaviorIpc()
-  registerTaskHandoffIpc()
   registerPluginCatalogIpc()
   registerMigrationSubscriptionIpc(migrationBackupRoot)
-  registerBrowserDebugIpc({ getSessionMeta: id => sessionManager.get(id)?.meta, manager: browserViewManager })
-  registerBrowserExtensionIpc({ getSessionMeta: id => sessionManager.get(id)?.meta })
-  registerChatSnapshotShareIpc()
   registerMcpOAuthIpc()
-  registerSshIpc()
   registerTaskSourceIpc()
   registerLocalSiteCatalogIpc()
+  registerLocalSitePreviewIpc()
   registerLocalDevServerIpc()
-  registerCompanionAppearanceIpc()
-  registerBrowserStyleIpc({ getSessionMeta: id => sessionManager.get(id)?.meta, manager: browserViewManager })
   registerRoutineInboxIpc()
-  registerHostedSiteIpc()
   registerBrowserManagementIpc({ getSessionMeta: id => sessionManager.get(id)?.meta, manager: browserViewManager })
   registerPullRequestWorkspaceIpc()
   registerWorktreePullRequestDraftIpc()
@@ -366,20 +343,13 @@ export function registerIpc(): void {
     if (!win || !['main', 'task'].includes(role ?? '') || role === 'task' && taskSessionForWindow(win) !== sessionId) throw new Error('请从原任务退出持续目标模式。')
     return clearSessionGoalMode(sessionId, app.getPath('userData'))
   }))
-  registerRemoteHostsIpc()
-  registerComputerHistoryIpc()
-  registerHistoryQuestionIpc()
   registerWslIpc()
   registerMemoryPreferencesIpc({ metaForSession: id => sessionManager.get(id)?.meta, updateSession: (id, overrides) => sessionManager.updateMemoryOverrides(id, overrides) })
-  registerSkillRecordingIpc()
   registerFeedbackIpc()
   registerTemporaryTaskIpc()
   registerProjectHistoryIpc()
-  registerSiteDeploymentIpc()
-  registerRemoteConnectionIpc()
   registerExternalBrowserIpc()
   registerActivityIpc()
-  registerImageCanvasIpc()
   registerPreparationPermissionIpc()
   registerTaskExecutionAuthorityIpc()
   registerTaskBudgetIpc()
@@ -387,7 +357,7 @@ export function registerIpc(): void {
   registerCouncilIpc()
   registerSideChatIpc()
   configureMigrationOperationBackupRoot(migrationBackupRoot())
-  for (const register of [registerQuickbarIpc, registerTaskRecoveryIpc, registerWorkflowLedgerIpc, registerProjectWorkspaceIpc, registerDataRetentionIpc, registerDigitalWorkerIpc, registerSupervisorIpc, registerInteractiveMutationIpc, registerAppFeatureIpc, registerProviderGatewayIpc, registerFileIntelligenceIpc, registerPermissionGrantIpc, registerPalaceSceneBuilderIpc]) register()
+  for (const register of [registerTaskRecoveryIpc, registerWorkflowLedgerIpc, registerProjectWorkspaceIpc, registerDataRetentionIpc, registerDigitalWorkerIpc, registerSupervisorIpc, registerInteractiveMutationIpc, registerAppFeatureIpc, registerProviderGatewayIpc, registerFileIntelligenceIpc, registerPermissionGrantIpc]) register()
   // Search adapters are resolved only by an explicit main-process factory. The
   // default production wiring therefore fails closed with no_credentials until
   // a provider-aware factory is intentionally supplied.

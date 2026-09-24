@@ -6,7 +6,6 @@ import { terminalManager } from './terminal'
 import { app, BrowserWindow, powerSaveBlocker } from 'electron'
 import { join } from 'node:path'
 import { desktopWindowRole } from './desktop-window-registry'
-import { DesktopCompanionOutbox } from './desktop-companion-outbox'
 import type { EffectResolution, TaskEffectRecoveryView } from '../shared/effect-recovery-types'
 import { buildTaskEffectRecoveryView } from './task/effect-recovery-view'
 import { isInteractiveOperationActive } from './task/operation-effect-gateway'
@@ -387,7 +386,6 @@ class SessionManager {
       }
     )
     purgeSideChatRecords(app.getPath('userData'), [history.id])
-    new DesktopCompanionOutbox(join(app.getPath('userData'), 'desktop-companion', 'draft-outbox.json')).purge([history.id])
     this.snapshotCounts.delete(history.id)
     this.recentEventIds.delete(history.id)
     this.effectRecoveryPreservedSessions.delete(history.id)

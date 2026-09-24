@@ -59,29 +59,3 @@ export interface SiteDeploymentPreview {
   localUrl?: string
 }
 export interface SiteDeploymentState { targets: SiteDeploymentTarget[]; receipts: SiteDeploymentReceipt[] }
-export interface LocalSitePreview {
-  id: string
-  sessionId: string
-  sourcePath: string
-  kind: 'html' | 'directory'
-  entryPath: string
-  localUrl: string
-  fileCount: number
-  bytes: number
-  manifestDigest: string
-  createdAt: number
-  expiresAt: number
-}
-export interface SiteDeploymentApi {
-  startLocalSitePreview(sessionId: string, path: string, expectedTaskKey?: string): Promise<LocalSitePreview>
-  getLocalSitePreview(sessionId: string): Promise<LocalSitePreview | null>
-  stopLocalSitePreview(sessionId: string, previewId?: string): Promise<void>
-  getSiteDeployments(sessionId: string): Promise<SiteDeploymentState>
-  saveSiteDeploymentTarget(sessionId: string, input: SiteDeploymentTarget): Promise<SiteDeploymentTarget>
-  removeSiteDeploymentTarget(sessionId: string, targetId: string, revision: number): Promise<void>
-  prepareSiteDeployment(sessionId: string, targetId: string, rollbackReceiptId?: string): Promise<SiteDeploymentPreview>
-  executeSiteDeployment(sessionId: string, previewId: string): Promise<SiteDeploymentReceipt | null>
-  cancelSiteDeployment(sessionId: string, receiptId: string): Promise<boolean>
-  inspectSiteDeployment(sessionId: string, receiptId: string): Promise<SiteDeploymentReceipt | null>
-  stopSiteDeploymentPreview(sessionId: string, previewId: string): Promise<void>
-}

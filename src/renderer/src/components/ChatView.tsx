@@ -14,7 +14,6 @@ import ChatStatusBar from './experience/ChatStatusBar'
 import TaskPlanWorkbench from './experience/TaskPlanWorkbench'
 import { useExperienceProjection } from './experience/ExperienceProjection'
 import SessionModelPicker from './composer/SessionModelPicker'
-import { ChatSnapshotShareDialog } from './sharing/ChatSnapshotShareLauncher'
 import { sessionRoutingLabel } from './composer/session-routing-form'
 import { ConversationFindBar, revealConversationMessage, useConversationFind } from './conversation-find'
 
@@ -79,8 +78,6 @@ export default function ChatView(): React.JSX.Element | null {
   const scrollFrame = useRef<number | null>(null)
   const [scrollSnapshot, setScrollSnapshot] = useState<ScrollSnapshot>({ top: 0, height: 0 })
   const [moreOpen, setMoreOpen] = useState(false)
-  const [sharingSessionId, setSharingSessionId] = useState<string | null>(null)
-  useEffect(() => { setSharingSessionId(null) }, [activeId])
   const [modelPickerSessionId, setModelPickerSessionId] = useState<string | null>(null)
   const moreRef = useRef<HTMLDivElement>(null)
 
@@ -267,8 +264,6 @@ export default function ChatView(): React.JSX.Element | null {
               <div className="header-more-menu" role="menu">
                 <MenuItem action="find-conversation" icon="review" label={zh ? '查找当前对话' : 'Find in conversation'} meta="⌘/Ctrl F"
                   onSelect={() => { setMoreOpen(false); find.show() }} />
-                <MenuItem action="share-snapshot" icon="summary" label={zh ? '分享对话快照' : 'Share conversation snapshot'}
-                  onSelect={() => { setMoreOpen(false); setSharingSessionId(activeId) }} />
                 <button type="button" className="header-more-item" role="menuitem" data-session-routing-open
                   onClick={() => { setMoreOpen(false); setModelPickerSessionId(modelPickerSessionId === activeId ? null : activeId) }}>
                   <HeaderIcon name="tools" /><span>{t('switchModel')}</span><small>{sessionRoutingLabel(meta, zh)}</small>
@@ -337,7 +332,6 @@ export default function ChatView(): React.JSX.Element | null {
         </div>
       </header>
       <ConversationFindBar find={find} zh={zh} />
-      {sharingSessionId === activeId && <ChatSnapshotShareDialog sessionId={activeId} zh={zh} onClose={() => setSharingSessionId(null)} />}
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
         <div className="chat-inner">
           {projection !== 'assistant' && <TaskPlanWorkbench sessionId={activeId} strategy={meta.taskStrategy} running={running} compact />}

@@ -143,8 +143,7 @@
     "test:office-delivery-requirements:required": "tsx scripts/office-delivery-requirements-required.ts",
     "test:office-requirements-audit:required": "tsx scripts/office-requirements-audit-required.ts",
     "test:session-requirement-revision:required": "tsx scripts/session-requirement-revision-required.ts",
-    "test:presentation-sequence:required": "tsx scripts/presentation-sequence-required.ts",
-    "prebuild": "node scripts/build-browser-extension.mjs"
+    "test:presentation-sequence:required": "tsx scripts/presentation-sequence-required.ts"
   },
   "build": {
     "appId": "com.caogen.app",

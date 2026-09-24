@@ -173,7 +173,7 @@ function useResolvedProviderDraft(
   )
 
   useEffect(() => {
-    if (!providersLoaded || stored.executionTarget?.kind === 'remote') return
+    if (!providersLoaded) return
     if ((stored.providerId ?? '') === resolved.providerId
       && (stored.model ?? '') === resolved.model
       && stored.routingMode === resolved.routingMode) return
@@ -182,7 +182,7 @@ function useResolvedProviderDraft(
       model: resolved.model || null,
       routingMode: resolved.routingMode
     })
-  }, [providersLoaded, resolved.model, resolved.providerId, resolved.routingMode, stored.model, stored.providerId, stored.routingMode, stored.executionTarget?.kind, update])
+  }, [providersLoaded, resolved.model, resolved.providerId, resolved.routingMode, stored.model, stored.providerId, stored.routingMode, update])
 
   return resolved
 }

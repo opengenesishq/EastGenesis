@@ -17,7 +17,6 @@ import {
   RoutingMessage
 } from './experience/RoutingMessage'
 import CopyButton from './CopyButton'
-import ImageCanvasLauncher from './image-canvas/ImageCanvasLauncher'
 
 // Markdown 依赖 highlight.js(~700KB),懒加载拆出首屏包;未加载完先按纯文本显示
 const Markdown = lazy(() => import('./Markdown'))
@@ -157,7 +156,7 @@ function MessageItem({
             <div className="msg-user-attachments">
               {item.attachments.map((attachment, index) => (
                 <div key={`${attachment.id}-${index}`} className="msg-user-attachment">
-                  {sessionId && <ImageCanvasLauncher sessionId={sessionId} initialAttachmentId={attachment.id} title="查看与批注图片" ariaLabel="查看与批注图片">图片</ImageCanvasLauncher>}
+                  <span>图片</span>
                   <span>{attachment.mime.replace('image/', '').toUpperCase()}</span>
                   <span>{formatBytes(attachment.bytes)}</span>
                 </div>

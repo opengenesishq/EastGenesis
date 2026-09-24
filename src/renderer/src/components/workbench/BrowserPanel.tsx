@@ -4,12 +4,9 @@ import { useT } from '../../i18n'
 import { useStore } from '../../store'
 import { canSendToSession, isSessionBusy } from './session-send-availability'
 import ResearchSearchPanel from './ResearchSearchPanel'
-import ExternalBrowserPanel from './ExternalBrowserPanel'
 import BrowserTabStrip from './BrowserTabStrip'
 import BrowserSiteControls from './BrowserSiteControls'
-import BrowserStylePanel from './BrowserStylePanel'
-import BrowserDebugPanel from './BrowserDebugPanel'
-import { activeBrowserState, targetForBrowserState } from '../../store/browser-tab-state'
+import { activeBrowserState } from '../../store/browser-tab-state'
 import type { BrowserTabsSnapshot } from '../../../../shared/browser-tab-types'
 
 function annotationLabel(note: string): string {
@@ -129,16 +126,12 @@ function BrowserPanelHeader(props: {
 }
 
 export default function BrowserPanel({ active = true }: { active?: boolean }): React.JSX.Element {
-  const sessionId = useStore(state => state.activeId)
-  const [externalMode, setExternalMode] = useState(false)
   const bounds = useStore(state => state.setBrowserBounds)
   useEffect(() => {
-    if (externalMode || !active) void bounds({ x: 0, y: 0, width: 0, height: 0 })
-  }, [externalMode, active, bounds])
-  return <div className={`browser-panel-with-connections ${externalMode ? 'is-external' : ''}`}>
-    {sessionId && <ExternalBrowserPanel key={sessionId} sessionId={sessionId} active={active} externalMode={externalMode} onModeChange={setExternalMode} />}
-    {externalMode && <p className="settings-hint">高级调试当前仅支持内置浏览器；外部 CDP 和浏览器扩展暂不支持。</p>}
-    {!externalMode && <EmbeddedBrowserPanel active={active} />}
+    if (!active) void bounds({ x: 0, y: 0, width: 0, height: 0 })
+  }, [active, bounds])
+  return <div className="browser-panel-with-connections">
+    <EmbeddedBrowserPanel active={active} />
   </div>
 }
 
@@ -168,11 +161,6 @@ function EmbeddedBrowserPanel({ active = true }: { active?: boolean }): React.JS
   const addressRevision = useRef(0)
   const [note, setNote] = useState('')
   const [showAnnotations, setShowAnnotations] = useState(false)
-  const [showStyles, setShowStyles] = useState(false)
-  const [showDebug, setShowDebug] = useState(false)
-  const styleTarget = targetForBrowserState(browserState)
-  const styleVisible = showStyles && active && activePanelId === 'browser' && !!styleTarget
-  const debugVisible = showDebug && active && activePanelId === 'browser' && !!styleTarget
   const zh = useStore(state => state.settings.language === 'zh')
   const [manualTakeover, setManualTakeover] = useState(false)
   const noteRevision = useRef(0)
@@ -287,9 +275,7 @@ function EmbeddedBrowserPanel({ active = true }: { active?: boolean }): React.JS
       </div>
 
       <div className="browser-assistant-toggle no-drag">
-        <button className="btn btn-ghost btn-sm" disabled={!styleTarget || browserPicking || browserLoading} aria-expanded={showDebug} aria-controls="browser-debug-panel" onClick={() => { setShowDebug(value => !value); setShowStyles(false); setShowAnnotations(false) }}>{zh ? '高级调试' : 'Advanced debugging'}</button>
-        <button className="btn btn-ghost btn-sm" disabled={!styleTarget || browserPicking || browserLoading} aria-expanded={showStyles} aria-controls="browser-style-adjuster" onClick={() => { setShowStyles(value => !value); setShowAnnotations(false); setShowDebug(false) }}>{zh ? '样式调整' : 'Style adjustment'}</button>
-        <button className="btn btn-ghost btn-sm" aria-expanded={showAnnotations} aria-controls="browser-research-annotations" onClick={() => { setShowAnnotations(value => !value); setShowStyles(false); setShowDebug(false) }}>{showAnnotations ? (zh ? '收起研究与批注' : 'Hide research & notes') : (zh ? '研究与批注' : 'Research & notes')}{browserAnnotations.length ? ` (${browserAnnotations.length})` : ''}</button>
+        <button className="btn btn-ghost btn-sm" aria-expanded={showAnnotations} aria-controls="browser-research-annotations" onClick={() => setShowAnnotations(value => !value)}>{showAnnotations ? (zh ? '收起研究与批注' : 'Hide research & notes') : (zh ? '研究与批注' : 'Research & notes')}{browserAnnotations.length ? ` (${browserAnnotations.length})` : ''}</button>
       </div>
       <BrowserSiteControls state={browserState} />
 
@@ -305,13 +291,11 @@ function EmbeddedBrowserPanel({ active = true }: { active?: boolean }): React.JS
         </div>
       )}
 
-      <div className={`browser-body ${debugVisible ? 'has-debug-sidebar' : styleVisible ? 'has-style-sidebar' : showAnnotations ? 'has-assistant-sidebar' : 'browser-page-full-width'}`}>
+      <div className={`browser-body ${showAnnotations ? 'has-assistant-sidebar' : 'browser-page-full-width'}`}>
         <div className="browser-viewport" ref={viewportRef}>
           {!browserState && <div className="browser-placeholder">{t('browserStarting')}</div>}
           {browserState && !browserState.tabId && <div className="browser-placeholder">点击 + 新建标签页</div>}
         </div>
-        {styleVisible && styleTarget && <BrowserStylePanel key={`${styleTarget.contextId}:${styleTarget.contextEpoch}:${styleTarget.tabId}:${styleTarget.selectionRevision}:${styleTarget.navigationRevision}`} target={styleTarget} />}
-        {debugVisible && styleTarget && <BrowserDebugPanel key={`debug:${styleTarget.contextId}:${styleTarget.contextEpoch}:${styleTarget.tabId}:${styleTarget.selectionRevision}:${styleTarget.navigationRevision}`} target={styleTarget} />}
         <aside id="browser-research-annotations" className="browser-annotations" hidden={!showAnnotations}>
           {activeId && <ResearchSearchPanel key={activeId} sessionId={activeId} />}
           <div className="browser-annotation-editor">

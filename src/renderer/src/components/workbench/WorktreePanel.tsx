@@ -5,7 +5,6 @@ import { formatTime } from '../../format'
 import WorktreeMergeInspector from './WorktreeMergeInspector'
 import WorktreePullRequestDraft from './WorktreePullRequestDraft'
 import PullRequestWorkspace from './PullRequestWorkspace'
-import TaskHandoffPanel from './TaskHandoffPanel'
 
 function shortSha(sha?: string): string {
   return sha ? sha.slice(0, 8) : ''
@@ -108,10 +107,6 @@ export default function WorktreePanel(): React.JSX.Element {
       </header>
 
       <div className="worktree-panel-body">
-        {session && activeId && <details className="worktree-remote-handoff" data-task-handoff-entry>
-          <summary>{zh ? '移交到其他主机' : 'Hand off to another host'}</summary>
-          <TaskHandoffPanel key={`${activeId}:${session.meta.createdAt}`} sessionId={activeId} sessionCreatedAt={session.meta.createdAt} />
-        </details>}
         {session && <div className="worktree-actions">
           <button className="btn btn-primary btn-sm" disabled={handoffBusy || worktreeLoading} onClick={() => void onHandoff()}>
             {handoffBusy ? '正在交接…' : session.meta.workspaceHandoffPending ? '继续上次交接' : session.meta.isolated ? '交接到本地目录' : '交接到 Worktree'}

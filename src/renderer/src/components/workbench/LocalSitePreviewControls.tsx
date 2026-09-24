@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { LocalSitePreview } from '../../../../shared/site-deployment-types'
+import type { LocalSitePreview } from '../../../../shared/local-site-preview-types'
 import { useStore } from '../../store'
 import { trackLocalSitePreview, untrackLocalSitePreview } from './local-site-preview-lifecycle'
 import LocalDevServerPanel from './LocalDevServerPanel'

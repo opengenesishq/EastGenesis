@@ -1,8 +1,7 @@
-import { Suspense, lazy, useEffect } from 'react'
+import { Suspense, lazy } from 'react'
 import type { ExperienceMode } from '../store/experience-mode'
 import { useStore } from '../store'
 import { useActivityStore } from '../store/activity-store'
-import { useRemoteTaskNavigation } from '../store/remote-task-navigation'
 import Sidebar from './Sidebar'
 import WelcomeView from './WelcomeView'
 import WorkbenchRoot from './workbench/WorkbenchRoot'
@@ -14,7 +13,6 @@ import './codex-desktop-shell.css'
 // Legacy project/video records remain readable in the store, but they no longer
 // select a second product surface or add another navigation model.
 const ActivityCenter = lazy(() => import('./studio/ActivityCenter'))
-const RemoteTaskWorkspacePage = lazy(() => import('../pages/RemoteTaskWorkspacePage'))
 
 interface AppListViewProps {
   activeId: string | null
@@ -63,13 +61,6 @@ export default function AppListView({
 }: AppListViewProps): React.JSX.Element {
   useFirstTaskOnboardingLifecycle()
   const activityVisible = useActivityStore(state => state.visible)
-  const remoteTask = useRemoteTaskNavigation(state => state.target)
-
-  useEffect(() => {
-    // Keep the shell deterministic when a legacy task or external notification
-    // re-enters the app. The next action always lands in the single composer.
-    useRemoteTaskNavigation.getState().close()
-  }, [activeId, showNewSession])
 
   return (
     <div className="caogen-desktop-shell" data-product-surface="conversation">
@@ -82,13 +73,6 @@ export default function AppListView({
         <main className="main">
           <DesktopViewNavigation language={language} />
           <div className="experience-pane" data-experience-mode="assistant">
-            {remoteTask && (
-              <section className="experience-surface experience-remote-task">
-                <Suspense fallback={<div className="studio-loading">正在打开任务…</div>}>
-                  <RemoteTaskWorkspacePage key={`${remoteTask.hostId}:${remoteTask.sourceCommandId}`} target={remoteTask} />
-                </Suspense>
-              </section>
-            )}
             {activityVisible && (
               <section className="experience-surface experience-activity">
                 <Suspense fallback={<div className="studio-loading">正在加载活动…</div>}>
@@ -96,7 +80,7 @@ export default function AppListView({
                 </Suspense>
               </section>
             )}
-            {!remoteTask && !activityVisible && (
+            {!activityVisible && (
               <ConversationSurface
                 activeId={activeId}
                 hasActive={hasActive}

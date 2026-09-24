@@ -6,19 +6,13 @@ import './styles.css'
 
 const App = lazy(() => import('./App'))
 const TaskWindowApp = lazy(() => import('./TaskWindowApp'))
-const DesktopCompanionApp = lazy(() => import('./components/companion/DesktopCompanionApp'))
-const GuiPreviewApp = lazy(() => import('./components/gui-preview/GuiPreviewApp'))
 
 const container = document.getElementById('root')
 const detachedSessionId = taskWindowSessionId()
 if (container) {
-  const content = window.guiPreview
-    ? <GuiPreviewApp />
-    : window.desktopCompanion
-    ? <DesktopCompanionApp />
-    : detachedSessionId
-      ? <TaskWindowApp sessionId={detachedSessionId} />
-      : <App />
+  const content = detachedSessionId
+    ? <TaskWindowApp sessionId={detachedSessionId} />
+    : <App />
   createRoot(container).render(
     <React.StrictMode>
       <Suspense fallback={<div className="office-loading">加载中…</div>}>{content}</Suspense>

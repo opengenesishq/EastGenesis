@@ -4,7 +4,6 @@ import { getSettings } from '../settings'
 import { evaluateToolPermission } from '../permission/tool-permission'
 import { LocalSiteCatalogService } from './local-site-catalog'
 import { LocalSitePreviewService } from './local-site-preview'
-import { isSiteDeploymentActive } from './site-deployment-service'
 
 function assertRead(id: string, path: string): void {
   const meta = sessionManager.get(id)?.meta
@@ -15,7 +14,7 @@ function assertRead(id: string, path: string): void {
 let catalog: LocalSiteCatalogService | undefined, previews: LocalSitePreviewService | undefined
 export function localSiteCatalogService(): LocalSiteCatalogService {
   return catalog ??= new LocalSiteCatalogService({ root: () => app.getPath('userData'), session: id => sessionManager.get(id)?.meta,
-    assertRead: async (id, path) => { await sessionManager.assertInteractiveExecutionAuthorized(id, '读取当前任务静态网站'); assertRead(id, path) }, isExecuting: isSiteDeploymentActive })
+    assertRead: async (id, path) => { await sessionManager.assertInteractiveExecutionAuthorized(id, '读取当前任务静态网站'); assertRead(id, path) } })
 }
 export function localSitePreviewService(): LocalSitePreviewService {
   return previews ??= new LocalSitePreviewService({ root: () => app.getPath('userData'), session: id => sessionManager.get(id)?.meta,
