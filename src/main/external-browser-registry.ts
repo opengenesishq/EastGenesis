@@ -3,8 +3,6 @@ import type { BrowserWindow } from 'electron'
 import { normalizeExternalBrowserInput, type ExternalBrowserConnection, type ExternalBrowserConnectInput, type ExternalBrowserTab, type ExternalBrowserConnectResult } from '../shared/external-browser-types'
 import type { EffectTarget } from '../shared/effect-types'
 import { ExternalBrowserCdpAdapter, EXTERNAL_BROWSER_CAPABILITIES } from './external-browser-cdp'
-import { ExternalBrowserExtensionAdapter } from './browser-extension/adapter'
-import { browserExtensionBridge } from './browser-extension/bridge'
 
 type MutationPage = NonNullable<Extract<EffectTarget, { kind: 'unsupported' }>['browserPage']>
 type MutationKind = NonNullable<MutationPage['actionTarget']>['kind']
@@ -49,9 +47,8 @@ export class ExternalBrowserRegistry {
         entry.connection = { ...entry.connection, status: 'disconnected', selectionRevision: entry.connection.selectionRevision + 1 }
       }
     }
-    const adapter = entry.connection.transport === 'extension'
-      ? new ExternalBrowserExtensionAdapter(entry.connection.vendor, entry.connection.id, onDisconnect)
-      : this.makeAdapter(copy(entry), Number(entry.connection.endpointLabel.split(':')[1]), onDisconnect)
+    if (entry.connection.transport === 'extension') throw new Error('浏览器扩展连接已不再支持。')
+    const adapter = this.makeAdapter(copy(entry), Number(entry.connection.endpointLabel.split(':')[1]), onDisconnect)
     entry.adapter = adapter
     try {
       await adapter.connect()
@@ -102,7 +99,6 @@ export class ExternalBrowserRegistry {
     if (this.bySession.get(entry.connection.sessionId) === id) this.bySession.delete(entry.connection.sessionId)
     entry.attempt++; entry.connection.status = 'revoked'; entry.connection.revokedAt = Date.now()
     entry.adapter?.disconnect(); entry.adapter = undefined
-    browserExtensionBridge.revoke(id)
     return true
   }
   revokeForSession(sessionId: string): void { const id = this.bySession.get(sessionId); if (id) this.revoke(id) }

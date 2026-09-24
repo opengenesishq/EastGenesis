@@ -1,7 +1,0 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EastGenesis 标签授权</title><link rel="stylesheet" href="popup.css"></head><body>
-<h1>EastGenesis 浏览器连接</h1><p class="hint">调试权限可以读取和修改附加标签。仅在你明确配对、授权标签并在 EastGenesis 绑定后工作。</p>
-<label>扩展 ID<input id="extension-id" readonly></label><label>当前标签<span id="tab-title"></span></label>
-<section id="pair-section"><label>一次性配对码<input id="pair-code" autocomplete="off" placeholder="CG1.…"></label><button id="pair">连接 EastGenesis</button></section>
-<section id="authorize-section" hidden><p id="task-title"></p><p class="hint">授权覆盖此标签及其后续 HTTP(S) 页面；其他标签不会被附加。</p><button id="authorize">允许当前任务使用这个标签</button></section>
-<section id="attached-section" hidden><p id="attached-label"></p><p class="hint">回到 EastGenesis 手动绑定此标签，然后继续任务。</p></section>
-<button id="revoke" hidden>撤销连接与标签授权</button><p id="message" role="status"></p><script src="popup.js"></script></body></html>
