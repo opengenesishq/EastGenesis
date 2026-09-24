@@ -4,7 +4,7 @@ import { createRunDetailRoute, resolveRunRecoverySnapshotId } from '../../../../
 import { useStore } from '../../store'
 import RunDetailPanel from '../studio/RunDetailPanel'
 import { mergeWorkflowLedgerPages } from '../studio/workInboxNavigation'
-import SessionRawRecords from '../office/PalaceRawRecords'
+import SessionRawRecords from './SessionRawRecords'
 import GoalContinuationPanel from './GoalContinuationPanel'
 import './task-execution-panel.css'
 

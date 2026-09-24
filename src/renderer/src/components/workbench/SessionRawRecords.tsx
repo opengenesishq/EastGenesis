@@ -7,7 +7,7 @@ import { formatPermissionInput } from '../PermissionBar'
 type RecordFilter = 'all' | 'tools' | 'permissions' | 'failures'
 type Binding = Pick<SessionMeta, 'id' | 'workspaceId' | 'goalId' | 'workItemId'>
 
-export default function PalaceRawRecords({ session, zh }: { session: SessionState; zh: boolean }): React.JSX.Element {
+export default function SessionRawRecords({ session, zh }: { session: SessionState; zh: boolean }): React.JSX.Element {
   const binding = session.meta
   return <BoundRecords key={JSON.stringify([binding.id, binding.workspaceId, binding.goalId, binding.workItemId])} binding={binding} zh={zh} />
 }
@@ -50,8 +50,8 @@ function BoundRecords({ binding, zh }: { binding: Binding; zh: boolean }): React
     return records.filter(({ entry, text }) => matchesFilter(entry, filter) && (!search || text.toLocaleLowerCase().includes(search)))
   }, [records, filter, query])
   const refreshLabel = zh ? '刷新原始记录' : 'Refresh source records'
-  return <div className="palace-raw-records" data-palace-raw-records={binding.id}>
-    <div className="palace-raw-records-toolbar">
+  return <div className="session-raw-records" data-session-raw-records={binding.id}>
+    <div className="session-raw-records-toolbar">
       <h3>{zh ? '原始会话记录' : 'Original session records'}</h3>
       <button type="button" className="btn btn-ghost btn-sm" title={refreshLabel} aria-label={refreshLabel} disabled={loading} onClick={() => void refresh()}><RefreshCw size={14} aria-hidden="true" /></button>
       <select aria-label={zh ? '记录类型' : 'Record type'} value={filter} onChange={event => { setFilter(event.target.value as RecordFilter); setVisibleCount(100) }}>
@@ -63,14 +63,14 @@ function BoundRecords({ binding, zh }: { binding: Binding; zh: boolean }): React
       <input type="search" aria-label={zh ? '搜索原始记录' : 'Search source records'} placeholder={zh ? '搜索记录' : 'Search records'} value={query}
         onChange={event => { setQuery(event.target.value); setVisibleCount(100) }} />
     </div>
-    <p className="palace-work-identity">{binding.id}</p>
+    <p className="session-raw-records-identity">{binding.id}</p>
     <p role="status">{loading ? (zh ? '正在读取原始记录…' : 'Reading source records…') : loadedAt
       ? `${zh ? '读取时间' : 'Read at'} ${new Date(loadedAt).toLocaleTimeString()} · ${matching.length} / ${entries.length} ${zh ? '条事件' : 'events'}` : ''}
       {entries.length > 0 && ` · #${entries[0].seq} – #${entries.at(-1)!.seq}`}</p>
     {entries.length > 0 && entries[0].seq > 1 && <p role="status">{zh ? '当前为引擎返回的最近记录，序号范围之前的事件未载入。' : 'These are recent records returned by the engine. Earlier events are not loaded.'}</p>}
     {error && <p role="alert">{error}</p>}
     {!loading && !error && matching.length === 0 && <p>{zh ? '当前没有匹配的原始记录。' : 'No matching source records.'}</p>}
-    {matching.slice(0, visibleCount).map(({ entry, text }) => <details key={`${entry.seq}:${entry.eventId ?? ''}`} data-palace-raw-seq={entry.seq}>
+    {matching.slice(0, visibleCount).map(({ entry, text }) => <details key={`${entry.seq}:${entry.eventId ?? ''}`} data-raw-record-seq={entry.seq}>
       <summary>#{entry.seq} · {entry.event.kind}{entry.occurredAt ? ` · ${new Date(entry.occurredAt).toLocaleString()}` : ''}{entry.event.kind === 'tool-result' && entry.event.isError ? (zh ? ' · 失败' : ' · Failed') : ''}</summary>
       <pre>{text}</pre>
     </details>)}

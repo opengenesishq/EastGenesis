@@ -1,6 +1,0 @@
-.welcome-provider-setup { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 14px; margin: 16px 0 4px; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border)); border-radius: 14px; background: color-mix(in srgb, var(--accent) 7%, var(--bg-card)); color: var(--text-secondary); font-size: 13px; }
-.caogen-desktop-shell .welcome-provider-setup { width: min(620px, 100%); margin: 14px auto 0; }
-.caogen-desktop-shell .welcome-provider-setup > span { color: var(--text); }
-.welcome-provider-setup > div { display: flex; flex-wrap: wrap; gap: 8px; }
-.provider-first-import { margin: 0 0 14px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
-.provider-first-import p { margin: 0 0 8px; }

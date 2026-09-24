@@ -8,7 +8,8 @@
 .task-execution-panel .run-detail-grid { grid-template-columns: minmax(0, 1fr); }
 .task-execution-panel .run-detail-header { flex-wrap: wrap; }
 .task-execution-panel .run-detail-identity, .task-execution-panel p, .task-execution-panel summary { overflow-wrap: anywhere; }
-.task-execution-panel .palace-raw-records-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.task-execution-panel .palace-raw-records-toolbar input, .task-execution-panel .palace-raw-records-toolbar select { max-width: 100%; min-width: 0; }
-.task-execution-panel .palace-raw-records pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 400px; overflow: auto; padding: 8px; background: var(--bg-raised); }
-.task-execution-panel .palace-raw-records details { padding: 8px 0; border-top: 1px solid var(--border); }
+.task-execution-panel .session-raw-records-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.task-execution-panel .session-raw-records-toolbar input, .task-execution-panel .session-raw-records-toolbar select { max-width: 100%; min-width: 0; }
+.task-execution-panel .session-raw-records pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 400px; overflow: auto; padding: 8px; background: var(--bg-raised); }
+.task-execution-panel .session-raw-records details { padding: 8px 0; border-top: 1px solid var(--border); }
+.task-execution-panel .session-raw-records-identity { color: var(--text-dim); overflow-wrap: anywhere; }
