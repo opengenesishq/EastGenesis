@@ -66,6 +66,8 @@ export interface MigrationApplyResult {
   ok: boolean
   status: 'applied' | 'no_changes' | 'failed'
   backupId?: string
+  /** Assets captured by the main process as eligible for an explicit source watch. */
+  subscriptionAssetIds?: string[]
   applied: MigrationApplyItemResult[]
   skipped: MigrationApplyItemResult[]
   errorCode?: string
@@ -82,8 +84,32 @@ export interface MigrationRollbackResult {
   message: string
 }
 
+export type MigrationHistoryState = 'prepared' | 'backup_verified' | 'applying' | 'committed' | 'rollback_pending' | 'rolled_back' | 'invalid'
+export interface MigrationHistoryEntry {
+  backupId: string
+  state: MigrationHistoryState
+  createdAt?: number
+  updatedAt?: number
+  targetPaths: string[]
+  canReviewRollback: boolean
+  message?: string
+}
+export interface MigrationHistory {
+  entries: MigrationHistoryEntry[]
+  truncated: boolean
+}
+export interface MigrationRollbackPreview {
+  backupId: string
+  targetPaths: string[]
+  canRollback: boolean
+  reviewDigest?: string
+  message: string
+}
+
 export interface MigrationApi {
   scanMigration(cwd?: string): Promise<MigrationScan>
   applyMigration(input: MigrationApplyInput): Promise<MigrationApplyResult>
-  rollbackMigration(backupId: string): Promise<MigrationRollbackResult>
+  listMigrationHistory(): Promise<MigrationHistory>
+  previewMigrationRollback(backupId: string): Promise<MigrationRollbackPreview>
+  rollbackMigration(backupId: string, reviewDigest?: string): Promise<MigrationRollbackResult>
 }

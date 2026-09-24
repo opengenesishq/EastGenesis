@@ -6,7 +6,7 @@ import { retainAcademyResource, type AcademyResource } from './academyResourceCa
 
 const ignoreDecorativeRaycast = (): void => undefined
 
-export default function AcademyMeshes({ parts, resource }: { parts: AcademyGeometryPart[]; resource?: AcademyResource }): React.JSX.Element {
+export default function AcademyMeshes({ parts, resource, colors }: { parts: AcademyGeometryPart[]; resource?: AcademyResource; colors?: Partial<Record<keyof typeof ACADEMY_COLORS, string>> }): React.JSX.Element {
   const gradient = useMemo(() => {
     const texture = new DataTexture(new Uint8Array([78, 145, 208, 255]), 4, 1, RedFormat)
     texture.minFilter = NearestFilter
@@ -22,7 +22,7 @@ export default function AcademyMeshes({ parts, resource }: { parts: AcademyGeome
   useEffect(() => () => { if (!resource) outlines.forEach((geometry) => geometry.dispose()) }, [outlines, resource])
   return <group userData={{ assetOrigin: 'caogen-original-procedural', style: 'ming-academy' }}>
     {parts.map(({ color, geometry }) => <mesh key={color} geometry={geometry} castShadow receiveShadow raycast={ignoreDecorativeRaycast}>
-      <InkToonMaterial color={ACADEMY_COLORS[color]} gradientMap={gradient} surface={inkSurface(color)} />
+      <InkToonMaterial color={colors?.[color] ?? ACADEMY_COLORS[color]} gradientMap={gradient} surface={inkSurface(color)} />
     </mesh>)}
     {outlines.map((geometry, index) => <lineSegments key={index} geometry={geometry} raycast={ignoreDecorativeRaycast}>
       <lineBasicMaterial color="#34433d" transparent opacity={.18} depthWrite={false} />

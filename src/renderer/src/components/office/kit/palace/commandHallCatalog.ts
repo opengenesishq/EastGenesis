@@ -20,7 +20,7 @@ export interface CommandHallStationSpec {
   action: CommandHallStationAction
 }
 
-/** The six functional stations in HALL_main. Each station is a projection of an existing CaoGen surface. */
+/** The six functional stations in HALL_main. Each station is a projection of an existing EastGenesis surface. */
 export const COMMAND_HALL_STATIONS: readonly CommandHallStationSpec[] = [
   { id: 'command_desk', anchor: 'COMMAND_DESK', label: '总控案', purpose: '查看全局目标并提交自然语言任务', position: [0, 2.4, -14], capabilities: ['目标总览', '自然语言指令', '召集议政'], action: 'command' },
   { id: 'plan_sandbox', anchor: 'STATUS_PLAN', label: '规划沙盘', purpose: '复核 WorkItem 依赖、分派和路由建议', position: [-6, 2.4, -12], capabilities: ['WorkItem 依赖', '分派复核', '路由建议'], action: 'new_task' },

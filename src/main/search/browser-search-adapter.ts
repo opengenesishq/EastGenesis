@@ -7,6 +7,7 @@ import { SearchOperationError, type SearchAdapter, type SearchRequest } from './
 
 export interface BrowserSearchAdapterOptions {
   rootDir: string
+  browser?: { available(sessionId: string): boolean; searchPage(sessionId: string, query: string, signal: AbortSignal): Promise<import('./search-broker').SearchAdapterResult> }
   /** Main-owned live Session lookup, never a renderer-provided object. */
   resolveSession(request: SearchRequest): { meta: SessionMeta; runId: string } | Promise<{ meta: SessionMeta; runId: string }>
   /** Checks the explicit one-query receipt and current outbound-data permission. */
@@ -19,7 +20,7 @@ export function createBrowserSearchAdapter(options: BrowserSearchAdapterOptions)
     available(request) {
       if (request.egress !== 'allow' || !request.authorizationId) return { ok: false, reason: 'egress_denied' }
       if (!request.sessionId || !request.runId || !request.projectId) return { ok: false, reason: 'scope_denied' }
-      if (!browserViewManager.getState(request.sessionId)) return { ok: false, reason: 'browser_unavailable' }
+      if (!(options.browser ? options.browser.available(request.sessionId) : browserViewManager.getState(request.sessionId))) return { ok: false, reason: 'browser_unavailable' }
       return { ok: true }
     },
     async search(request, execution) {
@@ -50,13 +51,13 @@ export function createBrowserSearchAdapter(options: BrowserSearchAdapterOptions)
       assertCurrent()
       await options.assertAuthorized(request)
       assertCurrent()
-      const result = await browserViewManager.searchPage(origin.meta.id, request.query, signal)
+      const result = await (options.browser ? options.browser.searchPage(origin.meta.id, request.query, signal) : browserViewManager.searchPage(origin.meta.id, request.query, signal))
       assertCurrent()
       await options.assertAuthorized(request)
       const current = await options.resolveSession(request)
       if (freezeScope(current.meta, current.runId) !== frozen) throw new SearchOperationError('scope_denied', 'Search Session changed during query')
       assertCurrent()
-      return { ...result, assertCurrent }
+      return { ...result, assertCurrent: () => { assertCurrent(); result.assertCurrent?.() } }
     }
   }
 }

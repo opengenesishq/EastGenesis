@@ -1,0 +1,68 @@
+.palace-court-controls {
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  z-index: 6;
+  box-sizing: border-box;
+  width: 280px;
+  max-width: calc(100% - 32px);
+  padding: 14px;
+  border: 1px solid rgba(224, 204, 162, .24);
+  border-radius: 14px;
+  background: rgba(25, 23, 22, .78);
+  color: #f3ebdc;
+  box-shadow: 0 8px 28px #0003;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.palace-court-controls-heading { display: flex; align-items: center; gap: 8px; }
+.palace-court-controls-heading > strong { font-size: 14px; font-weight: 600; }
+.palace-court-controls-status { margin-left: auto; color: #d3c4aa; font-size: 11px; }
+.palace-court-controls button {
+  appearance: none;
+  border: 1px solid rgba(224, 204, 162, .22);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .055);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 6px 9px;
+}
+.palace-court-controls button:hover:not(:disabled) { background: rgba(255, 255, 255, .13); }
+.palace-court-controls button:focus-visible { outline: 2px solid #e1bd7b; outline-offset: 3px; }
+.palace-court-controls button:disabled { opacity: .4; cursor: default; }
+.palace-court-controls .palace-court-close { border: 0; background: transparent; padding: 0; width: 24px; height: 24px; font-size: 22px; line-height: 1; color: #d3c4aa; }
+.palace-court-stage-current { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 15px; }
+.palace-court-stage-current > span { font-size: 20px; font-weight: 600; letter-spacing: .05em; }
+.palace-court-stage-current > small { color: #d3c4aa; font-size: 11px; }
+.palace-court-stage-list { display: flex; list-style: none; padding: 0; margin: 12px 0; gap: 8px; }
+.palace-court-stage-list > li { flex: 1; display: flex; flex-direction: column; gap: 5px; color: #a79e90; font-size: 10px; }
+.palace-court-stage-list > li > span { display: block; height: 3px; border-radius: 2px; background: #ffffff20; }
+.palace-court-stage-list > li.is-current { color: #ffe0a6; }
+.palace-court-stage-list > li.is-current > span { background: #e8be77; }
+.palace-court-stage-list > li.is-complete > span { background: #ad946c; }
+.palace-court-progress { display: flex; align-items: center; gap: 9px; }
+.palace-court-progress > progress { appearance: none; width: 0; min-width: 0; height: 3px; flex: 1; border: 0; background: #ffffff20; border-radius: 2px; overflow: hidden; }
+.palace-court-progress > progress::-webkit-progress-bar { background: #ffffff20; border-radius: 2px; }
+.palace-court-progress > progress::-webkit-progress-value { background: #e8be77; border-radius: 2px; }
+.palace-court-progress > progress::-moz-progress-bar { background: #e8be77; border-radius: 2px; }
+.palace-court-progress > span { color: #c7bba6; font-variant-numeric: tabular-nums; font-size: 10px; }
+.palace-court-playback-buttons { display: flex; gap: 6px; margin-top: 12px; }
+.palace-court-speed { display: flex; margin-left: auto; gap: 4px; }
+.palace-court-speed > button { padding-inline: 7px; }
+.palace-court-speed > button[aria-pressed="true"] { border-color: #c9a46a; color: #ffe0a6; background: #e8be7719; }
+.palace-court-controls .palace-court-open-work { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 10px; border-color: #cead7770; color: #ffe0a6; }
+.palace-court-motion-note { margin: 9px 0 0; color: #bfb3a1; font-size: 10px; }
+@media (max-width: 640px) {
+  .palace-court-controls { left: 10px; top: 10px; width: 246px; max-width: calc(100% - 20px); padding: 11px; }
+  .palace-court-stage-current { margin-top: 10px; }
+  .palace-court-stage-current > span { font-size: 17px; }
+}
+
+.office[data-court-playing="true"] :is(.office-camera-strip, .office-business-strip, .office-command-strip, .office-selection-panel, .office-facility-panel, .office-idle-notice, .office-operational-panel, .office-task-label-layer) { display: none; }
+.court-report-caption { position: absolute; z-index: 6; left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: min(680px, calc(100% - 40px)); padding: 13px 18px; border: 1px solid #d8c4a2; border-radius: 12px; background: #f8f1e7ed; color: #493f31; box-shadow: 0 5px 25px #46342124; }
+.court-report-caption strong { font-size: 13px; white-space: nowrap; }
+.court-report-caption > span { flex: 1 1 240px; font-size: 12px; line-height: 1.5; }
+@media (max-width: 760px) { .court-report-caption { bottom: 12px; padding: 9px 12px; } }

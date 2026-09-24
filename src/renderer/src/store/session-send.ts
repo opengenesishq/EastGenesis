@@ -1,5 +1,6 @@
 import type { StoreApi } from 'zustand'
 import type { SendMessagePayload } from '../../../shared/types'
+import { projectUserMessageImageAttachments } from '../../../shared/attachment-types'
 import type { AppStore } from '../store'
 
 type StoreAccess = Pick<StoreApi<AppStore>, 'getState' | 'setState'> & { nextId(): string }
@@ -32,7 +33,7 @@ export async function sendActiveSessionMessage(
             id: optimisticId,
             kind: 'user',
             text: displayText,
-            attachments: payload.images?.map(({ id: imageId, mime, bytes }) => ({ id: imageId, mime, bytes }))
+            attachments: projectUserMessageImageAttachments(payload.images)
           }],
           meta: { ...session.meta, status: 'running' }
         }

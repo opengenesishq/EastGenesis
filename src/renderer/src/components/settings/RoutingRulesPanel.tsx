@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store'
-import { getBusinessLines } from '../../../../shared/business-line-types'
-import type { RoutingRuleApi, RoutingRuleDraftV1 } from '../../../../shared/routing-policy-types'
+import type { RoutingRuleApi } from '../../../../shared/routing-policy-types'
+import { ROUTING_RULE_LIMITS } from '../../../../shared/routing-policy-parser'
 import RoutingRuleEditorShell from './routing-rules/RoutingRuleEditorShell'
 import RoutingRuleForm from './routing-rules/RoutingRuleForm'
 import { createRoutingControllerRunner } from './routing-rules/routing-controller-runner'
@@ -11,17 +11,21 @@ import { initialRoutingPreviewContext, resolvePanelLegacy, reviewedPanelDraft } 
 import RoutingPanelContext from './routing-rules/RoutingPanelContext'
 import RoutingPanelComparison from './routing-rules/RoutingPanelComparison'
 import RoutingPreviewRuleSources from './routing-rules/RoutingPreviewRuleSources'
+import RoutingPreviewExplanation from './routing-rules/RoutingPreviewExplanation'
 import { routingProviderOptions } from './routing-rules/routing-provider-options'
+import { createRoutingRuleDraft } from './routing-rules/routing-rule-templates'
 import './routing-rules/routing-panel.css'
 
 export default function RoutingRulesPanel(): React.JSX.Element {
-  const settings = useStore((s) => s.settings)
   const providers = useStore((s) => s.providers)
   const activeId = useStore((s) => s.activeId)
   const activeSession = useStore((s) => activeId ? s.sessions[activeId] : undefined)
   const active = activeSession?.meta
   const activePrompt = [...(activeSession?.items ?? [])].reverse().find((item) => item.kind === 'user')
-  const businessLineId = settings.selectedBusinessLineId ?? 'assistant'
+  // Routing is a single conversation-wide policy in the simplified assistant
+  // projection. Keep the legacy identity in preview requests for compatibility
+  // without exposing a custom business-line picker in settings.
+  const businessLineId = 'assistant'
   const [state, setState] = useState<RoutingControllerState>(() => ({ ...createRoutingControllerState(),
     context: initialRoutingPreviewContext(active?.id, businessLineId, activePrompt?.kind === 'user' ? activePrompt.text : '') }))
   const retained = useRef(state)
@@ -46,12 +50,12 @@ export default function RoutingRulesPanel(): React.JSX.Element {
   const read = state.read
   const draft = state.draft
   if (!read || !draft) return <RoutingPanelReadState state={state} onReread={reread} />
-  const lines = getBusinessLines(settings).map((line) => ({ id: line.id, name: line.name, enabled: line.enabled }))
+  const lines: never[] = []
   const providerOptions = routingProviderOptions(providers)
   const providerName = (id: string): string => providers.find((provider) => provider.id === id)?.name ?? id
-  const lineName = (id: string): string => lines.find((line) => line.id === id)?.name ?? id
+  const lineName = (_id: string): string => '全局'
   const selected = draft.rules.find((rule) => rule.id === state.selectedRuleId) ?? draft.rules[0]
-  const limits = { targets: 8, keywords: 12, retries: 8, maxPriority: 1000 }
+  const limits = ROUTING_RULE_LIMITS
   const edit = selected ? <RoutingRuleForm draft={selected} providers={providerOptions} businessLines={lines} limits={limits} diagnostics={state.preview?.diagnostics}
     onChange={(next) => runnerRef.current?.editDraft({ ...draft, rules: draft.rules.map((rule) => rule.id === next.id ? next : rule) })} /> : undefined
   const locked = Boolean(state.pending) || routingOutcomeUnknown(state) || read.mode === 'invalid_v1'
@@ -60,8 +64,6 @@ export default function RoutingRulesPanel(): React.JSX.Element {
     if (result.resolution) { runnerRef.current?.resolveComparison(result.resolution); setReviewOpen(false) }
   }
   return <div className="rr-editor" data-routing-panel>
-    <RoutingPanelContext context={state.context} active={active} lines={lines} defaultLineId={businessLineId} disabled={locked || Boolean(state.comparison)}
-      onChange={(context) => runnerRef.current?.setContext(context)} />
     {state.error && <div className="rr-panel-error" role="alert" data-routing-panel-error={state.error.kind}>
       <p>{state.error.kind === 'save_outcome_unknown' ? '尚不能确认保存结果，请重新读取并核对。' : state.error.message}</p>
       <button type="button" disabled={Boolean(state.pending)} onClick={reread}>重新读取规则</button>
@@ -71,15 +73,20 @@ export default function RoutingRulesPanel(): React.JSX.Element {
     <RoutingRuleEditorShell read={read} draft={draft} selectedRuleId={selected?.id ?? null} businessLines={lines} dirty={state.dirty}
     busy={state.pending?.kind === 'save' ? 'saving' : state.pending?.kind === 'preview' ? 'previewing' : state.pending?.kind === 'read' ? 'loading' : undefined}
     migration={state.migration} lastSave={state.lastSave} diagnostics={state.preview?.diagnostics} editor={edit}
+    previewContext={<details className="rr-preview-context" data-routing-preview-context><summary>预演任务（可选）</summary>
+      <p>可沿用当前任务，也可以输入示例，查看这些规则会选择哪个模型。</p>
+      <RoutingPanelContext context={state.context} active={active} defaultLineId={businessLineId} disabled={locked || Boolean(state.comparison)}
+        onChange={(context) => runnerRef.current?.setContext(context)} />
+    </details>}
     preview={state.preview && <section data-routing-panel-preview>
       <p role="status">{state.preview.status === 'ready' && state.preview.initialTarget
         ? `初始目标：${providerName(state.preview.initialTarget.providerId)} / ${state.preview.initialTarget.model}` : '当前规则不可执行'}</p>
       <RoutingPreviewRuleSources preview={state.preview} rules={draft.rules} />
+      <RoutingPreviewExplanation preview={state.preview} providerName={providerName} />
     </section>}
     onSelectRule={(id) => runnerRef.current?.selectRule(id)}
-    onAddRule={() => {
-      const rule: RoutingRuleDraftV1 = { id: `route-${crypto.randomUUID()}`, name: '', enabled: true, priority: draft.rules.length,
-        scope: { kind: 'global' }, when: {}, selection: { kind: 'global_auto' }, strategy: 'balanced', failure: { kind: 'pause' }, expectedVersion: null }
+    onAddRule={(template) => {
+      const rule = createRoutingRuleDraft(draft.rules, template)
       runnerRef.current?.editDraft({ ...draft, rules: [...draft.rules, rule] })
       runnerRef.current?.selectRule(rule.id)
     }}

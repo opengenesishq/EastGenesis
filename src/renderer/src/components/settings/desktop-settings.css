@@ -1,0 +1,100 @@
+.desktop-settings {
+  --bg: #181818;
+  --bg-raised: #232323;
+  --bg-card: #232323;
+  --bg-input: #2c2c2c;
+  --border: #363636;
+  --border-soft: #2e2e2e;
+  --settings-sidebar-width: 270px;
+  position: relative;
+}
+[data-theme='light'] .desktop-settings {
+  --bg: #fff;
+  --bg-raised: #f7f7f7;
+  --bg-card: #f7f7f7;
+  --bg-input: #ededed;
+  --border: #dedede;
+  --border-soft: #e8e8e8;
+}
+.desktop-settings .settings-body { max-width: none; align-self: stretch; }
+.desktop-settings .settings-tabs {
+  flex: 0 0 var(--settings-sidebar-width);
+  width: var(--settings-sidebar-width);
+  padding: 0 9px 20px;
+  border: 0;
+  background: #3c3c3c;
+  gap: 0;
+}
+[data-theme='light'] .desktop-settings .settings-tabs { background: #f0f0f0; }
+.desktop-settings-titlebar { min-height: 45px; flex-shrink: 0; }
+.desktop-settings .settings-page-back {
+  width: 100%; min-height: 36px; display: flex; justify-content: flex-start;
+  gap: 10px; padding: 7px 10px; margin-bottom: 10px; color: var(--text); font-size: 14px;
+}
+.desktop-settings .settings-search { background: #484848; border: 0; margin-bottom: 18px; min-height: 32px; border-radius: 9px; }
+[data-theme='light'] .desktop-settings .settings-search { background: #e6e6e6; }
+.desktop-settings .settings-search-input { font-size: 13px; }
+.desktop-settings .settings-tab-group { gap: 1px; margin-bottom: 20px; }
+.desktop-settings .settings-tab-group-label { font-size: 12px; font-weight: 400; padding: 0 8px 5px; color: #a1a1a1; text-transform: none; }
+.desktop-settings .settings-tab { font-size: 13.5px; min-height: 33px; padding: 6px 9px; color: #e0e0e0; font-weight: 400; border-radius: 8px; }
+.desktop-settings .settings-tab svg { width: 16px; height: 16px; stroke-width: 1.6; }
+.desktop-settings .settings-tab.active, .desktop-settings .settings-tab:hover { background: #515151; color: #fff; }
+[data-theme='light'] .desktop-settings .settings-tab { color: #333; }
+[data-theme='light'] .desktop-settings .settings-tab.active, [data-theme='light'] .desktop-settings .settings-tab:hover { background: #dedede; color: #111; }
+.desktop-settings .settings-pane { padding: 65px 34px 48px; }
+.desktop-settings .settings-pane-content { max-width: 790px; margin: 0 auto; }
+.desktop-settings-page-title { margin: 0 0 42px; font-size: 23px; line-height: 1.4; font-weight: 500; }
+.desktop-preference-heading { margin: 36px 0 15px; font-size: 14px; font-weight: 500; }
+.desktop-preference-heading:first-of-type { margin-top: 0; }
+.desktop-preference-card { padding: 0 17px; border: 1px solid var(--border); border-radius: 17px; background: var(--bg-card); }
+.desktop-preference-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 70px; padding: 14px 0; border-bottom: 1px solid var(--border-soft); }
+.desktop-preference-row:last-child { border-bottom: 0; }
+.desktop-preference-label { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 500; line-height: 1.5; }
+.desktop-preference-label p { margin: 3px 0 0; color: var(--text-dim); font-size: 12px; font-weight: 400; line-height: 1.5; }
+.desktop-preference-control { display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; gap: 8px; max-width: 48%; font-size: 12px; }
+.desktop-preference-control .select, .desktop-preference-control .input { min-height: 30px; width: auto; max-width: 235px; border-radius: 9px; font-size: 12.5px; }
+.desktop-preference-control input[type='range'] { max-width: 130px; accent-color: #3984ff; }
+.desktop-font-settings { display: grid; gap: 8px; min-width: 230px; text-align: left; }
+.desktop-font-settings .field-label { margin: 0; }
+.desktop-shortcut-details { min-width: 230px; text-align: left; }
+.desktop-shortcut-details > summary { cursor: pointer; color: var(--text-dim); }
+.desktop-shortcut-settings { width: 100%; max-height: 62vh; overflow: auto; padding: 12px 0; }
+.desktop-shortcut-group { border-top: 1px solid var(--border-soft); padding: 10px 0; }
+.desktop-shortcut-group h4 { margin: 0 0 8px; font-size: 12px; color: var(--text-dim); }
+.desktop-shortcut-row { display: grid; grid-template-columns: minmax(130px, 1fr) auto minmax(110px, 1fr); align-items: center; gap: 8px; min-height: 34px; }
+.desktop-shortcut-row button { min-width: 130px; padding: 5px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-input); color: var(--text); font: inherit; font-size: 12px; }
+.desktop-shortcut-row.has-conflict button { border-color: var(--red); }
+.desktop-shortcut-row small { color: var(--red); font-size: 11px; }
+.desktop-shortcut-row small:empty { display: none; }
+.desktop-preference-toggle { display: flex; align-items: center; width: 34px; height: 21px; padding: 3px; border: 0; border-radius: 12px; background: #555; cursor: pointer; }
+.desktop-preference-toggle span { width: 15px; height: 15px; border-radius: 50%; background: #fff; transition: transform .14s ease; }
+.desktop-preference-toggle[aria-checked='true'] { background: #3984ff; }
+.desktop-preference-toggle[aria-checked='true'] span { transform: translateX(13px); }
+.desktop-preference-toggle:focus-visible { outline: 2px solid #7db1ff; outline-offset: 3px; }
+.desktop-preference-intro { color: var(--text-dim); font-size: 13px; margin: 0 0 24px; line-height: 1.7; }
+.desktop-settings .settings-page-actions { margin-left: var(--settings-sidebar-width); padding: 10px max(24px, calc((100vw - var(--settings-sidebar-width) - 790px) / 2)); background: var(--bg); }
+.desktop-settings .settings-pane-content > .settings-section { border-radius: 14px; }
+@media (max-width: 900px) {
+  .desktop-settings { --settings-sidebar-width: 215px; }
+  .desktop-settings .settings-pane { padding: 52px 24px 36px; }
+  .desktop-preference-row { gap: 12px; }
+  .desktop-preference-control { max-width: 52%; }
+  .desktop-preference-control .input, .desktop-preference-control .select { max-width: 170px; }
+}
+@media (max-width: 760px) {
+  .desktop-settings .settings-body { flex-direction: row; }
+  .desktop-settings { --settings-sidebar-width: 180px; }
+  .desktop-settings .settings-tabs { max-height: none; padding: 0 6px 16px; }
+  .desktop-settings .settings-tab-group { display: grid; }
+  .desktop-settings .settings-tab { white-space: normal; font-size: 12px; }
+  .desktop-settings .settings-tab-group-label { font-size: 11px; }
+  .desktop-settings .settings-pane { padding: 52px 16px 30px; }
+  .desktop-preference-row { flex-wrap: wrap; }
+  .desktop-preference-label { flex-basis: 100%; }
+  .desktop-preference-control { max-width: 100%; }
+}
+.settings-runtime-status { margin-bottom: 24px; }
+.settings-runtime-list { display: grid; gap: 10px; margin: 12px 0; }
+.settings-runtime-list article { padding: 12px; border: 1px solid var(--border); border-radius: 10px; }
+.settings-runtime-list article > div { display: flex; justify-content: space-between; gap: 12px; }
+.settings-runtime-list code { display: block; margin-top: 6px; font-size: 11px; overflow-wrap: anywhere; color: var(--text-secondary); }

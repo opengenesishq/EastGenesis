@@ -1,0 +1,14 @@
+.site-deployment-panel { padding: 16px; min-width: 0; overflow: auto; width: 100%; font-size: 12px; line-height: 1.5; }
+.site-deployment-panel > header { display: flex; align-items: center; gap: 10px; }
+.site-deployment-panel > header span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.site-deployment-panel label { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; }
+.site-deployment-panel :is(input, textarea, select) { padding: 8px; color: var(--text-primary); background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; min-width: 0; width: 100%; box-sizing: border-box; }
+.site-deployment-panel pre { overflow: auto; white-space: pre-wrap; word-break: break-word; padding: 8px; background: var(--bg-primary); border-radius: 6px; font-size: 11px; }
+.site-deployment-panel code { overflow-wrap: anywhere; font-size: 10px; }
+.site-deployment-panel details { margin: 10px 0; }
+.site-deployment-panel summary { cursor: pointer; }
+.site-deployment-actions, .site-deployment-fields { display: flex; flex-wrap: wrap; gap: 8px; }
+.site-deployment-fields > label { flex: 1; min-width: 100px; }
+.site-deployment-preview, .site-deployment-receipt { border: 1px solid var(--border-color); border-radius: 8px; margin: 14px 0; padding: 12px; }
+.site-deployment-panel h4 { margin: 8px 0; }
+.site-deployment-panel ul { padding-left: 18px; max-height: 200px; overflow: auto; overflow-wrap: anywhere; }

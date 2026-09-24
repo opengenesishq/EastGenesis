@@ -1,5 +1,6 @@
 import { useId, useRef, useState } from 'react'
 import { useStore } from '../../store'
+import { matchesDesktopShortcut } from '../../desktop-keyboard'
 import { readComposerDraft, writeComposerDraft } from '../../store/composer-draft-persistence'
 import type { GoalPlanningTemplate } from '../../lib/project-goal-task-submission'
 import type { useProjectGoalTaskStart } from './useProjectWorkspaceStudio'
@@ -38,7 +39,7 @@ export default function GoalTaskStarter({ projectId, state }: {
         value={objective} maxLength={20_000} placeholder={localized('你想完成什么？', 'What would you like to accomplish?')}
         disabled={state.busy} onChange={(event) => changeObjective(event.target.value)} data-goal-task-objective
         onKeyDown={(event) => {
-          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) {
+          if (matchesDesktopShortcut(event.nativeEvent, 'submitMultiline', useStore.getState().settings.desktopShortcuts)) {
             event.preventDefault()
             if (objective.trim() && !state.busy) event.currentTarget.form?.requestSubmit()
           }

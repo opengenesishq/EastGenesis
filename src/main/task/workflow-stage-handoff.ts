@@ -120,7 +120,7 @@ export async function buildWorkflowStageHandoffPrompt(
   const handoff = await resolveWorkflowStageHandoff({ projectId, workItemId: meta.workItemId, rootDir })
   if (handoff.artifacts.length === 0) return ''
   const lines = [
-    '# CaoGen Workflow Handoff',
+    '# EastGenesis Workflow Handoff',
     `Current WorkItem: ${handoff.workItemId} (${handoff.workItemType})`,
     'The following durable upstream Artifacts are already attached. Treat them as source material; do not ask the user to upload or restate them.'
   ]

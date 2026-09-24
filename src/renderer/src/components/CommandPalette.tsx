@@ -7,10 +7,9 @@ import {
   buildPluginCommands,
   filterCommandItems
 } from '../commands'
-import { projectedPaletteItems } from './experience/projectedComposerCommands'
-import { cancelOfficeIdlePrewarm } from './office/loadOffice'
-import { resolveSelectedBusinessLine } from '../../../shared/business-line-types'
 import { taskPaletteItems, runPaletteItem, type PaletteItem, type PaletteSection } from './task-palette-items'
+import { projectedPaletteItems } from './experience/projectedComposerCommands'
+import { useExperienceProjection } from './experience/ExperienceProjection'
 
 function useCloseOnEscape(setVisible: (visible: boolean) => void): void {
   useEffect(() => {
@@ -27,9 +26,7 @@ function useCloseOnEscape(setVisible: (visible: boolean) => void): void {
 
 export default function CommandPalette(): React.JSX.Element {
   const t = useT()
-  const experienceMode = useStore((s) => s.experienceMode)
-  const lineId = useStore((s) => resolveSelectedBusinessLine(s.settings).id)
-  const projection = experienceMode === 'studio' ? 'studio' : 'assistant'
+  const projection = useExperienceProjection()
   const [query, setQuery] = useState('')
   const [taskGroup, setTaskGroup] = useState<PaletteItem>()
   const [activeIndex, setActiveIndex] = useState(0)
@@ -45,11 +42,8 @@ export default function CommandPalette(): React.JSX.Element {
   const setShowCommandPalette = useStore((s) => s.setShowCommandPalette)
   const setShowNewSession = useStore((s) => s.setShowNewSession)
   const setShowSettings = useStore((s) => s.setShowSettings)
-  const openNewProjectWorkspace = useStore((s) => s.openNewProjectWorkspace)
-  const setExperienceMode = useStore((s) => s.setExperienceMode)
   const selectSession = useStore((s) => s.selectSession)
   const resumeFromHistory = useStore((s) => s.resumeFromHistory)
-  const setView = useStore((s) => s.setView)
   const openLatestRewindPanel = useStore((s) => s.openLatestRewindPanel)
   const openBrowserPanel = useStore((s) => s.openBrowserPanel)
   const openDiffPanel = useStore((s) => s.openDiffPanel)
@@ -76,7 +70,6 @@ export default function CommandPalette(): React.JSX.Element {
     const activeMeta = activeId ? sessions[activeId]?.meta : undefined
     const commandItems: PaletteItem[] = buildPaletteCommands({
       t,
-      experienceMode,
       modelOptions: modelOptionsForProvider(
         providers,
         activeMeta?.providerId ?? '',
@@ -87,12 +80,6 @@ export default function CommandPalette(): React.JSX.Element {
       setShowNewSession,
       setShowSettings,
       focusSidebarSearch,
-      openNewProject: openNewProjectWorkspace,
-      openNewVideo: () => {
-        setExperienceMode('video')
-        requestAnimationFrame(() => window.dispatchEvent(new Event('caogen:video-new')))
-      },
-      openControlRoom: () => { cancelOfficeIdlePrewarm(); setView('office') },
       openLatestRewindPanel,
       openDiffPanel,
       openBrowserPanel,
@@ -106,29 +93,25 @@ export default function CommandPalette(): React.JSX.Element {
       updateSettings,
       setModel
     }).map((item) => ({ ...item, section: 'command' }))
+    const taskItems = taskPaletteItems({ order, sessions, history, selectSession, resume: resumeFromHistory })
 
-    const taskItems = taskPaletteItems({ lineId, order, sessions, history, selectSession, resume: resumeFromHistory })
+    const pluginItems: PaletteItem[] = projection === 'studio'
+      ? buildPluginCommands(pluginRegistry?.items ?? [], {
+        sendPluginRegistryItemToAgent,
+        dispatchPluginAgent
+      }).map((item) => ({ ...item, section: 'plugin' }))
+      : []
 
-    const pluginItems: PaletteItem[] = buildPluginCommands(pluginRegistry?.items ?? [], {
-      sendPluginRegistryItemToAgent,
-      dispatchPluginAgent
-    }).map((item) => ({ ...item, section: 'plugin' }))
-
-    const projected = projectedPaletteItems(projection, [...commandItems, ...taskItems, ...pluginItems])
-    return experienceMode === 'video'
-      ? projected.filter((item) => item.section === 'command' && !item.id.startsWith('slash:'))
-      : projected
+    return [...projectedPaletteItems(projection, commandItems), ...taskItems, ...pluginItems]
   }, [
-    activeId, lineId,
+    activeId,
     dispatchPluginAgent,
-    experienceMode,
     history,
     openBrowserPanel,
     openDiffPanel,
     openFilesPanel,
     openLatestRewindPanel,
     openMemoryPanel,
-    openNewProjectWorkspace,
     openPluginRegistryPanel,
     openRoutinePanel,
     openSubagentPanel,
@@ -136,17 +119,15 @@ export default function CommandPalette(): React.JSX.Element {
     openWorktreePanel,
     order,
     pluginRegistry,
-    projection,
     providers,
+    projection,
     resumeFromHistory,
     selectSession,
     sendPluginRegistryItemToAgent,
     sessions,
     setModel,
-    setExperienceMode,
     setShowNewSession,
     setShowSettings,
-    setView,
     t,
     theme,
     updateSettings

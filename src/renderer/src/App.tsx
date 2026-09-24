@@ -1,5 +1,6 @@
+import { desktopMenuCommand } from './desktop-keyboard'
 import * as React from 'react'
-import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect } from 'react'
 import { useStore } from './store'
 import { useThemeEffect } from './theme'
 import type { MenuCommand } from '../../shared/types'
@@ -7,55 +8,24 @@ import CommandPalette from './components/CommandPalette'
 import TaskRecoveryModal from './components/TaskRecoveryModal'
 import Quickbar from './components/Quickbar'
 import AppListView from './components/AppListView'
+import { requestConversationFind } from './components/conversation-find'
 import { APP_ICON_URL, APP_NAME } from './brand'
-import { loadOfficeView, scheduleOfficeIdlePrewarm } from './components/office/loadOffice'
 import type { ExperienceMode } from './store/experience-mode'
-import { resolveBusinessLineId, resolveSelectedBusinessLine } from '../../shared/business-line-types'
+import { appendPersistentComposerDraft } from './store/composer-draft-persistence'
+import splashDarkUrl from '../../../resources/eastgenesis/splash-dark.png?url'
+import splashLightUrl from '../../../resources/eastgenesis/splash-light.png?url'
 
-const OfficeView = lazy(loadOfficeView)
 const SettingsPage = lazy(() => import('./components/SettingsModal'))
 
-function useStudioVisited(experienceMode: ExperienceMode): boolean {
-  const [visited, setVisited] = useState(experienceMode === 'studio')
-  useEffect(() => {
-    if (experienceMode === 'studio') setVisited(true)
-  }, [experienceMode])
-  return visited
-}
-
-function useVideoVisited(experienceMode: ExperienceMode): boolean {
-  const [visited, setVisited] = useState(experienceMode === 'video')
-  useEffect(() => {
-    if (experienceMode === 'video') setVisited(true)
-  }, [experienceMode])
-  return visited
-}
-
-function useVisitedExperiences(mode: ExperienceMode): [boolean, boolean] {
-  return [useStudioVisited(mode), useVideoVisited(mode)]
-}
-
-function startPrimaryCreation(
-  mode: ExperienceMode,
-  actions: { newProject: () => void; newSession: () => void; selectMode: (mode: ExperienceMode) => void }
-): void {
-  if (mode === 'studio') return actions.newProject()
-  if (mode === 'assistant') return actions.newSession()
-  actions.selectMode('video')
-  requestAnimationFrame(() => window.dispatchEvent(new Event('caogen:video-new')))
+function startPrimaryCreation(onNewSession: () => void): void {
+  onNewSession()
 }
 
 function sessionOrderForMode(
-  businessLineId: string,
   order: string[],
   sessions: ReturnType<typeof useStore.getState>['sessions']
 ): string[] {
-  if (businessLineId === 'video') return []
-  return order.filter((id) => {
-    const meta = sessions[id]?.meta
-    if (!meta) return false
-    return resolveBusinessLineId(meta) === businessLineId
-  })
+  return order.filter((id) => Boolean(sessions[id]))
 }
 
 export default function App(): React.JSX.Element {
@@ -66,8 +36,6 @@ export default function App(): React.JSX.Element {
   const order = useStore((s) => s.order)
   const sessions = useStore((s) => s.sessions)
   const view = useStore((s) => s.view)
-  const experienceMode = useStore((s) => s.experienceMode)
-  const selectedBusinessLineId = useStore((s) => resolveSelectedBusinessLine(s.settings).id)
   const language = useStore((s) => s.settings.language)
   const showNewSession = useStore((s) => s.showNewSession)
   const showSettings = useStore((s) => s.showSettings)
@@ -77,9 +45,6 @@ export default function App(): React.JSX.Element {
   const setShowCommandPalette = useStore((s) => s.setShowCommandPalette)
   const selectSession = useStore((s) => s.selectSession)
   const setView = useStore((s) => s.setView)
-  const setExperienceMode = useStore((s) => s.setExperienceMode)
-  const openNewProjectWorkspace = useStore((s) => s.openNewProjectWorkspace)
-  const [studioVisited, videoVisited] = useVisitedExperiences(experienceMode)
   useThemeEffect()
   const focusSidebarSearch = useCallback((): void => {
     setView('list')
@@ -94,7 +59,7 @@ export default function App(): React.JSX.Element {
     (command: MenuCommand): void => {
       if (command.type === 'new-session') {
         setShowSettings(false)
-        startPrimaryCreation(experienceMode, { newProject: openNewProjectWorkspace, newSession: () => setShowNewSession(true), selectMode: setExperienceMode })
+        startPrimaryCreation(() => setShowNewSession(true))
         return
       }
       if (command.type === 'settings') {
@@ -108,27 +73,65 @@ export default function App(): React.JSX.Element {
         return
       }
       if (command.type === 'open-search') {
+        if (requestConversationFind()) return
         setShowSettings(false)
         focusSidebarSearch()
         return
       }
-      const id = sessionOrderForMode(selectedBusinessLineId, order, sessions)[command.index]
+      const id = sessionOrderForMode(order, sessions)[command.index]
       if (id) {
         setShowSettings(false)
         selectSession(id)
       }
     },
-    [experienceMode, selectedBusinessLineId, focusSidebarSearch, openNewProjectWorkspace, order, selectSession, sessions, setExperienceMode, setShowCommandPalette, setShowNewSession, setShowSettings]
+    [focusSidebarSearch, order, selectSession, sessions, setShowCommandPalette, setShowNewSession, setShowSettings]
   )
   useEffect(() => {
     if (typeof window.agentDesk === 'undefined') return
     void init()
   }, [init])
   useEffect(() => {
-    if (!hydrated || view === 'office' || showSettings) return
-    return scheduleOfficeIdlePrewarm()
-  }, [hydrated, order.length, showSettings, view])
-
+    const bridge = window.desktopCompanionWorkbench
+    if (!bridge || !hydrated) return
+    let disposed = false
+    let navigationId = ''
+    const receiving = new Set<string>()
+    const offNavigation = bridge.onNavigate((navigation) => {
+      navigationId = navigation.requestId
+      void (async () => {
+        if (navigation.sessionId && !useStore.getState().sessions[navigation.sessionId]) await useStore.getState().syncSession(navigation.sessionId)
+        if (disposed || navigationId !== navigation.requestId) return
+        const state = useStore.getState()
+        if (navigation.sessionId && state.sessions[navigation.sessionId]?.meta.status !== 'closed' && state.sessions[navigation.sessionId]) state.selectSession(navigation.sessionId)
+        state.setShowSettings(false)
+        state.setShowNewSession(false)
+        // The main app has one conversation workspace. Legacy companion
+        // navigation targets are acknowledged here but never reopen the
+        // removed palace/office surface.
+        state.setView('list')
+        await bridge.acknowledgeNavigation(navigation.requestId)
+      })().catch(() => console.error('[companion] 工作台导航未完成，将在窗口就绪后重试。'))
+    })
+    const offDraft = bridge.onDesktopCompanionDraft((delivery) => {
+      if (receiving.has(delivery.requestId)) return
+      receiving.add(delivery.requestId)
+      void (async () => {
+        // Refresh the authoritative task identity before appending, including tasks created in another window.
+        const exists = await useStore.getState().syncSession(delivery.sessionId)
+        if (disposed) return
+        const session = useStore.getState().sessions[delivery.sessionId]
+        if (!exists || !session || session.meta.status === 'closed') throw new Error('任务已不可用，请从主工作台打开后重新加入草稿。')
+        if ((['id', 'createdAt', 'workspaceId', 'goalId', 'workItemId'] as const).some(key => session.meta[key] !== delivery.binding[key])) throw new Error('任务归属已经变化，未加入草稿。')
+        appendPersistentComposerDraft(window.localStorage, delivery.sessionId, delivery.text, delivery.requestId)
+        void bridge.acknowledgeDesktopCompanionDraft({ ...delivery, status: 'delivered' }).catch(() => console.error('[companion] 草稿已保存，等待重试回执。'))
+      })().catch(error => {
+        void bridge.acknowledgeDesktopCompanionDraft({ ...delivery, status: 'rejected', error: error instanceof Error ? error.message : String(error) }).catch(() => console.error('[companion] 草稿拒绝回执未送达。'))
+      }).finally(() => receiving.delete(delivery.requestId))
+    })
+    // Register listeners before declaring readiness, including on a reopened main window.
+    void bridge.readyDesktopCompanionReceiver().catch(() => console.error('[companion] 工作台接收端尚未就绪。'))
+    return () => { disposed = true; offNavigation(); offDraft() }
+  }, [hydrated])
   useEffect(() => {
     if (typeof window.agentDesk === 'undefined') return
     return window.agentDesk.onMenuCommand(handleMenuCommand)
@@ -136,33 +139,12 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
-      const mod = e.metaKey || e.ctrlKey
-      if (!mod || e.altKey || e.isComposing) return
-      const key = e.key.toLowerCase()
-      if (key === 'n') {
-        e.preventDefault()
-        handleMenuCommand({ type: 'new-session' })
-        return
-      }
-      if (key === ',') {
-        e.preventDefault()
-        handleMenuCommand({ type: 'settings' })
-        return
-      }
-      if (key === 'k') {
-        e.preventDefault()
-        handleMenuCommand({ type: 'command-palette' })
-        return
-      }
-      if (key === 'f') {
-        e.preventDefault()
-        handleMenuCommand({ type: 'open-search' })
-        return
-      }
-      if (/^[1-9]$/.test(key)) {
-        e.preventDefault()
-        handleMenuCommand({ type: 'select-session', index: Number(key) - 1 })
-      }
+      if (e.defaultPrevented) return
+      const command = desktopMenuCommand(e, useStore.getState().settings.desktopShortcuts)
+      if (!command) return
+      e.preventDefault()
+      if (command === 'searchTasks') { setShowSettings(false); focusSidebarSearch() }
+      else handleMenuCommand(command)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -178,24 +160,29 @@ export default function App(): React.JSX.Element {
     )
   }
 
+  if (!hydrated) {
+    return (
+      <div className="eastgenesis-splash" role="status" aria-label={`${APP_NAME} 正在启动`}>
+        <picture>
+          <source media="(prefers-color-scheme: light)" srcSet={splashLightUrl} />
+          <img src={splashDarkUrl} alt={`${APP_NAME} Desktop`} />
+        </picture>
+      </div>
+    )
+  }
+
   return (
     <div className="app">
       {showSettings ? (
         <Suspense fallback={<div className="office-loading">加载设置…</div>}>
           <SettingsPage />
         </Suspense>
-      ) : view === 'office' ? (
-        <Suspense fallback={<div className="office-loading">加载办公区…</div>}>
-          <HydratedOfficeEntry />
-        </Suspense>
       ) : (
         <AppListView
-          activeId={activeId} experienceMode={experienceMode}
+          activeId={activeId} experienceMode="assistant"
           hasActive={hasActive} language={language}
           showNewSession={showNewSession}
-          studioVisited={studioVisited}
-          videoVisited={videoVisited}
-          onExperienceModeChange={setExperienceMode}
+          onExperienceModeChange={() => undefined}
         />
       )}
       {showCommandPalette && <CommandPalette />}
@@ -203,10 +190,4 @@ export default function App(): React.JSX.Element {
       {!showSettings && <Quickbar />}
     </div>
   )
-}
-
-/** Navigation must validate saved custom business lines against loaded settings. */
-function HydratedOfficeEntry(): React.JSX.Element {
-  const hydrated = useStore((state) => state.hydrated)
-  return hydrated ? <OfficeView /> : <div className="office-loading">加载办公区…</div>
 }

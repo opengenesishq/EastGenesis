@@ -1,4 +1,61 @@
+import type { SiteDeploymentApi } from './site-deployment-types'
+import type { WorkspaceBehaviorApi } from './workspace-behavior-types'
+import type { BrowserExtensionApi } from './browser-extension-types'
+import type { ChatSnapshotShareApi } from './chat-snapshot-share-types'
+import type { McpOAuthApi } from './mcp-oauth-types'
+import type { HistoryQuestionApi } from './history-question-types'
+import type { WslApi } from './wsl-types'
+import type { MemoryPreferencesApi } from './memory-preferences-types'
+import type { MigrationSubscriptionApi } from './migration-subscription-types'
+import type { BrowserDebugApi } from './browser-debug-types'
+import type { TaskHandoffApi } from './task-handoff-api'
+import type { PluginCatalogApi } from './plugin-catalog-types'
+export interface AgentDeskApi extends PluginCatalogApi {}
+export interface AgentDeskApi extends TaskHandoffApi {}
+export interface AgentDeskApi extends MigrationSubscriptionApi, BrowserDebugApi {}
+export interface AgentDeskApi extends MemoryPreferencesApi {}
+export interface AgentDeskApi extends WslApi {}
+export interface AgentDeskApi extends WorkspaceBehaviorApi, BrowserExtensionApi, ChatSnapshotShareApi, McpOAuthApi, HistoryQuestionApi {}
+import type { CompanionAppearanceApi } from './companion-appearance-types'
+import type { BrowserStyleApi } from './browser-style-types'
+import type { RoutineInboxApi } from './routine-inbox-types'
+import type { HostedSiteApi } from './hosted-site-types'
+export interface AgentDeskApi extends CompanionAppearanceApi, BrowserStyleApi, RoutineInboxApi, HostedSiteApi {}
+import type { LocalDevServerApi } from './local-dev-server-types'
+import type { BrowserManagementApi } from './browser-preferences-types'
+import type { PullRequestWorkspaceApi } from './pull-request-workspace-types'
+export interface AgentDeskApi extends LocalDevServerApi, BrowserManagementApi, PullRequestWorkspaceApi {}
+import type { BrowserTabApi, BrowserTabTarget } from './browser-tab-types'
+export interface AgentDeskApi extends BrowserTabApi {}
+import type { LocalSiteCatalogApi } from './local-site-catalog-types'
+import type { WorktreePullRequestDraftApi } from './worktree-pr-draft-types'
+export interface AgentDeskApi extends LocalSiteCatalogApi, WorktreePullRequestDraftApi {}
+import type { SshApi } from './ssh-types'
+import type { TaskSourceApi } from './task-source-types'
+import type { GoalModeApi } from './session-goal-mode'
+export interface AgentDeskApi extends GoalModeApi {}
+export interface AgentDeskApi extends TaskSourceApi {}
+import type { RemoteHostApi } from './remote-host-types'
+export interface AgentDeskApi extends RemoteHostApi {}
+import type { GuiPreviewWorkbenchApi } from './gui-preview-types'
+import type { ComputerHistoryApi } from './computer-history-types'
+export interface AgentDeskApi extends SshApi, GuiPreviewWorkbenchApi, ComputerHistoryApi {}
+import type { FeedbackApi } from './feedback-types'
+import type { SkillRecordingApi } from './skill-recording-types'
+export interface AgentDeskApi extends SkillRecordingApi {}
+import type { ProjectHistoryApi } from './project-history'
+
+export interface AgentDeskApi extends ProjectHistoryApi {}
+import type { RemoteConnectionApi } from './remote-connection-types'
+import type { WorkspaceHandoffApi, WorkspaceHandoffReceipt } from './workspace-handoff-types'
+export type * from './workspace-handoff-types'
+import type { SideChatApi, SideChatBinding } from './side-chat-types'
+import type { VoiceInputApi, VoiceInputSettings } from './voice-input-types'
+export type * from './voice-input-types'
 import type { TaskRunRecord } from './task-runtime-types'
+import type { TaskWindowApi } from './task-window-types'
+import type { TemporaryTaskApi } from './temporary-task-types'
+export interface AgentDeskApi extends TemporaryTaskApi {}
 import type { ProviderConnectionBinding } from './provider-connection-identity'
 export type * from './task-runtime-types'
 import type { OfficeRevisionApi } from './office-revision-types'
@@ -44,6 +101,12 @@ import type { MediaApi, ProviderMediaPricing } from './media-types'
 import type { SessionEntrypointApi } from './session-entrypoint-types'
 import type { AssistantSearchApi } from './assistant-search-types'
 import type { PalaceSceneBuilderApi } from './palace-scene-builder-types'
+import type { ExternalBrowserBridgeApi } from './external-browser-types'
+import type { TaskActivityApi } from './activity-types'
+import type { TaskImageCanvasApi } from './image-canvas-types'
+export type * from './image-canvas-types'
+export type * from './activity-types'
+export type * from './external-browser-types'
 export type * from './palace-scene-builder-types'
 export type * from './assistant-search-types'
 import type { NotificationConnectorInput, NotificationConnectorView } from './notification-connector-types'
@@ -575,6 +638,12 @@ export interface ResponsesConversationContext {
 }
 
 export interface SessionMeta extends BusinessLineBinding, SessionRuntimeRoutingBinding {
+  reasoningEffort?: ProviderReasoningEffort
+  memoryOverrides?: import('./memory-preferences-types').MemoryOverrides
+  executionEnvironment?: import('./wsl-types').ExecutionEnvironmentBinding
+  sideChat?: SideChatBinding
+  workspaceHandoff?: WorkspaceHandoffReceipt
+  workspaceHandoffPending?: string
   id: string
   /** Session-only memory identity retained by explicit resume; never inherited by new tasks or forks. */
   taskMemorySessionId?: string
@@ -669,6 +738,12 @@ export interface SessionMeta extends BusinessLineBinding, SessionRuntimeRoutingB
   lastError?: string
 }
 export interface HistoryEntry extends BusinessLineBinding, SessionRuntimeRoutingBinding, Pick<SessionMeta, 'budgetUsd'> {
+  reasoningEffort?: ProviderReasoningEffort
+  memoryOverrides?: import('./memory-preferences-types').MemoryOverrides
+  executionEnvironment?: import('./wsl-types').ExecutionEnvironmentBinding
+  sideChat?: SideChatBinding
+  workspaceHandoff?: WorkspaceHandoffReceipt
+  workspaceHandoffPending?: string
   id: string
   taskMemorySessionId?: string
   title: string
@@ -722,6 +797,10 @@ export interface HistoryEntry extends BusinessLineBinding, SessionRuntimeRouting
   pinned?: boolean
 }
 export interface CreateSessionOptions extends BusinessLineBinding {
+  reasoningEffort?: ProviderReasoningEffort
+  executionEnvironment?: import('./wsl-types').ExecutionEnvironmentSelection
+  /** Main-process-only side-chat binding; never accepted from renderer IPC. */
+  sideChat?: SideChatBinding
   cwd: string
   /** 旧目录型 Project 身份；新工作流归属使用 workspaceId。 */
   projectId?: string
@@ -1254,6 +1333,25 @@ export interface LayoutSettings {
 }
 
 export interface AppSettings extends BusinessLineSettings {
+  wsl?: import('./wsl-types').WslPreferences
+  workspaceBehavior?: import('./workspace-behavior-types').WorkspaceBehaviorPreferences
+  gitPreferences?: import('./desktop-git-preferences').DesktopGitPreferences
+  desktopPersonalization?: import('./desktop-personalization').DesktopPersonalizationSettings
+  notificationPreferences?: import('./desktop-behavior-preferences').DesktopNotificationPreferences
+  terminalPreferences?: import('./desktop-behavior-preferences').TerminalPreferences
+  /** Visibility of task examples and opt-in task-context suggestions. */
+  suggestedPrompts?: import('./suggested-prompt-settings').SuggestedPromptSettings
+  followUpBehavior?: import('./session-follow-up').SessionFollowUpBehavior
+  memoryPreferences?: import('./memory-preferences-types').MemoryPreferences
+  browserDebug?: import('./browser-debug-types').BrowserDebugPreferences
+  /** Optional overrides; omitted shortcuts retain the shared registry defaults. */
+  desktopShortcuts?: import('./desktop-shortcuts').DesktopShortcutSettings
+  /** Local font families for interface text and code/terminal surfaces. */
+  desktopFonts?: import('./desktop-fonts').DesktopFontSettings
+  /** Optional desktop companion window preference. */
+  desktopCompanion: import('./desktop-companion-types').DesktopCompanionSettings
+  quickbar?: import('./quickbar-settings').QuickbarSettings
+  voiceInput?: VoiceInputSettings
   /** CaoGen Drive 默认档位;新会话默认继承此档位。 */
   driveMode: CaoGenDriveMode
   /** 新任务默认策略;单个 Session 可以显式覆盖且不改写该偏好。 */
@@ -1524,6 +1622,8 @@ export interface QuickbarState {
   accelerator: string
   registered: boolean
   registrationError?: string
+  platform?: string
+  screenCapturePermission?: 'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown'
 }
 
 export interface QuickbarEvent {
@@ -1562,6 +1662,8 @@ export interface QuickbarScreenshotInput {
   sessionId: string
   cwd?: string
   sourceId?: string
+  expectedSourceName?: string
+  includeOcr?: boolean
   note?: string
   maxWidth?: number
   includeWindowContext?: boolean
@@ -1579,6 +1681,9 @@ export interface QuickbarPayloadResult {
   payload?: SendMessagePayload
   context?: QuickbarContextResult
   screenshotPath?: string
+  sessionId?: string
+  imagePreviews?: Record<string, string>
+  warning?: string
   files?: Array<{
     path: string
     kind: 'file' | 'directory' | 'other'
@@ -1591,8 +1696,12 @@ export interface QuickbarPayloadResult {
 
 export interface QuickbarDispatchOptions {
   target: QuickbarTargetMode
+  /** Captured when the user selects a target; never resolved from activeId after an await. */
+  sessionId?: string
   cwd?: string
   sourceId?: string
+  expectedSourceName?: string
+  includeOcr?: boolean
   paths?: string[]
   note?: string
 }
@@ -1601,6 +1710,7 @@ export interface QuickbarDispatchResult {
   ok: boolean
   sessionId?: string
   error?: string
+  warning?: string
 }
 
 export interface ProviderInput {
@@ -2000,6 +2110,9 @@ export interface RoutineNotificationOptions {
 }
 
 export interface Routine extends Record<string, unknown> {
+  goalContinuation?: import('./routine-heartbeat-types').RoutineGoalContinuation
+  goalContinuationState?: import('./routine-heartbeat-types').RoutineGoalContinuationState
+  executionTarget?: import('./routine-heartbeat-types').RoutineSessionTarget
   id: string
   name: string
   prompt: string
@@ -2009,10 +2122,16 @@ export interface Routine extends Record<string, unknown> {
   digitalWorkerId?: string
   projectCwd?: string
   schedule: string
+  timeZone?: string
+  startAt?: number
+  scheduleState?: import('./routine-schedule').RoutineScheduleState
+  scheduleError?: string
   frequency?: string
   providerId: string
   model: string
   engine?: EngineKind
+  reasoningEffort?: ProviderReasoningEffort
+  executionLocation?: 'local' | 'worktree'
   permissionMode: RoutinePermissionMode
   budgetUsd: number
   notification: RoutineNotificationOptions
@@ -2024,6 +2143,7 @@ export interface Routine extends Record<string, unknown> {
 }
 
 export type CreateRoutineInput = {
+  executionTarget?: { kind: 'existing_session'; sessionId: string } | null
   id?: string
   name: string
   prompt?: string
@@ -2033,10 +2153,14 @@ export type CreateRoutineInput = {
   digitalWorkerId?: string
   projectCwd?: string
   schedule?: string
+  timeZone?: string
+  startAt?: number
   frequency?: string
   providerId?: string
   model?: string
   engine?: EngineKind
+  reasoningEffort?: ProviderReasoningEffort
+  executionLocation?: 'local' | 'worktree'
   permissionMode?: RoutinePermissionMode
   budgetUsd?: number
   notification?: RoutineNotificationOptions
@@ -2048,6 +2172,7 @@ export type CreateRoutineInput = {
 } & Record<string, unknown>
 
 export type UpdateRoutineInput = {
+  executionTarget?: { kind: 'existing_session'; sessionId: string } | null
   name?: string
   prompt?: string
   content?: string
@@ -2056,10 +2181,14 @@ export type UpdateRoutineInput = {
   digitalWorkerId?: string | null
   projectCwd?: string
   schedule?: string
+  timeZone?: string
+  startAt?: number
   frequency?: string
   providerId?: string
   model?: string
   engine?: EngineKind
+  reasoningEffort?: ProviderReasoningEffort
+  executionLocation?: 'local' | 'worktree'
   permissionMode?: RoutinePermissionMode
   budgetUsd?: number
   notification?: RoutineNotificationOptions
@@ -2079,6 +2208,7 @@ export type RoutineDispatchState = 'preparing' | 'session_created' | 'prompt_acc
 export type RoutineReviewDecision = 'accepted' | 'rejected'
 
 export interface RoutineRunRecord {
+  heartbeat?: import('./routine-heartbeat-types').RoutineHeartbeatRun
   id: string
   routineId: string
   routineName: string
@@ -2430,6 +2560,9 @@ export interface BrowserAnnotationViewport {
 }
 
 export interface BrowserAnnotation {
+  tabId?: string
+  contextEpoch?: string
+  navigationRevision?: number
   id: string
   sessionId: string
   url: string
@@ -2451,6 +2584,7 @@ export type BrowserEvent =
 
 /** DOM 圈选结果:pickElement 注入拾取器后用户选定的元素信息 */
 export interface BrowserPickResult {
+  pickId?: string
   cancelled: boolean
   url?: string
   title?: string
@@ -2527,7 +2661,8 @@ export type MenuCommand =
   | { type: 'select-session'; index: number }
 
 /** 通过 contextBridge 暴露给渲染进程的 API */
-export interface AgentDeskApi extends TaskEffectRecoveryApi, CouncilApi, PreparationPermissionApi, TaskExecutionAuthorityApi, TaskBudgetApi, SessionInputApi, WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, RemoteApi, MediaApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi, PalaceSceneBuilderApi {
+export interface AgentDeskApi extends TaskImageCanvasApi, FeedbackApi, TaskActivityApi, ExternalBrowserBridgeApi, SiteDeploymentApi, RemoteConnectionApi, WorkspaceHandoffApi, SideChatApi, VoiceInputApi, TaskWindowApi, TaskEffectRecoveryApi, CouncilApi, PreparationPermissionApi, TaskExecutionAuthorityApi, TaskBudgetApi, SessionInputApi, WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, RemoteApi, MediaApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, DigitalWorkerApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi, PalaceSceneBuilderApi {
+  inspectLocalRuntimes(): Promise<import('./local-runtime-types').LocalRuntimeStatus>
   listPendingPermissions(sessionId: string): Promise<PermissionRequestInfo[]>
   getTranscript(sessionId: string): Promise<TranscriptEntry[]>
   suggestFiles(sessionId: string, query: string): Promise<string[]>
@@ -2592,6 +2727,7 @@ export interface AgentDeskApi extends TaskEffectRecoveryApi, CouncilApi, Prepara
   renameHistory(id: string, title: string): Promise<void>
   deleteHistory(id: string): Promise<boolean>
   getSettings(): Promise<AppSettings>
+  onSettingsChanged(cb: () => void): () => void
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>
   getRoutingRuleSet(): Promise<import('./routing-policy-types').RoutingRuleReadResult>
   previewRoutingRuleSet(input: import('./routing-policy-types').RoutingRulePreviewInput): Promise<import('./routing-policy-types').RoutingRulePreviewResult>
@@ -2683,7 +2819,7 @@ export interface AgentDeskApi extends TaskEffectRecoveryApi, CouncilApi, Prepara
   getWorktreeConflictFiles(sessionId: string): Promise<WorktreeConflictFilesResult>
   /** 合并回执列表(最新在前),验收"上次到底合了什么" */
   listWorktreeMergeReceipts(): Promise<WorktreeMergeReceipt[]>
-  createWorktreePullRequest(sessionId: string): Promise<WorktreePullRequestResult>
+  createWorktreePullRequest(sessionId: string, input?: import('./worktree-pr-draft-types').WorktreePullRequestDraftSubmitInput): Promise<WorktreePullRequestResult>
   removeWorktree(
     sessionId: string,
     opts?: { deleteBranch?: boolean; force?: boolean }
@@ -2705,15 +2841,16 @@ export interface AgentDeskApi extends TaskEffectRecoveryApi, CouncilApi, Prepara
   listPreviewAnnotations(sessionId: string, path?: string): Promise<PreviewAnnotation[]>
   setBrowserBounds(sessionId: string, bounds: BrowserBounds): Promise<void>
   closeBrowser(sessionId: string): Promise<void>
-  captureBrowserAnnotation(sessionId: string, note: string): Promise<BrowserAnnotation>
+  captureBrowserAnnotation(sessionId: string, note: string, target?: BrowserTabTarget): Promise<BrowserAnnotation>
   listBrowserAnnotations(sessionId: string): Promise<BrowserAnnotation[]>
-  pickBrowserElement(sessionId: string): Promise<BrowserPickResult>
+  pickBrowserElement(sessionId: string, target?: BrowserTabTarget): Promise<BrowserPickResult>
   captureBrowserElementAnnotation(
     sessionId: string,
     pick: BrowserPickResult,
-    note: string
+    note: string,
+    target?: BrowserTabTarget
   ): Promise<BrowserAnnotation>
-  observeBrowser(sessionId: string): Promise<BrowserObservation>
+  observeBrowser(sessionId: string, target?: BrowserTabTarget): Promise<BrowserObservation>
   onBrowserEvent(cb: (event: BrowserEvent) => void): () => void
   importMigrationAssets(cwd: string, paths: string[]): Promise<MigrationImportOperationResult>
   listProjects(): Promise<Project[]>
@@ -2744,6 +2881,7 @@ export interface AgentDeskApi extends TaskEffectRecoveryApi, CouncilApi, Prepara
   pickDirectory(): Promise<string | null>
   pathForFile(file: File): string
   quickbarGetState(): Promise<QuickbarState>
+  setDesktopShortcutCapture(active: boolean): Promise<void>
   quickbarSetVisible(visible: boolean): Promise<QuickbarState>
   quickbarGetWindowContext(cwd?: string, sourceId?: string): Promise<QuickbarContextResult>
   quickbarReadClipboard(input?: QuickbarClipboardInput): Promise<QuickbarPayloadResult>

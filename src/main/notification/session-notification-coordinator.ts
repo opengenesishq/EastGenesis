@@ -2,6 +2,7 @@ import type { AgentEvent, SessionMeta } from '../../shared/types'
 import { showDesktopNotification } from '../desktopNotify'
 import { getSettings } from '../settings'
 import type { SessionNotificationState } from '../session-manager-support'
+import type { DesktopNotificationKind } from '../../shared/desktop-behavior-preferences'
 
 export class SessionNotificationCoordinator {
   private readonly states = new Map<string, SessionNotificationState>()
@@ -57,7 +58,7 @@ export class SessionNotificationCoordinator {
     else if (event.status === 'error') {
       if (!state.terminalNotified) {
         const error = event.error || meta?.lastError || '未知错误'
-        this.notify(sessionId, 'CaoGen: 任务失败', `${label} · ${trimText(error)}`)
+    this.notify(sessionId, 'EastGenesis: 任务失败', `${label} · ${trimText(error)}`, 'failure')
         state.terminalNotified = true
       }
       state.turnActive = false
@@ -79,7 +80,7 @@ export class SessionNotificationCoordinator {
     const needsAttention = state.pendingPermissionIds.size === 0
     state.pendingPermissionIds.add(requestId)
     if (needsAttention) {
-      this.notify(sessionId, 'CaoGen: 等待权限', `${label} · ${trimText(event.request.toolName, 60)} · 打开任务查看待办`)
+    this.notify(sessionId, 'EastGenesis: 等待权限', `${label} · ${trimText(event.request.toolName, 60)} · 打开任务查看待办`, 'approval')
     }
   }
 
@@ -91,15 +92,15 @@ export class SessionNotificationCoordinator {
   ): void {
     if (!state.terminalNotified) {
       const bits = turnResultBits(label, event)
-      this.notify(sessionId, event.isError ? 'CaoGen: 任务失败' : 'CaoGen: 任务完成', bits.join(' · '))
+    this.notify(sessionId, event.isError ? 'EastGenesis: 任务失败' : 'EastGenesis: 任务完成', bits.join(' · '), event.isError ? 'failure' : 'complete')
       state.terminalNotified = true
     }
     state.turnActive = false
   }
 
-  private notify(sessionId: string, title: string, body: string): void {
+  private notify(sessionId: string, title: string, body: string, kind: DesktopNotificationKind): void {
     if (!getSettings().notificationsEnabled) return
-    showDesktopNotification({ title, body, sessionId })
+    showDesktopNotification({ title, body, sessionId, kind })
   }
 }
 

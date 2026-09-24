@@ -34,6 +34,7 @@ import type { WorkflowLedgerDatabase } from './workflow-ledger-db'
 import { canonicalJson, digest } from './workflow-ledger-codec'
 import { WorkflowLedgerCorruptionError } from './workflow-ledger-errors'
 import { hasApprovedArtifactSupersession } from './requirement-artifact-access'
+import { handoffArtifactPlacement } from '../task-handoff/artifact-placement'
 
 export async function verifyArtifactLifecycle(
   db: WorkflowLedgerDatabase,
@@ -81,7 +82,7 @@ async function verifyLifecycleRecord(
   assertSupersession(db, record)
   assertLifecycleEvent(db, record)
   const purge = findArtifactPurge(db, record.artifactId)
-  if (!purge) await verifyAvailableContent(rootDir, record)
+  if (!purge) await verifyAvailableContent(db, rootDir, record)
   else await verifyPurgedContent(db, rootDir, record, purge)
 }
 
@@ -99,11 +100,12 @@ function assertContentLocation(
   record: ArtifactLifecycleRecord
 ): void {
   const location = findWorkflowArtifactLocation(db, record.locationId)
+  const placement = handoffArtifactPlacement(db, rootDir, record.artifactId, record.digest, record.sizeBytes)
   const expectedPath = record.storageKind === 'blob'
     ? artifactBlobPath(rootDir, record.digest)
     : record.sourceRef
   if (!location || location.artifactId !== record.artifactId || location.projectId !== record.projectId ||
-      location.runId !== record.runId || location.path !== expectedPath ||
+      location.runId !== record.runId || (!placement && location.path !== expectedPath) ||
       location.checksum !== record.digest || location.sizeBytes !== record.sizeBytes ||
       location.availability !== 'available') {
     throw new WorkflowLedgerCorruptionError(`artifact ${record.artifactId} content location is invalid`)
@@ -172,10 +174,11 @@ function verifyRetentionRevisions(
   }
 }
 
-async function verifyAvailableContent(rootDir: string, record: ArtifactLifecycleRecord): Promise<void> {
-  const filePath = record.storageKind === 'blob'
+async function verifyAvailableContent(db: WorkflowLedgerDatabase, rootDir: string, record: ArtifactLifecycleRecord): Promise<void> {
+  const placement = handoffArtifactPlacement(db, rootDir, record.artifactId, record.digest, record.sizeBytes)
+  const filePath = placement?.path ?? (record.storageKind === 'blob'
     ? artifactBlobPath(rootDir, record.digest)
-    : requiredSourceRef(record)
+    : requiredSourceRef(record))
   await assertRegularContent(filePath, record.digest, record.sizeBytes)
 }
 

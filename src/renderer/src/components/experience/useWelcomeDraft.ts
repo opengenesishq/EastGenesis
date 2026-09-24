@@ -130,7 +130,9 @@ export function useWelcomeDraftController({
   }
   const setPickedDirectory = (nextCwd: string): void => {
     update({
-      projectChoice: projectChoice === UNASSIGNED ? UNASSIGNED : NEW_PROJECT,
+      // A folder is optional context for the single conversation workspace,
+      // never a project selection or a mode switch.
+      projectChoice: UNASSIGNED,
       cwd: nextCwd
     })
   }
@@ -171,7 +173,7 @@ function useResolvedProviderDraft(
   )
 
   useEffect(() => {
-    if (!providersLoaded) return
+    if (!providersLoaded || stored.executionTarget?.kind === 'remote') return
     if ((stored.providerId ?? '') === resolved.providerId
       && (stored.model ?? '') === resolved.model
       && stored.routingMode === resolved.routingMode) return
@@ -180,7 +182,7 @@ function useResolvedProviderDraft(
       model: resolved.model || null,
       routingMode: resolved.routingMode
     })
-  }, [providersLoaded, resolved.model, resolved.providerId, resolved.routingMode, stored.model, stored.providerId, stored.routingMode, update])
+  }, [providersLoaded, resolved.model, resolved.providerId, resolved.routingMode, stored.model, stored.providerId, stored.routingMode, stored.executionTarget?.kind, update])
 
   return resolved
 }

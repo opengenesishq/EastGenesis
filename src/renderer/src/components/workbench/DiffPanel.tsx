@@ -4,6 +4,7 @@ import { useStore } from '../../store'
 import { useT } from '../../i18n'
 import type { GitFileStatus, WorkspaceDiffFile, WorkspaceDiffHunk, WorkspaceDiffLine } from '../../../../shared/types'
 import { useProjectTests } from './useProjectTests'
+import { expandGitTextTemplate, normalizeDesktopGitPreferences } from '../../../../shared/desktop-git-preferences'
 
 function fileLabel(file: WorkspaceDiffFile): string {
   if (file.status === 'renamed') return `${file.oldPath} -> ${file.newPath}`
@@ -175,8 +176,8 @@ function GitCommitForm({
   onCommit: () => void
 }): React.JSX.Element {
   return <div className="git-commit-form">
-    <input className="git-commit-input" value={message} placeholder="Commit message" onChange={(event) => onMessageChange(event.target.value)} onKeyDown={(event) => {
-      if (event.key === 'Enter' && canCommit) { event.preventDefault(); onCommit() }
+    <textarea className="git-commit-input" rows={3} aria-label="Commit message" value={message} placeholder="Commit message · ⌘/Ctrl Enter" onChange={(event) => onMessageChange(event.target.value)} onKeyDown={(event) => {
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing && canCommit) { event.preventDefault(); onCommit() }
     }} />
     <button className="btn btn-primary btn-sm" disabled={!canCommit} onClick={onCommit}>Commit</button>
   </div>
@@ -203,8 +204,23 @@ function GitCommitBox(): React.JSX.Element {
   const commitGit = useStore((s) => s.commitGit)
   const openLatestRewindPanel = useStore((s) => s.openLatestRewindPanel)
   const tests = useProjectTests()
+  const activeId = useStore(state => state.activeId)
+  const meta = useStore(state => state.activeId ? state.sessions[state.activeId]?.meta : undefined)
+  const preferences = useStore(state => state.settings.gitPreferences)
+  const zh = useStore(state => state.settings.language === 'zh')
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [message, setMessage] = useState('')
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const draftKey = `${activeId ?? ''}:${meta?.cwd ?? ''}:${gitStatus?.branch ?? ''}`
+  const message = drafts[draftKey] ?? ''
+  const setMessage = (text: string): void => setDrafts(current => ({ ...current, [draftKey]: text }))
+  const defaultMessage = expandGitTextTemplate(normalizeDesktopGitPreferences(preferences).commitTemplate, {
+    title: meta?.title ?? '', branch: gitStatus?.branch ?? '', baseBranch: '',
+    summary: (gitStatus?.files ?? []).slice(0, 20).map(file => file.path).join('\n')
+  })
+  useEffect(() => {
+    if (!activeId || !gitStatus?.branch) return
+    setDrafts(current => Object.hasOwn(current, draftKey) ? current : { ...current, [draftKey]: defaultMessage })
+  }, [activeId, gitStatus?.branch, draftKey, defaultMessage])
 
   const files = gitStatus?.files ?? []
   const selectedPaths = useMemo(
@@ -261,6 +277,7 @@ function GitCommitBox(): React.JSX.Element {
       <GitFileSelection files={files} selected={selected} allSelected={allSelected} onToggleAll={toggleAll} onToggle={togglePath} />
       <GitCommitActions gitBusy={gitBusy} selectedCount={selectedCount} filesLength={files.length}
         onStage={() => void stageGitFiles(selectedPaths)} onStageAll={() => void stageAllGitFiles()} onUnstage={() => void unstageGitFiles(selectedPaths)} />
+      {Boolean(defaultMessage) && <button className="btn btn-ghost btn-sm" disabled={gitBusy || Boolean(message.trim())} onClick={() => setMessage(defaultMessage)}>{zh ? '填入提交模板' : 'Fill commit template'}</button>}
       <GitCommitForm message={message} canCommit={canCommit} onMessageChange={setMessage} onCommit={() => {
         void commitGit(message).then((result) => { if (result?.ok) { setMessage(''); tests.invalidate() } })
       }} />

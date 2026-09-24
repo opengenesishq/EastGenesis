@@ -13,7 +13,7 @@ export function buildStudioDeliveryChecklist(
   const acceptances = snapshot.acceptances.filter(item => item.deliveryScope !== 'historical')
   const needsReview = acceptances.filter(item => !['passed', 'waived'].includes(item.status))
   const title = snapshot.workItems.length === 1 ? snapshot.workItems[0].title
-    : snapshot.goal?.title ?? snapshot.workspace?.name ?? 'CaoGen'
+    : snapshot.goal?.title ?? snapshot.workspace?.name ?? 'EastGenesis'
   const lines = [
     '# 交付清单 / Delivery checklist', '',
     `## ${plain(title)}`, '',

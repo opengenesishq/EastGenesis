@@ -3,6 +3,9 @@ import { useStore } from '../../store'
 import { useT } from '../../i18n'
 import { formatTime } from '../../format'
 import WorktreeMergeInspector from './WorktreeMergeInspector'
+import WorktreePullRequestDraft from './WorktreePullRequestDraft'
+import PullRequestWorkspace from './PullRequestWorkspace'
+import TaskHandoffPanel from './TaskHandoffPanel'
 
 function shortSha(sha?: string): string {
   return sha ? sha.slice(0, 8) : ''
@@ -10,6 +13,7 @@ function shortSha(sha?: string): string {
 
 export default function WorktreePanel(): React.JSX.Element {
   const t = useT()
+  const zh = useStore((s) => s.settings.language === 'zh')
   const activeId = useStore((s) => s.activeId)
   const session = useStore((s) => (s.activeId ? s.sessions[s.activeId] : undefined))
   const {
@@ -35,18 +39,33 @@ export default function WorktreePanel(): React.JSX.Element {
   const exportPatch = useStore((s) => s.exportWorktreePatch)
   const inspectMerge = useStore((s) => s.inspectWorktreeMerge)
   const applyPatch = useStore((s) => s.applyWorktreePatch)
-  const createPr = useStore((s) => s.createWorktreePullRequest)
   const removeWorktree = useStore((s) => s.removeWorktree)
   const loadConflictFiles = useStore((s) => s.loadWorktreeConflictFiles)
   const [removing, setRemoving] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [handoffBusy, setHandoffBusy] = useState(false)
+  const [handoffError, setHandoffError] = useState<string>()
+  const [prPreparing, setPrPreparing] = useState(false)
+  const [prWorkspaceOpen, setPrWorkspaceOpen] = useState(false)
+  const onHandoff = async () => {
+    if (!activeId || handoffBusy) return
+    const id = activeId
+    setHandoffBusy(true)
+    setHandoffError(undefined)
+    try {
+      const meta = await window.agentDesk.handoffWorkspace(id)
+      useStore.setState(state => state.sessions[id] ? { sessions: { ...state.sessions, [id]: { ...state.sessions[id], meta } } } : {})
+      await refresh()
+    } catch (error) { setHandoffError(error instanceof Error ? error.message : String(error)) }
+    finally { setHandoffBusy(false) }
+  }
 
   useEffect(() => {
     if (activeId) void refresh()
   }, [activeId, refresh])
 
   const record = worktree?.record
-  const isolated = Boolean(session?.meta.isolated || worktree?.isolated)
+  const isolated = Boolean(record)
   const canApply = worktreeApplyCheck?.ok === true && worktreeApplyCheck.canApply === true
   const applied = worktreeApplyResult?.ok === true
 
@@ -71,13 +90,6 @@ export default function WorktreePanel(): React.JSX.Element {
     await applyPatch()
   }
 
-  const onCreatePr = async (): Promise<void> => {
-    // 推送受管分支并创建 PR/MR;明确二次确认,避免误触发网络副作用。
-    const ok = window.confirm('推送当前 worktree 分支并创建 PR/MR？')
-    if (!ok) return
-    await createPr()
-  }
-
   return (
     <div className="worktree-panel">
       <header className="workspace-diff-top">
@@ -96,6 +108,19 @@ export default function WorktreePanel(): React.JSX.Element {
       </header>
 
       <div className="worktree-panel-body">
+        {session && activeId && <details className="worktree-remote-handoff" data-task-handoff-entry>
+          <summary>{zh ? '移交到其他主机' : 'Hand off to another host'}</summary>
+          <TaskHandoffPanel key={`${activeId}:${session.meta.createdAt}`} sessionId={activeId} sessionCreatedAt={session.meta.createdAt} />
+        </details>}
+        {session && <div className="worktree-actions">
+          <button className="btn btn-primary btn-sm" disabled={handoffBusy || worktreeLoading} onClick={() => void onHandoff()}>
+            {handoffBusy ? '正在交接…' : session.meta.workspaceHandoffPending ? '继续上次交接' : session.meta.isolated ? '交接到本地目录' : '交接到 Worktree'}
+          </button>
+          <span>保留当前任务、对话、文件与暂存状态</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => setPrWorkspaceOpen(value => !value)}>浏览 PR/MR</button>
+        </div>}
+        {prWorkspaceOpen && activeId && <PullRequestWorkspace key={activeId} sessionId={activeId} onClose={() => setPrWorkspaceOpen(false)} />}
+        {handoffError && <div className="notice notice-error">{handoffError}</div>}
         {worktreeError && <div className="notice notice-error">{worktreeError}</div>}
         {worktreeMessage && <div className="notice notice-info">{worktreeMessage}</div>}
         {worktreeLoading && !worktree && <div className="workspace-diff-empty">{t('loadingDiff')}</div>}
@@ -186,7 +211,7 @@ export default function WorktreePanel(): React.JSX.Element {
                 inspecting: t('worktreeInspectingMerge'),
                 apply: t('worktreeApplyPatch'),
                 applying: t('worktreeApplyingPatch'),
-                createPr: t('worktreeCreatePr'),
+                createPr: '准备 PR/MR',
                 creatingPr: t('worktreeCreatingPr'),
                 summary: t('worktreeMergeSummary'),
                 patch: t('worktreeMergePatch'),
@@ -207,9 +232,11 @@ export default function WorktreePanel(): React.JSX.Element {
               }}
               onInspect={() => void inspectMerge()}
               onApply={() => void onApply()}
-              onCreatePr={() => void onCreatePr()}
+              onCreatePr={() => setPrPreparing(true)}
               onLoadConflicts={() => void loadConflictFiles()}
             />
+            {prPreparing && activeId && <WorktreePullRequestDraft key={activeId} sessionId={activeId} onClose={() => setPrPreparing(false)}
+              onResult={result => { if (useStore.getState().activeId === activeId) useStore.setState(state => ({ workbench: { ...state.workbench, worktreePrResult: result } })) }} />}
           </>
         ) : null}
       </div>

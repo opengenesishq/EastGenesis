@@ -1,9 +1,11 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSyncInExecutionEnvironment as execFileSync } from './wsl/process'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import { isolatedLocalGitEnv, withSafeLocalGitConfig } from './git/safe-git'
+import type { WorktreePullRequestDraft } from '../shared/worktree-pr-draft-types'
+import { stableValueDigest } from './task/tool-idempotency'
 import { inspectPullRequestCapability } from './git/pull-request-effect'
 import type {
   ManagedWorktreeView,
@@ -85,6 +87,7 @@ export type ManagedWorktreePatchEffectPlanResult =
   | { ok: false; error: string }
 
 export interface ManagedWorktreePullRequestEffectPlan {
+  draft?: WorktreePullRequestDraft
   sessionId: string
   worktreePath: string
   branch: string
@@ -289,7 +292,7 @@ export function getManagedWorktreeSummary(sessionId: string): WorktreeSummary {
         isolated: false,
         changedFiles: 0,
         dirty: false,
-        error: '当前会话没有 CaoGen 管理的 worktree'
+        error: '当前会话没有 EastGenesis 管理的 worktree'
       }
     }
     const stats = diffStats(record)
@@ -313,7 +316,7 @@ export function getManagedWorktreeSummary(sessionId: string): WorktreeSummary {
 export function exportManagedWorktreePatch(sessionId: string): WorktreePatchResult {
   try {
     const record = recordForSession(sessionId)
-    if (!record) return { ok: false, error: '当前会话没有 CaoGen 管理的 worktree' }
+    if (!record) return { ok: false, error: '当前会话没有 EastGenesis 管理的 worktree' }
     if (record.state !== 'active' || !existsSync(record.worktreePath)) {
       return { ok: false, error: 'worktree 已不存在或已移除' }
     }
@@ -353,7 +356,7 @@ export function exportManagedWorktreePatch(sessionId: string): WorktreePatchResu
 export function inspectManagedWorktreeMerge(sessionId: string): WorktreeMergeSummary {
   try {
     const record = recordForSession(sessionId)
-    if (!record) return { ok: false, error: '当前会话没有 CaoGen 管理的 worktree' }
+    if (!record) return { ok: false, error: '当前会话没有 EastGenesis 管理的 worktree' }
     if (record.state !== 'active' || !existsSync(record.worktreePath)) {
       return { ok: false, error: 'worktree 已不存在或已移除' }
     }
@@ -366,7 +369,7 @@ export function inspectManagedWorktreeMerge(sessionId: string): WorktreeMergeSum
 export function createManagedWorktreeMergePatch(sessionId: string): WorktreePatchResult {
   try {
     const record = recordForSession(sessionId)
-    if (!record) return { ok: false, error: '当前会话没有 CaoGen 管理的 worktree' }
+    if (!record) return { ok: false, error: '当前会话没有 EastGenesis 管理的 worktree' }
     if (record.state !== 'active' || !existsSync(record.worktreePath)) {
       return { ok: false, error: 'worktree 已不存在或已移除' }
     }
@@ -399,7 +402,7 @@ export function prepareManagedWorktreePatchEffect(
 ): ManagedWorktreePatchEffectPlanResult {
   try {
     const record = recordForSession(sessionId)
-    if (!record) return { ok: false, error: '当前会话没有 CaoGen 管理的 worktree' }
+    if (!record) return { ok: false, error: '当前会话没有 EastGenesis 管理的 worktree' }
     if (record.state !== 'active' || !existsSync(record.worktreePath)) {
       return { ok: false, error: 'worktree 已不存在或已移除' }
     }
@@ -472,7 +475,7 @@ export function applyPreparedManagedWorktreePatch(
 
 function loadPreparedWorktreePatch(plan: ManagedWorktreePatchEffectPlan): PreparedWorktreePatchInput {
   const record = recordForSession(plan.sessionId)
-  if (!record) return { ok: false, error: '当前会话没有 CaoGen 管理的 worktree' }
+  if (!record) return { ok: false, error: '当前会话没有 EastGenesis 管理的 worktree' }
   if (record.state !== 'active' || !existsSync(record.worktreePath)) {
     return { ok: false, error: 'worktree 已不存在或已移除' }
   }
@@ -516,7 +519,7 @@ function appendWorktreeMergeReceipt(
 export function getWorktreeConflictFiles(sessionId: string): WorktreeConflictFilesResult {
   try {
     const record = recordForSession(sessionId)
-    if (!record) return { ok: false, error: '当前会话没有 CaoGen 管理的 worktree' }
+  if (!record) return { ok: false, error: '当前会话没有 EastGenesis 管理的 worktree' }
     if (record.state !== 'active' || !existsSync(record.worktreePath)) {
       return { ok: false, error: 'worktree 已不存在或已移除' }
     }
@@ -553,14 +556,16 @@ export function createManagedWorktreePullRequest(sessionId: string): WorktreePul
 }
 
 export function prepareManagedWorktreePullRequestEffect(
-  sessionId: string
+  sessionId: string, draft?: WorktreePullRequestDraft
 ): ManagedWorktreePullRequestEffectPlanResult {
   try {
     const record = recordForSession(sessionId)
-    if (!record) return { ok: false, error: '当前会话没有 CaoGen 管理的 worktree' }
+  if (!record) return { ok: false, error: '当前会话没有 EastGenesis 管理的 worktree' }
     if (record.state !== 'active' || !existsSync(record.worktreePath)) {
       return { ok: false, error: 'worktree 已不存在或已移除' }
     }
+    if (!draft || draft.snapshot.binding.sessionId !== sessionId || draft.snapshot.binding.registryDigest !== stableValueDigest(record) ||
+        draft.snapshot.binding.branch !== record.branch || draft.snapshot.binding.worktreePath !== record.worktreePath) return { ok: false, error: '请选择已保存且绑定当前 Worktree 的 PR 草稿' }
     const capability = inspectPullRequestCapability(record.worktreePath)
     if (!capability.available) {
       return {
@@ -575,14 +580,7 @@ export function prepareManagedWorktreePullRequestEffect(
         sessionId: record.sessionId,
         worktreePath: record.worktreePath,
         branch: record.branch,
-        title: `${record.branch}: CaoGen worktree changes`,
-        body: [
-          `Automated pull request for CaoGen managed worktree \`${record.branch}\`.`,
-          '',
-          `- Base: ${record.baseBranch ?? 'detached'} (${record.baseSha.slice(0, 12)})`,
-          `- Worktree: ${record.worktreePath}`
-        ].join('\n'),
-        ...(record.baseBranch ? { base: record.baseBranch } : {})
+        draft, title: draft.title, body: draft.body, base: draft.snapshot.baseBranch
       }
     }
   } catch (err) {

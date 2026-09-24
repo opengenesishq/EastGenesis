@@ -19,13 +19,14 @@ export type SystemRoleActionId =
   | 'open_incident_watch'
   | 'open_results'
   | 'open_recovery'
+  | 'open_treasury'
 
 export interface SystemRoleAction {
   id: SystemRoleActionId
   label: string
   labelEn: string
   /** Existing canonical view/command that performs this navigation. */
-  target: 'command_hall' | 'summon_council' | 'new_task' | 'incident_watch' | 'results' | 'recovery'
+  target: 'command_hall' | 'summon_council' | 'new_task' | 'incident_watch' | 'results' | 'recovery' | 'treasury'
 }
 
 export interface SystemRoleSpec {
@@ -49,7 +50,7 @@ export interface SystemRoleSpec {
 }
 
 const commandHallAction: SystemRoleAction = {
-  id: 'open_command_hall', label: '回到议政殿', labelEn: 'Open council hall', target: 'command_hall'
+  id: 'open_command_hall', label: '回到议事区', labelEn: 'Open council workspace', target: 'command_hall'
 }
 const summonCouncilAction: SystemRoleAction = {
   id: 'summon_council', label: '查看职责', labelEn: 'View responsibilities', target: 'summon_council'
@@ -94,7 +95,7 @@ export const LEGACY_SYSTEM_ROLES: readonly SystemRoleSpec[] = [
     id: 'hubu', anchor: 'ROLE_HUBU', label: '户部', labelEn: 'Ministry of Revenue', group: 'ministry',
     duty: '预算与资源；读取真实成本、额度和 Provider 健康', dutyEn: 'Budget and resources from real cost and provider health',
     canonicalSource: 'HALL_main', projectionOnly: true, position: [-5, 2.4, -22],
-    cameraPosition: [-5, 7.5, -29], cameraTarget: [-5, 3, -22], actions: [commandHallAction]
+    cameraPosition: [-5, 7.5, -29], cameraTarget: [-5, 3, -22], actions: [{ id: 'open_treasury', label: '查看国库账目', labelEn: 'Open treasury', target: 'treasury' }, commandHallAction]
   },
   {
     id: 'libu_ritual', anchor: 'ROLE_LIBU_RITUAL', label: '礼部', labelEn: 'Ministry of Rites', group: 'ministry',

@@ -51,13 +51,17 @@ export async function recordOfficeDeliveryRequirements(lifecycle: ArtifactLifecy
     if (lifecycle.digest !== report.artifactDigest) throw new WorkflowLedgerCorruptionError('Office 要求检查字节版本与成果不同')
     const evidenceId = `evidence:office-requirements:${lifecycle.artifactId}`
     const checked = report.checks.filter((check) => check.status !== 'not_applicable')
+    // Evidence metadata is persisted as strict JSON. Requirement reports carry
+    // optional binding fields, so strip undefined object members before they
+    // cross the workflow ledger boundary.
+    const reportMetadata = JSON.parse(JSON.stringify(report)) as OfficeDeliveryRequirementReport
     recordWorkflowEvidence(db, { evidenceId, projectId: lifecycle.projectId, goalId: lifecycle.goalId,
       workItemId: lifecycle.workItemId, runId: lifecycle.runId, artifactId: lifecycle.artifactId,
       kind: 'delivery_check', title: '办公交付要求检查', summary: checked.length
         ? checked.map((check) => `${check.requirement.text}: ${check.status}; ${check.reason}`).join('\n')
         : report.binding.reason ?? '本版本没有可确定性核验的显式办公交付要求；用户最终验收未代行。',
       contentDigest: lifecycle.digest.replace(/^sha256:/, ''), metadata: { producer: 'office-request-requirements',
-        artifactVersion: lifecycle.version, artifactDigest: lifecycle.digest, report } },
+        artifactVersion: lifecycle.version, artifactDigest: lifecycle.digest, report: reportMetadata } },
     { source: 'runtime', verifier: 'office-request-requirements', observedAt: lifecycle.createdAt })
     for (const check of checked) {
       const id = `acceptance:office-requirements:${lifecycle.artifactId}:${check.id}`, criterionId = `${id}:criterion`

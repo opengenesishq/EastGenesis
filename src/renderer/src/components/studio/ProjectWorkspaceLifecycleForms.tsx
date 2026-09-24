@@ -48,7 +48,8 @@ export function ProjectEditForm({
       name: draft.name.trim(),
       kind: draft.kind,
       ownerId: draft.ownerId.trim(),
-      rulesRef: draft.rulesRef.trim()
+      rulesRef: draft.rulesRef.trim(),
+      primaryResourceId: draft.primaryResourceId || null
     })
   }
   return (
@@ -71,6 +72,14 @@ export function ProjectEditForm({
             <input id={`${baseId}-rules`} name="projectRulesRef" className="input" value={draft.rulesRef} onChange={(event) => update('rulesRef', event.target.value)} />
           </LifecycleField>
         </div>
+        <LifecycleField id={`${baseId}-primary`} label="新任务的主文件夹">
+          <select id={`${baseId}-primary`} className="select select-block" data-project-primary-resource value={draft.primaryResourceId} onChange={event => update('primaryResourceId', event.target.value)}>
+            <option value="">自动选择可用文件夹</option>
+            {project.resources.filter(resource => ['directory', 'repository'].includes(resource.kind) && resource.path).map(resource =>
+              <option key={resource.id} value={resource.id}>{resource.label ? `${resource.label} · ` : ''}{resource.path}</option>)}
+          </select>
+        </LifecycleField>
+        <p className="pws-muted">新任务从此文件夹开始。已有任务保留原工作目录；其他文件夹通过“添加资源”管理。</p>
         <LifecycleFormActions busy={busy} submitLabel={TEXT.saveProject} onCancel={onCancel} />
       </fieldset>
     </form>

@@ -1,0 +1,13 @@
+.browser-body.has-debug-sidebar { grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); }
+.browser-debug-panel { min-width: 0; min-height: 0; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; border-left: 1px solid var(--border); }
+.browser-debug-panel h3 { margin: 0; font-size: 13px; }
+.browser-debug-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.browser-debug-panel .field-label { display: flex; flex-direction: column; gap: 5px; }
+.browser-debug-panel .input { width: 100%; min-width: 0; }
+.browser-debug-panel pre, .browser-debug-record { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; padding: 5px 0; border-bottom: 1px solid var(--border); margin: 0; }
+.browser-debug-record small { display: block; }
+.browser-debug-panel .notice, .browser-debug-panel .field-hint { overflow-wrap: anywhere; }
+@container browser-workspace (max-width: 520px) {
+  .browser-body.has-debug-sidebar { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(160px, 1fr) minmax(150px, 42%); }
+  .browser-debug-panel { border-left: 0; border-top: 1px solid var(--border); }
+}

@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { app } from 'electron'
+import { currentTaskHostExecutionContext, getTaskHostExecutionGate } from '../task-handoff/execution-gate'
 import type {
   EffectRecord,
   EffectStatus,
@@ -109,7 +111,26 @@ export async function executeInteractiveOperationEffect<T>(
   spec: InteractiveOperationEffectSpec<T>
 ): Promise<InteractiveOperationEffectOutcome<T>> {
   const sourceSessionId = requireText(spec.sourceSessionId, 'sourceSessionId')
-  return withSessionOperationQueue(sourceSessionId, async () => {
+  const hostGate = getTaskHostExecutionGate(spec.rootDir ?? app.getPath('userData'))
+  const subject = { sessionId: sourceSessionId }, claim = hostGate.claim(subject)
+  return withSessionOperationQueue(sourceSessionId, () => hostGate.withPermit(subject, () => executeInteractiveOperationEffectInSessionQueue({ ...spec, sourceSessionId }), claim))
+}
+
+/** For lifecycle coordinators that already hold withSessionOperationQueue(sourceSessionId). */
+export async function executeInteractiveOperationEffectInSessionQueue<T>(
+  spec: InteractiveOperationEffectSpec<T>
+): Promise<InteractiveOperationEffectOutcome<T>> {
+  const hostGate = getTaskHostExecutionGate(spec.rootDir ?? app.getPath('userData'))
+  if (currentTaskHostExecutionContext()?.control) {
+    if (spec.toolName !== 'task_handoff' || !spec.operationId) throw new Error('TASK_HANDOFF_CONTROL_OPERATION_INVALID')
+    hostGate.assertHandoffControl(spec.sourceSessionId, spec.operationId)
+    return executeInteractiveOperationWithHostPermit(spec)
+  }
+  return hostGate.withPermit({ sessionId: spec.sourceSessionId }, () => executeInteractiveOperationWithHostPermit(spec))
+}
+
+async function executeInteractiveOperationWithHostPermit<T>(spec: InteractiveOperationEffectSpec<T>): Promise<InteractiveOperationEffectOutcome<T>> {
+    const sourceSessionId = requireText(spec.sourceSessionId, 'sourceSessionId')
     const context = createOperationExecutionContext({ ...spec, sourceSessionId })
     activeOperationScopes.add(context.scopeId)
     try {
@@ -119,7 +140,6 @@ export async function executeInteractiveOperationEffect<T>(
     } finally {
       activeOperationScopes.delete(context.scopeId)
     }
-  })
 }
 
 async function executeActiveInteractiveOperation<T>(
@@ -368,17 +388,18 @@ export function isInteractiveOperationActive(snapshotOrScopeId: TaskSnapshotReco
 
 /** Reconciles a stopped operation and removes recovery state only after settlement. */
 export async function settleStoppedInteractiveOperationSnapshot(
-  snapshot: TaskSnapshotRecord
+  snapshot: TaskSnapshotRecord,
+  rootDir?: string
 ): Promise<TaskSnapshotRecord | null> {
   if (!isInteractiveOperationSnapshot(snapshot)) return snapshot
   if (isInteractiveOperationActive(snapshot)) return null
-  const stored = await getTaskSnapshot(snapshot.id)
+  const stored = await getTaskSnapshot(snapshot.id, rootDir)
   let current = stored ?? snapshot
   const projection = ensureManagedWorktreeProjections(current.run)
-  if ('error' in projection) return await saveProjectionWaitingSnapshot(current, projection.error)
+  if ('error' in projection) return await saveProjectionWaitingSnapshot(current, projection.error, rootDir)
   if (current.run && (runHasUnresolvedEffects(current.run) ||
       current.run.status === 'waiting_reconciliation')) {
-    current = await reconcilePersistedTaskSnapshot(current)
+    current = await reconcilePersistedTaskSnapshot(current, rootDir)
   }
   if (runHasUnresolvedEffects(current.run)) return current
   const successful = current.run?.effects?.length
@@ -387,7 +408,7 @@ export async function settleStoppedInteractiveOperationSnapshot(
   const finalRun = current.run
     ? settleRun(current.run, successful ? 'completed' : 'failed', successful ? undefined : '交互操作未完成')
     : undefined
-  await deleteTaskSnapshot(current.id, undefined, finalRun)
+  await deleteTaskSnapshot(current.id, rootDir, finalRun)
   taskRuntimeRegistry.delete(current.sessionId)
   return null
 }
@@ -476,14 +497,15 @@ function ensureManagedWorktreeProjections(
 
 async function saveProjectionWaitingSnapshot(
   snapshot: TaskSnapshotRecord,
-  error: string
+  error: string,
+  rootDir?: string
 ): Promise<TaskSnapshotRecord> {
   if (!snapshot.run) return snapshot
   const transitioned = snapshot.run.status === 'waiting_reconciliation'
     ? snapshot.run
     : transitionTaskRun(snapshot.run, 'waiting_reconciliation')
   const run = { ...transitioned, error }
-  const saved = await saveTaskSnapshot({ ...snapshot, updatedAt: Date.now(), run })
+  const saved = await saveTaskSnapshot({ ...snapshot, updatedAt: Date.now(), run }, rootDir)
   taskRuntimeRegistry.set(run.sessionId, run)
   return saved
 }

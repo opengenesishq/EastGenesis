@@ -1,6 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import { useStore } from '../../store'
+import { matchesDesktopShortcut } from '../../desktop-keyboard'
 import * as monaco from 'monaco-editor'
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
+import HtmlWorker from 'monaco-editor/languages/features/html/html.worker.js?worker'
+import CssWorker from 'monaco-editor/languages/features/css/css.worker.js?worker'
+import JsonWorker from 'monaco-editor/languages/features/json/json.worker.js?worker'
+import TypeScriptWorker from 'monaco-editor/languages/features/typescript/ts.worker.js?worker'
 import 'monaco-editor/editor/browser/coreCommands'
 import 'monaco-editor/editor/contrib/bracketMatching/browser/bracketMatching'
 import 'monaco-editor/editor/contrib/clipboard/browser/clipboard'
@@ -57,7 +63,13 @@ type MonacoEnvironmentWithWorker = typeof globalThis & {
 const globalWithMonaco = globalThis as MonacoEnvironmentWithWorker
 if (!globalWithMonaco.MonacoEnvironment) {
   globalWithMonaco.MonacoEnvironment = {
-    getWorker: () => new EditorWorker()
+    getWorker: (_moduleId, label) => {
+      if (label === 'html' || label === 'handlebars' || label === 'razor') return new HtmlWorker()
+      if (label === 'css' || label === 'scss' || label === 'less') return new CssWorker()
+      if (label === 'json') return new JsonWorker()
+      if (label === 'typescript' || label === 'javascript') return new TypeScriptWorker()
+      return new EditorWorker()
+    }
   }
 }
 
@@ -147,7 +159,7 @@ function editorOptions(path: string): monaco.editor.IStandaloneEditorConstructio
     bracketPairColorization: { enabled: true },
     codeLens: false,
     folding: true,
-    fontFamily: 'var(--mono), SFMono-Regular, Menlo, Consolas, monospace',
+    fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--mono').trim() || 'SFMono-Regular, Menlo, Consolas, monospace',
     fontSize: 12,
     glyphMargin: false,
     hover: { enabled: 'off' },
@@ -230,10 +242,11 @@ const MonacoFileEditor = forwardRef<MonacoFileEditorHandle, MonacoFileEditorProp
     const cursorSubscription = editor.onDidChangeCursorPosition(updateCursorOffset)
     updateCursorOffset()
     const keySubscription = editor.onKeyDown((event: monaco.IKeyboardEvent) => {
-      if (event.keyCode === monaco.KeyCode.F12) {
+      const shortcuts = useStore.getState().settings.desktopShortcuts
+      if (matchesDesktopShortcut(event.browserEvent, 'goToDefinition', shortcuts)) {
         event.preventDefault()
         callbacksRef.current.onDefinition()
-      } else if (event.keyCode === monaco.KeyCode.Space && (event.ctrlKey || event.metaKey)) {
+      } else if (matchesDesktopShortcut(event.browserEvent, 'completeCode', shortcuts)) {
         event.preventDefault()
         callbacksRef.current.onCompletion()
       } else if (event.keyCode === monaco.KeyCode.Escape) {
@@ -242,8 +255,10 @@ const MonacoFileEditor = forwardRef<MonacoFileEditorHandle, MonacoFileEditorProp
     })
     const themeObserver = new MutationObserver(() => {
       monaco.editor.setTheme(themeForDocument())
+      editor.updateOptions({ fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--mono').trim() || 'SFMono-Regular, Menlo, Consolas, monospace' })
+      monaco.editor.remeasureFonts()
     })
-    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style'] })
 
     return () => {
       themeObserver.disconnect()

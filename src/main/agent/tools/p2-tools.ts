@@ -69,7 +69,7 @@ export const P2_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'send_notification',
-      description: '通过 CaoGen 中已保存的飞书或钉钉连接器发送消息。无需传 Webhook 或密钥；省略 connectorId 时使用该渠道默认连接器。',
+      description: '通过 EastGenesis 中已保存的飞书或钉钉连接器发送消息。无需传 Webhook 或密钥；省略 connectorId 时使用该渠道默认连接器。',
       parameters: {
         type: 'object',
         properties: {
@@ -102,7 +102,7 @@ export const P2_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'work_item_comment',
-      description: '以当前数字员工会话的不可变身份，在当前 WorkItem 下发表评论。Project、WorkItem、作者和 Assignment 均由 CaoGen 注入，不能由参数覆盖。',
+      description: '以当前数字员工会话的不可变身份，在当前 WorkItem 下发表评论。Project、WorkItem、作者和 Assignment 均由 EastGenesis 注入，不能由参数覆盖。',
       parameters: {
         type: 'object',
         properties: {

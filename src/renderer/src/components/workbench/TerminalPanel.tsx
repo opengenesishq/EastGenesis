@@ -1,10 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store'
 import { useT } from '../../i18n'
+import { PanelBottomClose, SquareTerminal } from 'lucide-react'
+import TerminalViewport from './TerminalViewport'
+import { workspaceTerminalContextKey, workspaceTerminalMatches } from '../../store/terminal-actions'
 
-export default function TerminalPanel(): React.JSX.Element {
+export default function TerminalPanel({ workspaceMode = false, active = true }: { workspaceMode?: boolean; active?: boolean }): React.JSX.Element {
   const t = useT()
   const activeId = useStore((s) => s.activeId)
+  const workspaceContextKey = useStore(workspaceTerminalContextKey)
+  const dockOpen = useStore((s) => s.workbench.terminalDockOpen || s.workbench.activePanelId === 'terminal')
+  const visible = active && dockOpen
   const { terminal, terminalBuffer, terminalError, terminalLoading } = useStore((s) => s.workbench)
   const startTerminal = useStore((s) => s.startTerminal)
   const sendInput = useStore((s) => s.sendTerminalInput)
@@ -12,10 +18,25 @@ export default function TerminalPanel(): React.JSX.Element {
   const closePanel = useStore((s) => s.closeTerminalPanel)
   const [command, setCommand] = useState('')
   const scrollRef = useRef<HTMLPreElement>(null)
+  const previousContext = useRef({ workspaceMode, key: workspaceContextKey })
 
   useEffect(() => {
-    if (activeId) void startTerminal()
-  }, [activeId, startTerminal])
+    if (!active) return
+    const changedWorkspace = workspaceMode && previousContext.current.workspaceMode
+      && previousContext.current.key !== workspaceContextKey
+    previousContext.current = { workspaceMode, key: workspaceContextKey }
+    setCommand('')
+    useStore.setState((state) => ({ workbench: {
+      ...state.workbench, terminalScope: workspaceMode ? 'workspace' : 'task',
+      ...(workspaceMode && !workspaceTerminalMatches(state, state.workbench.terminal)
+        ? { terminal: undefined, terminalBuffer: '', terminalError: undefined, terminalLoading: false } : {})
+    } }))
+    // Editing a directory must only unbind old input; do not open a picker for every keystroke.
+    if (!changedWorkspace && (activeId || workspaceMode) && visible) void startTerminal()
+  }, [active, activeId, visible, workspaceMode, workspaceContextKey, startTerminal])
+
+  const boundTerminal = terminal && (workspaceMode ? workspaceTerminalMatches(useStore.getState(), terminal) : terminal.sessionId === activeId) ? terminal : undefined
+  const ready = Boolean(boundTerminal && !boundTerminal.exit && !terminalLoading)
 
   useEffect(() => {
     const el = scrollRef.current
@@ -24,7 +45,7 @@ export default function TerminalPanel(): React.JSX.Element {
 
   const runCommand = async (): Promise<void> => {
     const text = command.trim()
-    if (!text || !terminal || terminal.exit) return
+    if (!text || !ready) return
     setCommand('')
     await sendInput(`${text}\n`)
   }
@@ -33,41 +54,42 @@ export default function TerminalPanel(): React.JSX.Element {
     <div className="terminal-panel">
       <header className="workspace-diff-top">
         <div>
-          <div className="workspace-diff-title">{t('terminalPanelTitle')}</div>
+          <div className="workspace-diff-title"><SquareTerminal size={14} aria-hidden="true" />{t('terminalPanelTitle')}</div>
           <div className="workspace-diff-sub">
-            {terminal ? `${terminal.backend} · ${terminal.cwd}` : t('terminalNotStarted')}
+            {boundTerminal?.executionEnvironment?.kind === 'wsl' ? `WSL2 · ${boundTerminal.executionEnvironment.distribution} · ${boundTerminal.executionEnvironment.guestCwd}` : boundTerminal ? boundTerminal.cwd : t('terminalNotStarted')}
           </div>
         </div>
         <div className="workspace-diff-actions">
           <button className="btn btn-ghost btn-sm" disabled={terminalLoading} onClick={() => void startTerminal()}>
             {terminalLoading ? t('loadingDiff') : t('terminalRestart')}
           </button>
-          {terminal && (
+          {boundTerminal && (
             <button className="btn btn-ghost btn-sm" onClick={() => void closeTerminal()}>
               {t('terminalStop')}
             </button>
           )}
-          <button className="btn btn-ghost btn-sm" onClick={closePanel}>
-            {t('close')}
+          <button className="icon-btn" aria-label={t('collapseToolPanel')} title={t('collapseToolPanel')} onClick={closePanel}>
+            <PanelBottomClose size={15} aria-hidden="true" />
           </button>
         </div>
       </header>
 
       {terminalError && <div className="notice notice-error terminal-notice">{terminalError}</div>}
-      {terminal?.fallbackReason && (
-        <div className="notice notice-info terminal-notice">{terminal.fallbackReason}</div>
+      {boundTerminal?.fallbackReason && (
+        <div className="notice notice-info terminal-notice">{boundTerminal.fallbackReason}</div>
       )}
 
+      {boundTerminal?.backend === 'pty' ? <TerminalViewport terminal={boundTerminal} active={Boolean(visible)} /> : <>
       <pre ref={scrollRef} className="terminal-output">
-        {terminalBuffer || (terminalLoading ? t('terminalStarting') : t('terminalEmpty'))}
+        {(boundTerminal ? terminalBuffer : '') || (terminalLoading ? t('terminalStarting') : t('terminalEmpty'))}
       </pre>
 
       <div className="terminal-input-row">
         <input
           className="input terminal-input"
           value={command}
-          disabled={!terminal || Boolean(terminal.exit)}
-          placeholder={terminal?.exit ? t('terminalExited') : t('terminalCommandPlaceholder')}
+          disabled={!ready}
+          placeholder={boundTerminal?.exit ? t('terminalExited') : t('terminalCommandPlaceholder')}
           onChange={(e) => setCommand(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -76,10 +98,11 @@ export default function TerminalPanel(): React.JSX.Element {
             }
           }}
         />
-        <button className="btn btn-primary" disabled={!command.trim() || !terminal || Boolean(terminal.exit)} onClick={() => void runCommand()}>
+        <button className="btn btn-primary" disabled={!command.trim() || !ready} onClick={() => void runCommand()}>
           {t('terminalRun')}
         </button>
       </div>
+      </>}
     </div>
   )
 }

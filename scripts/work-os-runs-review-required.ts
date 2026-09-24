@@ -17,7 +17,10 @@ const checks: Array<[string, boolean]> = [
   ['run opens canonical work item', read(files.panel).includes("requestProjectWorkspaceNavigation(projectId, 'work-item', workItemId)" )],
   ['review opens delivery acceptance', read(files.panel).includes("requestProjectWorkspaceNavigation(projectId, 'delivery', workItemId)" )],
   ['studio accepts runs/review sections', read(files.navigation).includes("'runs' | 'review'") && read(files.studio).includes("target === 'runs' || target === 'review'" )],
-  ['global navigation lands workspace', read(files.app).includes("target === 'runs' || target === 'review' || target === 'inbox'")],
+  ['global navigation mounts the single conversation workspace',
+    read(files.app).includes('data-product-surface="conversation"') &&
+    read(files.app).includes('data-experience-mode="assistant"') &&
+    read(files.app).includes('experienceMode="assistant"')],
   ['no provider calls', !/provider|fetch\s*\(/iu.test(read(files.panel))]
 ]
 let passed = 0

@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import { PERMISSION_OPTIONS, useStore } from '../store'
 import { useT } from '../i18n'
+import { taskReasoningOptions } from '../../../shared/task-reasoning'
+import { isRRuleSchedule, routineStartFromLocal, routineStartToLocal } from '../../../shared/routine-schedule'
+import RoutineScheduleFields from './routines/RoutineScheduleFields'
+import './routines/routine-editor.css'
 import type {
   CreateRoutineInput,
   DigitalWorker,
@@ -15,24 +19,32 @@ import type {
 interface Props {
   /** null / undefined = 新建;否则编辑该 Routine */
   routine?: Routine | null
+  initialSessionId?: string
   onClose: () => void
 }
 
-/** cron 速查:主控接入真实执行器前仅作输入提示,不做严格校验 */
-const CRON_EXAMPLES: Array<{ expr: string; desc: string }> = [
-  { expr: '0 9 * * *', desc: '每天 09:00' },
-  { expr: '*/30 * * * *', desc: '每 30 分钟' },
-  { expr: '0 */2 * * *', desc: '每 2 小时' },
-  { expr: '0 9 * * 1-5', desc: '工作日 09:00' },
-  { expr: '0 0 1 * *', desc: '每月 1 号 00:00' }
+/** Examples feed the same schedule calculation used by the main-process runtime. */
+const CRON_EXAMPLES: Array<{ expr: string; label: string }> = [
+  { expr: '0 9 * * *', label: 'routineExampleDaily' },
+  { expr: '*/30 * * * *', label: 'routineExampleHalfHour' },
+  { expr: '0 */2 * * *', label: 'routineExampleTwoHours' },
+  { expr: '0 9 * * 1-5', label: 'routineExampleWeekdays' },
+  { expr: '0 0 1 * *', label: 'routineExampleMonthly' },
+  { expr: 'RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=9;BYMINUTE=0;BYSECOND=0', label: 'routineExampleWeekdayRule' },
+  { expr: 'RRULE:FREQ=DAILY;INTERVAL=2;COUNT=5', label: 'routineExampleFiveRuns' }
 ]
 
-export default function RoutineEditor({ routine = null, onClose }: Props): React.JSX.Element {
+export default function RoutineEditor({ routine = null, initialSessionId, onClose }: Props): React.JSX.Element {
   const t = useT()
   const providers = useStore((s) => s.providers)
   const projectWorkspaces = useStore((s) => s.projectWorkspaces)
   const preferredProjectWorkspaceId = useStore((s) => s.preferredProjectWorkspaceId)
   const refreshProjectWorkspaces = useStore((s) => s.refreshProjectWorkspaces)
+  const sessions = useStore((s) => s.sessions)
+  const zh = useStore((s) => s.settings.language === 'zh')
+  const [continueSession, setContinueSession] = useState(Boolean(routine?.executionTarget || initialSessionId))
+  const [targetSessionId, setTargetSessionId] = useState(routine?.executionTarget?.sessionId ?? initialSessionId ?? '')
+  const targetSession = sessions[targetSessionId]?.meta
 
   const isEdit = routine !== null
 
@@ -45,8 +57,13 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
   const [goalTemplates, setGoalTemplates] = useState<Goal[]>([])
   const [projectCwd, setProjectCwd] = useState(routine?.projectCwd ?? '')
   const [schedule, setSchedule] = useState(routine?.schedule ?? '')
+  const [timeZone, setTimeZone] = useState(routine?.timeZone ?? (routine ? '' : Intl.DateTimeFormat().resolvedOptions().timeZone))
+  const [startLocal, setStartLocal] = useState(() => routineStartToLocal(routine?.startAt ?? (routine?.createdAt ?? Math.ceil((Date.now() + 1000) / 60000) * 60000), routine?.timeZone))
   const [providerId, setProviderId] = useState(routine?.providerId ?? '')
   const [model, setModel] = useState(routine?.model ?? '')
+  const [reasoningEffort, setReasoningEffort] = useState(routine?.reasoningEffort)
+  const [executionLocation, setExecutionLocation] = useState<'local' | 'worktree'>(routine?.executionLocation ?? 'local')
+  const reasoningOptions = taskReasoningOptions(providers.find(item => item.id === providerId), model.trim())
   const [engine, setEngine] = useState<EngineKind | ''>(routine?.engine ?? '')
   const [engines, setEngines] = useState<EngineInfo[]>([])
   const [budgetUsd, setBudgetUsd] = useState(routine?.budgetUsd ? String(routine.budgetUsd) : '')
@@ -116,7 +133,11 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
       setError(t('routineErrPromptRequired'))
       return
     }
-    if (!projectId && !projectCwd.trim()) {
+    if (continueSession && (!targetSession || targetSession.status === 'closed')) {
+      setError(zh ? '原任务已关闭或不存在，请先恢复原任务。' : 'Restore the original task before scheduling a continuation.')
+      return
+    }
+    if (!continueSession && !projectId && !projectCwd.trim()) {
       setError(t('routineErrCwdRequired'))
       return
     }
@@ -128,10 +149,12 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
     setBusy(true)
     setError('')
     try {
+      const startAt = isRRuleSchedule(schedule) ? routineStartFromLocal(startLocal, timeZone) : routine?.startAt
       const budget = Number(budgetUsd)
       const normalizedBudget = Number.isFinite(budget) && budget > 0 ? budget : 0
       if (isEdit && routine) {
         await window.agentDesk.updateRoutine(routine.id, {
+          executionTarget: continueSession ? { kind: 'existing_session', sessionId: targetSessionId } : null,
           name: name.trim(),
           prompt: prompt.trim(),
           projectId: projectId || null,
@@ -139,9 +162,13 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
           digitalWorkerId: digitalWorkerId || null,
           projectCwd: projectCwd.trim(),
           schedule: schedule.trim(),
+          timeZone,
+          startAt,
           providerId: providerId.trim(),
           model: model.trim(),
           engine: engine || undefined,
+          reasoningEffort: continueSession ? undefined : reasoningEffort,
+          executionLocation: continueSession ? undefined : executionLocation,
           budgetUsd: normalizedBudget,
           permissionMode,
           content: prompt.trim(),
@@ -151,6 +178,7 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
         })
       } else {
         const input: CreateRoutineInput = {
+          executionTarget: continueSession ? { kind: 'existing_session', sessionId: targetSessionId } : undefined,
           name: name.trim(),
           prompt: prompt.trim(),
           content: prompt.trim(),
@@ -159,10 +187,14 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
           digitalWorkerId: digitalWorkerId || undefined,
           projectCwd: projectCwd.trim(),
           schedule: schedule.trim(),
+          timeZone,
+          startAt,
           frequency: schedule.trim(),
           providerId: providerId.trim(),
           model: model.trim(),
           engine: engine || undefined,
+          reasoningEffort: continueSession ? undefined : reasoningEffort,
+          executionLocation: continueSession ? undefined : executionLocation,
           budgetUsd: normalizedBudget,
           permissionMode,
           notification: { enabled: notificationEnabled, onSuccess: true, onFailure: true },
@@ -178,18 +210,33 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
   }
 
   return (
-    <div className="modal-backdrop modal-backdrop-nested" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2 className="modal-title">
+    <div className="modal-backdrop modal-backdrop-nested routine-editor-backdrop" onClick={onClose}>
+      <div className="modal routine-editor-modal" role="dialog" aria-modal="true" aria-labelledby="routine-editor-title" onClick={(e) => e.stopPropagation()}>
+        <h2 className="modal-title" id="routine-editor-title">
           {isEdit ? t('routineEditTitle') : t('routineAddTitle')}
         </h2>
 
-        {!isEdit && templates.length > 0 && (
+        <label className="field-label">{zh ? '执行方式' : 'Execution'}</label>
+        <select className="select select-block" value={continueSession ? 'continue' : 'new'} onChange={(event) => setContinueSession(event.target.value === 'continue')}>
+          <option value="continue">{zh ? '定时继续原任务' : 'Continue an existing task'}</option>
+          <option value="new">{zh ? '每次创建新任务' : 'Create a new task for each run'}</option>
+        </select>
+        {continueSession && <>
+          <label className="field-label">{zh ? '原任务' : 'Original task'}</label>
+          <select className="select select-block" value={targetSessionId} onChange={(event) => setTargetSessionId(event.target.value)}>
+            <option value="">{zh ? '选择任务' : 'Choose a task'}</option>
+            {Object.values(sessions).filter((item) => item.meta.status !== 'closed').map(({ meta }) => <option key={meta.id} value={meta.id}>{meta.title || meta.id}</option>)}
+          </select>
+          <p className="field-hint">{zh ? '沿用原任务的模型路由、目录、预算和权限；正在执行时等待，不打断当前工作。' : 'Uses the task’s routing, directory, budget and permissions. Waits while the task is busy.'}</p>
+          {targetSession && <p className="field-hint">{targetSession.cwd}</p>}
+        </>}
+
+        {!continueSession && !isEdit && templates.length > 0 && (
           <>
-            <label className="field-label">Routine 模板</label>
+            <label className="field-label">{t('routineTemplateLabel')}</label>
             <select className="select select-block" defaultValue="" onChange={(e) => applyTemplate(e.target.value)}>
               <option value="" disabled>
-                选择模板
+                {t('routineTemplatePick')}
               </option>
               {templates.map((template) => (
                 <option key={template.id} value={template.id}>
@@ -217,13 +264,13 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
           onChange={(e) => setPrompt(e.target.value)}
         />
 
-        <label className="field-label">归属项目</label>
+        {!continueSession && <><label className="field-label">{t('routineProjectLabel')}</label>
         <select
           className="select select-block"
           value={projectId}
           onChange={(event) => setProjectId(event.target.value)}
         >
-          <option value="">仅使用执行目录</option>
+          <option value="">{t('routineDirectoryOnly')}</option>
           {projectWorkspaces.filter((project) => project.status === 'active').map((project) => (
             <option key={project.id} value={project.id}>{project.name}</option>
           ))}
@@ -231,13 +278,13 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
 
         {projectId && digitalWorkers.length > 0 && (
           <>
-            <label className="field-label">执行员工</label>
+            <label className="field-label">{t('routineWorkerLabel')}</label>
             <select
               className="select select-block"
               value={digitalWorkerId}
               onChange={(event) => setDigitalWorkerId(event.target.value)}
             >
-              <option value="">项目负责人</option>
+              <option value="">{t('routineProjectOwner')}</option>
               {digitalWorkers.map((worker) => (
                 <option key={worker.id} value={worker.id}>{worker.displayName}</option>
               ))}
@@ -247,13 +294,13 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
 
         {projectId && goalTemplates.length > 0 && (
           <>
-            <label className="field-label">目标契约模板</label>
+            <label className="field-label">{t('routineGoalTemplate')}</label>
             <select
               className="select select-block"
               value={goalTemplateId}
               onChange={(event) => setGoalTemplateId(event.target.value)}
             >
-              <option value="">不创建每次运行目标</option>
+              <option value="">{t('routineNoRunGoal')}</option>
               {goalTemplates.map((goal) => (
                 <option key={goal.id} value={goal.id}>{goal.title}</option>
               ))}
@@ -261,7 +308,7 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
           </>
         )}
 
-        <label className="field-label">执行目录{projectId ? '（可选）' : ''}</label>
+        <label className="field-label">{t(projectId ? 'routineDirectoryOptional' : 'routineDirectoryLabel')}</label>
         <div className="field-row">
           <input
             className="input input-block"
@@ -274,10 +321,19 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
           </button>
         </div>
 
-        <div className="field-label-row">
+        <label className="field-label">{zh ? '运行位置' : 'Run location'}</label>
+        <select className="select select-block" value={executionLocation} onChange={event => setExecutionLocation(event.target.value as 'local' | 'worktree')}>
+          <option value="local">{zh ? '本地目录' : 'Local directory'}</option>
+          <option value="worktree">{zh ? '独立 Worktree（Git 项目）' : 'Isolated Worktree (Git project)'}</option>
+        </select>
+        <p className="field-hint">{zh ? 'Worktree 每次创建独立分支和目录；原目录须为已提交的 Git 项目，失败时会显示原因。' : 'Each Worktree run creates its own branch and directory. Requires a Git project with a commit; creation errors are shown.'}</p>
+        </>}
+
+        <div className="field-label-row routine-schedule-row">
           <label className="field-label">{t('routineScheduleLabel')}</label>
           <select
             className="select"
+            aria-label={t('routineCronPick')}
             defaultValue=""
             onChange={(e) => applyCron(e.target.value)}
           >
@@ -286,7 +342,7 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
             </option>
             {CRON_EXAMPLES.map((c) => (
               <option key={c.expr} value={c.expr}>
-                {c.expr} — {c.desc}
+                {t(c.label)}
               </option>
             ))}
           </select>
@@ -297,15 +353,16 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
           placeholder="0 9 * * *"
           onChange={(e) => setSchedule(e.target.value)}
         />
-        <p className="field-hint">{t('routineCronHint')}</p>
+        <p className="field-hint">{zh ? '支持 every 30m、五段 cron 或一条 RRULE:FREQ=…；规则中的起点与时区在下方设置。' : 'Use every 30m, five-field cron, or a single RRULE:FREQ=…. Configure its start and time zone below.'}</p>
+        <RoutineScheduleFields schedule={schedule} timeZone={timeZone} startLocal={startLocal} onTimeZone={setTimeZone} onStartLocal={setStartLocal} zh={zh} />
 
-        <details className="routine-advanced-settings">
-          <summary>高级设置</summary>
+        {!continueSession && <details className="routine-advanced-settings">
+          <summary>{t('routineAdvanced')}</summary>
           <label className="field-label">{t('providerLabel')}</label>
           <select
             className="select select-block"
             value={providerId}
-            onChange={(e) => setProviderId(e.target.value)}
+            onChange={(e) => { setProviderId(e.target.value); setReasoningEffort(undefined) }}
           >
             <option value="">{t('noDefaultProvider')}</option>
             {providers.map((p) => (
@@ -321,8 +378,15 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
             className="input input-block"
             value={model}
             placeholder={t('selectModelPlaceholder')}
-            onChange={(e) => setModel(e.target.value)}
+            onChange={(e) => { setModel(e.target.value); setReasoningEffort(undefined) }}
           />
+
+          <label className="field-label">{zh ? '此计划的推理强度' : 'Reasoning for this schedule'}</label>
+          <select className="select select-block" value={reasoningEffort ?? ''} disabled={!reasoningOptions.length} onChange={event => setReasoningEffort(event.target.value as Routine['reasoningEffort'] || undefined)}>
+            <option value="">{zh ? '跟随模型配置' : 'Use model configuration'}</option>
+            {reasoningOptions.map(value => <option key={value} value={value}>{value}</option>)}
+          </select>
+          {!reasoningOptions.length && <p className="field-hint">{zh ? '选择已声明推理能力或已配置推理档位的模型后可独立选择。其他模型沿用设置中的思考配置。' : 'Independent levels require a model that declares reasoning support or has a configured reasoning level. Other models retain their thinking settings.'}</p>}
 
           {engines.length > 1 && (
             <>
@@ -363,11 +427,11 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
           >
             {PERMISSION_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
-                {o.label}
+                {t(o.value === 'default' ? 'routinePermissionDefault' : o.value === 'acceptEdits' ? 'routinePermissionEdits' : o.value === 'plan' ? 'routinePermissionPlan' : 'routinePermissionBypass')}
               </option>
             ))}
           </select>
-        </details>
+        </details>}
 
         <label className="settings-check">
           <input
@@ -384,7 +448,7 @@ export default function RoutineEditor({ routine = null, onClose }: Props): React
             checked={notificationEnabled}
             onChange={(e) => setNotificationEnabled(e.target.checked)}
           />
-          执行完成后发送通知
+          {t('routineNotify')}
         </label>
 
         {error && <div className="notice notice-error">{error}</div>}

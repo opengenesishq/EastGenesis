@@ -49,7 +49,7 @@ async function run() {
   const win = await waitForWindow()
   win.setSize(1200, 800)
   win.webContents.reload()
-  await waitForRenderer(win, `document.body.innerText.includes('CaoGen')`)
+  await waitForRenderer(win, `document.body.innerText.includes('EastGenesis')`)
   await selectSession(win, session.id)
   await openRefactor(win)
 

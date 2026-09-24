@@ -1,24 +1,37 @@
+import type { RemoteCreatedTask, RemoteCreatePhase } from './remote-created-task-types'
+
 /**
  * Remote continuation contracts. The remote surface is intentionally a
- * control and projection plane: local files, provider credentials and raw
- * conversation content never cross this boundary.
+ * control and projection plane. File reads and task transfer require separate
+ * opt-in capabilities; task transfer retains its own preview and ownership checks.
  */
 export const REMOTE_SCHEMA_VERSION = 1 as const
 
 export type RemoteDeviceCapability =
   | 'view_results'
+  | 'workspace_read'
+  | 'task_handoff'
   | 'resume_work_item'
+  | 'create_task'
+  | 'control_work_item'
   | 'approve_effect'
   | 'trigger_routine'
   | 'remote_runner'
 
 export type RemoteDeviceStatus = 'active' | 'revoked'
 export type RemoteConnectivity = 'online' | 'offline'
-export type RemoteCommandKind = 'resume_work_item' | 'approve_effect' | 'view_result' | 'trigger_routine'
+export type RemoteCommandKind = 'resume_work_item' | 'approve_effect' | 'view_result' | 'trigger_routine' | 'create_task' | 'append_task' | 'pause_work_item' | 'cancel_work_item'
 export type RemoteCommandStatus = 'pending' | 'offline' | 'expired' | 'rejected' | 'accepted'
 export type RemoteCommandExecutionStatus = 'running' | 'succeeded' | 'failed'
 export type RemoteApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired'
 export type RemoteRunnerKind = 'local' | 'remote'
+
+export type RemoteCommandPayload =
+  | { kind: 'approve_effect'; sessionId: string; permissionRequestId: string; action: string; targetDigest: string; dataScope: string }
+  | { kind: 'create_task'; objective: string; businessLineId?: string }
+  | { kind: 'append_task'; text: string; clientRequestId: string }
+  | { kind: 'pause_work_item'; reason?: string }
+  | { kind: 'cancel_work_item'; reason?: string }
 
 export interface RemoteDeviceIdentity {
   schemaVersion: typeof REMOTE_SCHEMA_VERSION
@@ -57,6 +70,8 @@ export interface RemoteCommandEnvelope {
   expiresAt: number
   createdAt: number
   payloadDigest: string
+  /** Signed command input. Metadata-only commands may omit this for v1 compatibility. */
+  payload?: RemoteCommandPayload
   signature: string
 }
 
@@ -82,6 +97,8 @@ export interface RemoteCommandRecord {
     status: RemoteCommandExecutionStatus
     routineRunId?: string
     runId?: string
+    createdTask?: RemoteCreatedTask
+    createPhase?: RemoteCreatePhase
     error?: string
     updatedAt: number
   }
@@ -194,7 +211,7 @@ export interface RemoteContinuationSnapshot {
 
 export interface RemoteApi {
   getRemoteContinuation(): Promise<RemoteContinuationSnapshot>
-  createRemotePairingSession(input?: { ttlMs?: number; projectId?: string }): Promise<RemotePairingSession>
+  createRemotePairingSession(input?: { ttlMs?: number; projectId?: string; workspaceRead?: boolean; taskHandoff?: boolean }): Promise<RemotePairingSession>
   registerRemoteDevice(input: { label: string; userId: string; publicKey: string; capabilities?: RemoteDeviceCapability[] }): Promise<RemoteDeviceIdentity>
   updateRemoteDeviceCapabilities(deviceId: string, capabilities: RemoteDeviceCapability[]): Promise<RemoteDeviceIdentity>
   unbindRemoteDevice(deviceId: string): Promise<RemoteDeviceIdentity>

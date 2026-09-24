@@ -7,13 +7,14 @@ interface Props {
   sessionId: string
   refreshToken: number
   onChanged?(): Promise<void>
+  contributionAllowed?: boolean
 }
 
 export default function LearningApprovalPanel(props: Props): React.JSX.Element {
   return <ProjectLearningApprovalPanel key={props.sessionId} {...props} />
 }
 
-function ProjectLearningApprovalPanel({ sessionId, refreshToken, onChanged }: Props): React.JSX.Element {
+function ProjectLearningApprovalPanel({ sessionId, refreshToken, onChanged, contributionAllowed = true }: Props): React.JSX.Element {
   const loadSequence = useRef(0)
   const mounted = useRef(false)
   const [snapshot, setSnapshot] = useState<LearningProjectSnapshot | null>(null)
@@ -80,6 +81,7 @@ function ProjectLearningApprovalPanel({ sessionId, refreshToken, onChanged }: Pr
               record={record}
               previous={record.supersedes ? recordsById.get(record.supersedes) : undefined}
               disabled={actingId !== null}
+              contributionAllowed={contributionAllowed}
               onDecision={decide}
             />
           ))}
@@ -93,11 +95,13 @@ function LearningRecordRow({
   record,
   previous,
   disabled,
+  contributionAllowed,
   onDecision
 }: {
   record: LearningRecord
   previous?: LearningRecord
   disabled: boolean
+  contributionAllowed: boolean
   onDecision(action: LearningDecisionAction, recordId: string): Promise<void>
 }): React.JSX.Element {
   return (
@@ -121,7 +125,7 @@ function LearningRecordRow({
       <div className="provider-row-actions">
         {record.status === 'draft' && (
           <>
-            <DecisionButton label="批准" action="approve" record={record} disabled={disabled} onDecision={onDecision} />
+            <DecisionButton label="批准" action="approve" record={record} disabled={disabled || (record.kind === 'memory' && !contributionAllowed)} onDecision={onDecision} />
             <DecisionButton label="拒绝" action="reject" record={record} disabled={disabled} onDecision={onDecision} />
           </>
         )}
@@ -129,7 +133,7 @@ function LearningRecordRow({
           <DecisionButton label="撤销" action="revoke" record={record} disabled={disabled} onDecision={onDecision} />
         )}
         {canRollback(record) && (
-          <DecisionButton label="回滚到此版本" action="rollback" record={record} disabled={disabled} onDecision={onDecision} />
+          <DecisionButton label="回滚到此版本" action="rollback" record={record} disabled={disabled || (record.kind === 'memory' && !contributionAllowed)} onDecision={onDecision} />
         )}
         {record.status !== 'deleted' && (
           <DecisionButton label="删除" action="delete" record={record} disabled={disabled} onDecision={onDecision} />

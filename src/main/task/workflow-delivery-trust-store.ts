@@ -361,7 +361,7 @@ export function recordWorkflowDeliveryRetiredLocalIdentity(
       makeRoomForIdentity(identities)
       identities.push({
         fingerprint: normalized,
-        label: `CaoGen local identity (${reason})`,
+        label: `EastGenesis local identity (${reason})`,
         status: 'revoked',
         trustedAt: retiredAt,
         updatedAt: retiredAt,

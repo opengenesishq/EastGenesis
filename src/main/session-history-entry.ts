@@ -4,9 +4,15 @@ import type { HistoryEntry, SessionMeta } from '../shared/types'
 export function sessionHistoryEntry(meta: SessionMeta & { sdkSessionId: string }): HistoryEntry {
   return {
     id: meta.id,
+    sideChat: meta.sideChat,
+    workspaceHandoff: meta.workspaceHandoff,
+    workspaceHandoffPending: meta.workspaceHandoffPending,
     taskMemorySessionId: meta.taskMemorySessionId,
     title: meta.title,
     cwd: meta.cwd,
+    executionEnvironment: meta.executionEnvironment,
+    reasoningEffort: meta.reasoningEffort,
+    memoryOverrides: meta.memoryOverrides,
     driveMode: meta.driveMode,
     parentSessionId: meta.parentSessionId,
     orchestrationId: meta.orchestrationId,

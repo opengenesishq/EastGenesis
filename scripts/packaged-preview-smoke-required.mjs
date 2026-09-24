@@ -10,7 +10,7 @@
  *   node scripts/packaged-preview-smoke-required.mjs --artifact dist/mac/CaoGen.app
  */
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -181,7 +181,7 @@ function inspectUnpackedLayout(artifact) {
 async function launchSmoke(artifact) {
   const executable = appExecutable(artifact)
   assert(executable && existsSync(executable), `launch executable missing: ${executable || '(unknown)'}`)
-  const userData = await mkdtemp(path.join(tmpdir(), 'caogen-packaged-smoke-'))
+  const userData = await mkdtemp(path.join(realpathSync(tmpdir()), 'caogen-packaged-smoke-'))
   const stdout = []
   const stderr = []
   const child = spawn(executable, ['--user-data-dir', userData], {

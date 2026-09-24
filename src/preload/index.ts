@@ -1,3 +1,36 @@
+import { siteDeploymentApi } from './site-deployment'
+import { workspaceBehaviorApi } from './workspace-behavior'
+import { browserExtensionApi } from './browser-extension'
+import { chatSnapshotShareApi } from './chat-snapshot-share'
+import { mcpOAuthApi } from './mcp-oauth'
+import { historyQuestionApi } from './history-question'
+import { wslApi } from './wsl'
+import { memoryPreferencesApi } from './memory-preferences'
+import { migrationSubscriptionApi } from './migration-subscriptions'
+import { browserDebugApi } from './browser-debug'
+import { taskHandoffApi } from './task-handoff'
+import { pluginCatalogApi } from './plugin-catalog'
+import { companionAppearanceApi } from './companion-appearance'
+import { browserStyleApi } from './browser-style'
+import { routineInboxApi } from './routine-inbox'
+import { hostedSiteApi } from './hosted-site'
+import { localDevServerApi } from './local-dev-server'
+import { browserManagementApi } from './browser-management'
+import { pullRequestWorkspaceApi } from './pull-request-workspace'
+import { browserTabsApi } from './browser-tabs'
+import { localSiteCatalogApi } from './local-site-catalog'
+import { worktreePullRequestDraftApi } from './worktree-pr-draft'
+import { sshApi } from './ssh'
+import { taskSourceApi } from './task-sources'
+import { remoteHostsApi } from './remote-hosts'
+import { isGuiPreview, guiPreviewApi, guiPreviewWorkbenchApi } from './gui-preview'
+import { computerHistoryApi } from './computer-history'
+import { feedbackApi } from './feedback'
+import { skillRecordingApi } from './skill-recording'
+import { temporaryTaskApi } from './temporary-task'
+import { projectHistoryApi } from './project-history'
+import { taskActivityApi } from './activity'
+import { imageCanvasApi } from './image-canvas'
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import type {
   EffectResolution,
@@ -33,6 +66,7 @@ import type {
   TaskDecomposeInput,
   UpdateRoutineInput
 } from '../shared/types'
+import type { ExternalBrowserConnectInput } from '../shared/external-browser-types'
 import { resolveTaskDagFinalization } from './task-dag-finalization'
 import { workflowLedgerApi } from './workflow-ledger'
 import { preparationPermissionApi } from './preparation-permission'
@@ -57,8 +91,66 @@ import { assistantSearchApi } from './assistant-search'
 import { palaceSceneBuilderApi } from './palace-scene-builder'
 import { sessionInputApi } from './session-input'
 import { councilApi } from './council'
+import { taskWindowApi } from './task-window'
+import { voiceInputApi } from './voice-input'
+import { desktopCompanionApi, desktopCompanionWorkbenchApi, isDesktopCompanion } from './desktop-companion'
+import type { SideChatApi } from '../shared/side-chat-types'
+
+const sideChatApi: SideChatApi = {
+  createSideChat: input => ipcRenderer.invoke('side-chat:create', input),
+  listSideChats: sourceSessionId => ipcRenderer.invoke('side-chat:list', sourceSessionId),
+  getSideChat: sideChatId => ipcRenderer.invoke('side-chat:get', sideChatId),
+  sendSideChatMessage: input => ipcRenderer.invoke('side-chat:send', input),
+  interruptSideChat: sideChatId => ipcRenderer.invoke('side-chat:interrupt', sideChatId),
+  closeSideChat: sideChatId => ipcRenderer.invoke('side-chat:close', sideChatId),
+  adoptSideChatAnswer: input => ipcRenderer.invoke('side-chat:adopt', input)
+}
 
 const api: AgentDeskApi = {
+  clearSessionGoalMode: sessionId => ipcRenderer.invoke('session-goal-mode:clear', sessionId),
+  inspectLocalRuntimes: () => ipcRenderer.invoke('environment:runtimes'),
+  listExternalBrowserConnections: () => ipcRenderer.invoke('externalBrowser:list'),
+  connectExternalBrowser: (input: ExternalBrowserConnectInput) => ipcRenderer.invoke('externalBrowser:connect', input),
+  reconnectExternalBrowser: (connectionId: string) => ipcRenderer.invoke('externalBrowser:reconnect', connectionId),
+  listExternalBrowserTabs: (connectionId: string) => ipcRenderer.invoke('externalBrowser:tabs', connectionId),
+  selectExternalBrowserTab: (connectionId: string, tabId: string) => ipcRenderer.invoke('externalBrowser:selectTab', connectionId, tabId),
+  revokeExternalBrowser: (connectionId: string) => ipcRenderer.invoke('externalBrowser:revoke', connectionId),
+  ...siteDeploymentApi,
+  ...workspaceBehaviorApi,
+  ...browserExtensionApi,
+  ...chatSnapshotShareApi,
+  ...mcpOAuthApi,
+  ...historyQuestionApi,
+  ...wslApi,
+  ...memoryPreferencesApi,
+  ...migrationSubscriptionApi,
+  ...browserDebugApi,
+  ...taskHandoffApi,
+  ...pluginCatalogApi,
+  ...companionAppearanceApi,
+  ...browserStyleApi,
+  ...routineInboxApi,
+  ...hostedSiteApi,
+  ...localDevServerApi,
+  ...browserManagementApi,
+  ...pullRequestWorkspaceApi,
+  ...sshApi,
+  ...taskSourceApi,
+  ...browserTabsApi,
+  ...localSiteCatalogApi,
+  ...worktreePullRequestDraftApi,
+  ...remoteHostsApi,
+  ...guiPreviewWorkbenchApi,
+  ...computerHistoryApi,
+  ...feedbackApi,
+  ...skillRecordingApi,
+  ...temporaryTaskApi,
+  ...projectHistoryApi,
+  ...taskActivityApi,
+  ...imageCanvasApi,
+  ...sideChatApi,
+  ...voiceInputApi,
+  ...taskWindowApi,
   ...councilApi,
   ...preparationPermissionApi,
   ...taskExecutionAuthorityApi,
@@ -90,6 +182,8 @@ const api: AgentDeskApi = {
   ...workflowLedgerApi,
   ...projectWorkspaceApi,
   ...remoteContinuationApi,
+  getRemoteConnectionSettings: () => ipcRenderer.invoke('remote-connection:get'),
+  saveRemoteConnectionSettings: settings => ipcRenderer.invoke('remote-connection:save', settings),
   ...dataRetentionApi,
   ...projectTestApi,
   ...projectDebugApi,
@@ -155,6 +249,11 @@ const api: AgentDeskApi = {
   renameHistory: (id: string, title: string) => ipcRenderer.invoke('history:rename', id, title),
   deleteHistory: (id: string) => ipcRenderer.invoke('history:delete', id),
   getSettings: () => ipcRenderer.invoke('settings-domain:get'),
+  onSettingsChanged: cb => {
+    const listener = (): void => cb()
+    ipcRenderer.on('settings-domain:changed', listener)
+    return () => ipcRenderer.removeListener('settings-domain:changed', listener)
+  },
   updateSettings: (patch: Partial<AppSettings>) => ipcRenderer.invoke('settings-domain:update', patch),
   getRoutingRuleSet: () => ipcRenderer.invoke('settings-domain:routing:get'),
   previewRoutingRuleSet: (input) => ipcRenderer.invoke('settings-domain:routing:preview', input),
@@ -284,6 +383,10 @@ const api: AgentDeskApi = {
     invokeMain('appFeatures:invoke', 'provider-profile-sync', 's3-history-preview', revisionId),
   applyProviderProfileS3History: (previewId: string, decisions: ProviderProfileImportDecision[]) =>
     invokeMain('appFeatures:invoke', 'provider-profile-sync', 's3-history-apply', previewId, decisions),
+  previewNativeProviderImports: (client) =>
+    invokeMain('appFeatures:invoke', 'provider-profile', 'native-preview', client),
+  applyNativeProviderImport: (previewId, action) =>
+    invokeMain('appFeatures:invoke', 'provider-profile', 'native-apply', previewId, action),
   previewCodexNativeProviderImport: () =>
     invokeMain('appFeatures:invoke', 'provider-profile', 'native-codex-preview'),
   applyCodexNativeProviderImport: (previewId, action) =>
@@ -331,6 +434,8 @@ const api: AgentDeskApi = {
     ipcRenderer.invoke('workspace:applyHunk', sessionId, filePath, hunkPatch),
   discardWorkspaceHunk: (sessionId: string, filePath: string, hunkPatch: string) =>
     ipcRenderer.invoke('workspace:discardHunk', sessionId, filePath, hunkPatch),
+  getWorkspaceHandoff: (sessionId: string) => ipcRenderer.invoke('worktrees:handoff-state', sessionId),
+  handoffWorkspace: (sessionId: string) => ipcRenderer.invoke('worktrees:handoff', sessionId),
   getWorktreeSummary: (sessionId: string) => ipcRenderer.invoke('worktrees:summary', sessionId),
   exportWorktreePatch: (sessionId: string) => ipcRenderer.invoke('worktrees:exportPatch', sessionId),
   inspectWorktreeMerge: (sessionId: string) => ipcRenderer.invoke('worktrees:mergeInspect', sessionId),
@@ -340,8 +445,8 @@ const api: AgentDeskApi = {
   getWorktreeConflictFiles: (sessionId: string) =>
     ipcRenderer.invoke('worktrees:conflictFiles', sessionId),
   listWorktreeMergeReceipts: () => ipcRenderer.invoke('worktrees:mergeReceipts'),
-  createWorktreePullRequest: (sessionId: string) =>
-    ipcRenderer.invoke('worktrees:createPr', sessionId),
+  createWorktreePullRequest: (sessionId, input) =>
+    ipcRenderer.invoke('worktrees:createPr', sessionId, input),
   removeWorktree: (sessionId: string, opts?: { deleteBranch?: boolean; force?: boolean }) =>
     ipcRenderer.invoke('worktrees:remove', sessionId, opts),
   listProjectFiles: (sessionId: string) => invokeMain('files:intelligence', 'list', sessionId),
@@ -369,22 +474,23 @@ const api: AgentDeskApi = {
     ipcRenderer.invoke('preview:saveAnnotation', sessionId, input),
   listPreviewAnnotations: (sessionId: string, path?: string) =>
     ipcRenderer.invoke('preview:listAnnotations', sessionId, path),
+  openWorkspaceBrowser: (url) => ipcRenderer.invoke('browser:open-workspace', url),
   openBrowser: (sessionId: string, url?: string) => ipcRenderer.invoke('browser:open', sessionId, url),
-  navigateBrowser: (sessionId: string, url: string) =>
-    ipcRenderer.invoke('browser:navigate', sessionId, url),
+  navigateBrowser: (sessionId, url, target) =>
+    ipcRenderer.invoke('browser:navigate', sessionId, url, target),
   setBrowserBounds: (sessionId: string, bounds) => ipcRenderer.invoke('browser:bounds', sessionId, bounds),
-  browserGoBack: (sessionId: string) => ipcRenderer.invoke('browser:back', sessionId),
-  browserGoForward: (sessionId: string) => ipcRenderer.invoke('browser:forward', sessionId),
-  reloadBrowser: (sessionId: string) => ipcRenderer.invoke('browser:reload', sessionId),
+  browserGoBack: (sessionId, target) => ipcRenderer.invoke('browser:back', sessionId, target),
+  browserGoForward: (sessionId, target) => ipcRenderer.invoke('browser:forward', sessionId, target),
+  reloadBrowser: (sessionId, target) => ipcRenderer.invoke('browser:reload', sessionId, target),
   closeBrowser: (sessionId: string) => ipcRenderer.invoke('browser:close', sessionId),
-  captureBrowserAnnotation: (sessionId: string, note: string) =>
-    ipcRenderer.invoke('browser:captureAnnotation', sessionId, note),
+  captureBrowserAnnotation: (sessionId, note, target) =>
+    ipcRenderer.invoke('browser:captureAnnotation', sessionId, note, target),
   listBrowserAnnotations: (sessionId: string) =>
     ipcRenderer.invoke('browser:listAnnotations', sessionId),
-  pickBrowserElement: (sessionId: string) => ipcRenderer.invoke('browser:pickElement', sessionId),
-  captureBrowserElementAnnotation: (sessionId: string, pick, note: string) =>
-    ipcRenderer.invoke('browser:captureElementAnnotation', sessionId, pick, note),
-  observeBrowser: (sessionId: string) => ipcRenderer.invoke('browser:observe', sessionId),
+  pickBrowserElement: (sessionId, target) => ipcRenderer.invoke('browser:pickElement', sessionId, target),
+  captureBrowserElementAnnotation: (sessionId, pick, note, target) =>
+    ipcRenderer.invoke('browser:captureElementAnnotation', sessionId, pick, note, target),
+  observeBrowser: (sessionId, target) => ipcRenderer.invoke('browser:observe', sessionId, target),
   onBrowserEvent: (cb) => {
     const listener = (_e: IpcRendererEvent, event: Parameters<typeof cb>[0]): void => {
       cb(event)
@@ -394,6 +500,7 @@ const api: AgentDeskApi = {
       ipcRenderer.removeListener('browser:event', listener)
     }
   },
+  setDesktopShortcutCapture: (active) => ipcRenderer.invoke('desktop-shortcuts:capture', active),
   onMenuCommand: (cb) => {
     const listeners: Array<[string, (e: IpcRendererEvent, value?: unknown) => void]> = [
       ['menu:new-session', () => cb({ type: 'new-session' })],
@@ -414,6 +521,7 @@ const api: AgentDeskApi = {
     }
   },
   listTerminals: () => ipcRenderer.invoke('terminals:list'),
+  startWorkspaceTerminal: (input) => ipcRenderer.invoke('terminals:start-workspace', input),
   startTerminal: (sessionId: string, opts?: { cols?: number; rows?: number; reuse?: boolean }) =>
     ipcRenderer.invoke('terminals:start', sessionId, opts),
   writeTerminal: (id: string, data: string) => ipcRenderer.invoke('terminals:write', id, data),
@@ -519,4 +627,9 @@ function invokeMain<T>(channel: string, ...args: unknown[]): Promise<T> {
   return ipcRenderer.invoke(channel, ...args) as Promise<T>
 }
 
-contextBridge.exposeInMainWorld('agentDesk', api)
+if (isGuiPreview) contextBridge.exposeInMainWorld('guiPreview', guiPreviewApi)
+else if (isDesktopCompanion) contextBridge.exposeInMainWorld('desktopCompanion', desktopCompanionApi)
+else {
+  contextBridge.exposeInMainWorld('agentDesk', api)
+  if (!taskWindowApi.taskWindowSessionId) contextBridge.exposeInMainWorld('desktopCompanionWorkbench', desktopCompanionWorkbenchApi)
+}

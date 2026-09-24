@@ -11,6 +11,7 @@ export const TOOL_SEMANTIC_CAPABILITIES: readonly ToolSemanticCapability[] = [
 
 const COMPOSITE_TOOL_CAPABILITIES: ToolSemanticCapability[] = [...TOOL_SEMANTIC_CAPABILITIES]
 const SCOPED_TOOL_CAPABILITIES: Record<string, ToolSemanticCapability[] | undefined> = {
+  web_search: ['browser', 'network'],
   create_document: ['workspaceWrite'], create_spreadsheet: ['workspaceWrite'], create_presentation: ['workspaceWrite'], create_pdf: ['workspaceWrite'],
   inspect_office_artifact: ['workspaceRead'], plan_office_revision: ['workspaceRead'], revise_office_artifact: ['workspaceRead', 'workspaceWrite'],
   project_knowledge_search: ['workspaceRead', 'network'], inspect_media: ['workspaceRead'],

@@ -91,7 +91,7 @@ export async function buildProjectResourceContext(
 
   const retrievedAt = new Date().toISOString()
   const lines = [
-    '# CaoGen Project Resources',
+    '# EastGenesis Project Resources',
     `Project: ${workspace.name} (${workspace.id})`,
     `Retrieved at: ${retrievedAt}`,
     'Only the sources registered to this Project are listed here. Do not infer access to another Project or to an unlisted source.'

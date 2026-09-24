@@ -17,6 +17,15 @@ type WorktreeLifecycleTarget = Extract<
 >
 
 export function effectTargetsConflict(left: EffectTarget, right: EffectTarget): boolean {
+  if (left.kind === 'task_handoff' || right.kind === 'task_handoff') return true
+  if (left.kind === 'workspace_handoff' || right.kind === 'workspace_handoff') {
+    const handoff = left.kind === 'workspace_handoff' ? left : right as Extract<EffectTarget, { kind: 'workspace_handoff' }>
+    const other = left.kind === 'workspace_handoff' ? right : left
+    const roots = [handoff.repoRoot, handoff.worktreePath]
+    if ('repoRoot' in other && typeof other.repoRoot === 'string' && roots.some(root => pathIsInside(root, other.repoRoot))) return true
+    if ('rootPath' in other && typeof other.rootPath === 'string' && roots.some(root => pathIsInside(root, other.rootPath))) return true
+    if (other.kind === 'unsupported') return true
+  }
   if (domainEffectTargetsConflict(left, right)) return true
   if (targetsShareFile(left, right)) return true
   if (opaqueFileTargetsConflict(left, right)) return true

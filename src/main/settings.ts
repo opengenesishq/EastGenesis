@@ -1,3 +1,14 @@
+import { normalizeWslPreferences } from '../shared/wsl-types'
+import { normalizeVoiceInputSettings } from '../shared/voice-input-types'
+import { normalizeWorkspaceBehavior } from '../shared/workspace-behavior-types'
+import { normalizeDesktopGitPreferences } from '../shared/desktop-git-preferences'
+import { normalizeNotificationPreferences, normalizeTerminalPreferences } from '../shared/desktop-behavior-preferences'
+import { normalizeDesktopPersonalization } from '../shared/desktop-personalization'
+import { normalizeQuickbarSettings } from '../shared/quickbar-settings'
+import { normalizeSuggestedPrompts } from '../shared/suggested-prompt-settings'
+import { normalizeSessionFollowUpBehavior } from '../shared/session-follow-up'
+import { normalizeMemoryPreferences } from '../shared/memory-preferences-types'
+import { normalizeBrowserDebugPreferences } from '../shared/browser-debug-types'
 import { app } from 'electron'
 import { join } from 'node:path'
 import { compareAndWriteSettingsFile, readSettingsFileSnapshot, SETTINGS_SCHEMA_VERSION, UnsupportedSettingsSchemaError } from './settings-file-storage'
@@ -17,6 +28,9 @@ import type {
   RoutingExpertPolicy,
   SchedulerStrategy
 } from '../shared/types'
+import { normalizeDesktopCompanionSettings } from '../shared/desktop-companion-settings'
+import { normalizeDesktopFonts } from '../shared/desktop-fonts'
+import { normalizeDesktopShortcuts, validateDesktopShortcuts } from '../shared/desktop-shortcuts'
 
 const SIDEBAR_MIN_WIDTH = 208
 const SIDEBAR_MAX_WIDTH = 420
@@ -42,6 +56,13 @@ const MODEL_ROUTING_TASK_KINDS = new Set<ModelRoutingTaskKind>([
 ])
 
 const DEFAULTS: AppSettings = {
+  suggestedPrompts: normalizeSuggestedPrompts(undefined),
+  followUpBehavior: normalizeSessionFollowUpBehavior(undefined),
+  memoryPreferences: normalizeMemoryPreferences(undefined),
+  browserDebug: normalizeBrowserDebugPreferences(undefined),
+  desktopFonts: normalizeDesktopFonts(undefined),
+  desktopShortcuts: {},
+  desktopCompanion: normalizeDesktopCompanionSettings(undefined),
   driveMode: 'core',
   defaultTaskStrategy: 'execute',
   ...normalizeBusinessLineSettings({ experienceMode: 'assistant' }),
@@ -318,10 +339,26 @@ export function normalizeSettingsDocument(document: RoutingSettingsDocument): Ap
     chinaDockerRegistryMirror: _legacyDockerRegistryMirror,
     ...raw
   } = persisted
+  const normalizedVoiceInput = normalizeVoiceInputSettings(raw.voiceInput)
   return {
     ...DEFAULTS,
     ...raw,
     ...normalizeBusinessLineSettings(raw),
+    ...(normalizedVoiceInput === undefined ? {} : { voiceInput: normalizedVoiceInput }),
+    desktopPersonalization: normalizeDesktopPersonalization(raw.desktopPersonalization),
+    notificationPreferences: normalizeNotificationPreferences(raw.notificationPreferences),
+    terminalPreferences: normalizeTerminalPreferences(raw.terminalPreferences),
+    wsl: normalizeWslPreferences(raw.wsl),
+    workspaceBehavior: normalizeWorkspaceBehavior(raw.workspaceBehavior),
+    gitPreferences: normalizeDesktopGitPreferences(raw.gitPreferences),
+    quickbar: normalizeQuickbarSettings(raw.quickbar),
+    desktopCompanion: normalizeDesktopCompanionSettings(raw.desktopCompanion),
+    desktopFonts: normalizeDesktopFonts(raw.desktopFonts),
+    desktopShortcuts: normalizeDesktopShortcuts(raw.desktopShortcuts),
+    suggestedPrompts: normalizeSuggestedPrompts(raw.suggestedPrompts),
+    followUpBehavior: normalizeSessionFollowUpBehavior(raw.followUpBehavior),
+    memoryPreferences: normalizeMemoryPreferences(raw.memoryPreferences),
+    browserDebug: normalizeBrowserDebugPreferences(raw.browserDebug),
     driveMode: normalizeCaoGenDriveMode(raw.driveMode),
     defaultTaskStrategy: normalizeDefaultTaskStrategy(raw.defaultTaskStrategy, DEFAULTS.defaultTaskStrategy),
     experienceRecommendationDismissedId: normalizeRecommendationId(raw.experienceRecommendationDismissedId),
@@ -390,10 +427,26 @@ export function updateSettings(patch: Partial<AppSettings>): AppSettings {
     patch.permissionRules === undefined ? prev.permissionRules : normalizePermissionRules(patch.permissionRules),
     migratedLegacyRules
   )
+  const normalizedVoiceInput = normalizeVoiceInputSettings(patch.voiceInput === undefined ? prev.voiceInput : patch.voiceInput)
   const next = {
     ...prev,
     ...patch,
     ...mergeBusinessLineSettings(prev, patch),
+    ...(normalizedVoiceInput === undefined ? {} : { voiceInput: normalizedVoiceInput }),
+    desktopPersonalization: normalizeDesktopPersonalization(patch.desktopPersonalization === undefined ? prev.desktopPersonalization : patch.desktopPersonalization),
+    notificationPreferences: normalizeNotificationPreferences(patch.notificationPreferences === undefined ? prev.notificationPreferences : patch.notificationPreferences),
+    terminalPreferences: normalizeTerminalPreferences(patch.terminalPreferences === undefined ? prev.terminalPreferences : patch.terminalPreferences),
+    wsl: normalizeWslPreferences(patch.wsl === undefined ? prev.wsl : patch.wsl),
+    workspaceBehavior: normalizeWorkspaceBehavior(patch.workspaceBehavior === undefined ? prev.workspaceBehavior : patch.workspaceBehavior),
+    gitPreferences: normalizeDesktopGitPreferences(patch.gitPreferences === undefined ? prev.gitPreferences : patch.gitPreferences),
+    quickbar: normalizeQuickbarSettings(patch.quickbar === undefined ? prev.quickbar : patch.quickbar),
+    desktopCompanion: normalizeDesktopCompanionSettings(patch.desktopCompanion === undefined ? prev.desktopCompanion : patch.desktopCompanion),
+    desktopFonts: normalizeDesktopFonts(patch.desktopFonts === undefined ? prev.desktopFonts : patch.desktopFonts),
+    desktopShortcuts: patch.desktopShortcuts === undefined ? prev.desktopShortcuts : validateDesktopShortcuts(patch.desktopShortcuts),
+    suggestedPrompts: normalizeSuggestedPrompts(patch.suggestedPrompts === undefined ? prev.suggestedPrompts : patch.suggestedPrompts),
+    followUpBehavior: normalizeSessionFollowUpBehavior(patch.followUpBehavior === undefined ? prev.followUpBehavior : patch.followUpBehavior),
+    memoryPreferences: normalizeMemoryPreferences(patch.memoryPreferences === undefined ? prev.memoryPreferences : patch.memoryPreferences),
+    browserDebug: normalizeBrowserDebugPreferences(patch.browserDebug === undefined ? prev.browserDebug : patch.browserDebug),
     driveMode: patch.driveMode === undefined ? prev.driveMode : normalizeCaoGenDriveMode(patch.driveMode),
     defaultTaskStrategy: patch.defaultTaskStrategy === undefined
       ? prev.defaultTaskStrategy
@@ -435,7 +488,16 @@ export function updateSettings(patch: Partial<AppSettings>): AppSettings {
     throw err
   }
   cache = next
+  for (const listener of settingsListeners) {
+    try { listener() } catch (error) { console.error('[agent-desk] settings listener failed:', error) }
+  }
   return next
+}
+
+const settingsListeners = new Set<() => void>()
+export function subscribeSettingsChanges(listener: () => void): () => void {
+  settingsListeners.add(listener)
+  return () => settingsListeners.delete(listener)
 }
 
 function normalizeRecommendationId(value: unknown): string {

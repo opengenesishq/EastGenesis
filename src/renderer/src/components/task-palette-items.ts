@@ -1,6 +1,5 @@
 import type { CommandDescriptor } from '../commands'
 import type { HistoryEntry } from '../../../shared/types'
-import { resolveBusinessLineId } from '../../../shared/business-line-types'
 import type { AppStore } from '../store'
 import type { SidebarEntry } from './sidebar-project-groups'
 import { groupTaskEntries, taskEntryRecord } from './task-entry-groups'
@@ -9,18 +8,18 @@ export type PaletteSection = 'command' | 'session' | 'history' | 'plugin'
 export interface PaletteItem extends CommandDescriptor { section: PaletteSection; children?: PaletteItem[] }
 
 export function taskPaletteItems(input: {
-  lineId: string; order: string[]; sessions: AppStore['sessions']; history: HistoryEntry[]
+  order: string[]; sessions: AppStore['sessions']; history: HistoryEntry[]
   selectSession(id: string): void; resume(entry: HistoryEntry): Promise<void>
 }): PaletteItem[] {
   const open = new Set(input.order)
   const sdk = new Set(input.order.map((id) => input.sessions[id]?.meta.sdkSessionId))
   const entries: SidebarEntry[] = input.order.flatMap((id) => {
     const session = input.sessions[id]
-    return session && resolveBusinessLineId(session.meta) === input.lineId
+    return session
       ? [{ kind: 'active' as const, id, meta: session.meta, pendingCount: session.pendingPermissions.length }] : []
   })
   for (const history of input.history) {
-    if (!open.has(history.id) && !sdk.has(history.sdkSessionId) && resolveBusinessLineId(history) === input.lineId) entries.push({ kind: 'history', id: history.id, history })
+    if (!open.has(history.id) && !sdk.has(history.sdkSessionId)) entries.push({ kind: 'history', id: history.id, history })
   }
   return groupTaskEntries(entries).flatMap((group) => {
     const primary = entryItem(group.representative, input)

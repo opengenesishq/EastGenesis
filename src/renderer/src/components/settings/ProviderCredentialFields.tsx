@@ -52,12 +52,15 @@ export default function ProviderCredentialFields(props: Props): React.JSX.Elemen
         {isEdit && provider?.hasToken && !tokenTouched && <span className="field-hint">{t('savedKeepEmpty')}</span>}
       </label>
       <input className="input input-block" data-provider-field="api-key" type="password" value={token} placeholder={isEdit && provider?.hasToken ? t('tokenPlaceholderSaved') : '<your-api-key>'} onChange={(event) => onTokenChange(event.target.value)} />
+      <details className="provider-credential-options">
+      <summary>{t('providerSimpleCredentialsMore')}</summary>
       <label className="field-label">{t('apiKeyNameLabel')}</label>
       <input className="input input-block" value={tokenLabel} placeholder={t('apiKeyNamePlaceholder')} onChange={(event) => onTokenLabelChange(event.target.value)} />
       <ProviderSavedKeys provider={provider} savedKeys={savedKeys} keyDrafts={keyDrafts} activeKeyId={activeKeyId} routingMode={credentialRoutingMode} onActiveKeyChange={onActiveKeyChange} onRoutingModeChange={onCredentialRoutingModeChange} onKeyDraftsChange={onKeyDraftsChange} />
       <label className="field-label">{t('additionalApiKeysLabel')}</label>
       <textarea className="input input-block textarea" data-provider-field="additional-api-keys" value={additionalKeysText} rows={3} placeholder={t('additionalApiKeysPlaceholder')} onChange={(event) => onAdditionalKeysTextChange(event.target.value)} />
       <div className="field-hint">{t('additionalApiKeysHint')}</div>
+      </details>
     </>}
   </>
 }

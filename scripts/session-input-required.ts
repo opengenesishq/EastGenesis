@@ -142,7 +142,7 @@ async function main(): Promise<void> {
   })
   await check('local controls use exact unquoted requests; supplemental content stays ordinary input', () => {
     assert.equal(sessionInputIntent('暂停这个任务。'), 'pause')
-    assert.equal(sessionInputIntent('去故宫看看'), 'palace')
+    assert.equal(sessionInputIntent('去故宫看看'), 'message')
     assert.equal(sessionInputIntent('换一个更快的模型'), 'model')
     assert.equal(sessionInputIntent('“暂停这个任务”这句话请加入演示稿'), 'message')
     assert.equal(sessionInputIntent('暂停这个任务', true), 'message')

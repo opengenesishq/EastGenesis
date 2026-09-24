@@ -468,7 +468,40 @@ async function stopRuntime(runtime) {
 async function enterStudio(page) {
   await page.waitForSelector('.app', { timeout: 30_000 })
   await page.waitForFunction(() => typeof window.agentDesk?.getProjectGoal === 'function', { timeout: 30_000 })
-  await page.click('[data-experience-mode-option="studio"]')
+  // A fresh profile now shows the provider guide before the mode switcher.
+  // Dismiss that user-visible guide in the same way as the packaged UI gate,
+  // then continue through the normal Studio entry when the switcher exists.
+  const onboardingSkip = await page.$('.first-launch-onboarding button.btn-ghost')
+  if (onboardingSkip) {
+    await onboardingSkip.click()
+    await page.waitForFunction(() => !document.querySelector('.first-launch-onboarding'), { timeout: 15_000 })
+  }
+  const studioAlreadyOpen = await page.$('[data-studio-view]')
+  if (!studioAlreadyOpen) {
+    const personalMenuSelector = '[data-sidebar-action="personal-menu"][aria-expanded="false"]'
+    if (await page.$(personalMenuSelector)) {
+      await page.locator(personalMenuSelector).click()
+      await page.waitForFunction(
+        () => document.querySelector('[data-sidebar-action="personal-menu"]')?.getAttribute('aria-expanded') === 'true',
+        { timeout: 10_000 }
+      )
+    }
+    const moreToolsSelector = '[data-workspace-more-tools]:not([open]) > summary'
+    if (await page.$(moreToolsSelector)) {
+      await page.locator(moreToolsSelector).click()
+      await page.waitForFunction(
+        () => Boolean(document.querySelector('[data-workspace-more-tools][open]')),
+        { timeout: 10_000 }
+      )
+    }
+    const studioModeSelector = '[data-experience-mode-option="studio"]'
+    await page.waitForSelector(studioModeSelector, { visible: true, timeout: 10_000 })
+    await page.locator(studioModeSelector).click()
+    await page.waitForFunction(
+      () => document.querySelector('[data-experience-mode="studio"]') || document.querySelector('[data-studio-view]'),
+      { timeout: 30_000 }
+    )
+  }
   await page.waitForSelector('[data-studio-view]', { visible: true, timeout: 30_000 })
   // Studio now opens on the unified Work Inbox. ProjectWorkspaceStudio remains
   // mounted behind its explicit Work tab, so a selector-only wait for a

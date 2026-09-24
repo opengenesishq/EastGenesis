@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { invalidateGuiPreview } from '../gui-preview/gui-preview-events'
 import { isGuiToolName } from '../agent/tools/gui-tools'
 import type {
   AppSettings,
@@ -205,12 +206,16 @@ export function listToolCapabilityGrants(now = Date.now()): ToolCapabilityGrantV
 }
 
 export function revokeGuiAutomationGrant(grantId: string): boolean {
-  return grants.delete(grantId.trim())
+  const id = grantId.trim(), grant = grants.get(id)
+  const removed = grants.delete(id)
+  if (grant) invalidateGuiPreview(grant.sessionId)
+  return removed
 }
 
 export function revokeAllGuiAutomationGrants(): number {
   const count = grants.size
   grants.clear()
+  invalidateGuiPreview()
   return count
 }
 
@@ -231,6 +236,7 @@ export function revokeGuiAutomationGrantsForSession(sessionId: string): number {
     grants.delete(id)
     count += 1
   }
+  invalidateGuiPreview(sessionId)
   return count
 }
 

@@ -1,5 +1,7 @@
 import type { MemoryLayer } from './memory-manager'
 import { proposeMemoryDraft, type ProjectMemoryDraft } from '../memoryStore'
+import type { SessionMeta } from '../../shared/types'
+import { currentTaskMemoryPreferences, withTaskMemoryPreferences } from './memory-preferences'
 
 export interface MemoryExtractionInput {
   rootDir: string
@@ -8,6 +10,7 @@ export interface MemoryExtractionInput {
   projectId?: string
   source: string
   defaultLayer?: MemoryLayer
+  sessionMeta?: SessionMeta
 }
 
 // 只抽取用户明确要求记住的稳定约定，避免把一次性聊天内容写成长期记忆。
@@ -27,11 +30,13 @@ export function summarizeMemoryTitle(text: string): string {
 }
 
 export async function writeExtractedMemory(input: MemoryExtractionInput): Promise<ProjectMemoryDraft | null> {
+  if (!currentTaskMemoryPreferences(input.sessionMeta).effective.contributeSharedMemory) return null
   if (!shouldExtractMemory(input.text)) return null
   if (!input.projectRoot) return null
+  const projectRoot = input.projectRoot
   const layer = input.defaultLayer ?? (input.projectRoot ? 'project' : 'user')
   const tags = inferTags(input.text)
-  return proposeMemoryDraft({ projectRoot: input.projectRoot, projectId: input.projectId }, input.rootDir, {
+  const write = () => proposeMemoryDraft({ projectRoot, projectId: input.projectId }, input.rootDir, {
     kind: `auto-extracted-${layer}`,
     title: summarizeMemoryTitle(input.text),
     body: input.text.trim(),
@@ -41,6 +46,7 @@ export async function writeExtractedMemory(input: MemoryExtractionInput): Promis
     confidence: 0.8,
     actor: { type: 'runtime', id: 'memory-auto-extract', source: input.source }
   })
+  return input.sessionMeta ? withTaskMemoryPreferences(input.sessionMeta, write) : write()
 }
 
 function inferTags(text: string): string[] {

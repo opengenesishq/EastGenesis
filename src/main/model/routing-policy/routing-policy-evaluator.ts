@@ -5,7 +5,7 @@ import type { TaskProfile } from '../model-profile'
 import type { RoutingTargetRef } from '../../../shared/routing-policy-types'
 import type { EffectiveRoutingPolicy, EvaluatedRule, RoutingCatalogEntry, RoutingEvaluatorInput, RoutingEvaluationResult } from './evaluator-types'
 import { readEvaluatorRules, matchRoutingRules, effectivePolicy, issue } from './evaluator-rules'
-import { buildRoutingCatalog, qualifyCatalog, targetKey } from './evaluator-catalog'
+import { buildRoutingCatalog, qualifyCatalog, resolveCatalogTarget, targetKey } from './evaluator-catalog'
 import { compileRoutingSelection } from './evaluator-selection'
 import { rankQualifiedCatalog } from './evaluator-ranking'
 import { validateEvaluationBoundary } from './evaluator-validation'
@@ -79,8 +79,15 @@ function readyResult(state: IntersectionInput, entries: RoutingCatalogEntry[], d
     && entry.profile.model === decision.selected.profile.model)!
   const ranked = decision.candidates.map((candidate) => entries.find((entry) => entry.profile.providerId === candidate.profile.providerId
     && entry.profile.model === candidate.profile.model)!)
+  const selection = state.policy.selection
+  const configured = selection.kind === 'preferred' && selection.alternativesOrder === 'configured'
+  // Explicit order is an execution contract: do not reorder by score or silently skip
+  // an unavailable intermediate target. The user can repair the rule after a pause.
+  const ordered = configured ? selection.alternatives.map((target) => resolveCatalogTarget(entries, target)) : ranked
+  const firstUnavailable = ordered.findIndex((entry) => !entry)
+  const usableOrder = firstUnavailable < 0 ? ordered : ordered.slice(0, firstUnavailable)
   const alternatives = state.policy.failure.kind === 'retry_allowed_targets'
-    ? ranked.filter((entry) => targetKey(entry.target) !== targetKey(initial.target)).map((entry) => entry.target) : []
+    ? usableOrder.flatMap((entry) => entry && targetKey(entry.target) !== targetKey(initial.target) ? [entry.target] : []) : []
   const output = { ...state.base, status: 'ready' as const, effectivePolicy: state.policy, task: state.task,
     initialTarget: initial.target, qualifiedTargets: ranked.map((entry) => entry.target), allowedAlternatives: alternatives,
     rankedCandidates: decision.candidates, pricing: ranked.map((entry) => ({ target: entry.target, basis: entry.pricingBasis,

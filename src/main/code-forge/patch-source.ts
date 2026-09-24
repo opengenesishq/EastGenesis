@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawnSyncInExecutionEnvironment as spawnSync } from '../wsl/process'
 import { isolatedLocalGitEnv, withSafeLocalGitConfig } from '../git/safe-git'
 import { MAX_PATCH_ARTIFACT_BYTES } from './patch-artifact'
 import {

@@ -3,10 +3,13 @@ import { nextStudioSessionNonce } from './project-workspace-actions'
 
 type SessionOwnership = Pick<
   SessionMeta,
-  'workspaceId' | 'projectId' | 'goalId' | 'workItemId' | 'experienceModeOverride'
+  'workspaceId' | 'projectId' | 'goalId' | 'workItemId' | 'experienceModeOverride' | 'businessLineId'
 >
 
 export function sessionExperienceMode(meta: SessionOwnership): 'assistant' | 'studio' {
+  // Current tasks carry an explicit entry identity, including Assistant tasks
+  // whose tool directory also has a legacy projectId.
+  if (meta.businessLineId === 'assistant' || meta.businessLineId === 'studio') return meta.businessLineId
   // A session may retain a legacy path-based projectId for tool context while
   // still belonging to the Assistant entry. The explicit creation projection
   // is authoritative for the surface shown after reload or session switching.

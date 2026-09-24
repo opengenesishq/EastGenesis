@@ -1,4 +1,4 @@
-# CaoGen watercolor character runtime assets
+# EastGenesis watercolor character runtime assets
 
 Only transparent, QC-approved PNG files belong in this directory. A file is not used by the Office runtime until its canonical filename is added to `VERIFIED_WATERCOLOR_CHARACTER_FILES` in `watercolor-character-assets.ts`.
 

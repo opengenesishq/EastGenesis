@@ -3,6 +3,7 @@ import { taskExecutionAuthoritySystemPrompt } from './permission/task-execution-
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
 import { assertPersistedSessionExecutionAllowed } from './session-execution-ownership'
+import { boundedSideChatBody } from './side-chat/side-chat-policy'
 import {
   documentAttachmentsToPrompt,
   imageAttachmentRefToContentBlock,
@@ -56,6 +57,7 @@ import {
 import { runHasUnresolvedEffects } from './task/effect-runtime'
 import { taskStrategySystemAppend, updateTaskStrategyMeta } from './task/task-strategy'
 import { buildWorkflowStageHandoffPrompt } from './task/workflow-stage-handoff'
+import { INLINE_VISUALIZATION_PROMPT } from '../shared/inline-visualization'
 import { buildSessionRequirementContext } from './task/session-requirement-context'
 import { nativeRecoveryHandoffPrompt } from './task/native-recovery-handoff'
 import { sessionModelHandoffPrompt } from './agent/session-model-handoff'
@@ -223,14 +225,13 @@ export class AnthropicEngine implements Engine {
     this.turnRevisionEligible = payload.images.length === 0 && payload.documents.length === 0
     this.turnHadToolEvents = false
     this.dependencies.modelAttempts.startTurn(messageId)
-    let attachments: UserMessageAttachmentView[]
     try {
-      attachments = durableImageReferences(payload.images)
+      durableImageReferences(payload.images)
     } catch (error) {
       this.rejectSend(anthropicErrorText(error))
       return
     }
-    emitNativeUserMessage({ meta: this.meta, payload, messageId, attachments, emit: (event) => this.emit(event) })
+    emitNativeUserMessage({ meta: this.meta, payload, messageId, emit: (event) => this.emit(event) })
 
     this.assistantText = ''
     this.thinkingText = ''
@@ -485,14 +486,16 @@ export class AnthropicEngine implements Engine {
     const request = this.dependencies.applyRuntimeToRequest({
       model: target.model,
       maxTokens: DEFAULT_MAX_TOKENS,
-      system: [taskStrategySystemAppend(this.meta.taskStrategy, projectContext, preparationPermissionSystemPrompt(this.meta, app.getPath('userData')), taskExecutionAuthoritySystemPrompt(this.meta, app.getPath('userData'))), recoveryHandoff].filter(Boolean).join('\n\n'),
+      system: [taskStrategySystemAppend(this.meta.taskStrategy, projectContext, preparationPermissionSystemPrompt(this.meta, app.getPath('userData')), taskExecutionAuthoritySystemPrompt(this.meta, app.getPath('userData'))), INLINE_VISUALIZATION_PROMPT, recoveryHandoff].filter(Boolean).join('\n\n'),
       messages: [...this.history, ...turnMessages],
       tools: ANTHROPIC_CODING_TOOLS,
       extraBody: target.credentialProvider.advancedConfig?.request?.body
     }, target.credentialProvider.advancedConfig?.runtime)
     rememberAnthropicRecoveryTarget(this.recoveryState, target)
     if (target.keyId) this.dependencies.markProviderKeyUsed(target.providerId, target.keyId)
-    const body = boundedCouncilBody(this.meta, this.dependencies.buildWireBody(request), target.providerId, target.model, 'anthropic.messages') as Record<string, unknown>
+    const body = boundedSideChatBody(this.meta,
+      boundedCouncilBody(this.meta, this.dependencies.buildWireBody(request), target.providerId, target.model, 'anthropic.messages'),
+      app.getPath('userData')) as Record<string, unknown>
     const assertPhysicalRequestAllowed = async (): Promise<void> => {
       await assertPersistedSessionExecutionAllowed(this.meta, app.getPath('userData'))
       // The SDK may issue more than one physical request during a single
@@ -554,7 +557,8 @@ export class AnthropicEngine implements Engine {
         onThinking: (text) => this.appendThinking(text),
         fetch: async (url, init = {}) => {
           await assertPhysicalRequestAllowed()
-          const wire = boundedCouncilBody(this.meta, init.body, target.providerId, target.model, 'anthropic.messages')
+          const wire = boundedSideChatBody(this.meta,
+            boundedCouncilBody(this.meta, init.body, target.providerId, target.model, 'anthropic.messages'), app.getPath('userData'))
           await claimCouncilPhysicalRequest(this.meta, typeof url === 'string' ? url : url.toString())
           const scope = providerCredentialScopeForSession(this.meta, target.providerId, operationId)
           const selection = target.issueCredentialLease(scope)

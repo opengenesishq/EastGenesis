@@ -1,0 +1,34 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>EastGenesis</title>
+  <desc>EastGenesis 的东方红金 G 标志，代表生成、协作与智能路由。</desc>
+  <defs>
+    <radialGradient id="eg-bg" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(512 384) rotate(90) scale(650)">
+      <stop stop-color="#3B090A"/>
+      <stop offset="1" stop-color="#170204"/>
+    </radialGradient>
+    <linearGradient id="eg-gold" x1="188" y1="154" x2="728" y2="722" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFE178"/>
+      <stop offset="0.45" stop-color="#FFC700"/>
+      <stop offset="1" stop-color="#EE9700"/>
+    </linearGradient>
+    <linearGradient id="eg-red" x1="208" y1="750" x2="802" y2="408" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#A90000"/>
+      <stop offset="0.48" stop-color="#E40000"/>
+      <stop offset="1" stop-color="#FF4B32"/>
+    </linearGradient>
+    <filter id="eg-glow" x="70" y="70" width="884" height="884" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="1 0 0 0 0.95 0 1 0 0 0.35 0 0 1 0 0.02 0 0 0 .32 0"/>
+    </filter>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="236" fill="url(#eg-bg)"/>
+  <path d="M760 268A344 344 0 0 0 232 708" fill="none" stroke="#FFB500" stroke-width="138" stroke-linecap="round" opacity=".3" filter="url(#eg-glow)"/>
+  <path d="M232 708A344 344 0 0 0 816 468H610" fill="none" stroke="#F00000" stroke-width="138" stroke-linecap="butt" opacity=".3" filter="url(#eg-glow)"/>
+  <path d="M760 268A344 344 0 0 0 232 708" fill="none" stroke="url(#eg-gold)" stroke-width="112" stroke-linecap="round"/>
+  <path d="M232 708A344 344 0 0 0 816 468H610" fill="none" stroke="url(#eg-red)" stroke-width="112" stroke-linecap="butt"/>
+  <!-- G terminal: the bar points toward the next generated possibility. -->
+  <path d="M812 412L884 466L812 520L766 474L812 428L812 412Z" fill="url(#eg-red)"/>
+  <!-- The central spark is a four-way routing decision. -->
+  <path d="M424 404L454 458L512 484L454 510L424 566L394 510L336 484L394 458L424 404Z" fill="url(#eg-gold)"/>
+  <path d="M424 443L438 470L466 484L438 498L424 525L410 498L382 484L410 470L424 443Z" fill="#FFF4B0" opacity=".9"/>
+</svg>

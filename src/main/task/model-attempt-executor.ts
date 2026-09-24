@@ -58,7 +58,7 @@ export function normalizeModelExecutorReceipt(value: unknown, target: AttemptTar
     throw invalid('executor identity and model protocol are incompatible')
   }
   const executorVersion = safeText(record.executorVersion, 'executor version', 80)
-  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(executorVersion)) throw invalid('executor version must identify a CaoGen build')
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(executorVersion)) throw invalid('executor version must identify an EastGenesis build')
   const identity = {
     schemaVersion: 1 as const, source: 'native_runtime' as const,
     executorId: implementation.id, executorVersion, component,

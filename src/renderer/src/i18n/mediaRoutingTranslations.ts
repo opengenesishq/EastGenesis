@@ -165,8 +165,8 @@ export const MEDIA_ROUTING_TRANSLATIONS = {
     "en": "Media provider display name"
   },
   "mediaAdapterBinding": {
-    "zh": "绑定 CaoGen Provider",
-    "en": "Bind CaoGen provider"
+    "zh": "绑定 EastGenesis Provider",
+    "en": "Bind EastGenesis provider"
   },
   "mediaAdapterChooseProvider": {
     "zh": "选择已配置 Provider",

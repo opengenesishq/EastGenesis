@@ -1,6 +1,8 @@
 import { memo, Suspense, lazy, useEffect, useState } from 'react'
 import { ArrowUp, GitBranch, Pencil, RefreshCw, X } from 'lucide-react'
 import type { ChatItem, ToolResultInfo } from '../store'
+import { useStore } from '../store'
+import { matchesDesktopShortcut } from '../desktop-keyboard'
 import type { CheckpointRestoreMode } from '../../../shared/types'
 import { useT } from '../i18n'
 import { formatCost, formatDuration, formatTokens } from '../format'
@@ -15,6 +17,7 @@ import {
   RoutingMessage
 } from './experience/RoutingMessage'
 import CopyButton from './CopyButton'
+import ImageCanvasLauncher from './image-canvas/ImageCanvasLauncher'
 
 // Markdown 依赖 highlight.js(~700KB),懒加载拆出首屏包;未加载完先按纯文本显示
 const Markdown = lazy(() => import('./Markdown'))
@@ -27,6 +30,7 @@ function formatBytes(bytes: number): string {
 }
 
 interface Props {
+  sessionId?: string
   item: ChatItem
   toolResults: Record<string, ToolResultInfo>
   runningTools: Record<string, true>
@@ -54,6 +58,7 @@ export interface MessageFork {
 }
 
 function MessageItem({
+  sessionId,
   item,
   toolResults,
   runningTools,
@@ -115,7 +120,7 @@ function MessageItem({
                     event.preventDefault()
                     setEditing(false)
                     setError('')
-                  } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                  } else if (matchesDesktopShortcut(event.nativeEvent, 'submitMultiline', useStore.getState().settings.desktopShortcuts)) {
                     event.preventDefault()
                     void submitRevision(draft)
                   }
@@ -152,6 +157,7 @@ function MessageItem({
             <div className="msg-user-attachments">
               {item.attachments.map((attachment, index) => (
                 <div key={`${attachment.id}-${index}`} className="msg-user-attachment">
+                  {sessionId && <ImageCanvasLauncher sessionId={sessionId} initialAttachmentId={attachment.id} title="查看与批注图片" ariaLabel="查看与批注图片">图片</ImageCanvasLauncher>}
                   <span>{attachment.mime.replace('image/', '').toUpperCase()}</span>
                   <span>{formatBytes(attachment.bytes)}</span>
                 </div>
@@ -207,7 +213,7 @@ function MessageItem({
               return (
                 <div key={i} className="assistant-text">
                   <Suspense fallback={<div className="md-fallback">{block.text}</div>}>
-                    <Markdown text={block.text} />
+                    <Markdown text={block.text} sessionId={sessionId} messageId={item.id} />
                   </Suspense>
                 </div>
               )

@@ -124,7 +124,7 @@ export function buildProjectScopedPromptSync(projectPath: string, prompt: string
   const projectContext = buildProjectContextSystemAppendSync(projectPath).trim()
   if (!projectContext) return userPrompt
   return [
-    '# CaoGen 项目规则',
+    '# EastGenesis 项目规则',
     '以下内容来自当前项目的 caogen.md/.caogen.md/README.md。除非用户本轮明确覆盖,必须优先遵守这些项目规则。',
     projectContext,
     '# 当前用户请求',

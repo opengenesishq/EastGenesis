@@ -39,13 +39,14 @@ const DIRECT_USER: EffectEntryPolicy = {
   impact: 'external', effect: 'direct_user', replay: 'never'
 }
 
-export const EFFECT_ENTRY_INVENTORY_VERSION = 31
+export const EFFECT_ENTRY_INVENTORY_VERSION = 32
 
 export const IPC_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
   policyGroup([
     'assistantSearch:getAttempt',
     'attachments:ocr',
     'browser:listAnnotations', 'browser:observe', 'browser:pickElement',
+    'browser-debug:status', 'browser-debug:snapshot',
     'dataRetention:evaluatePurge', 'dataRetention:get', 'dataRetention:pending',
     'engines:list',
     'files:intelligence',
@@ -84,12 +85,13 @@ export const IPC_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
     'workspace:diff',
     'worktrees:applyCheck', 'worktrees:conflictFiles', 'worktrees:exportPatch',
     'worktrees:mergeInspect', 'worktrees:mergePatch', 'worktrees:mergeReceipts',
-    'worktrees:summary'
+    'worktrees:summary', 'worktrees:handoff-state'
   ], READ_ONLY),
   policyGroup([
     'appFeatures:invoke',
     'dataRetention:createLegalHold', 'dataRetention:releaseLegalHold', 'dataRetention:updatePolicy',
     'browser:captureAnnotation', 'browser:captureElementAnnotation',
+    'browser-debug:grant', 'browser-debug:revoke',
     'digitalWorker:invoke',
     'history:delete', 'history:rename', 'history:setArchived', 'history:setPinned',
     'learning:approve', 'learning:delete', 'learning:reject', 'learning:revoke', 'learning:rollback',
@@ -126,7 +128,7 @@ export const IPC_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
     'git:commit', 'git:stage', 'git:stageAll', 'git:unstage',
     'projectContext:write',
     'workspace:applyHunk', 'workspace:discardHunk',
-    'worktrees:applyPatch', 'worktrees:createPr', 'worktrees:remove'
+    'worktrees:handoff', 'worktrees:applyPatch', 'worktrees:createPr', 'worktrees:remove'
   ], QUERYABLE),
   policyGroup(['migration:apply', 'migration:rollback'], {
     ...QUERYABLE, evidence: 'executeMigrationApplyEffect/executeMigrationRollbackEffect'
@@ -139,9 +141,9 @@ export const IPC_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
   }),
   policyGroup([
     'attachments:copyDocument', 'attachments:copyImage', 'attachments:saveImageBytes',
-    'browser:back', 'browser:forward', 'browser:navigate', 'browser:open', 'browser:reload',
+    'browser:back', 'browser:forward', 'browser:navigate', 'browser:open', 'browser:open-workspace', 'browser:reload',
     'plugins:probeMcp',
-    'terminals:close', 'terminals:resize', 'terminals:start', 'terminals:write'
+    'terminals:close', 'terminals:resize', 'terminals:start', 'terminals:start-workspace', 'terminals:write'
   ], OPAQUE),
   policyGroup(['assistantSearch:search'], {
     ...OPAQUE, evidence: 'broker.search'
@@ -193,7 +195,7 @@ export const AGENT_TOOL_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
     reconcile_media_job: 'MediaRuntime.reconcileMediaJob verified original-job query lease'
   }),
   policyGroup([
-    'browser_automation_status', 'browser_read', 'browser_screenshot', 'browser_wait_for',
+    'browser_automation_status', 'browser_read', 'browser_screenshot', 'browser_wait_for', 'browser_debug_snapshot',
     'china_notify', 'draft_skill', 'find_file', 'genesis_orchestrate',
     'get_dependencies', 'git_diff', 'git_status', 'gitee_prepare',
     'gui_list_windows', 'gui_screenshot', 'list_dir', 'list_skills', 'load_skill',
@@ -203,7 +205,7 @@ export const AGENT_TOOL_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
   policyGroup([
     'revise_office_artifact', 'create_document', 'create_pdf', 'create_presentation', 'create_spreadsheet',
     'edit_file', 'git_commit', 'git_create_issue', 'git_create_pr', 'git_merge',
-    'git_push', 'git_stage', 'git_stage_all', 'write_file'
+    'git_push', 'git_stage', 'git_stage_all', 'write_file', 'workspace_handoff', 'task_handoff'
   ], QUERYABLE),
   policyGroup(['artifact_register', 'project_knowledge_search', 'work_item_comment'], LOCAL),
   policyGroup([
@@ -212,7 +214,7 @@ export const AGENT_TOOL_EFFECT_ENTRY_POLICIES = mergePolicyGroups(
   ], CONDITIONAL),
   policyGroup([
     'bash',
-    'browser_click', 'browser_evaluate', 'browser_navigate', 'browser_type',
+    'browser_click', 'browser_evaluate', 'browser_navigate', 'browser_type', 'browser_debug_evaluate',
     'mcp_builtin_servers', 'mcp_call_tool', 'mcp_discover',
     'memory_add', 'optimize_skill', 'send_notification',
     'task_decompose_and_dispatch_dag', 'task_dispatch_dag'
@@ -279,10 +281,12 @@ export const GATEWAY_ACTION_EFFECT_ENTRY_POLICIES = {
     ], LOCAL)
   ),
   'appFeatures:invoke': mergePolicyGroups(
+    policyGroup(['voice-input/transcribe'], DIRECT_USER),
     policyGroup([
       'office-revision/inspect', 'office-revision/plan',
       'session-query/discover',
       'provider-profile/backups', 'provider-profile/backup-preview',
+      'voice-input/prepare', 'provider-profile/native-preview',
       'provider-profile/native-backups', 'provider-profile/native-codex-preview',
       'provider-profile/preview',
       'provider-profile-sync/status', 'provider-profile-sync/preview',
@@ -293,6 +297,7 @@ export const GATEWAY_ACTION_EFFECT_ENTRY_POLICIES = {
       'studio-result/audit', 'studio-result/export', 'studio-result/get', 'task-plan/get'
     ], READ_ONLY),
     policyGroup([
+      'voice-input/permission', 'voice-input/cancel', 'provider-profile/native-apply',
       'provider-profile/export', 'provider-profile/native-codex-apply',
       'provider-profile/native-rollback',
       'provider-profile-sync/choose-directory', 'provider-profile-sync/disconnect',

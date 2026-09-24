@@ -66,7 +66,7 @@ export default function StudioResultFileChanges({ sessionId, snapshot, language,
   return (
     <section className="studio-result-section" data-studio-result-file-changes>
       <div className="studio-result-row-head">
-        <h3>{en ? 'Changes outside CaoGen' : '外部文件变更'}</h3>
+        <h3>{en ? 'Changes outside EastGenesis' : '外部文件变更'}</h3>
         <button type="button" disabled={busy || snapshot?.summary.currentArtifacts === 0} onClick={() => void check()} data-studio-result-check-files>
           {busy ? (en ? 'Checking…' : '检查中…') : (en ? 'Check file changes' : '检查文件变更')}
         </button>

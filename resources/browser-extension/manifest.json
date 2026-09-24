@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "EastGenesis Browser Bridge",
+  "version": "0.1.0",
+  "description": "用户明确配对和授权一个标签后，让 EastGenesis 当前任务读取、截图和操作该标签。",
+  "minimum_chrome_version": "118",
+  "permissions": [
+    "activeTab",
+    "debugger"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "action": {
+    "default_title": "EastGenesis 标签授权",
+    "default_popup": "popup.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src ws://127.0.0.1:*"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkmYifXxHxmQddqB2XKW+xxgT2BjLwLWz8v14kE/osFGg6+ZVfkmLOT1/G9kWrdbSwyovt7fqj8gWrcNFKgN9JWiChfpO6ZViT+YB2BohwSymmRpUmjxfRdMNfLg8mWOY2ZXDcmSokX/YIxRWyKELJm+V94ng5hUtqYwkqleCMoHYp5poBk1+KBXaEA/dNKva60lfLnIvYFMTCSM1Qcdip8ILUL6wx+JvEAgTSCB45JF38T/tp7hsnchKzweQNkIjvSNzlE/hokkyF08lZ8fwniy6l5A69Ejo88+HICWUU/HwQgF8LMavxChZcNFu2xc1lz5EnMWfLmjQlMayD/g+zwIDAQAB"
+}

@@ -190,7 +190,7 @@ export function buildWorkflowAcceptanceRepairPrompt(
 ): string {
   const criteria = repair.acceptanceSpec.map((criterion, index) => `${index + 1}. ${criterion.criterion}`).join('\n')
   return [
-    '【CaoGen 自动返工】',
+    '【EastGenesis 自动返工】',
     `失败 Acceptance: ${failed.id} revision ${failed.revision}`,
     `当前 repair WorkItem: ${repair.id}`,
     '请检查当前工作区并完成返工，不要重复已经完成的修改。',

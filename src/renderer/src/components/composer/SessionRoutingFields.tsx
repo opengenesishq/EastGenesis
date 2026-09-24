@@ -3,6 +3,7 @@ import type { SessionRoutingControl } from '../../../../shared/session-routing-c
 import type { RoutingTargetRef } from '../../../../shared/routing-policy-types'
 import { ROUTING_RULE_LIMITS } from '../../../../shared/routing-policy-parser'
 import { changeRoutingFormKind } from './session-routing-form'
+import './session-routing-controls.css'
 
 export default function SessionRoutingFields({ value, providers, engine, disabled, zh, onChange }: {
   value: SessionRoutingControl; providers: ProviderView[]; engine?: SessionMeta['engine']; disabled: boolean; zh: boolean
@@ -10,19 +11,19 @@ export default function SessionRoutingFields({ value, providers, engine, disable
 }): React.JSX.Element {
   const providerScopeId = value.kind === 'auto' && value.scope?.kind === 'provider' ? value.scope.providerId : undefined
   return <fieldset className="session-routing-fields" disabled={disabled}>
-    <legend>{zh ? '后续对话的模型选择' : 'Models for subsequent turns'}</legend>
-    <label>{zh ? '选择方式' : 'Selection mode'}<select className="select" data-session-routing-mode value={value.kind}
+    <legend>{zh ? '选择后续对话使用的模型' : 'Choose models for subsequent turns'}</legend>
+    <label>{zh ? '选择方式' : 'Selection mode'}<select className="select" aria-label={zh ? '选择后续使用的模型' : 'Choose models for subsequent turns'} data-session-routing-mode value={value.kind}
       onChange={event => onChange(changeRoutingFormKind(value, event.target.value as SessionRoutingControl['kind']))}>
-      <option value="auto">{zh ? '自动' : 'Automatic'}</option><option value="preferred">{zh ? '优先指定' : 'Preferred'}</option><option value="locked">{zh ? '锁定' : 'Locked'}</option>
+      <option value="auto">{zh ? '智能路由 · 自动选择' : 'Smart routing · automatic'}</option><option value="preferred">{zh ? '优先指定 · 自选备选' : 'Preferred · choose alternatives'}</option><option value="locked">{zh ? '锁定 · 只用一个模型' : 'Locked · one model only'}</option>
     </select></label>
     {value.kind === 'auto' && <><label>{zh ? '选择范围' : 'Selection scope'}<select className="select" data-session-routing-scope
       value={providerScopeId ?? ''}
       onChange={event => onChange({ kind: 'auto', scope: event.target.value ? { kind: 'provider', providerId: event.target.value } : { kind: 'global' } })}>
-      <option value="">{zh ? '所有已配置连接' : 'All configured connections'}</option>
+      <option value="">{zh ? '跨厂商 · 按已保存规则选择' : 'Across providers · use saved rules'}</option>
       {providerScopeId && !providers.some(provider => provider.id === providerScopeId) &&
         <option value={providerScopeId} disabled>{zh ? '原连接已不可用' : 'Original connection unavailable'}</option>}
       {providers.map(provider => <option key={provider.id} value={provider.id} disabled={!provider.ready || Boolean(engine && provider.engine !== engine)}>{provider.name}{!provider.ready ? (zh ? '（未就绪）' : ' (not ready)') : engine && provider.engine !== engine ? (zh ? '（执行器不兼容）' : ' (incompatible executor)') : ''}</option>)}
-    </select></label><p>{zh ? '按任务要求、权限、预算和已保存的路由规则选择。' : 'Choose using task needs, permissions, budget and saved routing rules.'}</p></>}
+    </select></label><p>{zh ? '根据任务要求和已保存规则，从可用模型中自动选择。可在“自定义路由”中指定参与模型、匹配条件与失败策略。' : 'Choose an available model using task requirements and saved rules. Set candidate models, matching conditions and failure handling in Routing rules.'}</p></>}
     {value.kind === 'locked' && <><TargetField label={zh ? '锁定模型' : 'Locked model'} value={value.target} providers={providers} engine={engine} zh={zh}
       onChange={target => onChange({ ...value, target })} /><p>{zh ? '此模型不可用时暂停，等待你处理。' : 'Pause for your decision if this model is unavailable.'}</p></>}
     {value.kind === 'preferred' && <>
@@ -34,7 +35,7 @@ export default function SessionRoutingFields({ value, providers, engine, disable
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => onChange({ ...value, alternatives: value.alternatives.filter((_, at) => at !== index) })}>{zh ? '移除' : 'Remove'}</button>
       </div>)}
       <button type="button" className="btn btn-ghost btn-sm" data-session-routing-add-alternative disabled={value.alternatives.length >= ROUTING_RULE_LIMITS.targets - 1}
-        onClick={() => onChange({ ...value, alternatives: [...value.alternatives, { providerId: '', model: '' }] })}>{zh ? '添加明确备选' : 'Add an alternative'}</button>
+        onClick={() => onChange({ ...value, alternatives: [...value.alternatives, { providerId: '', model: '' }] })}>{zh ? '添加备选模型' : 'Add an alternative model'}</button>
       <label>{zh ? '首选请求失败时' : 'If the preferred request fails'}<select className="select" data-session-routing-failure value={value.failure.kind}
         onChange={event => onChange({ ...value, failure: event.target.value === 'pause' ? { kind: 'pause' } : {
           kind: event.target.value as 'retry_same_target' | 'retry_allowed_targets', maxAdditionalAttempts: 1, retryOn: ['rate_limited', 'auth_failed'] } })}>
@@ -57,8 +58,11 @@ export default function SessionRoutingFields({ value, providers, engine, disable
         <p>{zh ? '仅在勾选的失败情形追加尝试；费用或外部操作结果未知时，先核对结果。' : 'Retry only selected failure categories. Reconcile unknown costs or operation results first.'}</p>
         <p>{zh ? '重试还需连接或全局设置允许故障恢复，并遵守连接的重试次数限制。' : 'Retries also require recovery to be enabled for the connection or globally, and remain subject to the connection’s retry limit.'}</p>
       </>}
-      <p>{zh ? '首选未满足权限、能力或预算要求时暂停。备选需使用兼容的调用协议，保存时会检查。' : 'Pause if the preferred model fails permission, capability or budget checks. Alternatives must use a compatible protocol, checked when saving.'}</p>
-      <p>{zh ? '切换执行器会带上已完成的对话、工具结果和权限记录；有未决操作、附件或过大的历史时，先整理交接再继续。' : 'Executor changes carry completed conversation, tool results and permission records. Resolve pending operations, attachments or oversized history before continuing.'}</p>
+      <p>{zh ? '仅在你允许的失败情形下使用列出的备选模型。' : 'Use listed alternatives only for the failures you allow.'}</p>
+      <details className="session-routing-details"><summary>{zh ? '兼容性与任务交接' : 'Compatibility & task continuity'}</summary>
+        <p>{zh ? '首选未满足权限、能力或预算要求时暂停。备选需使用兼容的调用协议，保存时会检查。' : 'Pause if the preferred model fails permission, capability or budget checks. Alternatives must use a compatible protocol, checked when saving.'}</p>
+        <p>{zh ? '切换执行器会带上已完成的对话、工具结果和权限记录；有未决操作、附件或过大的历史时，先整理交接再继续。' : 'Executor changes carry completed conversation, tool results and permission records. Resolve pending operations, attachments or oversized history before continuing.'}</p>
+      </details>
     </>}
     {value.kind === 'locked' && <p>{zh ? '锁定可选择与当前执行器兼容的连接。' : 'Locked mode supports connections compatible with the current executor.'}</p>}
   </fieldset>
@@ -71,9 +75,9 @@ function TargetField({ value, providers, engine, label, zh, onChange }: {
   const provider = providers.find(entry => entry.id === value.providerId)
   const models = [...new Set(provider?.models.map(model => model.trim()).filter(model => model && model !== 'auto') ?? [])]
   return <fieldset className="session-routing-target"><legend>{label}</legend>
-    <label>{zh ? '连接' : 'Connection'}<select className="select" data-session-routing-provider value={value.providerId}
+    <label>{zh ? '厂商连接' : 'Provider connection'}<select className="select" data-session-routing-provider value={value.providerId}
       onChange={event => onChange({ providerId: event.target.value, model: '' })}>
-      <option value="">{zh ? '选择连接…' : 'Choose a connection…'}</option>
+      <option value="">{zh ? '选择厂商连接…' : 'Choose a provider connection…'}</option>
       {value.providerId && !provider && <option value={value.providerId} disabled>{zh ? '原连接已不可用' : 'Original connection unavailable'}</option>}
       {providers.map(entry => <option key={entry.id} value={entry.id} disabled={!entry.ready || Boolean(engine && entry.engine !== engine)}>
         {entry.name}{!entry.ready ? (zh ? '（未就绪）' : ' (not ready)') : engine && entry.engine !== engine ? (zh ? '（执行器不兼容）' : ' (incompatible executor)') : ''}

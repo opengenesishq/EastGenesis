@@ -39,6 +39,7 @@ import {
   type LearningPersistedState
 } from './learning-store'
 import { approveManagedLearningSkillRuntime } from '../plugin/plugin-runtime-authorization'
+import { assertSharedMemoryContributionAllowed } from '../memory/memory-preferences'
 
 export interface LearningProposalContext {
   actor?: LearningActor
@@ -85,6 +86,7 @@ async function createLearningDraftNow(
   const expiresAt = normalizeOptionalTime(safeInput.expiresAt, 'expiresAt')
 
   return mutateLearningState(learningRoot, projectRoot, (state) => {
+    if (safeInput.kind === 'memory') assertSharedMemoryContributionAllowed()
     const previous = safeInput.supersedes ? findRecord(state, safeInput.supersedes) : undefined
     if (previous?.kind === 'memory' && previous.status !== 'active') {
       throw new Error('Memory revision must start from the currently active version; refresh before revising')
@@ -220,6 +222,7 @@ async function approveLearningDraftNow(
   let expired = false
   const record = await mutateLearningState(learningRoot, projectRoot, (state) => {
     const target = findRecord(state, recordId)
+    if (target.kind === 'memory') assertSharedMemoryContributionAllowed()
     if (target.status === 'active') return cloneRecord(target)
     if (target.status !== 'draft') throw invalidTransition(target, 'active')
     if (target.kind === 'memory' && target.supersedes) {
@@ -282,6 +285,7 @@ async function rollbackLearningRecordNow(
   const actor = requireTrustedUserLearningActor(authority)
   const record = await mutateLearningState(learningRoot, projectRoot, (state) => {
     const target = findRecord(state, targetRecordId)
+    if (target.kind === 'memory') assertSharedMemoryContributionAllowed()
     if (target.status === 'deleted') throw new Error('Deleted learning records cannot be restored')
     if (target.kind === 'memory' && target.status === 'expired') throw new Error('Expired memory cannot be restored; propose a new reviewed memory instead')
     if (target.kind === 'memory' && state.records.some((item) => item.logicalId === target.logicalId

@@ -53,8 +53,8 @@ async function run() {
   check('native preview contains structured facts and diffs', previewUi.facts === 4 && previewUi.diffRows >= 6)
   check('native preview never renders the API key', !previewUi.hasSecret)
   check('native import warnings follow the active UI language',
-    previewUi.text.includes('\u5df2\u5217\u51fa\u975e Provider \u7684 Codex \u914d\u7f6e')
-      && !previewUi.text.includes('Non-Provider Codex settings'))
+    previewUi.text.includes('\u5df2\u5217\u51fa\u975e Provider \u7684客户端\u914d\u7f6e')
+      && !previewUi.text.includes('Non-Provider client settings'))
   check('desktop preview remains inside the viewport', previewUi.insideViewport)
   await capture(win, 'codex-native-import-preview.png')
 
@@ -136,7 +136,7 @@ async function invoke(channel, ...args) {
 async function openProviderSettings() {
   const win = await waitForWindow()
   win.setSize(1200, 900)
-  await waitForRenderer(win, `document.body.innerText.includes('CaoGen')`)
+  await waitForRenderer(win, `document.body.innerText.includes('EastGenesis')`)
   const opened = await rendererValue(win, `(() => {
     const button = [...document.querySelectorAll('button')]
       .find((candidate) => candidate.textContent.trim().includes('\u8bbe\u7f6e'));

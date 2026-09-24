@@ -1,19 +1,22 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
+import { createRewindShortcutMatcher } from '../desktop-keyboard'
 import { useT } from '../i18n'
 import { HeaderIcon, type HeaderIconName } from './ChatHeaderIcons'
 import MessageItem, { type MessageFork, type MessageRevision } from './MessageItem'
 import PermissionBar from './PermissionBar'
 import Composer from './Composer'
+import TaskGoalBar from './workbench/TaskGoalBar'
 import RewindPanel from './RewindPanel'
-import StartSuggestionsPanel from './StartSuggestionsPanel'
 import type { ProviderView } from '../../../shared/types'
 import type { ChatItem, ToolResultInfo } from '../store'
 import ChatStatusBar from './experience/ChatStatusBar'
-import ChatTaskStrategyControl from './experience/ChatTaskStrategyControl'
 import TaskPlanWorkbench from './experience/TaskPlanWorkbench'
+import { useExperienceProjection } from './experience/ExperienceProjection'
 import SessionModelPicker from './composer/SessionModelPicker'
+import { ChatSnapshotShareDialog } from './sharing/ChatSnapshotShareLauncher'
 import { sessionRoutingLabel } from './composer/session-routing-form'
+import { ConversationFindBar, revealConversationMessage, useConversationFind } from './conversation-find'
 
 const VIRTUAL_MESSAGE_THRESHOLD = 100
 const VIRTUAL_MESSAGE_ESTIMATED_HEIGHT = 116
@@ -47,28 +50,20 @@ export default function ChatView(): React.JSX.Element | null {
   const activeId = useStore((s) => s.activeId)
   const session = useStore((s) => (s.activeId ? s.sessions[s.activeId] : undefined))
   const providers = useStore((s) => s.providers)
+  const projection = useExperienceProjection()
   const closeSession = useStore((s) => s.closeSession)
   const interrupt = useStore((s) => s.interrupt)
   const zh = useStore((s) => s.settings.language === 'zh')
   const openLatestRewindPanel = useStore((s) => s.openLatestRewindPanel)
   const openBrowserPanel = useStore((s) => s.openBrowserPanel)
   const openFilesPanel = useStore((s) => s.openFilesPanel)
-  const openWorktreePanel = useStore((s) => s.openWorktreePanel)
   const openTerminalPanel = useStore((s) => s.openTerminalPanel)
-  const openPluginRegistryPanel = useStore((s) => s.openPluginRegistryPanel)
-  const openSubagentPanel = useStore((s) => s.openSubagentPanel)
-  const openRoutinePanel = useStore((s) => s.openRoutinePanel)
-  const openMemoryPanel = useStore((s) => s.openMemoryPanel)
-  const allStartSuggestions = useStore((s) => s.workbench.startSuggestions)
-  const ignoredStartSuggestions = useStore((s) => s.workbench.ignoredStartSuggestions)
-  const laterStartSuggestions = useStore((s) => s.workbench.laterStartSuggestions)
-  const startSuggestionsLoading = useStore((s) => s.workbench.startSuggestionsLoading)
-  const startSuggestionsError = useStore((s) => s.workbench.startSuggestionsError)
+  const closeTerminalPanel = useStore((s) => s.closeTerminalPanel)
+  const terminalDockOpen = useStore((s) => s.workbench.terminalDockOpen || s.workbench.activePanelId === 'terminal')
+  const activePanelId = useStore((s) => s.workbench.activePanelId)
+  const openPanel = useStore((s) => s.openPanel)
+  const closePanel = useStore((s) => s.closePanel)
   const memorySuggestion = useStore((s) => s.workbench.memorySuggestion)
-  const refreshStartSuggestions = useStore((s) => s.refreshStartSuggestions)
-  const sendStartSuggestion = useStore((s) => s.sendStartSuggestion)
-  const laterStartSuggestion = useStore((s) => s.laterStartSuggestion)
-  const ignoreStartSuggestion = useStore((s) => s.ignoreStartSuggestion)
   const acceptMemorySuggestion = useStore((s) => s.acceptMemorySuggestion)
   const dismissMemorySuggestion = useStore((s) => s.dismissMemorySuggestion)
   const layout = useStore((s) => s.settings.layout)
@@ -78,14 +73,16 @@ export default function ChatView(): React.JSX.Element | null {
   const forkFromCheckpoint = useStore((s) => s.forkFromCheckpoint)
 
   const scrollRef = useRef<HTMLDivElement>(null)
+  const chatRoot = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
+  const find = useConversationFind(activeId, session?.items ?? [], chatRoot, () => { stickToBottom.current = false })
   const scrollFrame = useRef<number | null>(null)
   const [scrollSnapshot, setScrollSnapshot] = useState<ScrollSnapshot>({ top: 0, height: 0 })
   const [moreOpen, setMoreOpen] = useState(false)
+  const [sharingSessionId, setSharingSessionId] = useState<string | null>(null)
+  useEffect(() => { setSharingSessionId(null) }, [activeId])
   const [modelPickerSessionId, setModelPickerSessionId] = useState<string | null>(null)
-  const [startSuggestionsSessionId, setStartSuggestionsSessionId] = useState<string | null>(null)
   const moreRef = useRef<HTMLDivElement>(null)
-  const startSuggestionsOpen = startSuggestionsSessionId === activeId
 
   const updateScrollSnapshot = useCallback((): void => {
     const el = scrollRef.current
@@ -137,15 +134,6 @@ export default function ChatView(): React.JSX.Element | null {
     }
   }, [moreOpen])
 
-  const startSuggestions = useMemo(() => {
-    if (!activeId) return []
-    const now = Date.now()
-    return allStartSuggestions.filter((suggestion) => {
-      const key = `${activeId}:${suggestion.id}`
-      return !ignoredStartSuggestions[key] && (laterStartSuggestions[key] ?? 0) <= now
-    })
-  }, [activeId, allStartSuggestions, ignoredStartSuggestions, laterStartSuggestions])
-
   const itemCount = session?.items.length ?? 0
   const streamLen = (session?.streamText.length ?? 0) + (session?.streamThinking.length ?? 0)
 
@@ -166,36 +154,35 @@ export default function ChatView(): React.JSX.Element | null {
 
   useEffect(() => {
     setMoreOpen(false)
-    setStartSuggestionsSessionId(null)
   }, [activeId])
 
   useEffect(() => {
-    let lastEsc = 0
+    const matchesRewind = createRewindShortcutMatcher()
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return
-      const now = Date.now()
-      if (now - lastEsc < 700) {
+      if (find.open) return
+      if (matchesRewind(e, useStore.getState().settings.desktopShortcuts)) {
         e.preventDefault()
         openLatestRewindPanel('shortcut')
-        lastEsc = 0
         return
       }
-      lastEsc = now
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [openLatestRewindPanel])
+  }, [find.open, openLatestRewindPanel])
 
   if (!session || !activeId) return null
   const { meta } = session
   const running = meta.status === 'running' || meta.status === 'starting'
   const providerName = providerDisplayName(meta.providerId, providers, t)
   const activeMemorySuggestion = memorySuggestion?.sessionId === activeId ? memorySuggestion : undefined
+  const statusLabel = session.pendingPermissions.length > 0 ? (zh ? '等待审批' : 'Needs approval')
+    : t(meta.status === 'running' ? 'statusRunning' : meta.status === 'starting' ? 'statusStarting'
+      : meta.status === 'error' ? 'statusError' : meta.status === 'closed' ? 'statusClosed' : 'statusIdle')
 
   const onScroll = (): void => {
     const el = scrollRef.current
     if (!el) return
-    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    stickToBottom.current = !find.open && el.scrollHeight - el.scrollTop - el.clientHeight < 80
     scheduleScrollSnapshot()
   }
 
@@ -228,49 +215,41 @@ export default function ChatView(): React.JSX.Element | null {
 
   return (
     <div
+      ref={chatRoot}
       className={`chat chat-density-${layout.chatDensity}`}
       style={{ '--chat-scale': layout.chatScale } as React.CSSProperties}
     >
       <header className="chat-header drag-region">
         <div className="chat-heading">
-          <div className="chat-title" title={meta.title}>
-            {meta.title}
-          </div>
-          <div className="chat-cwd" title={meta.cwd}>
-            {meta.cwd}
+          <div className="workbench-task-title-row">
+            <div className="chat-title" title={meta.title}>{meta.title}</div>
+            <span className={`workbench-task-status status-${meta.status}`} title={statusLabel} role="status">
+              <span className={`status-dot status-${meta.status}`} /><span>{statusLabel}</span>
+            </span>
           </div>
         </div>
         <div className="chat-controls no-drag">
-          <ChatTaskStrategyControl value={meta.taskStrategy} disabled={running} />
-          <button type="button" className="btn" data-session-routing-open title={t('switchModel')}
-            aria-expanded={modelPickerSessionId === activeId}
-            onClick={() => setModelPickerSessionId(modelPickerSessionId === activeId ? null : activeId)}>
-            {sessionRoutingLabel(meta, zh)}
-          </button>
+          <button type="button" className={`btn btn-ghost btn-sm${activePanelId === 'sources' ? ' active' : ''}`} data-task-sources-launcher aria-pressed={activePanelId === 'sources'} title={zh ? '任务资料与来源' : 'Task materials and sources'} onClick={() => activePanelId === 'sources' ? closePanel() : openPanel('sources')}>{zh ? '资料' : 'Sources'}</button>
           {running && (
             <button className="btn btn-danger" onClick={() => void interrupt()}>
               {t('stop')}
             </button>
           )}
-          {meta.isolated && (
-            <IconButton
-              icon="worktree"
-              expert
-              label={t('worktreeShort')}
-              onClick={() => void openWorktreePanel()}
-            />
-          )}
-          <IconButton icon="files" label={t('filesShort')} onClick={() => void openFilesPanel()} />
+          <IconButton icon="files" label={t('filesShort')} active={activePanelId === 'files' || activePanelId === 'preview'}
+            onClick={() => activePanelId === 'files' || activePanelId === 'preview' ? closePanel() : void openFilesPanel()} />
+          <IconButton icon="review" label={zh ? '代码差异' : 'Review changes'} active={activePanelId === 'diff' || activePanelId === 'worktree'}
+            onClick={() => activePanelId === 'diff' || activePanelId === 'worktree' ? closePanel() : openPanel('diff')} />
           <IconButton
             icon="terminal"
-            expert
             label={t('terminalShort')}
-            onClick={() => void openTerminalPanel()}
+            active={terminalDockOpen}
+            onClick={() => terminalDockOpen ? closeTerminalPanel() : void openTerminalPanel()}
           />
           <IconButton
             icon="browser"
             label={t('browserShort')}
-            onClick={() => void openBrowserPanel()}
+            active={activePanelId === 'browser'}
+            onClick={() => activePanelId === 'browser' ? closePanel() : void openBrowserPanel()}
           />
           <div className="header-more" ref={moreRef}>
             <button
@@ -286,56 +265,18 @@ export default function ChatView(): React.JSX.Element | null {
             </button>
             {moreOpen && (
               <div className="header-more-menu" role="menu">
-                <MenuItem
-                  action="subagents"
-                  icon="subagents"
-                  label={t('subagentsShort')}
-                  onSelect={() => {
-                    setMoreOpen(false)
-                    void openSubagentPanel()
-                  }}
-                />
-                <MenuItem
-                  action="plugins"
-                  icon="plugins"
-                  label={t('pluginsShort')}
-                  onSelect={() => {
-                    setMoreOpen(false)
-                    void openPluginRegistryPanel()
-                  }}
-                />
-                <MenuItem
-                  action="routines"
-                  icon="routines"
-                  label={t('routinesShort')}
-                  onSelect={() => {
-                    setMoreOpen(false)
-                    void openRoutinePanel()
-                  }}
-                />
-                <MenuItem
-                  action="start-suggestions"
-                  icon="suggestions"
-                  label={t('startSuggestionsShort')}
-                  onSelect={() => {
-                    setMoreOpen(false)
-                    if (startSuggestionsOpen) {
-                      setStartSuggestionsSessionId(null)
-                      return
-                    }
-                    setStartSuggestionsSessionId(activeId)
-                    void refreshStartSuggestions()
-                  }}
-                />
-                <MenuItem
-                  action="memory"
-                  icon="memory"
-                  label={t('memoryShort')}
-                  onSelect={() => {
-                    setMoreOpen(false)
-                    openMemoryPanel()
-                  }}
-                />
+                <MenuItem action="find-conversation" icon="review" label={zh ? '查找当前对话' : 'Find in conversation'} meta="⌘/Ctrl F"
+                  onSelect={() => { setMoreOpen(false); find.show() }} />
+                <MenuItem action="share-snapshot" icon="summary" label={zh ? '分享对话快照' : 'Share conversation snapshot'}
+                  onSelect={() => { setMoreOpen(false); setSharingSessionId(activeId) }} />
+                <button type="button" className="header-more-item" role="menuitem" data-session-routing-open
+                  onClick={() => { setMoreOpen(false); setModelPickerSessionId(modelPickerSessionId === activeId ? null : activeId) }}>
+                  <HeaderIcon name="tools" /><span>{t('switchModel')}</span><small>{sessionRoutingLabel(meta, zh)}</small>
+                </button>
+                <MenuItem action="execution" icon="summary" label={t('deskExecution')}
+                  onSelect={() => { setMoreOpen(false); openPanel('execution') }} />
+                <MenuItem action="result" icon="summary" label={zh ? '成果与验收' : 'Results and acceptance'}
+                  onSelect={() => { setMoreOpen(false); openPanel('result') }} />
                 <div className="header-more-separator" role="separator" />
                 <MenuItem
                   action="zoom-out"
@@ -385,51 +326,21 @@ export default function ChatView(): React.JSX.Element | null {
                     })
                   }}
                 />
+                <div className="header-more-separator" role="separator" />
+                <button type="button" className="header-more-item" role="menuitem"
+                  onClick={() => { setMoreOpen(false); void closeSession(activeId) }}>
+                  <span className="header-close-glyph" aria-hidden="true">✕</span><span>{t('closeSession')}</span>
+                </button>
               </div>
             )}
           </div>
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label={t('closeSession')}
-            title={t('closeSession')}
-            onClick={() => void closeSession(activeId)}
-          >
-            <span className="header-close-glyph">✕</span>
-          </button>
         </div>
       </header>
-      <TaskPlanWorkbench sessionId={activeId} strategy={meta.taskStrategy} running={running} />
-
+      <ConversationFindBar find={find} zh={zh} />
+      {sharingSessionId === activeId && <ChatSnapshotShareDialog sessionId={activeId} zh={zh} onClose={() => setSharingSessionId(null)} />}
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
         <div className="chat-inner">
-          {startSuggestionsOpen && startSuggestionsLoading && (
-            <div className="notice start-suggestions-chat-notice" data-start-suggestions-status="loading">
-              {t('startSuggestionsLoading')}
-            </div>
-          )}
-          {startSuggestionsOpen && startSuggestionsError && (
-            <div className="notice notice-error start-suggestions-chat-notice">{startSuggestionsError}</div>
-          )}
-          {startSuggestionsOpen &&
-            !startSuggestionsLoading &&
-            !startSuggestionsError &&
-            startSuggestions.length === 0 && (
-              <div className="notice start-suggestions-chat-notice" data-start-suggestions-status="empty">
-                {t('startSuggestionsEmpty')}
-              </div>
-            )}
-          {startSuggestionsOpen && (
-            <StartSuggestionsPanel
-              suggestions={startSuggestions}
-              compact
-              disabled={running || startSuggestionsLoading}
-              maxVisible={3}
-              onSendToAgent={(suggestion) => void sendStartSuggestion(suggestion)}
-              onLater={(suggestion) => laterStartSuggestion(suggestion.id)}
-              onIgnore={(suggestion) => ignoreStartSuggestion(suggestion.id)}
-            />
-          )}
+          {projection !== 'assistant' && <TaskPlanWorkbench sessionId={activeId} strategy={meta.taskStrategy} running={running} compact />}
           <MessageList
             activeId={activeId}
             items={session.items}
@@ -441,6 +352,8 @@ export default function ChatView(): React.JSX.Element | null {
             running={running}
             onRevise={reviseMessage}
             onFork={forkMessage}
+            reveal={find.reveal}
+            onReveal={updateScrollSnapshot}
           />
 
           {session.streamThinking && (
@@ -484,8 +397,12 @@ export default function ChatView(): React.JSX.Element | null {
           </button>
         </div>
       )}
-      <ChatStatusBar meta={meta} providerName={providerName} session={session} />
+      <details className="workbench-runtime-info">
+        <summary>{zh ? '运行信息' : 'Runtime details'}<span>{session.effectiveModel || sessionRoutingLabel(meta, zh)}</span></summary>
+        <ChatStatusBar meta={meta} providerName={providerName} session={session} />
+      </details>
       {modelPickerSessionId === activeId && <SessionModelPicker key={activeId} sessionId={activeId} onClose={() => setModelPickerSessionId(null)} />}
+      {projection !== 'assistant' && <TaskGoalBar key={activeId} meta={meta} />}
       <Composer running={running} onModelRequest={setModelPickerSessionId} />
       <RewindPanel />
     </div>
@@ -503,6 +420,8 @@ interface MessageListProps {
   running: boolean
   onRevise: (revision: MessageRevision, text: string) => Promise<boolean>
   onFork: (fork: MessageFork) => void
+  reveal?: { itemId: string; revision: number }
+  onReveal: () => void
 }
 
 function MessageList({
@@ -515,24 +434,36 @@ function MessageList({
   stickToBottom,
   running,
   onRevise,
-  onFork
+  onFork,
+  reveal,
+  onReveal
 }: MessageListProps): React.JSX.Element {
   const revisions = useMemo(() => messageRevisions(items, running), [items, running])
   const forks = useMemo(() => messageForks(items, running), [items, running])
+  useLayoutEffect(() => {
+    if (items.length > VIRTUAL_MESSAGE_THRESHOLD || !reveal || !scrollRef.current) return
+    const node = Array.from(scrollRef.current.querySelectorAll<HTMLElement>('[data-chat-message-id]'))
+      .find((element) => element.dataset.chatMessageId === reveal.itemId)
+    if (!node) return
+    revealConversationMessage(scrollRef.current, node)
+    onReveal()
+  }, [activeId, reveal?.itemId, reveal?.revision, scrollRef, onReveal])
   if (items.length <= VIRTUAL_MESSAGE_THRESHOLD) {
     return (
       <>
         {items.map((item) => (
-          <MessageItem
-            key={item.id}
-            item={item}
-            toolResults={toolResults}
-            runningTools={runningTools}
-            revision={revisions.get(item.id)}
-            onRevise={onRevise}
-            fork={forks.get(item.id)}
-            onFork={onFork}
-          />
+          <div key={item.id} data-chat-message-id={item.id} className={`chat-message-row${reveal?.itemId === item.id ? ' chat-find-selected' : ''}`}>
+            <MessageItem
+              sessionId={activeId}
+              item={item}
+              toolResults={toolResults}
+              runningTools={runningTools}
+              revision={revisions.get(item.id)}
+              onRevise={onRevise}
+              fork={forks.get(item.id)}
+              onFork={onFork}
+            />
+          </div>
         ))}
       </>
     )
@@ -550,6 +481,8 @@ function MessageList({
       running={running}
       onRevise={onRevise}
       onFork={onFork}
+      reveal={reveal}
+      onReveal={onReveal}
     />
   )
 }
@@ -564,7 +497,9 @@ function VirtualMessageList({
   stickToBottom,
   running,
   onRevise,
-  onFork
+  onFork,
+  reveal,
+  onReveal
 }: MessageListProps): React.JSX.Element {
   const revisions = useMemo(() => messageRevisions(items, running), [items, running])
   const forks = useMemo(() => messageForks(items, running), [items, running])
@@ -573,6 +508,20 @@ function VirtualMessageList({
   const heightFrame = useRef<number | null>(null)
   const [heightVersion, setHeightVersion] = useState(0)
   const [listTop, setListTop] = useState(0)
+  const pendingReveal = useRef<string | null>(null)
+  useEffect(() => {
+    const scroll = scrollRef.current
+    if (!scroll) return
+    const releaseAnchor = (): void => { pendingReveal.current = null }
+    scroll.addEventListener('wheel', releaseAnchor, { passive: true })
+    scroll.addEventListener('touchstart', releaseAnchor, { passive: true })
+    scroll.addEventListener('pointerdown', releaseAnchor)
+    return () => {
+      scroll.removeEventListener('wheel', releaseAnchor)
+      scroll.removeEventListener('touchstart', releaseAnchor)
+      scroll.removeEventListener('pointerdown', releaseAnchor)
+    }
+  }, [scrollRef])
 
   const scheduleHeightVersion = useCallback((): void => {
     if (heightFrame.current !== null) return
@@ -657,6 +606,30 @@ function VirtualMessageList({
     return values
   }, [sizes])
 
+  // Jump using virtual offsets first; then center the mounted, measured row.
+  useLayoutEffect(() => {
+    pendingReveal.current = null
+    if (!reveal || !scrollRef.current || !listRef.current) return
+    const index = items.findIndex((item) => item.id === reveal.itemId)
+    if (index < 0) return
+    pendingReveal.current = reveal.itemId
+    const scroll = scrollRef.current
+    const top = listRef.current.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop
+    stickToBottom.current = false
+    scroll.scrollTop = Math.max(0, top + offsets[index] - 32)
+    onReveal()
+  }, [activeId, reveal?.itemId, reveal?.revision, scrollRef, stickToBottom, onReveal])
+
+  useLayoutEffect(() => {
+    const id = pendingReveal.current
+    if (!id || !scrollRef.current || !listRef.current) return
+    const node = Array.from(listRef.current.querySelectorAll<HTMLElement>('[data-chat-message-id]'))
+      .find((element) => element.dataset.chatMessageId === id)
+    if (!node) return
+    revealConversationMessage(scrollRef.current, node)
+    onReveal()
+  }, [heightVersion, offsets, scrollSnapshot.top, scrollSnapshot.height, scrollRef, onReveal])
+
   const totalHeight = offsets[offsets.length - 1] ?? 0
   const visibleTop = Math.max(0, scrollSnapshot.top - listTop - VIRTUAL_MESSAGE_OVERSCAN_PX)
   const visibleBottom = Math.min(
@@ -680,6 +653,7 @@ function VirtualMessageList({
         const index = startIndex + visibleOffset
         return (
           <VirtualMessageRow
+            sessionId={activeId}
             key={item.id}
             item={item}
             top={offsets[index] ?? 0}
@@ -690,6 +664,7 @@ function VirtualMessageList({
             onRevise={onRevise}
             fork={forks.get(item.id)}
             onFork={onFork}
+            selected={reveal?.itemId === item.id}
           />
         )
       })}
@@ -698,6 +673,7 @@ function VirtualMessageList({
 }
 
 interface VirtualMessageRowProps {
+  sessionId: string
   item: ChatItem
   top: number
   toolResults: Record<string, ToolResultInfo>
@@ -707,9 +683,11 @@ interface VirtualMessageRowProps {
   onRevise: (revision: MessageRevision, text: string) => Promise<boolean>
   fork?: MessageFork
   onFork: (fork: MessageFork) => void
+  selected?: boolean
 }
 
 function VirtualMessageRow({
+  sessionId,
   item,
   top,
   toolResults,
@@ -718,7 +696,8 @@ function VirtualMessageRow({
   revision,
   onRevise,
   fork,
-  onFork
+  onFork,
+  selected
 }: VirtualMessageRowProps): React.JSX.Element {
   const rowRef = useRef<HTMLDivElement>(null)
 
@@ -735,8 +714,9 @@ function VirtualMessageRow({
   }, [item.id, onMeasure])
 
   return (
-    <div ref={rowRef} className="chat-virtual-row" style={{ transform: `translateY(${top}px)` }}>
+    <div ref={rowRef} data-chat-message-id={item.id} className={`chat-virtual-row${selected ? ' chat-find-selected' : ''}`} style={{ transform: `translateY(${top}px)` }}>
       <MessageItem
+        sessionId={sessionId}
         item={item}
         toolResults={toolResults}
         runningTools={runningTools}
@@ -762,14 +742,15 @@ function findVirtualIndex(offsets: number[], target: number): number {
 
 interface IconButtonProps {
   expert?: boolean
+  active?: boolean
   icon: HeaderIconName
   label: string
   onClick: () => void
 }
 
-function IconButton({ expert = false, icon, label, onClick }: IconButtonProps): React.JSX.Element {
+function IconButton({ expert = false, active = false, icon, label, onClick }: IconButtonProps): React.JSX.Element {
   return (
-    <button type="button" className="icon-btn" aria-label={label} title={label} data-expert-control={expert || undefined} onClick={onClick}>
+    <button type="button" className={`icon-btn${active ? ' icon-btn-active' : ''}`} aria-label={label} title={label} aria-pressed={active} data-expert-control={expert || undefined} onClick={onClick}>
       <HeaderIcon name={icon} />
     </button>
   )

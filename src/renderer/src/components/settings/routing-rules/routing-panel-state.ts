@@ -42,7 +42,7 @@ export function summarizeRoutingRule(rule: RoutingRuleFields, providerName: (id:
   let selectionText: string = SELECTION_LABELS[selection.kind]
   if (selection.kind === 'fixed') selectionText += `：${target(selection.target)}`
   if (selection.kind === 'provider_auto') selectionText += `：${providerName(selection.providerId)}`
-  if (selection.kind === 'preferred') selectionText += `：${[selection.primary, ...selection.alternatives].map(target).join('；')}`
+  if (selection.kind === 'preferred') selectionText += `：首选 ${target(selection.primary)}；${selection.alternativesOrder === 'configured' ? '依次备选' : '评分备选'} ${selection.alternatives.map(target).join(selection.alternativesOrder === 'configured' ? ' → ' : '；') || '无'}`
   if (selection.kind === 'candidate_set') selectionText += `：${selection.targets.map(target).join('；')}`
   const when = rule.when, conditions: string[] = []
   if (when.keywords) conditions.push(`${when.keywords.mode === 'all' ? '包含全部' : '包含任一'}：${when.keywords.values.join('、')}`)

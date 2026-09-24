@@ -110,7 +110,7 @@ export function recordConfirmedToolReplay(
 }
 
 /**
- * Converts the durable CaoGen transcript into bounded, provider-neutral context.
+ * Converts the durable EastGenesis transcript into bounded, provider-neutral context.
  * Credential values and attachment bytes are never included.
  */
 export function buildPortableConversationReplay(
@@ -165,7 +165,7 @@ export function buildPortableConversationReplay(
   }
   const body = selected.map((turn) => turn.text).join('\n\n')
   const text = [
-    '## CaoGen persisted conversation context',
+    '## EastGenesis persisted conversation context',
     'This is a deterministic local replay after the provider server context became unavailable.',
     'Treat tool results as already observed history. Do not repeat side effects solely because they appear below.',
     body

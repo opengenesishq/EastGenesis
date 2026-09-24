@@ -23,7 +23,7 @@ const REPAIR_ID_NAMESPACE = 'caogen.workflow-acceptance-repair.v1'
 export const WORKFLOW_REPAIR_DEFAULT_OWNER = {
   type: 'human' as const,
   id: 'local-user',
-  displayName: 'CaoGen Repair Runtime'
+    displayName: 'EastGenesis Repair Runtime'
 }
 
 export type WorkflowAcceptanceRepairErrorCode =

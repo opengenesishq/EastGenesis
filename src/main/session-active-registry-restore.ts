@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { getTaskHostExecutionGate, taskHostSubject } from './task-handoff/execution-gate'
 import type { AgentEvent, AgentEventIdentity, SessionMeta } from '../shared/types'
 import type { Engine } from './engine'
 import { createEngine } from './engine'
@@ -20,6 +21,7 @@ export function prepareActiveSessionEngines(
   prepared: PreparedActiveSession[]
 ): void {
   for (const record of records) {
+    getTaskHostExecutionGate(app.getPath('userData')).assert(taskHostSubject(record))
     const meta = bindLegacyUnscopedSessionForRecovery(restoredSessionMeta(record))
     resolveDigitalWorkerSessionScope(meta, app.getPath('userData'))
     const bufferedEvents: PreparedActiveSession['bufferedEvents'] = []

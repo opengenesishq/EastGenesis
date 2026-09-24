@@ -44,11 +44,11 @@ try {
         const targets = { a: { projectRoot: cwd, projectId: 'a' }, sibling: { projectRoot: cwd, projectId: 'a' }, b: { projectRoot: cwd, projectId: 'b' }, legacy: {projectRoot: cwd} };
         const targetForSession = id => targets[id] ?? null;
         const metas = Object.fromEntries(Object.entries(targets).map(([id,target]) => [id, { id,cwd:target.projectRoot,workspaceId:target.projectId }]));
-        registerProjectMemoryIpc({ memoryRoot: () => root, targetForSession, taskScopeForSession: async id => {
+        registerProjectMemoryIpc({ memoryRoot: () => root, targetForSession, metaForSession: id => metas[id], taskScopeForSession: async id => {
           if (!metas[id]) throw new Error('会话不存在');
           return taskMemoryScope(metas[id],profile);
         } });
-        registerLearningIpc({ projectRootFor: id => targets[id]?.projectRoot ?? null, targetForSession, userDataRoot: () => profile });
+        registerLearningIpc({ projectRootFor: id => targets[id]?.projectRoot ?? null, targetForSession, metaForSession: id => metas[id], userDataRoot: () => profile });
         const invoke = async (channel, ...args) => globalThis.__memoryHandlers.get(channel)({trusted: true}, ...args);
         const input = { kind: 'note', title: 'Current convention', body: 'canonical alpha memory', source: 'user-fixture', reason: '' };
         const draft = await invoke('memory:propose', 'a', input);

@@ -1,0 +1,4 @@
+.terminal-viewport { flex: 1; min-height: 0; min-width: 0; overflow: hidden; padding: 4px 16px 12px; }
+.terminal-viewport .xterm { height: 100%; }
+.terminal-viewport .xterm-viewport { scrollbar-width: thin; }
+.terminal-viewport .xterm .xterm-accessibility-tree { font-family: var(--mono); }

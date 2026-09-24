@@ -16,11 +16,14 @@ import type { ProjectMemoryTarget } from '../memoryStore'
 import { projectLearningNamespace } from '../project-aggregate/project-memory-adapter'
 import { verifyProductionProjectMutation } from '../project-aggregate/project-mutation-ingress'
 import { assertTrustedWorkflowLedgerSender } from './workflow-ledger-handlers'
+import type { SessionMeta } from '../../shared/types'
+import { withTaskMemoryPreferences } from '../memory/memory-preferences'
 
 export interface LearningIpcOptions {
   projectRootFor(sessionId: string): string | null
   targetForSession?(sessionId: string): ProjectMemoryTarget | null
   userDataRoot?(): string
+  metaForSession(sessionId: string): SessionMeta | undefined
 }
 
 interface LearningContext {
@@ -64,8 +67,12 @@ export function registerLearningIpc(options: LearningIpcOptions): void {
       const context = await contextFor(sessionId)
       const recordId = requiredRecordId(rawRecordId)
       const namespace = await namespaceForRecord(context, recordId)
-      const result = await mutate(namespace, context.learningRoot, recordId,
-        createTrustedUserLearningDecision(`ipc:learning:${action}`))
+      const result = await withTaskMemoryPreferences(() => {
+        const meta = options.metaForSession(sessionId)
+        if (!meta || meta.status === 'closed') throw new Error('当前任务不存在或已关闭')
+        return meta
+      }, () => mutate(namespace, context.learningRoot, recordId,
+        createTrustedUserLearningDecision(`ipc:learning:${action}`)))
       if (context.projectId && options.userDataRoot) {
         await verifyProductionProjectMutation(options.userDataRoot(), context.projectId)
       }

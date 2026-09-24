@@ -66,6 +66,19 @@ export interface SessionDeletionJournalCompactionResult {
   pending: number
 }
 
+/**
+ * Read-only view used by the Workflow Ledger continuity gate. Session
+ * deletion is an independently journaled, authorized purge, so the gate
+ * needs the completed receipt without mutating or replaying the journal.
+ */
+export interface SessionDeletionConversationPurgeReceipt {
+  operationId: string
+  completedAt: number
+  streams: number
+  generations: number
+  events: number
+}
+
 type JournalPatch = Partial<Pick<SessionDeletionJournalEntry,
   'removedRecords' | 'removedPathCount' | 'residuals' | 'memoryScope'>>
 
@@ -100,6 +113,19 @@ export class SessionDeletionJournal {
     const completed = entries.filter((entry) => entry.phase === 'completed').map((entry) => entry.completedAt!)
     return { pending: entries.some((entry) => entry.phase !== 'completed'),
       ...(completed.length ? { completedAt: Math.max(...completed) } : {}) }
+  }
+
+  completedConversationPurgeReceipts(): SessionDeletionConversationPurgeReceipt[] {
+    return readDocument(this.filePath).entries
+      .filter((entry) => entry.phase === 'completed' && entry.completedAt !== undefined)
+      .map((entry) => ({
+        operationId: entry.operationId,
+        completedAt: entry.completedAt!,
+        streams: nonNegativeCount(entry.removedRecords?.conversationLedgerStreams),
+        generations: nonNegativeCount(entry.removedRecords?.conversationLedgerGenerations),
+        events: nonNegativeCount(entry.removedRecords?.conversationLedgerEvents)
+      }))
+      .filter((receipt) => receipt.streams > 0 || receipt.generations > 0 || receipt.events > 0)
   }
 
   async begin(input: SessionDeletionJournalBeginInput): Promise<SessionDeletionJournalEntry>
@@ -408,6 +434,10 @@ function validTimestamp(value: unknown): value is number {
 function requiredTimestamp(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || Number(value) <= 0) throw new Error(`${label} is invalid`)
   return Number(value)
+}
+
+function nonNegativeCount(value: unknown): number {
+  return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : 0
 }
 
 function requiredId(value: unknown, label: string): string {

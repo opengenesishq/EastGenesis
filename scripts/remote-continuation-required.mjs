@@ -194,7 +194,7 @@ try {
   const pairingPage = await fetch(pairing.url)
   assertEqual(pairingPage.status, 200, 'active pairing page is available')
   assertEqual(pairingPage.headers.get('cache-control'), 'no-store', 'pairing page is never cached')
-  assert((await pairingPage.text()).includes('CaoGen 设备配对'), 'pairing page contains the device binding experience')
+  assert((await pairingPage.text()).includes('EastGenesis 设备配对'), 'pairing page contains the device binding experience')
 
   const browserKeys = keyPair()
   const registration = await fetchJson(`${baseUrl}/remote/pair/register`, {
@@ -217,7 +217,7 @@ try {
 
   const consolePage = await fetch(registration.body.consoleUrl)
   assertEqual(consolePage.status, 200, 'registered device can open its console page')
-  assert((await consolePage.text()).includes('CaoGen 远程控制台'), 'console page renders the remote control surface')
+  assert((await consolePage.text()).includes('EastGenesis 远程控制台'), 'console page renders the remote control surface')
   const consoleToken = decodeURIComponent(new URL(registration.body.consoleUrl).pathname.split('/').at(-1))
   const consoleView = await fetch(`${baseUrl}/remote/console-api?token=${encodeURIComponent(consoleToken)}`)
   const consoleBody = await consoleView.json()

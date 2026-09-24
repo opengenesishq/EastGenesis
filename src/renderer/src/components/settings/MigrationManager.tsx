@@ -6,6 +6,8 @@ import type {
   MigrationScan
 } from '../../../../shared/types'
 import { useT } from '../../i18n'
+import MigrationHistoryPanel from './MigrationHistoryPanel'
+import MigrationSubscriptions from './MigrationSubscriptions'
 
 export default function MigrationManager({ defaultDirectory }: { defaultDirectory?: string }): React.JSX.Element {
   const t = useT()
@@ -14,7 +16,8 @@ export default function MigrationManager({ defaultDirectory }: { defaultDirector
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
-  const [backupId, setBackupId] = useState('')
+  const [result, setResult] = useState<MigrationApplyResult | null>(null)
+  const [historyRevision, setHistoryRevision] = useState(0)
 
   useEffect(() => {
     if (defaultDirectory) setDirectory((current) => current || defaultDirectory)
@@ -23,7 +26,7 @@ export default function MigrationManager({ defaultDirectory }: { defaultDirector
   const runScan = async (): Promise<void> => {
     setBusy(true)
     setMessage('')
-    setBackupId('')
+    setResult(null)
     try {
       const result = await window.agentDesk.scanMigration(directory.trim() || undefined)
       setScan(result)
@@ -45,26 +48,11 @@ export default function MigrationManager({ defaultDirectory }: { defaultDirector
         decisions: scan.assets.map((asset) => ({ assetId: asset.id, action: decisionFor(asset, picked) }))
       })
       setMessage(result.message)
-      setBackupId(result.backupId ?? '')
+      setResult(result)
+      setHistoryRevision(value => value + 1)
+      if (result.ok) setPicked(new Set())
       // Keep the scan snapshot stable while the rollback affordance is visible;
       // a concurrent rescan can race the operation's durable backup state.
-    } catch (error) {
-      setMessage(errorText(error))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const runRollback = async (): Promise<void> => {
-    if (!backupId) return
-    setBusy(true)
-    try {
-      const result = await window.agentDesk.rollbackMigration(backupId)
-      setMessage(result.message)
-      if (result.ok) {
-        setBackupId('')
-        void refreshAfterMutation(scan?.cwd)
-      }
     } catch (error) {
       setMessage(errorText(error))
     } finally {
@@ -113,16 +101,8 @@ export default function MigrationManager({ defaultDirectory }: { defaultDirector
       </div>
       {scan && <MigrationScanResults scan={scan} picked={picked} busy={busy} onToggle={toggle} onImport={runImport} />}
       {message && <div className="notice notice-info migrate-result" data-migration-result>{message}</div>}
-      {backupId && (
-        <button
-          className="btn btn-ghost migrate-rollback"
-          data-migration-rollback
-          disabled={busy}
-          onClick={() => void runRollback()}
-        >
-          {t('migrateRollback')}
-        </button>
-      )}
+      <MigrationSubscriptions scan={scan} result={result} />
+      <MigrationHistoryPanel revision={historyRevision} busy={busy} onBusy={setBusy} onResult={setMessage} onRestored={() => { setResult(null); void refreshAfterMutation(scan?.cwd) }} />
     </div>
   )
 }

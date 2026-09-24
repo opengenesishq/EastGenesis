@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSyncInExecutionEnvironment as execFileSync } from './wsl/process'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { inspectSingleFilePatch } from './git/git-patch-inspection'

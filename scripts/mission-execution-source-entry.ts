@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { pathToFileURL } from 'node:url'
 import type { Engine } from '../src/main/engine'
 import type { SessionMeta, TaskPlanStateView } from '../src/shared/types'
 import { sessionManager } from '../src/main/sessionManager'
@@ -17,6 +18,10 @@ const root = process.argv[2]
 const checks: string[] = []
 let providerCalls = 0
 globalThis.fetch = async () => { providerCalls++; throw new Error('network forbidden') }
+const trustedRendererUrl = new URL('../renderer/index.html', pathToFileURL(process.argv[1]).href).href
+const trustedSender = { id: 9001, isDestroyed: () => false, mainFrame: { url: trustedRendererUrl } }
+;(globalThis as typeof globalThis & { __caogenTrustedSender?: typeof trustedSender }).__caogenTrustedSender = trustedSender
+const trustedEvent = { sender: trustedSender, senderFrame: trustedSender.mainFrame }
 const sessions = new Map<string, Engine>()
 const coordinator = new TaskPlanSessionCoordinator((id) => sessions.get(id), () => root)
 const store = new TaskPlanContractStore(() => root)
@@ -27,6 +32,8 @@ manager.taskRuns = new Map()
 manager.dagSchedulers = new Map()
 manager.dagExecutionSnapshots = new Map()
 manager.dagAutoMergeOptions = new Map()
+manager.council = { loadSnapshots: async () => {}, snapshots: () => [], stopForParent: async () => {} }
+manager.dagFinalizationCoordinator = { hasIncomplete: () => false }
 manager.agentCapacity = { tryReserve: () => () => {} }
 manager.emitTaskDagUpdate = () => {}
 manager.persistDagProvisioning = async () => {}
@@ -161,13 +168,13 @@ async function main(): Promise<void> {
   registerTerminalMutationIpc({ assertExecutionAuthorized: () => Promise.reject(new Error('async-source-stale')),
     getSessionMeta: () => third.meta, manager: { get: () => ({ sessionId: third.meta.id }) } as never })
   for (const channel of ['terminals:start', 'terminals:write', 'terminals:resize', 'terminals:close']) {
-    await assert.rejects(Promise.resolve(handlers.get(channel)!(null, third.meta.id)), /async-source-stale/)
+    await assert.rejects(Promise.resolve(handlers.get(channel)!(trustedEvent, third.meta.id)), /async-source-stale/)
   }
   const realManager = sessionManager as any
   realManager.assertInteractiveExecutionAuthorized = () => Promise.reject(new Error('async-source-stale'))
   registerInteractiveMutationIpc()
   for (const channel of ['files:write', 'git:stage', 'git:commit', 'workspace:discardHunk', 'worktrees:mergePatch', 'worktrees:applyPatch']) {
-    await assert.rejects(Promise.resolve(handlers.get(channel)!(null, third.meta.id)), /async-source-stale/)
+    await assert.rejects(Promise.resolve(handlers.get(channel)!(trustedEvent, third.meta.id)), /async-source-stale/)
   }
   checks.push('terminal and interactive mutation IPC await asynchronous denial before executing effects')
   assert.equal(providerCalls, 0)

@@ -143,6 +143,7 @@ function ProjectLifecycleContent({
         busy={busy}
         editable={editable}
         resources={project.resources}
+        primaryResourceId={project.primaryResourceId}
         onAdd={onOpenResource}
         onRemove={(id) => void actions.removeResource(id)}
         onConnectorMutation={(id, mutation) => void actions.mutateConnector(id, mutation)}
@@ -334,7 +335,8 @@ function ProjectResourceList({
   onAdd,
   onRemove,
   onConnectorMutation,
-  resources
+  resources,
+  primaryResourceId
 }: {
   busy: boolean
   editable: boolean
@@ -342,6 +344,7 @@ function ProjectResourceList({
   onRemove: (id: string) => void
   onConnectorMutation: (id: string, mutation: ProjectConnectorMutation) => void
   resources: ProjectResource[]
+  primaryResourceId?: string
 }): React.JSX.Element {
   const titleId = useId()
   return (
@@ -350,6 +353,9 @@ function ProjectResourceList({
         <div className="pws-section-title"><h3 id={titleId}>{TEXT.resources}</h3><span>{resources.length}</span></div>
         {editable && <button type="button" className="btn btn-ghost btn-sm" onClick={onAdd} disabled={busy} data-project-action="add-resource-inline">{TEXT.addResource}</button>}
       </div>
+      <p className="pws-muted" data-project-primary-folder>新任务主文件夹：{primaryResourceId
+        ? resources.find(resource => resource.id === primaryResourceId)?.path ?? '配置不可用，请编辑项目'
+        : '自动选择可用文件夹'}。可在“编辑项目”中修改。</p>
       {resources.length === 0 ? <p className="pws-muted pws-resource-empty">{TEXT.noResources}</p> : (
         <div className="pws-resource-list" role="list">
           {resources.map((resource) => <ProjectResourceRow key={resource.id} resource={resource} busy={busy} editable={editable} onRemove={onRemove} onConnectorMutation={onConnectorMutation} />)}

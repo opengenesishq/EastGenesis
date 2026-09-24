@@ -89,6 +89,13 @@ export const PANEL_REGISTRY: readonly PanelDefinition[] = [
     keepAlive: true
   },
   {
+    id: 'sources',
+    titleKey: 'deskSources',
+    icon: 'files',
+    component: lazyPanel(() => import('../source-panel/TaskSourcesPanel')),
+    keepAlive: true
+  },
+  {
     id: 'files',
     titleKey: 'deskFiles',
     icon: 'files',
@@ -118,9 +125,16 @@ export const PANEL_REGISTRY: readonly PanelDefinition[] = [
   },
   {
     id: 'subagent',
-    titleKey: 'deskSideChat',
+    titleKey: 'subagentsShort',
     icon: 'subagents',
     component: lazyPanel(() => import('./SubagentPanel')),
+    keepAlive: true
+  },
+  {
+    id: 'sidechat',
+    titleKey: 'deskSideChat',
+    icon: 'summary',
+    component: lazyPanel(() => import('./SideChatPanel')),
     keepAlive: true
   },
   {

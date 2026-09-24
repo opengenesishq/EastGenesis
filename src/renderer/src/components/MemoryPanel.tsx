@@ -8,6 +8,7 @@ import type {
 import LearningApprovalPanel from './LearningApprovalPanel'
 import LegacyMemoryImportPanel from './LegacyMemoryImportPanel'
 import MemoryRetentionPanel from './MemoryRetentionPanel'
+import TaskMemoryPreferences, { useTaskMemoryPreferences } from './TaskMemoryPreferences'
 
 const EMPTY_FORM = { kind: 'note', title: '', body: '', reason: '' }
 type LoopOutcome = 'success' | 'partial' | 'failure'
@@ -25,6 +26,7 @@ interface Props {
   sessionId: string
   onClose?: () => void
   initialForm?: Partial<typeof EMPTY_FORM>
+  initialScope?: 'task' | 'project'
 }
 
 /**
@@ -41,7 +43,9 @@ export default function MemoryPanel(props: Props): React.JSX.Element {
   return <ProjectMemoryPanel key={props.sessionId} {...props} />
 }
 
-function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.JSX.Element {
+function ProjectMemoryPanel({ sessionId, onClose, initialForm, initialScope }: Props): React.JSX.Element {
+  const memoryControl = useTaskMemoryPreferences(sessionId)
+  const contributionAllowed = memoryControl.snapshot?.effective.contributeSharedMemory === true && !memoryControl.saving
   const loadSequence = useRef(0)
   const mounted = useRef(false)
   const [data, setData] = useState<ReadProjectMemoryResult | null>(null)
@@ -55,6 +59,7 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
 
   const [showForm, setShowForm] = useState(false)
   const [formScope, setFormScope] = useState<'task' | 'project'>('task')
+  const [viewScope, setViewScope] = useState<'all' | 'task' | 'project'>(initialScope ?? 'all')
   const [revising, setRevising] = useState<ProjectMemoryEntry | null>(null)
   const [form, setForm] = useState({ ...EMPTY_FORM })
   const [reviewForm, setReviewForm] = useState({ ...EMPTY_REVIEW_FORM })
@@ -94,7 +99,13 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
   }, [load])
 
   useEffect(() => {
+    setViewScope(initialScope ?? 'all')
+    setFormScope(initialScope ?? 'task')
+  }, [initialScope])
+
+  useEffect(() => {
     if (!initialForm) return
+    setViewScope('project')
     setFormScope('project')
     setForm({ ...EMPTY_FORM, ...initialForm })
     setShowForm(true)
@@ -275,18 +286,21 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
 
   const drafts: ProjectMemoryDraft[] = data?.drafts ?? []
   const entries: ProjectMemoryEntry[] = data?.entries ?? []
+  const visibleLayered = layered.filter(entry => viewScope === 'all' || (viewScope === 'task'
+    ? Boolean(entry.sessionId || entry.workItemId)
+    : !entry.sessionId && !entry.workItemId && entry.layer !== 'user'))
 
   return (
     <div className="memory-panel" data-memory-panel="true">
       <div className="settings-section-head">
-        <h3 className="settings-h3">任务与项目记忆</h3>
+        <h3 className="settings-h3">{viewScope === 'task' ? '任务记忆' : viewScope === 'project' ? '项目记忆' : '任务与项目记忆'}</h3>
         <div className="memory-panel-actions">
           <button
             className="btn btn-ghost btn-sm"
             disabled={acting}
             onClick={() => {
               setRevising(null)
-              setFormScope('task')
+              setFormScope(viewScope === 'project' ? 'project' : 'task')
               setForm({ ...EMPTY_FORM })
               setShowForm((v) => !v)
             }}
@@ -303,8 +317,18 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
       <p className="settings-hint">
         任务记忆只供当前任务使用，保存后生效；项目记忆供同项目任务共享，草稿确认后生效。记忆不授予工具权限。
       </p>
+      <TaskMemoryPreferences control={memoryControl} />
+      {memoryControl.snapshot && !contributionAllowed && <p className="field-hint">共享记忆贡献已关闭；可浏览或删除旧记录，并继续保存当前任务记忆。</p>}
+      <label className="field-label">查看范围
+        <select className="input input-block" aria-label="记忆查看范围" value={viewScope}
+          onChange={event => setViewScope(event.target.value as 'all' | 'task' | 'project')}>
+          <option value="all">全部可用记忆</option>
+          <option value="task">仅当前任务</option>
+          <option value="project">当前项目共享</option>
+        </select>
+      </label>
 
-      <LegacyMemoryImportPanel key={sessionId} sessionId={sessionId} onImported={load} />
+      {viewScope === 'all' && <><LegacyMemoryImportPanel key={sessionId} sessionId={sessionId} onImported={load} contributionAllowed={contributionAllowed} />
       <MemoryRetentionPanel key={`retention-${sessionId}`} sessionId={sessionId} onChanged={load} />
 
       <div className="memory-group">
@@ -379,7 +403,7 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
             <button
               className="btn btn-primary btn-sm"
               data-memory-loop-action="submit"
-              disabled={acting}
+              disabled={acting || !contributionAllowed}
               onClick={() => void submitReview()}
             >
               {acting ? '生成中…' : '生成复盘'}
@@ -389,13 +413,15 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
         </div>
       </div>
 
+      </>}
+
       {showForm && (
         <div className="memory-form" data-memory-form="true">
           <label className="field-label">使用范围</label>
           <select className="input input-block" data-memory-form-field="scope" value={formScope}
             disabled={acting || Boolean(revising)} onChange={(event) => setFormScope(event.target.value as 'task' | 'project')}>
             <option value="task">仅当前任务</option>
-            <option value="project">当前项目共享</option>
+            <option value="project" disabled={!contributionAllowed}>当前项目共享</option>
           </select>
           {revising && <div className="field-hint">修订 v{revising.version} · {revising.source}。确认新版本前，当前版本继续生效。</div>}
           {formScope === 'project' && (
@@ -443,7 +469,7 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
             <button
               className="btn btn-primary btn-sm"
               data-memory-form-action="propose"
-              disabled={acting}
+              disabled={acting || (formScope === 'project' && !contributionAllowed)}
               onClick={() => void propose()}
             >
               {acting ? '保存中…' : formScope === 'task' ? '保存到当前任务' : revising ? '提交修订草稿' : '提交草稿'}
@@ -457,6 +483,7 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
 
       {!loading && (
         <>
+          {viewScope !== 'task' && <>
           <div className="memory-group">
             <h4 className="settings-h3">待确认草稿 · {drafts.length}</h4>
             {drafts.length === 0 ? (
@@ -477,7 +504,7 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
                     <div className="provider-row-actions">
                       <button
                         className="btn btn-ghost btn-sm"
-                        disabled={acting}
+                        disabled={acting || !contributionAllowed}
                         onClick={() => void accept(d.id)}
                       >
                         采纳
@@ -515,7 +542,7 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
                     <div className="provider-row-actions">
                       {m.version && <button
                         className="btn btn-ghost btn-sm"
-                        disabled={acting}
+                        disabled={acting || !contributionAllowed}
                         onClick={() => {
                           setRevising(m)
                           setFormScope('project')
@@ -537,15 +564,16 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
             )}
           </div>
 
-          <LearningApprovalPanel sessionId={sessionId} refreshToken={learningRefreshToken} onChanged={load} />
+          <LearningApprovalPanel sessionId={sessionId} refreshToken={learningRefreshToken} onChanged={load} contributionAllowed={contributionAllowed} />
+          </>}
 
           <div className="memory-group">
-            <h4 className="settings-h3">可用记忆 · {layered.length}</h4>
-            {layered.length === 0 ? (
+            <h4 className="settings-h3">可用记忆 · {visibleLayered.length}</h4>
+            {visibleLayered.length === 0 ? (
               <div className="provider-empty">暂无可用记忆</div>
             ) : (
               <div className="provider-list">
-                {layered.map((entry) => {
+                {visibleLayered.map((entry) => {
                   const editing = editingLayeredId === entry.id
                   return (
                     <div key={entry.id} className="provider-row memory-row" data-layered-memory-id={entry.id}>
@@ -578,7 +606,7 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
                       <div className="provider-row-actions">
                         {editing ? (
                           <>
-                            <button className="btn btn-ghost btn-sm" disabled={acting} onClick={() => void saveLayered(entry)}>
+                            <button className="btn btn-ghost btn-sm" disabled={acting || (!entry.sessionId && !entry.workItemId && !contributionAllowed)} onClick={() => void saveLayered(entry)}>
                               保存
                             </button>
                             <button className="btn btn-ghost btn-sm" disabled={acting} onClick={() => setEditingLayeredId(null)}>
@@ -587,7 +615,7 @@ function ProjectMemoryPanel({ sessionId, onClose, initialForm }: Props): React.J
                           </>
                         ) : (
                           <>
-                            <button className="btn btn-ghost btn-sm" disabled={acting} onClick={() => startLayeredEdit(entry)}>
+                            <button className="btn btn-ghost btn-sm" disabled={acting || (!entry.sessionId && !entry.workItemId && !contributionAllowed)} onClick={() => startLayeredEdit(entry)}>
                               编辑
                             </button>
                             <button className="btn btn-ghost btn-sm" disabled={acting} onClick={() => void removeLayered(entry.id)}>

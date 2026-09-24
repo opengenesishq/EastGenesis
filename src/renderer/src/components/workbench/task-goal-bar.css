@@ -1,0 +1,6 @@
+.task-goal-bar { display:flex; align-items:center; gap:6px; margin:4px 24px 6px; padding:8px 10px; border:1px solid var(--border-soft); border-radius:12px; background:var(--bg-raised); }
+.task-goal-summary { min-width:0; flex:1; display:flex; flex-direction:column; gap:3px; text-align:left; background:none; border:0; color:var(--text); cursor:pointer; }
+.task-goal-summary span { font-size:11px; color:var(--text-dim); }
+.task-goal-summary strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:500; }
+.task-goal-bar > .btn { flex-shrink:0; font-size:11px; }
+@media (max-width:900px) { .task-goal-bar { margin-inline:16px; flex-wrap:wrap; } .task-goal-summary { flex-basis:65%; } }

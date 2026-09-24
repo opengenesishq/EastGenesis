@@ -1,6 +1,10 @@
 import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useT } from '../../i18n'
+import { useStore } from '../../store'
+import SkillRecordingWizard from '../../pages/Skills/SkillRecordingWizard'
+import McpOAuthCard from './McpOAuthCard'
+import PluginCatalogPanel from './PluginCatalogPanel'
 
 export type PluginRegistryKind = 'plugin' | 'skill' | 'agent' | 'mcp'
 export type PluginRegistrySourceKind = 'project' | 'user' | 'other'
@@ -117,7 +121,7 @@ export interface PluginRegistryPanelProps {
   onApproveItem?: (item: PluginRegistryPanelItem) => void | Promise<void>
   /** MCP 运行态:探测可见 mcp 条目的真实连接状态 */
   onProbeMcp?: (items: PluginRegistryPanelItem[]) => void | Promise<void>
-  /** 本地安装插件(从目录复制入 ~/.caogen/plugins;市场分发不在本版范围) */
+  /** 本地安装插件，从目录复制入 EastGenesis 托管插件区。 */
   onInstall?: () => void | Promise<void>
   /** 卸载托管插件(回收站式,仅 managed 条目) */
   onUninstall?: (item: PluginRegistryPanelItem) => void | Promise<void>
@@ -321,6 +325,9 @@ export default function PluginRegistryPanel({
 }: PluginRegistryPanelProps): React.JSX.Element {
   const t = useT()
   const labels = mergeLabels(labelOverrides, t)
+  const zh = useStore(state => state.settings.language === 'zh')
+  const [recordingOpen, setRecordingOpen] = useState(false)
+  const [surface, setSurface] = useState<'installed' | 'catalog'>('installed')
   const [query, setQuery] = useState('')
   const [kindFilter, setKindFilter] = useState<KindFilter>('all')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -370,12 +377,14 @@ export default function PluginRegistryPanel({
 
   return (
     <div className={cx('plugin-registry-panel', className)}>
+      {recordingOpen && <SkillRecordingWizard onClose={() => setRecordingOpen(false)} onSaved={onRefresh} />}
       <header className="plugin-registry-header">
         <div className="plugin-registry-heading">
           <div className="plugin-registry-title">{labels.title}</div>
           <div className="plugin-registry-subtitle">{labels.subtitle}</div>
         </div>
         <div className="plugin-registry-actions">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRecordingOpen(true)}>{zh ? '+ 录制技能' : '+ Record a skill'}</button>
           {onInstall && (
             <button
               className="btn btn-ghost btn-sm"
@@ -407,6 +416,12 @@ export default function PluginRegistryPanel({
           )}
         </div>
       </header>
+
+      <nav className="plugin-registry-surfaces" aria-label={zh ? '插件目录视图' : 'Plugin catalog views'}>
+        <button className="btn btn-ghost btn-sm" data-plugin-surface="installed" aria-pressed={surface === 'installed'} onClick={() => setSurface('installed')}>{zh ? '已安装' : 'Installed'}</button>
+        <button className="btn btn-ghost btn-sm" data-plugin-surface="catalog" aria-pressed={surface === 'catalog'} onClick={() => setSurface('catalog')}>{zh ? '发现' : 'Discover'}</button>
+      </nav>
+      {surface === 'catalog' ? <PluginCatalogPanel onInstalled={onRefresh} /> : <>
 
       {error && <div className="notice notice-error plugin-registry-notice">{error}</div>}
       {message && <div className="notice notice-info plugin-registry-notice">{message}</div>}
@@ -506,6 +521,7 @@ export default function PluginRegistryPanel({
             labels={labels}
             actions={{ onUseItem, onDispatchAgent, onApproveItem, onUninstall }}
           />
+          {selectedItem?.kind === 'mcp' && <McpOAuthCard key={selectedItem.id} item={selectedItem} />}
 
           <section className="plugin-registry-card">
             <h3 className="plugin-registry-card-title">{labels.status}</h3>
@@ -542,6 +558,7 @@ export default function PluginRegistryPanel({
           )}
         </aside>
       </div>
+      </>}
     </div>
   )
 }

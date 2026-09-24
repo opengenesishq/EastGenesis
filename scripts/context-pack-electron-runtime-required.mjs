@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { buildSync } from 'esbuild'
 
 const repoRoot = process.cwd()
@@ -38,6 +39,10 @@ try {
     platform: 'node',
     format: 'cjs',
     target: 'node22',
+    // The Electron runner loads the bundle as CommonJS. Preserve a concrete
+    // filename for main-process modules that call createRequire(import.meta.url)
+    // instead of letting esbuild emit an undefined import.meta value.
+    define: { 'import.meta.url': JSON.stringify(pathToFileURL(bundle).href) },
     // Keep native parser bindings out of the fixture bundle. The Electron
     // runner supplies a no-op parser stub because this proof exercises only
     // the engine's durable compression seam, never source indexing.

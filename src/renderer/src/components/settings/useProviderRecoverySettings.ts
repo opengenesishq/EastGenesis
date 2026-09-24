@@ -8,17 +8,18 @@ export type ProviderEditorTarget = ProviderView | 'new' | null
 
 export function useProviderRecoverySettings(providers: ProviderView[]) {
   const context = useStore((state) => state.settingsContext)
+  const onboardingContext = context === 'welcome-provider-recovery' || context === 'first-launch-provider-onboarding'
   const setShowSettings = useStore((state) => state.setShowSettings)
   const updateWelcomeDraft = useStore((state) => state.updateWelcomeDraft)
   const [editing, setEditing] = useState<ProviderEditorTarget>(() => {
-    if (context !== 'welcome-provider-recovery') return null
+    if (!onboardingContext) return null
     if (providers.some((provider) => provider.ready && provider.models.length > 0)) return null
     return providers[0] ?? 'new'
   })
 
   const closeEditor = (result: ProviderEditorCloseResult): void => {
     setEditing(null)
-    if (result.reason !== 'saved' || context !== 'welcome-provider-recovery') return
+    if (result.reason !== 'saved' || !onboardingContext) return
     if (!result.provider.ready || result.provider.models.length === 0) return
     const routingMode = useStore.getState().welcomeDraft.routingMode
     updateWelcomeDraft({

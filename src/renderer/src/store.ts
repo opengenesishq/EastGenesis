@@ -1,4 +1,7 @@
 import { create } from 'zustand'
+import { useLocalSitesNavigation } from './store/local-sites-navigation'
+import { useRemoteTaskNavigation } from './store/remote-task-navigation'
+import { useActivityStore } from './store/activity-store'
 import { interruptSession } from './store/session-interrupt'
 import { createDesktopNotificationNavigation } from './store/desktop-notification-navigation'
 import { clearDeletedTaskLocalData } from './store/task-local-data-cleanup'
@@ -19,7 +22,6 @@ import type {
   AppSettings,
   AssistantBlock,
   McpProbeResult,
-  OpenAIProtocol,
   BrowserAnnotation,
   BrowserBounds,
   BrowserEvent,
@@ -29,7 +31,6 @@ import type {
   CreateSessionOptions,
   DispatchSubagentsInput,
   EffectStatus,
-  EngineKind,
   GitCommitResult,
   GitOperationResult,
   GitStatus,
@@ -103,6 +104,7 @@ import { createTerminalActions } from './store/terminal-actions'
 import { historyResumeOptions, sessionExperienceMode, sessionProjectionPatch } from './store/session-experience'
 import { invalidateProjectTestResult } from './store/project-test-review'
 import { createBrowserActions } from './store/browser-actions'
+import { sameBrowserSelection, targetForBrowserState } from './store/browser-tab-state'
 import {
   activeFileTab,
   closeFileTabState,
@@ -115,6 +117,8 @@ import {
   type FileEditorTab,
   type FileEditorTabsState
 } from './store/file-editor-tabs'
+import { ensureQuickbarSession, stageQuickbarPayload } from './store/quickbar-draft'
+import { ENABLE_PALACE_EXPERIENCE } from './brand'
 let seq = 0
 let fileRequestSeq = 0
 let filesRequestSeq = 0
@@ -125,41 +129,7 @@ let previewVisualRequestSeq = 0
 const genId = (): string => `it-${Date.now().toString(36)}-${seq++}`
 function closeNativeBrowserView(sessionId: string | null | undefined): void {
   if (!sessionId) return
-  void window.agentDesk.closeBrowser(sessionId).catch(() => undefined)
-}
-
-function quickbarCwd(state: AppStore, requested?: string): string {
-  const clean = requested?.trim()
-  if (clean) return clean
-  const activeCwd = state.activeId ? state.sessions[state.activeId]?.meta.cwd : undefined
-  return activeCwd || state.projects[0]?.path || ''
-}
-
-async function ensureQuickbarSession(
-  getState: () => AppStore,
-  options: QuickbarDispatchOptions
-): Promise<{ sessionId: string; cwd: string }> {
-  const state = getState()
-  const currentId = state.activeId && state.sessions[state.activeId] ? state.activeId : null
-  if (options.target === 'current' && currentId) {
-    return { sessionId: currentId, cwd: state.sessions[currentId].meta.cwd }
-  }
-
-  const cwd = quickbarCwd(state, options.cwd)
-  if (!cwd) throw new Error('Quickbar 创建新会话需要工作目录')
-  await state.createSession({ cwd, title: 'Quickbar' })
-  const sessionId = getState().activeId
-  if (!sessionId) throw new Error('Quickbar 新会话创建失败')
-  return { sessionId, cwd: getState().sessions[sessionId]?.meta.cwd ?? cwd }
-}
-
-async function sendQuickbarPayload(
-  getState: () => AppStore,
-  sessionId: string,
-  payload: SendMessagePayload
-): Promise<void> {
-  if (getState().activeId !== sessionId) getState().selectSession(sessionId)
-  await getState().sendMessage(payload)
+  void window.agentDesk.setBrowserContextVisible(sessionId, false).catch(() => undefined)
 }
 
 /**
@@ -605,6 +575,9 @@ export type AppView = 'list' | 'office'
 export interface WorkbenchState {
   /** 当前活动面板 ID，null 表示无面板打开 */
   activePanelId: PanelId | null
+  /** Bottom terminal visibility is independent of the selected right-hand panel. */
+  terminalDockOpen?: boolean
+  terminalScope?: 'task' | 'workspace'
   /** 已挂载面板集合（keep-alive）。面板首次激活时加入，closePanel 不移除 */
   mountedPanels: Set<PanelId>
   diffLoading: boolean
@@ -704,6 +677,7 @@ export interface WorkbenchState {
   selectedRoutineId?: string | null
   memorySuggestion?: MemorySuggestionEvent
   memoryInitialForm?: { kind: string; title: string; body: string; reason: string }
+  memoryInitialScope?: 'task' | 'project'
   startSuggestions: StartSuggestion[]
   startSuggestionsLoading: boolean
   startSuggestionsError?: string
@@ -778,6 +752,7 @@ export interface AppStore extends BusinessLineSlice, ExperienceModeSlice, Settin
   forkFromCheckpoint(checkpointId: string, sourceText: string): void
   selectSession(id: string): void
   sendMessage(input: string | SendMessagePayload, sessionId?: string): Promise<void>
+  sendQuickbarText(options: QuickbarDispatchOptions): Promise<QuickbarDispatchResult | undefined>
   sendQuickbarClipboard(options: QuickbarDispatchOptions): Promise<QuickbarDispatchResult | undefined>
   sendQuickbarScreenshot(options: QuickbarDispatchOptions): Promise<QuickbarDispatchResult | undefined>
   sendQuickbarFiles(options: QuickbarDispatchOptions): Promise<QuickbarDispatchResult | undefined>
@@ -883,8 +858,8 @@ export interface AppStore extends BusinessLineSlice, ExperienceModeSlice, Settin
   openRoutinePanel(): Promise<void>
   /** @deprecated 使用 closePanel() 代替 */
   closeRoutinePanel(): void
-  refreshRoutinePanel(): Promise<void>
-  selectRoutine(id: string): void
+  refreshRoutinePanel(quiet?: boolean): Promise<void>
+  selectRoutine(id: string | null): void
   toggleRoutine(id: string, enabled: boolean): Promise<void>
   markRoutineRun(id: string): Promise<void>
   deleteRoutine(id: string): Promise<void>
@@ -913,14 +888,18 @@ export interface AppStore extends BusinessLineSlice, ExperienceModeSlice, Settin
 }
 
 function browserEventMatchesActiveSession(event: BrowserEvent, activeId: string | null): boolean {
-  if (event.kind === 'error') return !event.sessionId || !activeId || event.sessionId === activeId
-  return !activeId || event.sessionId === activeId
+  if (!activeId) return false
+  if (event.kind === 'error') return event.sessionId === activeId
+  return event.sessionId === activeId
 }
 
 function reduceBrowserEvent(state: AppStore, event: BrowserEvent): AppStore {
+  if (state.showNewSession) return state
   if (!browserEventMatchesActiveSession(event, state.activeId)) return state
   switch (event.kind) {
     case 'state':
+      if (state.workbench.browserState?.contextEpoch === event.state.contextEpoch &&
+        (state.workbench.browserState?.selectionRevision ?? -1) > (event.state.selectionRevision ?? -1)) return state
       return {
         ...state,
         workbench: {
@@ -928,6 +907,7 @@ function reduceBrowserEvent(state: AppStore, event: BrowserEvent): AppStore {
           browserState: event.state,
           browserUrlDraft: event.state.url,
           browserLoading: event.state.loading,
+          browserPicking: state.workbench.browserState?.selectionRevision === event.state.selectionRevision ? state.workbench.browserPicking : false,
           browserError: undefined
         }
       }
@@ -1018,6 +998,7 @@ export const useStore = create<AppStore>((set, get) => {
   type PanelActivator = (context?: PanelOpenContext) => void
   const panelActivators: Record<PanelId, PanelActivator> = {
     execution: () => {},
+    sources: () => {},
     diff: () => {
       void get().refreshDiffPanel()
       void get().refreshGitStatus()
@@ -1133,6 +1114,7 @@ export const useStore = create<AppStore>((set, get) => {
         }
       }))
     },
+    sidechat: () => {},
     routine: () => {
       set((s) => ({
         workbench: {
@@ -1143,9 +1125,9 @@ export const useStore = create<AppStore>((set, get) => {
       }))
       void get().refreshRoutinePanel()
     },
-    memory: () => {
+    memory: (context) => {
       set((s) => ({
-        workbench: { ...s.workbench, memoryInitialForm: undefined }
+        workbench: { ...s.workbench, memoryInitialForm: undefined, memoryInitialScope: context?.memoryScope }
       }))
     },
     result: () => {
@@ -1221,6 +1203,9 @@ export const useStore = create<AppStore>((set, get) => {
     notificationsEnabled: true,
     preventDisplaySleep: true,
     autoSkillLearningEnabled: false,
+    desktopCompanion: {
+      enabled: false, size: 'medium', alwaysOnTop: true, reducedMotion: false, legacyMigrated: false
+    },
     office: {
       qualityMode: 'auto', showBadges: true, liveliness: 1, catEars: false,
       spaceTheme: 'control-room', outfitPalette: 'role-default', hairStyle: 'role-default', teamLayout: 'grid'
@@ -1257,6 +1242,8 @@ export const useStore = create<AppStore>((set, get) => {
   transcriptSearchLoading: false,
   workbench: {
     activePanelId: null,
+    terminalDockOpen: false,
+    terminalScope: 'task',
     mountedPanels: new Set<PanelId>(),
     diffLoading: false,
     gitLoading: false,
@@ -1314,6 +1301,13 @@ export const useStore = create<AppStore>((set, get) => {
     window.agentDesk.onMemorySuggestion((event) => get().handleMemorySuggestion(event))
     window.agentDesk.onTerminalEvent((event) => get().handleTerminalEvent(event))
     window.agentDesk.onBrowserEvent((event) => get().handleBrowserEvent(event))
+    let settingsRefresh = 0
+    window.agentDesk.onSettingsChanged(() => {
+      const request = ++settingsRefresh
+      void window.agentDesk.getSettings().then(settings => {
+        if (request === settingsRefresh) set({ settings })
+      }).catch(() => console.warn('设置已保存，当前窗口等待重新同步。'))
+    })
     // Sessions and persisted Office quality define the first usable workspace frame.
     // Secondary panels hydrate independently so they cannot block navigation or transcript recovery.
     const [metas, settings] = await Promise.all([
@@ -1478,17 +1472,21 @@ export const useStore = create<AppStore>((set, get) => {
     set((s) => {
       const current = s.workbench.terminal
       if (event.kind === 'started') {
+        // Standalone terminals are adopted by their guarded start response.
+        // A delayed process event cannot select a former welcome-page directory.
+        if (s.workbench.terminalScope === 'workspace' || event.terminal.sessionId !== s.activeId) return s
         return {
           workbench: {
             ...s.workbench,
             terminal: event.terminal,
+            terminalBuffer: current?.id === event.terminal.id ? s.workbench.terminalBuffer : '',
             terminalLoading: false,
             terminalError: undefined
           }
         }
       }
       if (event.kind === 'output') {
-        if (current && current.id !== event.id) return s
+        if (!current || current.id !== event.id) return s
         const next = `${s.workbench.terminalBuffer}${event.data}`
         return {
           workbench: {
@@ -1498,7 +1496,7 @@ export const useStore = create<AppStore>((set, get) => {
         }
       }
       if (event.kind === 'exit') {
-        if (current && current.id !== event.id) return s
+        if (!current || current.id !== event.id) return s
         return {
           workbench: {
             ...s.workbench,
@@ -1508,7 +1506,7 @@ export const useStore = create<AppStore>((set, get) => {
         }
       }
       if (event.kind === 'error') {
-        if (event.id && current && current.id !== event.id) return s
+        if (event.id && (!current || current.id !== event.id)) return s
         return { workbench: { ...s.workbench, terminalError: event.message } }
       }
       return s
@@ -1744,6 +1742,9 @@ export const useStore = create<AppStore>((set, get) => {
   },
 
   selectSession(id) {
+    useRemoteTaskNavigation.getState().close()
+    useLocalSitesNavigation.getState().setVisible(false)
+    useActivityStore.getState().setVisible(false)
     const previousId = get().activeId
     if (previousId && previousId !== id) closeNativeBrowserView(previousId)
     set((s) => ({
@@ -1785,16 +1786,28 @@ export const useStore = create<AppStore>((set, get) => {
     }, input)
   },
 
+  async sendQuickbarText(options) {
+    try {
+      const text = options.note?.trim()
+      if (!text) return { ok: false, error: '请输入任务内容。' }
+      const target = await ensureQuickbarSession(get, options)
+      stageQuickbarPayload(get, target.sessionId, { text })
+      return { ok: true, sessionId: target.sessionId }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  },
+
   async sendQuickbarClipboard(options) {
     try {
       const target = await ensureQuickbarSession(get, options)
       const result = await window.agentDesk.quickbarReadClipboard({
         cwd: target.cwd,
         note: options.note,
-        includeWindowContext: true
+        includeWindowContext: false
       })
       if (!result.ok || !result.payload) return { ok: false, sessionId: target.sessionId, error: result.error }
-      await sendQuickbarPayload(get, target.sessionId, result.payload)
+      stageQuickbarPayload(get, target.sessionId, result.payload)
       return { ok: true, sessionId: target.sessionId }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -1808,12 +1821,15 @@ export const useStore = create<AppStore>((set, get) => {
         sessionId: target.sessionId,
         cwd: target.cwd,
         sourceId: options.sourceId,
+        expectedSourceName: options.expectedSourceName,
+        includeOcr: options.includeOcr,
         note: options.note,
         includeWindowContext: true
       })
       if (!result.ok || !result.payload) return { ok: false, sessionId: target.sessionId, error: result.error }
-      await sendQuickbarPayload(get, target.sessionId, result.payload)
-      return { ok: true, sessionId: target.sessionId }
+      if (result.sessionId !== target.sessionId) throw new Error('截图附件的目标任务不匹配，请重新截图。')
+      stageQuickbarPayload(get, target.sessionId, result.payload, result.imagePreviews)
+      return { ok: true, sessionId: target.sessionId, warning: result.warning }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
@@ -1826,10 +1842,10 @@ export const useStore = create<AppStore>((set, get) => {
         cwd: target.cwd,
         paths: options.paths ?? [],
         note: options.note,
-        includeWindowContext: true
+        includeWindowContext: false
       })
       if (!result.ok || !result.payload) return { ok: false, sessionId: target.sessionId, error: result.error }
-      await sendQuickbarPayload(get, target.sessionId, result.payload)
+      stageQuickbarPayload(get, target.sessionId, result.payload)
       return { ok: true, sessionId: target.sessionId }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -2039,12 +2055,20 @@ export const useStore = create<AppStore>((set, get) => {
   },
 
   setView(view) {
-    // All Control Room entrypoints share the sidebar's navigation intent,
-    // including when recovery attention hydrates after the scene opens.
+    // Palace entrypoints remain callable for compatibility, but cannot become a
+    // dead-end route while the current product is the workbench.
+    if (view === 'office' && !ENABLE_PALACE_EXPERIENCE) {
+      set({ view: 'list' })
+      return
+    }
     set({ view, ...(view === 'office' ? { showTaskRecovery: false } : {}) })
   },
 
   openPanel(id, context) {
+    if (id === 'terminal') {
+      void get().openTerminalPanel()
+      return
+    }
     closeNativeBrowserView(get().activeId)
     set((s) => ({
       workbench: {
@@ -2057,11 +2081,20 @@ export const useStore = create<AppStore>((set, get) => {
   },
 
   closePanel() {
+    if (get().workbench.activePanelId === 'terminal') {
+      get().closeTerminalPanel()
+      return
+    }
     closeNativeBrowserView(get().activeId)
     set((s) => ({ workbench: { ...s.workbench, activePanelId: null } }))
   },
 
   togglePanel(id, context) {
+    if (id === 'terminal') {
+      if (get().workbench.terminalDockOpen || get().workbench.activePanelId === 'terminal') get().closeTerminalPanel()
+      else void get().openTerminalPanel()
+      return
+    }
     const current = get().workbench.activePanelId
     if (current === id) {
       get().closePanel()
@@ -2078,6 +2111,7 @@ export const useStore = create<AppStore>((set, get) => {
         workbench: {
           ...s.workbench,
           mountedPanels: next,
+          ...(id === 'terminal' ? { terminalDockOpen: false } : {}),
           activePanelId: s.workbench.activePanelId === id ? null : s.workbench.activePanelId
         }
       }
@@ -3001,10 +3035,13 @@ export const useStore = create<AppStore>((set, get) => {
 
   async captureBrowserAnnotation(note) {
     const id = get().activeId
-    if (!id) return
+    const target = targetForBrowserState(get().workbench.browserState)
+    if (!id || !target || get().showNewSession) return
+    const current = (): boolean => get().activeId === id && !get().showNewSession && sameBrowserSelection(get().workbench.browserState, target)
     set((s) => ({ workbench: { ...s.workbench, browserError: undefined, browserMessage: undefined } }))
     try {
-      const annotation = await window.agentDesk.captureBrowserAnnotation(id, note)
+      const annotation = await window.agentDesk.captureBrowserAnnotation(id, note, target)
+      if (!current()) return
       set((s) => {
         const known = new Set(s.workbench.browserAnnotations.map((item) => item.id))
         return {
@@ -3018,6 +3055,7 @@ export const useStore = create<AppStore>((set, get) => {
         }
       })
     } catch (err) {
+      if (!current()) return
       set((s) => ({
         workbench: {
           ...s.workbench,
@@ -3029,14 +3067,19 @@ export const useStore = create<AppStore>((set, get) => {
 
   async refreshBrowserAnnotations() {
     const id = get().activeId
-    if (!id) return
+    const target = targetForBrowserState(get().workbench.browserState)
+    if (!id || !target || get().showNewSession) return
+    const current = (): boolean => get().activeId === id && !get().showNewSession && sameBrowserSelection(get().workbench.browserState, target)
     const annotations = await window.agentDesk.listBrowserAnnotations(id)
+    if (!current()) return
     set((s) => ({ workbench: { ...s.workbench, browserAnnotations: annotations } }))
   },
 
   async pickBrowserElementAnnotation(note) {
     const id = get().activeId
-    if (!id) return
+    const target = targetForBrowserState(get().workbench.browserState)
+    if (!id || !target || get().showNewSession) return
+    const current = (): boolean => get().activeId === id && !get().showNewSession && sameBrowserSelection(get().workbench.browserState, target)
     set((s) => ({
       workbench: {
         ...s.workbench,
@@ -3046,14 +3089,16 @@ export const useStore = create<AppStore>((set, get) => {
       }
     }))
     try {
-      const pick = await window.agentDesk.pickBrowserElement(id)
+      const pick = await window.agentDesk.pickBrowserElement(id, target)
+      if (!current()) return
       if (pick.cancelled) {
         set((s) => ({
           workbench: { ...s.workbench, browserPicking: false, browserMessage: '已取消圈选' }
         }))
         return
       }
-      const annotation = await window.agentDesk.captureBrowserElementAnnotation(id, pick, note)
+      const annotation = await window.agentDesk.captureBrowserElementAnnotation(id, pick, note, target)
+      if (!current()) return
       set((s) => {
         const known = new Set(s.workbench.browserAnnotations.map((item) => item.id))
         return {
@@ -3068,6 +3113,7 @@ export const useStore = create<AppStore>((set, get) => {
         }
       })
     } catch (err) {
+      if (!current()) return
       set((s) => ({
         workbench: {
           ...s.workbench,
@@ -3080,9 +3126,11 @@ export const useStore = create<AppStore>((set, get) => {
 
   async observeBrowserForAgent() {
     const id = get().activeId
-    if (!id) return
+    const target = targetForBrowserState(get().workbench.browserState)
+    if (!id || !target || get().showNewSession) return
+    const current = (): boolean => get().activeId === id && !get().showNewSession && sameBrowserSelection(get().workbench.browserState, target)
     try {
-      const obs = await window.agentDesk.observeBrowser(id)
+      const obs = await window.agentDesk.observeBrowser(id, target)
       const lines = [
         '以下是内置浏览器当前页面的只读观测快照(未做任何交互):',
         '',
@@ -3096,9 +3144,12 @@ export const useStore = create<AppStore>((set, get) => {
       ]
         .filter(Boolean)
         .join('\n')
+      if (!current()) return
       await get().sendMessage(lines)
+      if (!current()) return
       set((s) => ({ workbench: { ...s.workbench, browserMessage: '页面观测已发给 Agent' } }))
     } catch (err) {
+      if (!current()) return
       set((s) => ({
         workbench: {
           ...s.workbench,
@@ -3166,8 +3217,8 @@ export const useStore = create<AppStore>((set, get) => {
     get().closePanel()
   },
 
-  async refreshRoutinePanel() {
-    set((s) => ({
+  async refreshRoutinePanel(quiet = false) {
+    if (!quiet) set((s) => ({
       workbench: {
         ...s.workbench,
         routineLoading: true,
@@ -3190,7 +3241,7 @@ export const useStore = create<AppStore>((set, get) => {
           selectedRoutineId:
             s.workbench.selectedRoutineId && routines.some((routine) => routine.id === s.workbench.selectedRoutineId)
               ? s.workbench.selectedRoutineId
-              : (routines[0]?.id ?? null)
+              : null
         }
       }))
     } catch (err) {
@@ -3246,31 +3297,7 @@ export const useStore = create<AppStore>((set, get) => {
           routines,
           routineRuns,
           routineError: run ? undefined : '未找到 Routine',
-          routineMessage: run ? `${run.routineName} 已启动手动运行` : undefined
-        }
-      }))
-    } catch (err) {
-      set((s) => ({
-        workbench: {
-          ...s.workbench,
-          routineError: err instanceof Error ? err.message : String(err)
-        }
-      }))
-    }
-    return
-
-    try {
-      const routine = await window.agentDesk.markRoutineRun(id, { ranAt: Date.now() })
-      set((s) => ({
-        workbench: {
-          ...s.workbench,
-          routines: routine
-            ? s.workbench.routines.map((item) => (item.id === id ? routine : item))
-            : s.workbench.routines,
-          routineError: routine ? undefined : '未找到 Routine',
-          routineMessage: routine
-            ? `${routine.name} 已手动更新运行时间`
-            : undefined
+          routineMessage: run ? `${run.routineName} ${run.heartbeat?.phase === 'needs_reconciliation' ? '已暂停，提交结果待核对' : run.status === 'queued' ? '已排队，等待原任务空闲' : run.status === 'failed' ? '执行失败，请查看记录' : run.status === 'succeeded' ? '已完成' : '已启动手动运行'}` : undefined
         }
       }))
     } catch (err) {
@@ -3295,7 +3322,7 @@ export const useStore = create<AppStore>((set, get) => {
               routines: s.workbench.routines.filter((routine) => routine.id !== id),
               selectedRoutineId:
                 s.workbench.selectedRoutineId === id
-                  ? (s.workbench.routines.find((routine) => routine.id !== id)?.id ?? null)
+                  ? null
                   : s.workbench.selectedRoutineId,
               routineMessage: `${routineName} 已删除`,
               routineError: undefined
@@ -3317,7 +3344,7 @@ export const useStore = create<AppStore>((set, get) => {
 
   async refreshStartSuggestions() {
     const id = get().activeId
-    if (!id) return
+    if (!id || get().settings.suggestedPrompts?.contextual === false) return
     set((s) => ({
       workbench: {
         ...s.workbench,
@@ -3328,7 +3355,7 @@ export const useStore = create<AppStore>((set, get) => {
     }))
     try {
       const suggestions = await window.agentDesk.getStartSuggestions(id)
-      if (get().activeId !== id) return
+      if (get().activeId !== id || get().settings.suggestedPrompts?.contextual === false) return
       set((s) => ({
         workbench: {
           ...s.workbench,
@@ -3486,6 +3513,8 @@ export const useStore = create<AppStore>((set, get) => {
     set({ rewindPanel: { open: false } })
   },
   setShowNewSession(v, projectId) {
+    if (v) useRemoteTaskNavigation.getState().close()
+    if (v) { useLocalSitesNavigation.getState().setVisible(false); useActivityStore.getState().setVisible(false) }
     if (v) {
       get().updateWelcomeDraft({
         forkFromSdkSessionId: undefined,
@@ -3567,242 +3596,5 @@ export const PERMISSION_OPTIONS: Array<{ value: PermissionModeId; label: string 
   { value: 'bypassPermissions', label: '跳过权限' }
 ]
 
-/**
- * Provider 预设模板。Anthropic 引擎使用原生 Messages API;OpenAI 引擎支持 Responses(OpenAI 原生)与 Chat Completions
- * (通用)两种协议。模板预填 baseUrl 与常见模型名,降低配置成本。
- */
-export interface ProviderPreset {
-  key: string
-  label: string
-  baseUrl: string
-  models: string[]
-  engine: EngineKind
-  hint: string
-  /** 该预设推荐的 OpenAI 引擎协议(undefined = responses) */
-  openaiProtocol?: OpenAIProtocol
-  /** Descriptive metadata used by the searchable provider catalog. */
-  vendor?: string
-  category?: 'official' | 'aggregator' | 'gateway' | 'local'
-  region?: 'global' | 'china' | 'local'
-  billing?: 'metered' | 'subscription' | 'free-tier' | 'local'
-  auth?: 'api-key' | 'oauth' | 'none'
-  searchTerms?: string[]
-}
-
-export const PROVIDER_PRESETS: ProviderPreset[] = [
-  {
-    key: 'caogen-relay',
-    label: 'CaoGen 中转站模板(需配置 Key)',
-    baseUrl: 'https://ciyuan2api.com',
-    models: [],
-    engine: 'openai',
-    hint: 'CaoGen 中转站预设入口。服务暂不作为默认可用 Provider;请填写自己的 API Key,再用“获取模型”确认可用模型。若控制台给出的 API 路径不同,按实际路径调整 Base URL。',
-    openaiProtocol: 'chat'
-  },
-  {
-    key: 'anthropic',
-    label: 'Anthropic(Messages API 直连)',
-    baseUrl: 'https://api.anthropic.com',
-    models: ['claude-opus-4', 'claude-sonnet-4', 'claude-haiku-4'],
-    engine: 'anthropic',
-    hint: '直连 Anthropic 官方 Messages API;填入自己的 Anthropic API Key。'
-  },
-  {
-    key: 'gemini',
-    label: 'Google Gemini（原生 API）',
-    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-    models: ['gemini-2.5-pro', 'gemini-2.5-flash'],
-    engine: 'gemini',
-    hint: '直连 Google Generative Language API；使用 x-goog-api-key 受管凭据头。模型清单以 Google API 实际返回为准。'
-  },
-  {
-    key: 'openai',
-    label: 'OpenAI(厂商直连)',
-    baseUrl: 'https://api.openai.com',
-    models: ['gpt-4.1', 'gpt-4o', 'o3', 'o4-mini'],
-    engine: 'openai',
-    hint: '使用 OpenAI Responses 协议原生直连;填入 OpenAI API Key。'
-  },
-  {
-    key: 'deepseek',
-    label: 'DeepSeek(厂商直连)',
-    baseUrl: 'https://api.deepseek.com/anthropic',
-    models: ['deepseek-chat', 'deepseek-reasoner'],
-    engine: 'anthropic',
-    hint: 'DeepSeek 厂商 Anthropic 兼容端点,无须网关。api.deepseek.com 申请 Key。'
-  },
-  {
-    key: 'deepseek-chat',
-    label: 'DeepSeek(OpenAI 引擎 · Chat 协议)',
-    baseUrl: 'https://api.deepseek.com',
-    models: ['deepseek-chat', 'deepseek-reasoner'],
-    engine: 'openai',
-    hint: '走 OpenAI 引擎的 Chat Completions 协议直连 DeepSeek。会话会自动继承此处配置的执行引擎。',
-    openaiProtocol: 'chat'
-  },
-  {
-    key: 'kimi',
-    label: 'Kimi / 月之暗面(厂商直连)',
-    baseUrl: 'https://api.moonshot.cn/anthropic',
-    models: ['kimi-k2-0711-preview', 'moonshot-v1-auto'],
-    engine: 'anthropic',
-    hint: 'Moonshot 厂商 Anthropic 兼容端点,无须网关。platform.moonshot.cn 申请 Key。'
-  },
-  {
-    key: 'glm',
-    label: '智谱 GLM(厂商直连)',
-    baseUrl: 'https://open.bigmodel.cn/api/anthropic',
-    models: ['glm-4.5', 'glm-4.5-air'],
-    engine: 'anthropic',
-    hint: '智谱厂商 Anthropic 兼容端点,无须网关。open.bigmodel.cn 申请 Key。'
-  },
-  {
-    key: 'grok',
-    label: 'Grok / xAI(厂商直连)',
-    baseUrl: 'https://api.x.ai',
-    models: ['grok-4', 'grok-4-fast'],
-    engine: 'openai',
-    hint: 'xAI 厂商端点提供 Chat Completions,配 OpenAI-compatible 引擎 Chat 协议。console.x.ai 申请 Key。',
-    openaiProtocol: 'chat'
-  },
-  {
-    key: 'qwen',
-    label: '通义千问 Qwen(DashScope)',
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode',
-    models: ['qwen-max', 'qwen-plus', 'qwen-turbo'],
-    engine: 'openai',
-    hint: '阿里 DashScope OpenAI 兼容端点,配 OpenAI 引擎 Chat 协议。bailian.console.aliyun.com 申请 Key。',
-    openaiProtocol: 'chat'
-  },
-  {
-    key: 'baichuan',
-    label: '百川智能 Baichuan',
-    baseUrl: 'https://api.baichuan-ai.com/v1',
-    models: ['Baichuan4-Turbo', 'Baichuan4-Air'],
-    engine: 'openai',
-    hint: '百川 OpenAI 兼容端点,配 OpenAI 引擎 Chat 协议。若端点或模型名变化,按控制台文档调整。',
-    openaiProtocol: 'chat'
-  },
-  {
-    key: 'doubao',
-    label: '豆包 Doubao / 火山方舟',
-    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-    models: ['doubao-seed-1-6', 'doubao-1-5-pro-32k'],
-    engine: 'openai',
-    hint: '火山方舟 OpenAI 兼容端点,配 OpenAI 引擎 Chat 协议。模型 ID 以方舟控制台实际 endpoint 为准。',
-    openaiProtocol: 'chat'
-  },
-  {
-    key: 'local-openai',
-    label: '本地 / 自部署(vLLM · Ollama · LM Studio)',
-    baseUrl: 'http://localhost:11434',
-    models: ['qwen3', 'llama3.3', 'deepseek-r1'],
-    engine: 'openai',
-    hint: '任何自部署 OpenAI 兼容服务(vLLM/Ollama/LM Studio 等),配 OpenAI 引擎 Chat 协议。按你的服务地址改 baseUrl。',
-    openaiProtocol: 'chat'
-  },
-  {
-    key: 'oneapi',
-    label: 'one-api / new-api 网关',
-    baseUrl: 'http://localhost:3000',
-    models: ['gpt-4o', 'gpt-4o-mini', 'gemini-1.5-pro', 'deepseek-chat'],
-    engine: 'anthropic',
-    hint: '经 one-api/new-api 网关转译:请求走 Anthropic 协议,网关翻译到 OpenAI/Gemini 等后端。模型名需与网关映射一致。'
-  },
-  {
-    key: 'litellm',
-    label: 'LiteLLM 网关',
-    baseUrl: 'http://localhost:4000',
-    models: ['gpt-4o', 'claude-3-5-sonnet', 'gemini/gemini-1.5-pro'],
-    engine: 'anthropic',
-    hint: 'LiteLLM 以 /v1/messages 暴露 Anthropic 兼容端点,后端可接 OpenAI/Azure/Bedrock 等。'
-  },
-  {
-    key: 'openrouter',
-    label: 'OpenRouter (多模型聚合)',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    models: ['openai/gpt-4o-mini', 'anthropic/claude-3.5-sonnet', 'google/gemini-2.5-flash'],
-    engine: 'openai', openaiProtocol: 'chat',
-    hint: '统一 OpenAI-compatible 入口，可在 OpenRouter 控制台管理模型、余额和路由。',
-    vendor: 'OpenRouter', category: 'aggregator', region: 'global', billing: 'metered', auth: 'api-key',
-    searchTerms: ['router', 'aggregator', 'openai compatible', '聚合', '路由']
-  },
-  {
-    key: 'groq',
-    label: 'Groq (高速推理)',
-    baseUrl: 'https://api.groq.com/openai/v1',
-    models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b'],
-    engine: 'openai', openaiProtocol: 'chat',
-    hint: 'Groq OpenAI-compatible API，适合低延迟推理。',
-    vendor: 'Groq', category: 'official', region: 'global', billing: 'free-tier', auth: 'api-key',
-    searchTerms: ['llama', '高速', 'low latency']
-  },
-  {
-    key: 'mistral',
-    label: 'Mistral AI (官方)',
-    baseUrl: 'https://api.mistral.ai/v1',
-    models: ['mistral-large-latest', 'mistral-small-latest', 'codestral-latest'],
-    engine: 'openai', openaiProtocol: 'chat',
-    hint: 'Mistral 官方 OpenAI-compatible Chat Completions 入口。',
-    vendor: 'Mistral', category: 'official', region: 'global', billing: 'free-tier', auth: 'api-key',
-    searchTerms: ['codestral', 'mistral']
-  },
-  {
-    key: 'together',
-    label: 'Together AI (开源模型平台)',
-    baseUrl: 'https://api.together.xyz/v1',
-    models: ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'Qwen/Qwen2.5-72B-Instruct-Turbo'],
-    engine: 'openai', openaiProtocol: 'chat',
-    hint: 'Together AI OpenAI-compatible 入口，支持多种开源模型。',
-    vendor: 'Together AI', category: 'aggregator', region: 'global', billing: 'metered', auth: 'api-key',
-    searchTerms: ['open source', '开源', 'llama', 'qwen']
-  },
-  {
-    key: 'fireworks',
-    label: 'Fireworks AI (开源模型平台)',
-    baseUrl: 'https://api.fireworks.ai/inference/v1',
-    models: ['accounts/fireworks/models/llama-v3p1-70b-instruct', 'accounts/fireworks/models/deepseek-v3'],
-    engine: 'openai', openaiProtocol: 'chat',
-    hint: 'Fireworks AI OpenAI-compatible 推理入口，适合开源模型部署。',
-    vendor: 'Fireworks AI', category: 'aggregator', region: 'global', billing: 'metered', auth: 'api-key',
-    searchTerms: ['open source', 'serverless', '部署']
-  },
-  {
-    key: 'perplexity',
-    label: 'Perplexity (联网搜索模型)',
-    baseUrl: 'https://api.perplexity.ai',
-    models: ['sonar', 'sonar-pro', 'sonar-reasoning-pro'],
-    engine: 'openai', openaiProtocol: 'chat',
-    hint: 'Perplexity Sonar OpenAI-compatible 入口，模型自带联网搜索能力。',
-    vendor: 'Perplexity', category: 'official', region: 'global', billing: 'metered', auth: 'api-key',
-    searchTerms: ['search', '联网', 'sonar']
-  },
-  {
-    key: 'siliconflow',
-    label: 'SiliconFlow 硅基流动',
-    baseUrl: 'https://api.siliconflow.cn/v1',
-    models: ['deepseek-ai/DeepSeek-V3', 'Qwen/Qwen3-235B-A22B', 'THUDM/GLM-Z1-32B-0414'],
-    engine: 'openai', openaiProtocol: 'chat',
-    hint: '硅基流动 OpenAI-compatible 聚合入口，支持国内网络和多家开源模型。',
-    vendor: 'SiliconFlow', category: 'aggregator', region: 'china', billing: 'free-tier', auth: 'api-key',
-    searchTerms: ['国内', '硅基', 'deepseek', 'qwen', 'glm']
-  },
-  {
-    key: 'azure-openai',
-    label: 'Azure OpenAI (企业部署)',
-    baseUrl: 'https://{resource}.openai.azure.com/openai',
-    models: [],
-    engine: 'openai', openaiProtocol: 'chat',
-    hint: 'Azure OpenAI 使用资源专属 endpoint 和 api-key；模型名应填写 deployment name。',
-    vendor: 'Microsoft Azure', category: 'official', region: 'global', billing: 'metered', auth: 'api-key',
-    searchTerms: ['azure', 'enterprise', 'deployment', '企业']
-  },
-  {
-    key: 'custom',
-    label: '自定义',
-    baseUrl: '',
-    models: [],
-    engine: 'openai',
-    hint: '手动填写全部字段。'
-  }
-]
+export { PROVIDER_PRESETS, findProviderPresetForConnection } from '../../shared/provider-presets'
+export type { ProviderPreset } from '../../shared/provider-presets'

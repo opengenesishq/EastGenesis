@@ -1,3 +1,6 @@
+import { wslBindingForCwd } from '../wsl/binding'
+import { buildWorkspaceHandoffTarget } from '../workspace-handoff'
+import { buildTaskHandoffEffectTarget } from '../task-handoff/effect'
 import { buildOfficeRevisionEffectTarget } from '../office-revision/effect'
 import { realpathSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
@@ -81,10 +84,12 @@ export async function buildEffectTarget(
   operationContext: OperationEffectReconcilerContext
 ): Promise<BuiltEffectTarget> {
   const toolName = normalizeToolName(input.toolName)
+  const environment = wslBindingForCwd(input.cwd)
+  const bind = (target: EffectTarget): EffectTarget => environment ? { ...target, executionEnvironment: structuredClone(environment) } : target
   const fileTarget = await buildFileEffectTarget(input, toolName, observationOptions, context)
-  if (fileTarget) return { toolName, target: persistedEffectTarget(fileTarget) }
+  if (fileTarget) return { toolName, target: persistedEffectTarget(bind(fileTarget)) }
   const target = await buildRepositoryEffectTarget(input, toolName, context, operationContext)
-  return { toolName, target: persistedEffectTarget(target) }
+  return { toolName, target: persistedEffectTarget(bind(target)) }
 }
 
 function persistedEffectTarget(target: EffectTarget): EffectTarget {
@@ -148,11 +153,20 @@ async function buildRepositoryEffectTarget(
   context: EffectTargetBuilderContext,
   operationContext: OperationEffectReconcilerContext
 ): Promise<EffectTarget> {
-  if (['browser_click', 'browser_type', 'browser_evaluate'].includes(toolName)) {
+  if (toolName === 'browser_debug_evaluate') {
+    if (!input.sessionId) throw new Error('高级浏览器调试缺少当前任务身份。')
+    const { prepareBrowserDebugEvaluation } = await import('../browser-debug/runtime')
+    return prepareBrowserDebugEvaluation(input.sessionId, input.toolInput.expression)
+  }
+  if (['browser_click', 'browser_type', 'browser_evaluate', 'browser_navigate'].includes(toolName)) {
     if (!input.sessionId) throw new Error('浏览器操作缺少当前会话，不能建立审批目标。')
+    const { externalBrowserRegistry } = await import('../external-browser-registry')
+    const external = externalBrowserRegistry.forTask(input.sessionId)
+    if (external) return { kind: 'unsupported', toolName, browserPage: await external.captureMutationPage(
+      toolName === 'browser_navigate' ? 'browser_evaluate' : toolName as 'browser_click' | 'browser_type' | 'browser_evaluate', input.toolInput) }
     const { browserViewManager } = await import('../browser/browser-manager')
     return { kind: 'unsupported', toolName, browserPage: await browserViewManager.captureMutationPage(
-      input.sessionId, toolName as 'browser_click' | 'browser_type' | 'browser_evaluate', input.toolInput) }
+      input.sessionId, toolName === 'browser_navigate' ? 'browser_evaluate' : toolName as 'browser_click' | 'browser_type' | 'browser_evaluate', input.toolInput) }
   }
   const guiTarget = await buildGuiPostconditionEffectTarget(toolName, input.toolInput)
   if (guiTarget) return guiTarget
@@ -173,6 +187,8 @@ async function buildRepositoryEffectTarget(
   if (toolName === 'worktree_patch_apply') {
     return buildWorktreePatchApplyTarget(input.cwd, input.toolInput, operationContext)
   }
+  if (toolName === 'workspace_handoff') return buildWorkspaceHandoffTarget(input.toolInput)
+  if (toolName === 'task_handoff') return buildTaskHandoffEffectTarget(input.toolInput)
   if (toolName === 'managed_worktree_create') {
     return buildManagedWorktreeCreateTarget(input.cwd, input.toolInput)
   }

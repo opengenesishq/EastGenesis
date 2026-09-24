@@ -1,0 +1,23 @@
+.inline-viz { margin: 14px 0; padding: 18px; border: 1px solid var(--border, #ddd); border-radius: 14px; background: var(--bg-panel, var(--bg)); color: var(--text); overflow: hidden; }
+.inline-viz header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.inline-viz header strong { font-size: 16px; }
+.inline-viz button, .inline-viz select { color: inherit; font: inherit; border: 1px solid var(--border, #ccc); background: var(--bg-input, var(--bg)); border-radius: 7px; padding: 5px 10px; cursor: pointer; }
+.inline-viz button:disabled { opacity: .5; cursor: default; }
+.inline-viz-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin: 16px 0; }
+.inline-viz-controls label > span { display: flex; justify-content: space-between; gap: 12px; }
+.inline-viz-controls input { width: 100%; accent-color: #4e80e8; }
+.inline-viz-controls small, .inline-viz-note { opacity: .65; font-size: 12px; }
+.inline-viz-metrics { display: flex; gap: 20px; flex-wrap: wrap; margin: 16px 0; }
+.inline-viz-metrics dt { font-size: 12px; opacity: .75; }
+.inline-viz-metrics dd { margin: 4px 0; font-size: 22px; font-variant-numeric: tabular-nums; }
+.inline-viz-plot { width: 100%; max-height: 400px; display: block; margin: 12px 0; }
+.inline-viz-plot text { fill: currentColor; font: 11px sans-serif; }
+.inline-viz-legend { display: flex; flex-wrap: wrap; gap: 6px; }
+.inline-viz-legend [aria-pressed=false] { opacity: .45; text-decoration: line-through; }
+.inline-viz details { margin-top: 12px; }
+.inline-viz summary { cursor: pointer; font-size: 12px; }
+.inline-viz pre, .inline-viz-invalid pre { max-height: 240px; overflow: auto; white-space: pre-wrap; }
+.inline-viz-table { max-height: 220px; overflow: auto; }
+.inline-viz .inline-viz-revise { display: flex; align-items: flex-end; gap: 8px; margin-top: 16px; }
+.inline-viz-revise textarea { flex: 1; min-width: 0; padding: 8px; border: 1px solid var(--border, #ccc); border-radius: 8px; background: var(--bg-input, var(--bg)); color: inherit; font: inherit; resize: vertical; }
+.inline-viz > output { display: block; margin-top: 8px; }

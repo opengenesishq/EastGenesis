@@ -5,5 +5,6 @@ import { stableValueDigest } from './task/tool-idempotency'
 export function messagePayloadDigest(payload: SendMessagePayload): string {
   return stableValueDigest({ text: payload.text.trim(), images: payload.images ?? [],
     documents: payload.documents ?? [], officeRevisionIntent: payload.officeRevisionIntent ?? null,
+    ...(payload.goalRevisionIntent ? { goalRevisionIntent: payload.goalRevisionIntent } : {}),
     ...(payload.requirementRevisionIntent ? { requirementRevisionIntent: payload.requirementRevisionIntent } : {}) })
 }

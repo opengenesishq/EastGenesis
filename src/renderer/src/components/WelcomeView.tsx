@@ -1,23 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUp,
-  FileText,
-  Folder,
-  FolderOpen,
-  FolderPlus,
-  GitPullRequest,
-  ListChecks,
   LoaderCircle,
-  SearchCode,
-  type LucideIcon
+  SlidersHorizontal
 } from 'lucide-react'
 import { modelOptionsForProvider, useStore } from '../store'
 import { useT } from '../i18n'
-import { AUTO_MODEL, caogenDrivePolicyView } from '../../../shared/types'
+import { matchesDesktopShortcut } from '../desktop-keyboard'
+import { AUTO_MODEL } from '../../../shared/types'
 import type {
   LocalComputeActivationResult,
   LocalComputeUnavailableReason,
-  Project,
   TaskStrategy
 } from '../../../shared/types'
 import { useExperienceProjection } from './experience/ExperienceProjection'
@@ -25,29 +18,27 @@ import { startWelcomeTask } from './experience/welcome-personal-task'
 import PersonalTaskRecoveryPanel from './experience/PersonalTaskRecoveryPanel'
 import { PersonalTaskSubmissionError } from '../lib/personal-task-submission'
 import AssistantStartNotice from './experience/AssistantStartNotice'
-import TaskStrategyControl from './experience/TaskStrategyControl'
-import WelcomeRoutingControls, {
-  AssistantComputeIndicator
-} from './experience/WelcomeRoutingControls'
+import FirstLaunchProviderOnboarding from './experience/FirstLaunchProviderOnboarding'
+import RemoteIntakeReceipts from './experience/RemoteIntakeReceipts'
+import { submitWelcomeRemote } from './experience/welcome-remote-task'
+import { handoffWelcomeRemoteDraft } from './experience/welcome-remote-draft-handoff'
+import { taskWindowSessionId } from '../task-window-context'
 import { useAutosizeTextarea } from './useAutosizeTextarea'
+import VoiceDraftInput from './VoiceDraftInput'
 import {
   assistantSafeStartError,
   hasAvailableCompute,
-  NEW_PROJECT_SESSION_CHOICE,
   welcomeSessionOptions,
   welcomeValidationKey,
   welcomeWorkspaceValidationKey,
-  type WelcomeRoutingMode,
   type WelcomeSessionDraft
 } from './experience/welcome-session-projection'
-import {
-  UNASSIGNED,
-  useWelcomeDraftController
-} from './experience/useWelcomeDraft'
+import { useWelcomeDraftController } from './experience/useWelcomeDraft'
 import {
   patchFirstTaskOnboardingRecord,
   runFirstTaskSubmissionExclusive
 } from './experience/first-task-onboarding'
+import './welcome-simple.css'
 
 type WelcomeStoreState = ReturnType<typeof useStore.getState>
 type WelcomeProjection = ReturnType<typeof useExperienceProjection>
@@ -57,10 +48,12 @@ function useLocalComputeActivation(
   providersLoaded: boolean,
   computeAvailable: boolean,
   activateLocalCompute: (options?: { startInstalled?: boolean }) => Promise<LocalComputeActivationResult>,
-  updateWelcomeDraft: WelcomeStoreState['updateWelcomeDraft']
+  updateWelcomeDraft: WelcomeStoreState['updateWelcomeDraft'],
+  enabled = true
 ) {
   const [status, setStatus] = useState<'idle' | 'checking' | 'ready' | 'unavailable'>('idle')
   const ensure = useCallback(async (startInstalled = false): Promise<LocalComputeActivationResult> => {
+    if (!enabled || useStore.getState().welcomeDraft.executionTarget?.kind === 'remote') return { status: 'unavailable', checkedAt: Date.now(), reason: 'runtime-stopped' }
     if (hasAvailableCompute(useStore.getState().providers)) {
       return { status: 'activated', checkedAt: Date.now() }
     }
@@ -71,7 +64,7 @@ function useLocalComputeActivation(
           setStatus('unavailable')
           return result
         }
-        updateWelcomeDraft({
+        if (useStore.getState().welcomeDraft.executionTarget?.kind !== 'remote') updateWelcomeDraft({
           computeSelectionSource: 'default',
           providerId: result.provider.id,
           model: AUTO_MODEL
@@ -83,23 +76,14 @@ function useLocalComputeActivation(
         setStatus('unavailable')
         return { status: 'unavailable', checkedAt: Date.now(), reason: 'runtime-stopped' }
       })
-  }, [activateLocalCompute, updateWelcomeDraft])
+  }, [activateLocalCompute, updateWelcomeDraft, enabled])
 
   useEffect(() => {
-    if (!providersLoaded || projection !== 'assistant' || computeAvailable || status !== 'idle') return
+    if (!enabled || !providersLoaded || projection !== 'assistant' || computeAvailable || status !== 'idle') return
     void ensure(false)
-  }, [computeAvailable, ensure, projection, providersLoaded, status])
+  }, [computeAvailable, ensure, projection, providersLoaded, status, enabled])
 
   return { localComputeStatus: status, ensureLocalCompute: ensure }
-}
-
-interface WelcomeTool {
-  key: string
-  labelKey: string
-  promptKey: string
-  icon: LucideIcon
-  requiresWorkspace?: boolean
-  taskStrategy: TaskStrategy
 }
 
 type WelcomeRecoveryKind = 'compute' | 'provider' | 'workspace'
@@ -109,39 +93,6 @@ function welcomeRecoveryKind(validationKey: string): WelcomeRecoveryKind | null 
   if (validationKey === 'assistantComputeUnavailable') return 'compute'
   return validationKey === 'explicitProviderRequired' ? 'provider' : null
 }
-
-const WELCOME_TOOLS: WelcomeTool[] = [
-  {
-    key: 'understand',
-    labelKey: 'welcomeUnderstandProject',
-    promptKey: 'welcomeUnderstandProjectPrompt',
-    icon: SearchCode,
-    requiresWorkspace: true,
-    taskStrategy: 'view'
-  },
-  {
-    key: 'review',
-    labelKey: 'welcomeReviewChanges',
-    promptKey: 'welcomeReviewChangesPrompt',
-    icon: GitPullRequest,
-    requiresWorkspace: true,
-    taskStrategy: 'view'
-  },
-  {
-    key: 'report',
-    labelKey: 'welcomeOrganizeReport',
-    promptKey: 'welcomeOrganizeReportPrompt',
-    icon: FileText,
-    taskStrategy: 'execute'
-  },
-  {
-    key: 'plan',
-    labelKey: 'welcomePlanTask',
-    promptKey: 'welcomePlanTaskPrompt',
-    icon: ListChecks,
-    taskStrategy: 'plan'
-  }
-]
 
 interface WelcomeStartActionsInput {
   projection: WelcomeProjection
@@ -187,18 +138,28 @@ function useWelcomeSubmitAction(
   const t = useT()
   return async (
     promptInput = input.text,
-    selectedStrategy = input.taskStrategy,
-    title?: string
+    selectedStrategy = input.taskStrategy
   ): Promise<void> => {
     const prompt = promptInput.trim()
     if (!prompt || busy) return
+    const selectedDraft = useStore.getState().welcomeDraft
+    if (selectedDraft.executionTarget?.kind === 'remote') {
+      feedback.setBusy(true); feedback.setError(''); feedback.setRecoveryKind(null); feedback.setComputeReason(null)
+      try {
+        if (taskWindowSessionId()) {
+          await handoffWelcomeRemoteDraft(selectedDraft, prompt)
+          feedback.setError(useStore.getState().settings.language === 'zh' ? '草稿已交给主工作台，请在主窗口确认后发送。' : 'Draft passed to the main workspace. Confirm and send it there.')
+        } else await submitWelcomeRemote(selectedDraft, prompt)
+      } catch (cause) { feedback.setError(cause instanceof Error ? cause.message : 'Remote submission unconfirmed') }
+      finally { feedback.setBusy(false) }
+      return
+    }
     await runFirstTaskSubmissionExclusive(async () => {
       feedback.setBusy(true)
       const draft = { ...input.sessionDraft, taskStrategy: selectedStrategy }
-      // Selecting a project directory from the Assistant entry changes the
-      // execution contract: this is a Project task and must use explicit
-      // Provider routing instead of silently requiring local compute.
-      const effectiveProjection: WelcomeProjection = draft.unassigned ? input.projection : 'studio'
+      // A work folder is optional context; the first screen always stays in
+      // the single assistant conversation path.
+      const effectiveProjection: WelcomeProjection = 'assistant'
       try {
         const workspaceValidationKey = welcomeWorkspaceValidationKey(draft)
         if (workspaceValidationKey) {
@@ -224,16 +185,13 @@ function useWelcomeSubmitAction(
         feedback.setRecoveryKind(null)
         feedback.setComputeReason(null)
         const savedDraft = JSON.stringify(useStore.getState().welcomeDraft)
-        const options = welcomeSessionOptions(input.projection, draft, prompt)
-        const candidateSessionId = await input.startSessionWithPrompt(
-          title ? { ...options, title } : options,
-          prompt
-        )
+        const options = welcomeSessionOptions(effectiveProjection, draft, prompt)
+        const candidateSessionId = await input.startSessionWithPrompt(options, prompt)
         patchFirstTaskOnboardingRecord({
           candidateSessionId,
-          presetKey: title
-            ? WELCOME_TOOLS.find((tool) => t(tool.labelKey) === title)?.key ?? 'custom'
-            : 'custom',
+          // The first screen no longer has preset workflows; every request
+          // follows the same direct task path.
+          presetKey: 'custom',
           startedAt: Date.now()
         })
         if (JSON.stringify(useStore.getState().welcomeDraft) === savedDraft) useStore.getState().clearWelcomeDraft()
@@ -306,84 +264,15 @@ function useWelcomeStartActions(input: WelcomeStartActionsInput) {
     setComputeReason(null)
   }
 
-  const requireWorkspace = (): void => {
-    setError(t('assistantPresetNeedsWorkspace'))
-    setRecoveryKind('workspace')
-    setComputeReason(null)
-  }
-
   return {
     busy,
     clearError,
     computeReason,
     error,
     recoveryKind,
-    requireWorkspace,
     retryCompute,
     submit
   }
-}
-
-interface WelcomeProjectSelectorProps {
-  availableProjects: Project[]
-  cwd: string
-  hidden?: boolean
-  projectChoice: string
-  onBrowse: () => void
-  onCwdChange: (cwd: string) => void
-  onProjectChange: (choice: string) => void
-}
-
-function WelcomeProjectSelector({
-  availableProjects,
-  cwd,
-  hidden = false,
-  projectChoice,
-  onBrowse,
-  onCwdChange,
-  onProjectChange
-}: WelcomeProjectSelectorProps): React.JSX.Element {
-  const t = useT()
-  return (
-    <div className="welcome-project-bar" data-welcome-project-context hidden={hidden}>
-      <Folder size={15} strokeWidth={1.8} aria-hidden="true" />
-      <select
-        className="welcome-project-select"
-        aria-label={t('project')}
-        title={cwd || t('welcomePickProject')}
-        value={projectChoice}
-        onChange={(event) => onProjectChange(event.target.value)}
-      >
-        <option value={UNASSIGNED}>{t('directStartNoProject')}</option>
-        {availableProjects.map((project) => (
-          <option key={project.id} value={project.id}>{project.name}</option>
-        ))}
-        <option value={NEW_PROJECT_SESSION_CHOICE}>{t('newProjectDirectory')}</option>
-      </select>
-      {projectChoice === NEW_PROJECT_SESSION_CHOICE ? (
-        <>
-          <input
-            className="welcome-project-path"
-            value={cwd}
-            placeholder="/path/to/project"
-            aria-label={t('projectDir')}
-            onChange={(event) => onCwdChange(event.target.value)}
-          />
-          <button
-            type="button"
-            className="welcome-project-browse"
-            aria-label={t('browse')}
-            title={t('browse')}
-            onClick={onBrowse}
-          >
-            <FolderOpen size={15} strokeWidth={1.8} aria-hidden="true" />
-          </button>
-        </>
-      ) : projectChoice !== UNASSIGNED ? (
-        <span className="welcome-project-current" title={cwd}>{cwd}</span>
-      ) : null}
-    </div>
-  )
 }
 
 type WelcomeDraftController = ReturnType<typeof useWelcomeDraftController>
@@ -400,12 +289,10 @@ function buildWelcomeSessionDraft(
     driveMode: welcome.driveMode,
     model: welcome.model,
     taskStrategy,
-    projectId: welcome.availableProjects.some((project) => project.id === welcome.projectChoice)
-      ? welcome.projectChoice
-      : undefined,
+    projectId: undefined,
     providerId: welcome.providerId,
     routingMode: welcome.routingMode,
-    unassigned: welcome.projectChoice === UNASSIGNED,
+    unassigned: true,
     forkFromSdkSessionId: welcomeDraft.forkFromSdkSessionId,
     forkCheckpointId: welcomeDraft.forkCheckpointId
   }
@@ -413,63 +300,18 @@ function buildWelcomeSessionDraft(
 
 function useWelcomeModelOptions(
   welcome: WelcomeDraftController,
-  providers: WelcomeStoreState['providers'],
-  schedulerStrategy: WelcomeStoreState['settings']['schedulerStrategy']
-): { fixedModelOptions: WelcomeModelOptions; routingStrategyLabel: string } {
+  providers: WelcomeStoreState['providers']
+): { fixedModelOptions: WelcomeModelOptions } {
   const t = useT()
-  const routingStrategy = welcome.driveMode === 'core'
-    ? schedulerStrategy
-    : caogenDrivePolicyView(welcome.driveMode).schedulerStrategy
-  const routingStrategyLabel = t(
-    routingStrategy === 'quality'
-      ? 'routingStrategyQuality'
-      : routingStrategy === 'cost'
-        ? 'routingStrategyCost'
-        : routingStrategy === 'speed'
-          ? 'routingStrategySpeed'
-          : 'routingStrategyBalanced'
-  )
   const modelOptions = useMemo(() => modelOptionsForProvider(
     providers,
     welcome.providerId,
-    `${t('autoRoute')} · ${routingStrategyLabel}`,
+    t('autoRoute'),
     welcome.model
-  ), [providers, routingStrategyLabel, t, welcome.model, welcome.providerId])
+  ), [providers, t, welcome.model, welcome.providerId])
   return {
-    fixedModelOptions: modelOptions.filter((option) => option.value !== AUTO_MODEL),
-    routingStrategyLabel
+    fixedModelOptions: modelOptions.filter((option) => option.value !== AUTO_MODEL)
   }
-}
-
-function WelcomePresetGrid({
-  busy,
-  onSelect
-}: {
-  busy: boolean
-  onSelect: (tool: WelcomeTool) => void
-}): React.JSX.Element {
-  const t = useT()
-  return (
-    <div className="welcome-suggestion-grid">
-      {WELCOME_TOOLS.map((tool) => {
-        const ToolIcon = tool.icon
-        return (
-          <button
-            key={tool.key}
-            type="button"
-            className="welcome-suggestion"
-            data-welcome-preset={tool.key}
-            data-preset-strategy={tool.taskStrategy}
-            disabled={busy}
-            onClick={() => onSelect(tool)}
-          >
-            <ToolIcon size={17} strokeWidth={1.8} aria-hidden="true" />
-            <span>{t(tool.labelKey)}</span>
-          </button>
-        )
-      })}
-    </div>
-  )
 }
 
 function WelcomeComposerBar({
@@ -477,13 +319,8 @@ function WelcomeComposerBar({
   computeAvailable,
   fixedModelOptions,
   localComputeStatus,
-  onProjectPickerToggle,
-  onRoutingModeChange,
-  projectPickerOpen,
-  projection,
+  onOpenSettings,
   providers,
-  routingStrategyLabel,
-  taskStrategy,
   welcome,
   welcomeDraft
 }: {
@@ -491,69 +328,66 @@ function WelcomeComposerBar({
   computeAvailable: boolean
   fixedModelOptions: WelcomeModelOptions
   localComputeStatus: ReturnType<typeof useLocalComputeActivation>['localComputeStatus']
-  onProjectPickerToggle: () => void
-  onRoutingModeChange: (mode: WelcomeRoutingMode) => void
-  projectPickerOpen: boolean
-  projection: WelcomeProjection
+  onOpenSettings: () => void
   providers: WelcomeStoreState['providers']
-  routingStrategyLabel: string
-  taskStrategy: TaskStrategy
   welcome: WelcomeDraftController
   welcomeDraft: WelcomeStoreState['welcomeDraft']
 }): React.JSX.Element {
-  const t = useT()
-  const hasProjectContext = welcome.projectChoice !== UNASSIGNED
+  const zh = useStore(state => state.settings.language === 'zh')
+  const voiceDraftId = useRef(`draft:${crypto.randomUUID()}`)
+  const remote = welcomeDraft.executionTarget?.kind === 'remote'
+  const awaitingModel = !remote && !computeAvailable && localComputeStatus !== 'ready'
+  const selectedModel = fixedModelOptions.some(option => option.value === welcome.model) ? welcome.model : ''
   return (
     <div className="welcome-composer-bar">
-      <TaskStrategyControl
-        value={taskStrategy}
-        onChange={(nextStrategy) => welcome.update({ taskStrategy: nextStrategy })}
-        compact
-      />
-      {projection === 'assistant' && !welcomeDraft.forkFromSdkSessionId && !hasProjectContext && (
-        <button
-          type="button"
-          className="welcome-project-trigger"
-          aria-label={t('welcomeAttachProject')}
-          aria-pressed={projectPickerOpen}
-          title={t('welcomeAttachProject')}
-          data-welcome-project-trigger
-          onClick={onProjectPickerToggle}
-        >
-          <FolderPlus size={16} strokeWidth={1.8} aria-hidden="true" />
-        </button>
-      )}
-      {projection === 'assistant' && !welcomeDraft.forkFromSdkSessionId && !hasProjectContext ? (
-        <AssistantComputeIndicator
-          available={computeAvailable || localComputeStatus === 'ready'}
-          checking={localComputeStatus === 'checking'}
-        />
-      ) : (
-        <WelcomeRoutingControls
-          driveMode={welcome.driveMode}
-          fixedModelOptions={fixedModelOptions}
-          model={welcome.model}
-          providerId={welcome.providerId}
-          providers={providers}
-          routingMode={welcome.routingMode}
-          routingStrategyLabel={routingStrategyLabel}
-          onDriveChange={welcome.setDriveMode}
-          onModelChange={(model) => welcome.update({ computeSelectionSource: 'user', model })}
-          onProviderChange={welcome.setProvider}
-          onRoutingModeChange={onRoutingModeChange}
-        />
-      )}
+      <div className="welcome-model-picker" data-welcome-model-picker>
+        {remote ? <span className="welcome-remote-note">{zh ? '远端模型' : 'Remote model'}</span> : <>
+          {providers.length > 1 && <select
+            className="welcome-model-select welcome-provider-select"
+            data-welcome-routing-control="provider"
+            aria-label={zh ? '选择模型厂商' : 'Choose provider'}
+            value={welcome.providerId}
+            onChange={(event) => welcome.setProvider(event.target.value)}
+          >
+            <option value="" disabled>{zh ? '选择厂商' : 'Choose provider'}</option>
+            {providers.map(provider => <option key={provider.id} value={provider.id} disabled={!provider.ready}>{provider.name}{provider.ready ? '' : ` · ${zh ? '未配置' : 'not configured'}`}</option>)}
+          </select>}
+          <select
+            className="welcome-model-select"
+            data-welcome-routing-control="model"
+            aria-label={zh ? '选择模型' : 'Choose model'}
+            value={selectedModel}
+            disabled={!fixedModelOptions.length}
+            onChange={(event) => welcome.update({ computeSelectionSource: 'user', routingMode: 'fixed', model: event.target.value })}
+          >
+            <option value="" disabled>{fixedModelOptions.length ? (zh ? '选择模型' : 'Choose a model') : (zh ? '先连接模型' : 'Connect a model first')}</option>
+            {fixedModelOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </>}
+      </div>
+      {!remote && <button type="button" className="welcome-advanced-trigger" aria-label={zh ? '打开模型设置' : 'Open model settings'} title={zh ? '模型与连接设置' : 'Model and connection settings'} onClick={onOpenSettings}><SlidersHorizontal size={15} aria-hidden="true" /></button>}
+      {!remote && <VoiceDraftInput contextId={voiceDraftId.current} disabled={actions.busy}
+        onOpenSettings={() => useStore.getState().setShowSettings(true, 'voice')}
+        onInsert={transcript => {
+          const current = useStore.getState().welcomeDraft.text
+          welcome.update({ text: current ? `${current}\n${transcript}` : transcript })
+        }} />}
       <button
         type="button"
-        className="welcome-send"
-        aria-label={t('send')}
-        title={t('send')}
-        disabled={actions.busy || !welcome.text.trim()}
-        onClick={() => void actions.submit()}
+        className={`welcome-send${awaitingModel ? ' welcome-send-connect' : ''}`}
+        aria-label={awaitingModel ? (zh ? '连接模型' : 'Connect a model') : remote && taskWindowSessionId() ? (zh ? '交给主工作台' : 'Pass to main workspace') : (zh ? '发送并执行' : 'Send and run')}
+        title={awaitingModel ? (zh ? '连接模型后继续当前任务' : 'Connect a model to continue') : (zh ? '发送并执行' : 'Send and run')}
+        disabled={actions.busy || (!awaitingModel && !welcome.text.trim()) || (!computeAvailable && localComputeStatus === 'checking')}
+        onClick={() => {
+          if (awaitingModel) onOpenSettings()
+          else void actions.submit(undefined, 'execute')
+        }}
       >
-        {actions.busy
-          ? <LoaderCircle className="welcome-send-spinner" size={17} aria-hidden="true" />
-          : <ArrowUp size={17} strokeWidth={2.2} aria-hidden="true" />}
+        {awaitingModel
+          ? <span>{zh ? '连接模型' : 'Connect model'}</span>
+          : actions.busy
+            ? <LoaderCircle className="welcome-send-spinner" size={17} aria-hidden="true" />
+            : <ArrowUp size={17} strokeWidth={2.2} aria-hidden="true" />}
       </button>
     </div>
   )
@@ -567,12 +401,7 @@ function WelcomeComposer({
   onBrowse,
   onKeyDown,
   onOpenSettings,
-  onProjectChange,
-  onRoutingModeChange,
-  projection,
   providers,
-  routingStrategyLabel,
-  taskStrategy,
   textareaRef,
   welcome,
   welcomeDraft
@@ -584,53 +413,31 @@ function WelcomeComposer({
   onBrowse: () => void
   onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void
   onOpenSettings: () => void
-  onProjectChange: (choice: string) => void
-  onRoutingModeChange: (mode: WelcomeRoutingMode) => void
-  projection: WelcomeProjection
   providers: WelcomeStoreState['providers']
-  routingStrategyLabel: string
-  taskStrategy: TaskStrategy
   textareaRef: React.RefObject<HTMLTextAreaElement>
   welcome: WelcomeDraftController
   welcomeDraft: WelcomeStoreState['welcomeDraft']
 }): React.JSX.Element {
   const t = useT()
-  const [projectPickerOpen, setProjectPickerOpen] = useState(false)
-  const hasProjectContext = welcome.projectChoice !== UNASSIGNED
-  const showProjectSelector = projection !== 'assistant' || hasProjectContext || projectPickerOpen
+  const zh = useStore(state => state.settings.language === 'zh')
+  const remote = welcomeDraft.executionTarget?.kind === 'remote'
+  const [attachmentNotice, setAttachmentNotice] = useState('')
   useAutosizeTextarea(textareaRef, welcome.text)
   return (
     <div className="welcome-compose-dock">
       <div className="welcome-composer">
-        {welcomeDraft.forkFromSdkSessionId ? (
-          <div className="welcome-fork-source">
-            {t('conversationForkSource', { title: welcomeDraft.forkSourceTitle ?? t('conversation') })}
-          </div>
-        ) : (
-          <WelcomeProjectSelector
-            availableProjects={welcome.availableProjects}
-            cwd={welcome.cwd}
-            projectChoice={welcome.projectChoice}
-            hidden={!showProjectSelector}
-            onBrowse={onBrowse}
-            onCwdChange={(cwd) => {
-              welcome.update({ cwd })
-              actions.clearError()
-            }}
-            onProjectChange={(choice) => {
-              onProjectChange(choice)
-              if (projection === 'assistant' && choice === UNASSIGNED) setProjectPickerOpen(false)
-            }}
-          />
-        )}
+        {welcomeDraft.forkFromSdkSessionId ? <div className="welcome-fork-source">{t('conversationForkSource', { title: welcomeDraft.forkSourceTitle ?? t('conversation') })}</div> : null}
         <textarea
           ref={textareaRef}
           className="welcome-composer-input"
-          placeholder={t('welcomeInputPlaceholder')}
+          placeholder={zh ? '告诉 EastGenesis 你要完成什么，按 Enter 直接开始…' : 'Tell EastGenesis what to do, then press Enter to start…'}
           value={welcome.text}
           rows={1}
           onChange={(event) => welcome.update({ text: event.target.value })}
           onKeyDown={onKeyDown}
+          onPaste={event => { if (remote && event.clipboardData.files.length) { event.preventDefault(); setAttachmentNotice(zh ? '远端任务暂不支持粘贴文件，正文已保留。' : 'Remote tasks do not accept pasted files; your text is preserved.') } }}
+          onDragOver={event => { if (remote && event.dataTransfer.types.includes('Files')) event.preventDefault() }}
+          onDrop={event => { if (remote && event.dataTransfer.files.length) { event.preventDefault(); setAttachmentNotice(zh ? '远端任务暂不支持本机文件，正文已保留。' : 'Remote tasks do not accept local files; your text is preserved.') } }}
           data-composer-autosize="true"
           autoFocus
         />
@@ -639,18 +446,15 @@ function WelcomeComposer({
           computeAvailable={computeAvailable}
           fixedModelOptions={fixedModelOptions}
           localComputeStatus={localComputeStatus}
-          onProjectPickerToggle={() => setProjectPickerOpen((open) => !open)}
-          onRoutingModeChange={onRoutingModeChange}
-          projectPickerOpen={projectPickerOpen}
-          projection={projection}
+          onOpenSettings={onOpenSettings}
           providers={providers}
-          routingStrategyLabel={routingStrategyLabel}
-          taskStrategy={taskStrategy}
           welcome={welcome}
           welcomeDraft={welcomeDraft}
         />
       </div>
-      <PersonalTaskRecoveryPanel refreshKey={actions.busy} />
+      {attachmentNotice && <p role="alert" className="welcome-remote-note">{attachmentNotice}<button type="button" onClick={() => setAttachmentNotice('')}>{zh ? '知道了' : 'Dismiss'}</button></p>}
+      <RemoteIntakeReceipts refreshKey={actions.busy} />
+      {!remote && <PersonalTaskRecoveryPanel refreshKey={actions.busy} />}
       <AssistantStartNotice
         busy={actions.busy}
         computeReason={actions.computeReason}
@@ -686,7 +490,10 @@ export default function WelcomeView(): React.JSX.Element {
     preferInitialProject: projection !== 'assistant'
   })
   const { text } = welcome
-  const taskStrategy = welcomeDraft.taskStrategy ?? settings.defaultTaskStrategy
+  // The first screen is intentionally a direct-execution surface. Advanced
+  // planning remains available inside an active task, but never blocks the
+  // first sentence a user sends from here.
+  const taskStrategy: TaskStrategy = 'execute'
   const taRef = useRef<HTMLTextAreaElement>(null)
   const computeAvailable = hasAvailableCompute(providers)
   const { localComputeStatus, ensureLocalCompute } = useLocalComputeActivation(
@@ -694,7 +501,8 @@ export default function WelcomeView(): React.JSX.Element {
     providersLoaded,
     computeAvailable,
     activateLocalCompute,
-    welcome.update
+    welcome.update,
+    welcomeDraft.executionTarget?.kind !== 'remote'
   )
   const sessionDraft = buildWelcomeSessionDraft(
     welcome,
@@ -711,20 +519,7 @@ export default function WelcomeView(): React.JSX.Element {
     startSessionWithPrompt,
     refreshProviders
   })
-  const { fixedModelOptions, routingStrategyLabel } = useWelcomeModelOptions(
-    welcome,
-    providers,
-    settings.schedulerStrategy
-  )
-
-  const onRoutingModeChange = (mode: WelcomeRoutingMode): void => {
-    welcome.setRoutingMode(mode, fixedModelOptions[0]?.value ?? '')
-  }
-
-  const onProjectChange = (choice: string): void => {
-    welcome.setProject(choice)
-    actions.clearError()
-  }
+  const { fixedModelOptions } = useWelcomeModelOptions(welcome, providers)
 
   const browse = async (): Promise<void> => {
     const dir = await window.agentDesk.pickDirectory()
@@ -733,31 +528,18 @@ export default function WelcomeView(): React.JSX.Element {
     actions.clearError()
   }
 
-  const startPreset = (tool: WelcomeTool): void => {
-    const prompt = t(tool.promptKey)
-    welcome.update({ text: prompt, taskStrategy: tool.taskStrategy })
-    if (tool.requiresWorkspace && (welcome.projectChoice === UNASSIGNED || !welcome.cwd.trim())) {
-      welcome.setProject(NEW_PROJECT_SESSION_CHOICE)
-      actions.requireWorkspace()
-      return
-    }
-    if (tool.key !== 'understand') void actions.submit(prompt, tool.taskStrategy, t(tool.labelKey))
-    else taRef.current?.focus()
-  }
-
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+    if (!matchesDesktopShortcut(event.nativeEvent, 'sendMessage', settings.desktopShortcuts)) return
     event.preventDefault()
     void actions.submit()
   }
 
   return (
-    <div className="welcome welcome-hero">
+    <div className="welcome welcome-hero welcome-simple-shell">
+      <FirstLaunchProviderOnboarding />
       <div className="welcome-stage">
         <div className="welcome-hero-inner">
           <h1 className="welcome-ask" data-welcome-heading="true">{t('welcomeAsk')}</h1>
-          <WelcomePresetGrid busy={actions.busy} onSelect={startPreset} />
-        </div>
         <WelcomeComposer
           actions={actions}
           computeAvailable={computeAvailable}
@@ -766,16 +548,12 @@ export default function WelcomeView(): React.JSX.Element {
           onBrowse={() => void browse()}
           onKeyDown={onKeyDown}
           onOpenSettings={() => setShowSettings(true, 'providers', 'welcome-provider-recovery')}
-          onProjectChange={onProjectChange}
-          onRoutingModeChange={onRoutingModeChange}
-          projection={projection}
           providers={providers}
-          routingStrategyLabel={routingStrategyLabel}
-          taskStrategy={taskStrategy}
           textareaRef={taRef}
           welcome={welcome}
           welcomeDraft={welcomeDraft}
         />
+        </div>
       </div>
     </div>
   )

@@ -57,6 +57,7 @@ function queryableEffectTargetDescription(effect: EffectRecord): string | undefi
   if (effect.target.kind === 'office_artifact') {
     return `${effect.target.artifactKind} · ${effect.target.relativePath}`
   }
+  if (effect.target.kind === 'workspace_handoff') return `${effect.target.direction === 'local' ? '交接到本地目录' : '交接到 Worktree'} · ${effect.target.journalId}`
   if (effect.target.kind === 'git_worktree_create') {
     return `${effect.target.repoRoot} · create worktree ${effect.target.worktreePath}`
   }
@@ -91,6 +92,7 @@ function queryableEffectIntentDescription(effect: EffectRecord): string | undefi
   if (effect.target.kind === 'office_artifact') {
     return `generate ${effect.target.mediaType} · spec sha256 ${effect.target.specDigest.slice(0, 16)}`
   }
+  if (effect.target.kind === 'workspace_handoff') return `${effect.target.direction === 'local' ? '交接到本地目录' : '交接到 Worktree'} · ${effect.target.journalId}`
   if (effect.target.kind === 'git_worktree_create') {
     return `create ${effect.target.branchRef} at ${effect.target.baseSha.slice(0, 16)}`
   }

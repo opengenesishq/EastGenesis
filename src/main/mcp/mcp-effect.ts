@@ -2,6 +2,7 @@ import type { EffectTarget } from '../../shared/types'
 import { looksLikeProviderCredentialValue } from '../providerCredentialBroker'
 import { confirmed, unresolved, type EffectReconciliationResult } from '../task/effect-reconciliation-result'
 import { stableValueDigest } from '../task/tool-idempotency'
+import { mcpAuthorizationContext } from './mcp-oauth-runtime'
 import {
   callMcpTool,
   discoverMcpServer,
@@ -101,7 +102,8 @@ export function buildMcpEffectTarget(
   if (
     approved.binding.registryItemKey !== authorized.binding.registryItemKey ||
     approved.binding.contentDigest !== authorized.binding.contentDigest ||
-    approved.binding.capabilityDigest !== authorized.binding.capabilityDigest
+    approved.binding.capabilityDigest !== authorized.binding.capabilityDigest ||
+    approved.discovery.authorizationContext !== mcpAuthorizationContext(authorized.config)
   ) {
     throw new Error('MCP Plugin Registry approval changed after discovery')
   }
@@ -140,11 +142,12 @@ export async function executeMcpEffectTarget(
 ): Promise<McpEffectExecutionResult> {
   try {
     assertMcpExecutionMatchesTarget(target, input)
+    const config = authorizedConfigFromTarget(target)
     const before = await observeMcpEffectTarget(target, timeoutMs)
     if (!before.complete) return { ok: false, error: before.error ?? 'MCP 前置对账失败' }
     if (before.matches) return { ok: true, existing: true, result: before.result }
     const result = await callMcpTool(
-      authorizedConfigFromTarget(target),
+      config,
       target.toolName,
       record(input.arguments),
       timeoutMs
@@ -357,6 +360,7 @@ function mcpServerIdentityDigest(config: McpServerConfig): string {
 
 function mcpDiscoveryDigest(discovery: McpDiscoveryResult): string {
   return stableValueDigest({
+    ...(discovery.authorizationContext ? { authorizationContext: discovery.authorizationContext } : {}),
     serverInfo: discovery.serverInfo,
     tools: [...discovery.tools]
       .sort((left, right) => left.name.localeCompare(right.name))

@@ -1,6 +1,6 @@
 {
   "name": "caogen",
-  "productName": "CaoGen",
+  "productName": "EastGenesis",
   "version": "0.1.9",
   "license": "AGPL-3.0-only",
   "author": {
@@ -8,14 +8,14 @@
     "email": "2900814034@qq.com",
     "url": "https://www.caogen.dev"
   },
-  "description": "CaoGen — 多会话并行、多厂商可调度、3D 办公区的桌面 AI 工作台",
+  "description": "EastGenesis — 多会话并行、多厂商可调度的桌面 AI 工作台",
   "main": "./out/main/index.js",
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
-    "test": "npm run test:baseline && npm run test:fixture && npm run test:fixture:runtime && npm run test:remote-policy-plane:required && npm run test:context-pack:required && npm run test:memory-management:required && npm run test:legacy-memory-import:required && npm run test:executor-compatibility:required && npm run test:native-executor-receipt:required && npm run test:provider-identity:required && npm run test:provider-onboarding:required && npm run test:provider-capability-health:required && npm run test:provider-integration:required && npm run test:provider-runtime:required && npm run test:native-recovery-route:required && npm run test:recovery-runtime:required && npm run test:task-effect-recovery:required && npm run test:recovery-error-propagation:required && npm run test:recovery-ui-state:required && npm run test:workflow-audit-identity:required && npm run test:ui-evidence-report:required && npm run test:plan-confirmation:required && npm run test:mission-compiler:required && npm run test:mission-task-plan-adapter:required && npm run test:mission-role:required && npm run test:task-plan-form-roundtrip:required && npm run test:mission-task-plan-production:required && npm run test:mission-execution-source:required && npm run test:local-plan-session:required && npm run test:mission-compile:ui:required && npm run test:work-inbox:required && npm run test:cross-project-work-inbox:required && npm run test:run-detail:required && npm run test:task-plan-inbox-entry:required && npm run test:delivery-acceptance-inbox-entry:required && npm run test:work-inbox:first-screen:required && npm run test:goal-intake:required && npm run test:preparation-permission:required && npm run test:limited-file-execution:required && npm run test:task-execution-authority:required && npm run test:browser-research-source:required && npm run test:preparation-office:required && npm run test:office-local-revision:required && npm run test:preparation-portability:required && npm run test:submission-receipt-portability:required && npm run test:task-local-data-cleanup:required && npm run test:session-input:required && npm run test:project-institutions:required && npm run test:council-runtime:required && npm run test:route-observation:required && npm run test:goal-contract:required && npm run test:golden-task-entry:required && npm run test:golden-task-evidence-bridge:required && npm run test:work-os-navigation:required && npm run test:work-os-runs-review:required && npm run test:work-os-runs-review:ui:required && npm run test:palace-projection:required && npm run test:office-role-work-items:required && npm run test:palace-scene-manifest:required && npm run test:palace-scene-builder:required && npm run test:palace-scene-builder-ui:required && npm run test:palace-scene-builder:ipc:required && npm run test:palace-scene-builder-persistence:required && npm run test:palace-scene-runtime:required && npm run test:palace-scene-runtime-entry:required && npm run test:palace-scene-packaged-runtime:required && npm run test:change-impact:required && npm run test:change-impact:transaction:required && npm run test:change-impact:report:required && npm run test:source-change-impact:required && npm run test:studio-result-file-changes:required && npm run test:studio-delivery-audit:required && npm run test:studio-result-rerun:required && npm run test:golden-tasks:evidence-harness && npm run test:golden-tasks:session && npm run test:golden-tasks:operational-report && npm run test:packaged-ui-click:required && npm run test:packaged-preview:required && npm run test:automatic-task-plan:required && npm run test:palace-task-navigation:required && npm run test:layered-memory-portability:required && npm run test:canonical-request-budget:required && npm run test:council-opinion-records:required",
+    "test": "npm run test:baseline && npm run test:fixture && npm run test:fixture:runtime && npm run test:remote-policy-plane:required && npm run test:context-pack:required && npm run test:memory-management:required && npm run test:legacy-memory-import:required && npm run test:executor-compatibility:required && npm run test:native-executor-receipt:required && npm run test:provider-identity:required && npm run test:provider-onboarding:required && npm run test:provider-capability-health:required && npm run test:provider-integration:required && npm run test:provider-runtime:required && npm run test:native-recovery-route:required && npm run test:recovery-runtime:required && npm run test:task-effect-recovery:required && npm run test:recovery-error-propagation:required && npm run test:recovery-ui-state:required && npm run test:workflow-audit-identity:required && npm run test:ui-evidence-report:required && npm run test:simple-workspace-ui:required && npm run test:plan-confirmation:required && npm run test:mission-compiler:required && npm run test:mission-task-plan-adapter:required && npm run test:mission-role:required && npm run test:task-plan-form-roundtrip:required && npm run test:mission-task-plan-production:required && npm run test:mission-execution-source:required && npm run test:local-plan-session:required && npm run test:work-inbox:required && npm run test:cross-project-work-inbox:required && npm run test:run-detail:required && npm run test:task-plan-inbox-entry:required && npm run test:delivery-acceptance-inbox-entry:required && npm run test:work-inbox:first-screen:required && npm run test:goal-intake:required && npm run test:preparation-permission:required && npm run test:limited-file-execution:required && npm run test:task-execution-authority:required && npm run test:browser-research-source:required && npm run test:preparation-office:required && npm run test:office-local-revision:required && npm run test:preparation-portability:required && npm run test:submission-receipt-portability:required && npm run test:task-local-data-cleanup:required && npm run test:session-input:required && npm run test:project-institutions:required && npm run test:council-runtime:required && npm run test:route-observation:required && npm run test:goal-request-requirements:required && npm run test:golden-task-entry:required && npm run test:golden-task-evidence-bridge:required && npm run test:work-os-navigation:required && npm run test:work-os-runs-review:required && npm run test:palace-projection:required && npm run test:palace-scene-manifest:required && npm run test:palace-scene-builder:required && npm run test:palace-scene-builder-ui:required && npm run test:palace-scene-builder:ipc:required && npm run test:palace-scene-builder-persistence:required && npm run test:palace-scene-runtime:required && npm run test:palace-scene-runtime-entry:required && npm run test:change-impact:required && npm run test:change-impact:transaction:required && npm run test:change-impact:report:required && npm run test:source-change-impact:required && npm run test:studio-result-file-changes:required && npm run test:studio-delivery-audit:required && npm run test:studio-result-rerun:required && npm run test:golden-tasks:evidence-harness && npm run test:golden-tasks:session && npm run test:golden-tasks:operational-report && npm run test:packaged-preview:required && npm run test:automatic-task-plan:required && npm run test:palace-task-navigation:required && npm run test:layered-memory-portability:required && npm run test:canonical-request-budget:required && npm run test:council-opinion-records:required",
     "test:baseline": "node scripts/baseline-report.mjs",
     "test:fixture": "node scripts/product-launch-fixture-required.mjs",
     "test:fixture:runtime": "tsx scripts/product-launch-fixture-runtime.ts",
@@ -44,9 +44,10 @@
     "test:packaged-preview:policy": "node scripts/packaged-preview-policy-required.mjs",
     "test:packaged-preview:required": "npm run test:packaged-preview:policy && node scripts/packaged-preview-smoke-required.mjs --source-only",
     "test:packaged-ui-click:required": "node scripts/packaged-ui-click-required.mjs --source",
+    "test:simple-workspace-ui:required": "node scripts/simple-workspace-ui-required.mjs",
     "test:plan-confirmation:ui:required": "node scripts/plan-confirmation-ui-required.mjs",
     "test:goal-contract:required": "node scripts/goal-contract-required.mjs",
-    "test:plan-confirmation:required": "tsx scripts/plan-confirmation-contract-required.mjs && npm run test:plan-confirmation:ui:required",
+    "test:plan-confirmation:required": "tsx scripts/plan-confirmation-contract-required.mjs",
     "test:palace-projection:required": "tsx scripts/palace-projection-contract-required.ts",
     "test:palace-scene-manifest:required": "tsx scripts/palace-scene-manifest-contract-required.ts",
     "test:palace-scene-builder:required": "tsx scripts/palace-scene-builder-required.ts",
@@ -82,7 +83,7 @@
     "test:mission-role:required": "tsx scripts/mission-role-contract-required.ts",
     "test:work-inbox:required": "tsx scripts/work-inbox-projection-required.ts",
     "test:cross-project-work-inbox:required": "tsx scripts/cross-project-work-inbox-required.ts",
-    "test:run-detail:required": "tsx scripts/run-detail-acceptance-recovery-required.ts && node scripts/run-detail-delivery-recovery-electron-required.mjs",
+    "test:run-detail:required": "tsx scripts/run-detail-acceptance-recovery-required.ts",
     "test:run-detail-delivery-recovery:required": "node scripts/run-detail-delivery-recovery-electron-required.mjs",
     "test:task-plan-inbox-entry:required": "tsx scripts/task-plan-inbox-entry-required.ts",
     "test:delivery-acceptance-inbox-entry:required": "tsx scripts/delivery-acceptance-inbox-entry-required.ts",
@@ -142,11 +143,12 @@
     "test:office-delivery-requirements:required": "tsx scripts/office-delivery-requirements-required.ts",
     "test:office-requirements-audit:required": "tsx scripts/office-requirements-audit-required.ts",
     "test:session-requirement-revision:required": "tsx scripts/session-requirement-revision-required.ts",
-    "test:presentation-sequence:required": "tsx scripts/presentation-sequence-required.ts"
+    "test:presentation-sequence:required": "tsx scripts/presentation-sequence-required.ts",
+    "prebuild": "node scripts/build-browser-extension.mjs"
   },
   "build": {
     "appId": "com.caogen.app",
-    "productName": "CaoGen",
+    "productName": "EastGenesis",
     "electronLanguages": [
       "en",
       "zh_CN",
@@ -267,6 +269,10 @@
       {
         "from": "node_modules/@fontsource/noto-sans-sc/LICENSE",
         "to": "office-font/LICENSE"
+      },
+      {
+        "from": "resources/browser-extension",
+        "to": "browser-extension"
       }
     ],
     "asarUnpack": [
@@ -350,7 +356,8 @@
         "!node_modules/@nut-tree-fork/libnut-win32/**"
       ],
       "extendInfo": {
-        "NSAppleEventsUsageDescription": "CaoGen uses automation only for user-approved desktop actions."
+        "NSAppleEventsUsageDescription": "EastGenesis uses automation only for user-approved desktop actions.",
+        "NSMicrophoneUsageDescription": "EastGenesis records your voice only when you start voice input, so you can preview and insert a transcription into your task draft."
       },
       "target": [
         {
@@ -368,7 +375,7 @@
       ]
     },
     "dmg": {
-      "title": "CaoGen ${version}"
+      "title": "EastGenesis ${version}"
     },
     "publish": [
       {
@@ -389,7 +396,7 @@
       "deleteAppDataOnUninstall": false,
       "include": "resources/installer.nsh",
       "removeDefaultUninstallWelcomePage": true,
-      "uninstallDisplayName": "CaoGen ${version}"
+      "uninstallDisplayName": "EastGenesis ${version}"
     },
     "linux": {
       "icon": "resources/icon.png",
@@ -402,7 +409,10 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1106.0",
     "@iarna/toml": "^2.2.5",
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/xterm": "5.5.0",
     "chokidar": "^5.0.0",
+    "cron-parser": "5.10.1",
     "docx": "^9.7.1",
     "electron-updater": "^6.8.9",
     "exceljs": "^4.4.0",
@@ -410,6 +420,7 @@
     "js-yaml": "^4.3.1",
     "json5": "^2.2.3",
     "jszip": "^3.10.1",
+    "luxon": "3.7.2",
     "monaco-editor": "0.56.0",
     "node-cron": "^4.6.0",
     "node-gyp-build": "^4.8.4",
@@ -417,6 +428,7 @@
     "pdfkit": "^0.19.1",
     "pptxgenjs": "https://codeload.github.com/otcaveuni-dev/PptxGenJS/tar.gz/2ea5bafc5a1260c108c7200f6a36519bb6d35bd7",
     "puppeteer-core": "^25.3.0",
+    "rrule": "2.8.1",
     "sql.js": "^1.14.1",
     "tree-sitter": "^0.21.1",
     "tree-sitter-go": "^0.21.2",
@@ -450,6 +462,7 @@
     "@react-three/fiber": "^8.18.0",
     "@react-three/postprocessing": "^2.19.1",
     "@types/js-yaml": "^4.0.9",
+    "@types/luxon": "3.7.5",
     "@types/node": "^22.10.0",
     "@types/pdfkit": "^0.17.6",
     "@types/react": "^18.3.12",

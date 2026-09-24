@@ -29,6 +29,8 @@ export type InteractiveOperationKind =
   | 'workspace_hunk_discard'
   | 'git_commit'
   | 'git_index_update'
+  | 'workspace_handoff'
+  | 'task_handoff'
   | 'managed_worktree_create'
   | 'managed_worktree_remove'
   | 'worktree_patch_apply'
@@ -111,7 +113,9 @@ export interface ManagedWorktreeProjectionRecord {
   updatedAt: number
 }
 
-export type EffectTarget =
+export type EffectTarget = { executionEnvironment?: import('./wsl-types').WslExecutionBinding } & (
+  | { kind: 'workspace_handoff'; sessionId: string; journalId: string; journalDigest: string; userDataRoot: string; repoRoot: string; worktreePath: string; direction: 'worktree' | 'local' }
+  | { kind: 'task_handoff'; sessionId: string; handoffId: string; bundleDigest: string; previewDigest: string; sourceHostId: string; targetHostId: string; rootDir: string }
   | {
       kind: 'gui_postcondition'
       platform: 'win32' | 'darwin'
@@ -543,8 +547,10 @@ export type EffectTarget =
   | {
       kind: 'unsupported'
       toolName: string
+      browserDebug?: import('./browser-debug-types').BrowserDebugEvaluationBinding
       /** Opaque browser mutations still bind approval to one live document. */
       browserPage?: {
+        embedded?: import('./browser-tab-types').BrowserTabTarget
         viewId: string
         navigationRevision: number
         urlDigest: string
@@ -557,8 +563,18 @@ export type EffectTarget =
           version: number
           stateDigest: string
         }
+        /** External Chrome/Edge binding. Presence means this target is not an
+         * embedded BrowserView and must be executed through its connection. */
+        external?: {
+          connectionId: string
+          tabId: string
+          pageRevision: number
+          selectionRevision?: number
+        }
       }
     }
+
+)
 
 export interface EffectRecord {
   schemaVersion: 1

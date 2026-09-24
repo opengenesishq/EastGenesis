@@ -1,0 +1,165 @@
+.caogen-desktop-shell {
+  --accent: #FFC700;
+  --accent-strong: #D60000;
+  --desktop-main: #181818;
+  --desktop-sidebar: #3c3c3c;
+  --desktop-input: #292929;
+  --bg-input: #292929;
+  --desktop-strip: #222222;
+  --desktop-hover: #ffffff0b;
+  --text-secondary: var(--text-dim);
+  --text-muted: var(--text-faint);
+  display: flex;
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  color: var(--text);
+  background: var(--desktop-main);
+}
+[data-theme='light'] .caogen-desktop-shell {
+  --desktop-main: #fff;
+  --desktop-sidebar: #f0f0f0;
+  --desktop-input: #f5f5f5;
+  --bg-input: #f5f5f5;
+  --desktop-strip: #fafafa;
+  --desktop-hover: #00000006;
+}
+.caogen-desktop-shell > .main { background: var(--desktop-main); }
+.caogen-desktop-shell .sidebar { --text-dim: #c0c0c0; --text-faint: #a0a0a0; background: var(--desktop-sidebar); border-right: 1px solid #ffffff0a; }
+[data-theme='light'] .caogen-desktop-shell .sidebar { --text-dim: #6a6a6a; --text-faint: #929292; }
+.caogen-desktop-shell .sidebar-brand { min-height: 88px; padding: 44px 14px 12px 16px; gap: 8px; }
+.caogen-desktop-shell .brand-name { font-size: 17px; font-weight: 600; letter-spacing: -.3px; }
+.caogen-desktop-shell .brand-mark { width: 21px; height: 21px; }
+.caogen-desktop-shell .sidebar-primary-nav { gap: 1px; padding: 0 10px 16px; }
+.caogen-desktop-shell .sidebar-nav-item { min-height: 34px; padding: 0 8px; gap: 9px; border-radius: 7px; font-size: 13px; font-weight: 400; color: var(--text); }
+.caogen-desktop-shell .sidebar-nav-item > svg { color: var(--text-secondary); }
+.caogen-desktop-shell .sidebar-nav-item.is-active { background: linear-gradient(90deg, #d600001c, transparent); color: #fff; box-shadow: inset 2px 0 0 #D60000; }
+.caogen-desktop-shell .sidebar-nav-item:hover { background: #ffffff0b; }
+.caogen-desktop-shell .sidebar-scroll { padding: 2px 10px 14px; }
+.caogen-desktop-shell .sidebar-section { margin: 8px 0 20px; }
+.caogen-desktop-shell .sidebar-section-title { padding: 7px 8px 10px; font-size: 12px; font-weight: 400; color: var(--text-muted); }
+.caogen-desktop-shell .session-card { min-height: 34px; padding: 7px 8px; border-radius: 7px; }
+.caogen-desktop-shell .session-card-title { font-size: 12px; font-weight: 400; }
+.caogen-desktop-shell .session-card-meta { font-size: 10px; opacity: .72; }
+.caogen-desktop-shell .sidebar-empty { padding: 2px 8px 5px; font-size: 11px; opacity: .58; }
+.caogen-desktop-shell .sidebar-personal-footer { position: relative; padding: 8px 10px; border-top: 1px solid #ffffff08; }
+.sidebar-personal-trigger { display: flex; align-items: center; width: 100%; gap: 9px; min-height: 34px; padding: 3px 5px; border: 0; border-radius: 8px; background: transparent; color: var(--text); text-align: left; cursor: pointer; font-size: 12px; }
+.sidebar-personal-trigger:hover, .sidebar-personal-trigger[aria-expanded='true'] { background: var(--desktop-hover, var(--bg-hover)); }
+.sidebar-personal-trigger > span:nth-child(2) { flex: 1; }
+.sidebar-personal-avatar { display: grid; place-items: center; flex-shrink: 0; width: 23px; height: 23px; border-radius: 50%; background: #a94437; color: #fff4ed; font-size: 10px; }
+.sidebar-personal-menu { position: absolute; z-index: 120; left: 8px; right: 8px; bottom: calc(100% - 2px); padding: 8px 5px; border: 1px solid #ffffff18; border-radius: 16px; background: var(--desktop-input, var(--bg-card)); box-shadow: 0 10px 36px #0004; max-height: calc(100dvh - 105px); overflow-y: auto; }
+.sidebar-personal-identity { display: flex; align-items: center; gap: 9px; margin: 0 8px 7px; padding: 4px 0 12px; border-bottom: 1px solid var(--border); }
+.sidebar-personal-identity strong, .sidebar-personal-identity small { display: block; font-size: 12px; font-weight: 400; }
+.sidebar-personal-identity small { margin-top: 2px; font-size: 11px; color: var(--text-muted); }
+.sidebar-personal-menu .sidebar-nav-item { width: 100%; }
+.sidebar-personal-menu kbd { color: var(--text-muted); font-size: 11px; font-family: inherit; }
+.sidebar-personal-tools { margin-top: 7px; padding-top: 5px; border-top: 1px solid var(--border); }
+.sidebar-personal-tools .app-mode-bar { padding: 0; }
+.caogen-desktop-shell .sidebar-collapsed .sidebar-brand { padding: 39px 8px 10px; }
+.caogen-desktop-shell .sidebar-collapsed .sidebar-personal-trigger { justify-content: center; padding: 4px 0; }
+.caogen-desktop-shell .sidebar-collapsed .sidebar-personal-trigger > span:nth-child(2),
+.caogen-desktop-shell .sidebar-collapsed .sidebar-personal-trigger > svg { display: none; }
+.caogen-desktop-shell .sidebar-collapsed .sidebar-personal-menu { width: 246px; right: auto; }
+.caogen-desktop-shell .sidebar-collapsed .sidebar-personal-menu .sidebar-nav-item { display: grid; grid-template-columns: 18px 1fr auto; justify-content: initial; }
+.caogen-desktop-shell .sidebar-collapsed .sidebar-personal-menu .sidebar-nav-item > span { display: inline; }
+.desktop-view-header { position: relative; display: flex; align-items: center; justify-content: center; flex: 0 0 52px; min-height: 52px; background: var(--desktop-main); }
+.desktop-layout-controls-slot { position: absolute; right: 12px; top: 0; height: 52px; display: flex; align-items: center; justify-content: flex-end; }
+.desktop-layout-controls-slot .workbench-layout-controls { position: static; }
+.desktop-view-switcher { display: flex; padding: 3px; border-radius: 22px; background: #ffffff07; }
+.desktop-view-switcher > button { min-width: 94px; height: 32px; border: 1px solid transparent; border-radius: 18px; background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer; }
+.desktop-view-switcher > button.is-active { border-color: #ffffff0b; background: #ffffff07; color: var(--text); }
+.desktop-view-switcher > button:hover { color: var(--text); background: var(--desktop-hover); }
+.caogen-desktop-shell .welcome { position: relative; overflow: auto; background: radial-gradient(circle at 58% 40%, #d600000d, transparent 38%), var(--desktop-main); }
+.caogen-desktop-shell .first-launch-onboarding { position: absolute; z-index: 30; inset: 0; display: grid; place-items: center; padding: 24px; background: #080808b8; backdrop-filter: blur(7px); }
+.caogen-desktop-shell .first-launch-onboarding-card { width: min(520px, 100%); padding: 25px 27px 21px; border: 1px solid #FFC70066; border-radius: 20px; background: linear-gradient(145deg, #2d2a25, #211f1c); box-shadow: 0 24px 70px #0008, 0 0 0 1px #D6000022; color: #fff; }
+.caogen-desktop-shell .first-launch-onboarding-kicker { display: flex; align-items: center; gap: 7px; color: #FFC700; font-size: 12px; font-weight: 600; letter-spacing: .4px; }
+.caogen-desktop-shell .first-launch-onboarding-card h2 { margin: 13px 0 8px; font-size: clamp(23px, 2.3vw, 29px); line-height: 1.25; letter-spacing: -.5px; }
+.caogen-desktop-shell .first-launch-onboarding-lede { margin: 0; color: #d7d0c8; font-size: 13px; line-height: 1.7; }
+.caogen-desktop-shell .first-launch-onboarding-steps { display: grid; gap: 10px; margin: 20px 0 19px; padding: 0; list-style: none; }
+.caogen-desktop-shell .first-launch-onboarding-steps li { display: flex; align-items: flex-start; gap: 11px; padding: 10px 11px; border: 1px solid #ffffff12; border-radius: 11px; background: #ffffff08; }
+.caogen-desktop-shell .first-launch-onboarding-steps li > span { display: grid; place-items: center; flex: 0 0 26px; width: 26px; height: 26px; border-radius: 8px; background: #FFC7001f; color: #FFC700; }
+.caogen-desktop-shell .first-launch-onboarding-steps strong, .caogen-desktop-shell .first-launch-onboarding-steps small { display: block; }
+.caogen-desktop-shell .first-launch-onboarding-steps strong { font-size: 12px; }
+.caogen-desktop-shell .first-launch-onboarding-steps small { margin-top: 3px; color: #bdb5ae; font-size: 11px; line-height: 1.5; }
+.caogen-desktop-shell .first-launch-onboarding-actions { display: flex; gap: 9px; }
+.caogen-desktop-shell .first-launch-onboarding-actions .btn-primary { flex: 1; background: #FFC700; border-color: #FFC700; color: #1a0d00; }
+.caogen-desktop-shell .first-launch-onboarding-actions .btn-primary:hover { background: #ffd94a; border-color: #ffd94a; }
+.caogen-desktop-shell .first-launch-onboarding-footnote { margin: 13px 0 0; color: #9f9892; font-size: 10px; }
+[data-theme='light'] .caogen-desktop-shell .first-launch-onboarding { background: #ffffffb8; }
+[data-theme='light'] .caogen-desktop-shell .first-launch-onboarding-card { background: linear-gradient(145deg, #fff, #f8f4ec); color: #151515; box-shadow: 0 24px 70px #0003, 0 0 0 1px #D6000022; }
+[data-theme='light'] .caogen-desktop-shell .first-launch-onboarding-lede { color: #5d5a55; }
+[data-theme='light'] .caogen-desktop-shell .first-launch-onboarding-steps li { border-color: #00000010; background: #00000004; }
+[data-theme='light'] .caogen-desktop-shell .first-launch-onboarding-steps small { color: #6a665f; }
+[data-theme='light'] .caogen-desktop-shell .first-launch-onboarding-footnote { color: #7c776f; }
+.caogen-desktop-shell .welcome-stage { display: flex; align-items: center; justify-content: center; padding: 32px 30px 92px; }
+.caogen-desktop-shell .welcome-hero-inner { position: static; display: flex; flex-direction: column; align-items: center; width: min(740px, 100%); gap: 24px; transform: none; }
+.caogen-desktop-shell .welcome-ask { margin: 0; font-size: clamp(26px, 2.5vw, 34px); line-height: 1.35; font-weight: 600; letter-spacing: -.8px; }
+.caogen-desktop-shell .welcome-compose-dock { position: static; width: 100%; margin: 0; }
+.caogen-desktop-shell .welcome-composer { position: relative; border: 1px solid #ffffff12; border-radius: 20px; padding: 13px 13px 9px; background: linear-gradient(135deg, #2b2b2b, #242424); box-shadow: 0 18px 55px #0005; }
+.caogen-desktop-shell .welcome-composer:focus-within { border-color: #FFC70066; box-shadow: 0 18px 55px #0006, 0 0 0 1px #FFC70022; }
+.caogen-desktop-shell .welcome-composer-input { min-height: 46px; max-height: 240px; padding: 2px 0 8px; font-size: 14px; line-height: 1.6; background: transparent; }
+.caogen-desktop-shell .welcome-composer-input::placeholder { color: var(--text-muted); opacity: .72; }
+[data-theme='light'] .caogen-desktop-shell .welcome-composer,
+[data-theme='light'] .caogen-desktop-shell .welcome-composer-input { color: #f4f4f4; }
+[data-theme='light'] .caogen-desktop-shell .welcome-composer-input::placeholder { color: #c4c4c4; }
+[data-theme='light'] .caogen-desktop-shell .welcome-composer .welcome-mini-select,
+[data-theme='light'] .caogen-desktop-shell .welcome-composer .welcome-routing-summary,
+[data-theme='light'] .caogen-desktop-shell .welcome-composer .welcome-routing-modes button { color: #bdbdbd; }
+[data-theme='light'] .caogen-desktop-shell .welcome-composer .welcome-routing-modes button.active { background: #ffffff18; color: #ffffff; }
+[data-theme='light'] .caogen-desktop-shell .welcome-composer .assistant-compute-indicator { color: #d2d2d2; background: #ffffff12; border-color: #ffffff20; }
+.caogen-desktop-shell .welcome-composer-bar { min-height: 31px; gap: 8px; padding: 0; }
+.caogen-desktop-shell .welcome-routing-picker { margin-left: auto; }
+.caogen-desktop-shell .welcome-mini-select { min-height: 29px; border-color: transparent; background: transparent; font-size: 11px; }
+.caogen-desktop-shell .welcome-routing-picker > .welcome-mini-select { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.caogen-desktop-shell .welcome-project-trigger { order: -1; border: 0; background: transparent; color: var(--text-secondary); }
+.caogen-desktop-shell .task-strategy-compact { padding: 0; border: 0; background: transparent; gap: 2px; }
+.caogen-desktop-shell .task-strategy-compact button { padding: 5px 6px; font-size: 11px; border-radius: 6px; }
+.caogen-desktop-shell .task-strategy-compact button.active { color: #d99565; background: #ba783014; }
+.caogen-desktop-shell .welcome-send { margin-left: 0; width: 31px; height: 31px; flex-shrink: 0; border-radius: 50%; background: linear-gradient(135deg, #FFC700, #D60000); color: #1a0d00; box-shadow: 0 4px 14px #d6000040; }
+.caogen-desktop-shell .welcome-send-connect { width: auto; min-width: 92px; padding-inline: 12px; border-radius: 9px; font-size: 11px; font-weight: 600; }
+.caogen-desktop-shell .welcome-send:disabled { opacity: .35; }
+.caogen-desktop-shell .welcome-context-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 12px; margin: 0 12px; padding: 8px 12px; min-height: 39px; border-radius: 0 0 14px 14px; background: var(--desktop-strip); }
+.caogen-desktop-shell .welcome-execution-target { width: auto; flex: 1 1 100%; flex-direction: row; align-items: center; gap: 8px; min-height: 30px; padding: 0 0 6px; border-bottom: 1px solid #ffffff08; }
+.caogen-desktop-shell .welcome-execution-target label { flex: 0 0 auto; white-space: nowrap; }
+.caogen-desktop-shell .welcome-execution-target select { min-width: 120px; padding: 5px 8px; }
+.caogen-desktop-shell .welcome-execution-target button { padding: 4px 8px; font-size: 11px; white-space: nowrap; }
+.caogen-desktop-shell .welcome-remote-settings { border: 1px solid #ffffff12; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.caogen-desktop-shell .welcome-remote-settings:hover { border-color: #FFC70055; color: var(--accent); background: #FFC7000d; }
+.caogen-desktop-shell .welcome-project-bar { flex: 0 1 auto; width: auto; min-width: 0; max-width: 100%; padding: 0; margin: 0; border: 0; background: transparent; gap: 7px; }
+.caogen-desktop-shell .welcome-project-select { max-width: 210px; font-size: 12px; padding: 2px 17px 2px 0; }
+.caogen-desktop-shell .welcome-project-current { display: none; }
+.caogen-desktop-shell .welcome-project-path { min-width: 90px; width: 160px; font-size: 11px; }
+.caogen-desktop-shell .welcome-context-action { display: flex; align-items: center; gap: 6px; border: 0; padding: 2px 4px; border-radius: 5px; background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer; }
+.caogen-desktop-shell .welcome-context-action:hover { background: var(--desktop-hover); color: var(--text); }
+.caogen-desktop-shell .welcome-provider-setup .btn-primary { background: #FFC700; border-color: #FFC700; color: #1a0d00; }
+.caogen-desktop-shell .welcome-provider-setup .btn-primary:hover { background: #ffd94a; border-color: #ffd94a; }
+.caogen-desktop-shell .task-strategy-compact button.active { color: #FFC700; background: #FFC70018; }
+.caogen-desktop-shell .welcome-quick-actions { width: 100%; margin-top: 2px; }
+.caogen-desktop-shell .welcome-quick-actions-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0 2px 9px; color: var(--text-muted); font-size: 11px; }
+.caogen-desktop-shell .welcome-quick-actions-heading strong { color: var(--text-secondary); font-weight: 500; }
+.caogen-desktop-shell .welcome-quick-actions-heading span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.caogen-desktop-shell .welcome-suggestion-grid { display: flex; justify-content: center; flex-wrap: wrap; width: 100%; gap: 6px; margin-top: 12px; }
+.caogen-desktop-shell .welcome-suggestion { display: flex; align-items: center; flex-direction: row; justify-content: flex-start; gap: 7px; min-height: 32px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 9px; background: transparent; font-size: 11px; }
+.caogen-desktop-shell .welcome-suggestion > svg { width: 14px; height: 14px; }
+.caogen-desktop-shell :is(.workbench-split, .workbench-dock-open) .welcome-stage { padding: 28px 28px 16px; }
+.caogen-desktop-shell :is(.workbench-split, .workbench-dock-open) .welcome-hero-inner { flex: 1; align-self: stretch; width: 100%; gap: 0; }
+.caogen-desktop-shell :is(.workbench-split, .workbench-dock-open) .welcome-ask { display: grid; place-items: center; flex: 1; min-height: 90px; padding: 25px 0; }
+.caogen-desktop-shell :is(.workbench-split, .workbench-dock-open) .welcome-compose-dock { width: min(740px, 100%); }
+.caogen-desktop-shell :is(.workbench-split, .workbench-dock-open) .welcome-compose-dock { display: flex; flex-direction: column; }
+.caogen-desktop-shell :is(.workbench-split, .workbench-dock-open) .welcome-context-strip { order: -1; border-radius: 14px 14px 0 0; }
+  .caogen-desktop-shell :is(.workbench-split, .workbench-dock-open) .welcome-quick-actions { display: none; }
+.caogen-desktop-shell button:focus-visible,
+.caogen-desktop-shell summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 1050px) {
+  .caogen-desktop-shell .welcome-stage { padding-left: 22px; padding-right: 22px; }
+  .caogen-desktop-shell .welcome-routing-picker > .welcome-mini-select { max-width: 185px; }
+  .caogen-desktop-shell .welcome-composer-bar { gap: 4px; flex-wrap: wrap; }
+}
+@media (max-height: 650px) {
+  .caogen-desktop-shell .welcome-stage { padding-top: 20px; padding-bottom: 30px; }
+  .caogen-desktop-shell .welcome-hero-inner { gap: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .caogen-desktop-shell .sidebar-projects-actions { transition: none; }
+}

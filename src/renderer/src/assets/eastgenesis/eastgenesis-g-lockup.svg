@@ -1,0 +1,20 @@
+<svg width="1600" height="520" viewBox="0 0 1600 520" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>EastGenesis Desktop</title>
+  <desc>EastGenesis Desktop 红金 G 标志与文字标识。</desc>
+  <defs>
+    <linearGradient id="eg-lock-gold" x1="120" y1="68" x2="450" y2="390" gradientUnits="userSpaceOnUse"><stop stop-color="#FFE178"/><stop offset=".45" stop-color="#FFC700"/><stop offset="1" stop-color="#EE9700"/></linearGradient>
+    <linearGradient id="eg-lock-red" x1="120" y1="430" x2="460" y2="220" gradientUnits="userSpaceOnUse"><stop stop-color="#A90000"/><stop offset=".48" stop-color="#E40000"/><stop offset="1" stop-color="#FF4B32"/></linearGradient>
+  </defs>
+  <rect width="1600" height="520" rx="28" fill="#FFFDF8"/>
+  <g transform="translate(34 34) scale(.44296875)">
+    <rect x="32" y="32" width="960" height="960" rx="236" fill="#FFFDF8"/>
+    <path d="M760 268A344 344 0 0 0 232 708" fill="none" stroke="url(#eg-lock-gold)" stroke-width="112" stroke-linecap="round"/>
+    <path d="M232 708A344 344 0 0 0 816 468H610" fill="none" stroke="url(#eg-lock-red)" stroke-width="112" stroke-linecap="butt"/>
+    <path d="M812 412L884 466L812 520L766 474L812 428L812 412Z" fill="url(#eg-lock-red)"/>
+    <path d="M424 404L454 458L512 484L454 510L424 566L394 510L336 484L394 458L424 404Z" fill="url(#eg-lock-gold)"/>
+    <path d="M424 443L438 470L466 484L438 498L424 525L410 498L382 484L410 470L424 443Z" fill="#FFF4B0" opacity=".9"/>
+  </g>
+  <text x="500" y="249" fill="#13151A" font-family="Inter, SF Pro Display, Arial, sans-serif" font-size="116" font-weight="750" letter-spacing="-4">EastGenesis</text>
+  <text x="507" y="332" fill="#13151A" font-family="Inter, SF Pro Display, Arial, sans-serif" font-size="43" font-weight="520" letter-spacing="19">DESKTOP</text>
+  <text x="505" y="408" fill="#7E828C" font-family="Inter, SF Pro Display, Arial, sans-serif" font-size="25" font-weight="450" letter-spacing="7">CREATE · ORCHESTRATE · EMPOWER</text>
+</svg>

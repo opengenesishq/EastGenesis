@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawnSyncInExecutionEnvironment as spawnSync } from '../wsl/process'
 import { createHash } from 'node:crypto'
 import { existsSync, realpathSync, statSync } from 'node:fs'
 import path from 'node:path'

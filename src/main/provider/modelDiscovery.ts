@@ -202,8 +202,14 @@ function modelEndpointCandidates(base: string, engine?: EngineKind): string[] {
     candidates.push(`${candidateBase}/v1/models`)
     candidates.push(`${candidateBase}/models`)
   }
-  addCandidates(base)
-  const withoutAnthropic = base.replace(/\/anthropic$/i, '')
+  // Presets and imported clients sometimes store the generation endpoint
+  // itself (for example Perplexity's `/chat/completions`) as the base URL.
+  // Model discovery must remove that suffix before appending `/models`; doing
+  // so here keeps runtime generation URLs unchanged while preventing the
+  // invalid `/chat/completions/v1/models` request.
+  const catalogBase = base.replace(/\/v1\/chat\/completions$/i, '/v1').replace(/\/chat\/completions$/i, '')
+  addCandidates(catalogBase)
+  const withoutAnthropic = catalogBase.replace(/\/anthropic$/i, '')
   if (withoutAnthropic !== base) addCandidates(withoutAnthropic)
   return [...new Set(candidates)]
 }

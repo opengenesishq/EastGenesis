@@ -103,11 +103,12 @@ export function readSelection(value: unknown, path: string): RoutingSelection {
     return { kind, targets: targets(row.targets, `${path}.targets`) }
   }
   if (kind === 'preferred') {
-    const row = record(value, path, ['kind', 'primary', 'alternatives'])
+    const row = record(value, path, ['kind', 'primary', 'alternatives'], ['alternativesOrder'])
     const primary = readRoutingTargetRef(row.primary, `${path}.primary`)
     const alternatives = targets(row.alternatives, `${path}.alternatives`, 0, ROUTING_RULE_LIMITS.targets - 1)
     unique([primary, ...alternatives], path, targetKey)
-    return { kind, primary, alternatives }
+    return { kind, primary, alternatives,
+      ...(row.alternativesOrder === undefined ? {} : { alternativesOrder: oneOf(row.alternativesOrder, `${path}.alternativesOrder`, ['configured'] as const) }) }
   }
   if (kind === 'fixed') {
     const row = record(value, path, ['kind', 'target'])

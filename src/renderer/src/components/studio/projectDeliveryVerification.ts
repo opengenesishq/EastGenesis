@@ -49,7 +49,7 @@ export function packageVerificationSignals(report: VerificationReport): PackageV
 }
 
 function deliveryIdentityTrustLabel(report: VerificationReport): string {
-  if (report.identityTrust === 'local_identity') return localized('本机 CaoGen', 'Local CaoGen')
+  if (report.identityTrust === 'local_identity') return localized('本机 EastGenesis', 'Local EastGenesis')
   if (report.identityTrust === 'trusted_identity') return report.signingIdentityLabel || localized('已信任', 'Trusted')
   if (report.identityTrust === 'revoked_identity') return localized(`${report.signingIdentityLabel || '已知身份'}（已撤销）`, `${report.signingIdentityLabel || 'Known identity'} (revoked)`)
   if (report.identityTrust === 'unknown_identity') return localized('未知公钥', 'Unknown public key')

@@ -9,6 +9,19 @@ export async function resolveWorkspaceSessionCwd(workspaceId: string, rootDir: s
   if (!workspace) throw new Error(`canonical Workspace does not exist:${id}`)
   if (workspace.status !== 'active') throw new Error(`canonical Workspace is not active:${id}:${workspace.status}`)
 
+  if (workspace.primaryResourceId !== undefined) {
+    const resource = workspace.resources.find(item => item.id === workspace.primaryResourceId)
+    const path = resource?.path?.trim()
+    if (!resource || !['directory', 'repository'].includes(resource.kind) || !path || !isAbsolute(path)) {
+      throw new Error('项目主文件夹配置不可用，请在编辑项目中重新选择。')
+    }
+    try {
+      const candidate = resolve(path)
+      if (statSync(candidate).isDirectory()) return candidate
+    } catch { /* An explicit directory never silently falls back to a different location. */ }
+    throw new Error('项目主文件夹不存在或无法访问，请在编辑项目中重新选择。')
+  }
+
   for (const resource of workspace.resources) {
     if (resource.kind !== 'directory' && resource.kind !== 'repository') continue
     const path = resource.path?.trim()

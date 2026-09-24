@@ -1,0 +1,33 @@
+.task-companion { position: fixed; right: 20px; bottom: 14px; z-index: 45; font-size: 13px; color: var(--text); }
+.companion-launcher { display: flex; align-items: center; gap: 7px; padding: 9px 13px; border: 1px solid var(--border); border-radius: 20px; background: var(--bg-card); color: var(--text); box-shadow: 0 3px 14px #0001; cursor: pointer; }
+.companion-badge { border-radius: 10px; background: #aa603b; color: #fff; padding: 1px 6px; font-size: 11px; }
+.companion-panel { position: absolute; right: 0; bottom: 48px; width: min(330px, calc(100vw - 32px)); max-height: calc(100dvh - 100px); overflow-y: auto; border: 1px solid var(--border); border-radius: 18px; background: var(--bg-card); box-shadow: 0 12px 44px #0003; padding: 14px; }
+.companion-head { display: flex; gap: 8px; align-items: center; }
+.companion-head > div:nth-child(2) { flex: 1; }
+.companion-head strong { font-size: 16px; }
+.companion-head p, .companion-summary, .companion-empty { color: var(--text-secondary); font-size: 12px; line-height: 1.6; margin: 6px 0; }
+.companion-head > button { align-self: flex-start; background: transparent; border: 0; color: var(--text-secondary); padding: 6px; cursor: pointer; }
+.companion-figure { width: 60px; height: 90px; flex-shrink: 0; }
+.companion-fallback { display: grid; place-items: center; height: 100%; color: #917557; font-size: 28px; }
+.companion-summary { border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+.companion-current { padding: 10px; border-radius: 10px; background: var(--bg-raised); margin: 10px 0; }
+.companion-current > span { display: block; color: var(--text-secondary); font-size: 11px; margin-bottom: 5px; }
+.companion-current > strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.companion-current > p { color: var(--text-secondary); font-size: 12px; margin: 5px 0 10px; }
+.companion-actions { display: flex; gap: 7px; }
+.companion-actions > button { display: flex; align-items: center; justify-content: center; gap: 5px; flex: 1; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--bg-card); padding: 8px; cursor: pointer; }
+.companion-actions > button:disabled { opacity: 0.5; cursor: wait; }
+.companion-tasks > button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 9px 3px; color: var(--text); background: transparent; border: 0; border-bottom: 1px solid var(--border); cursor: pointer; }
+.companion-tasks > button > span:nth-child(2) { flex: 1; min-width: 0; }
+.companion-tasks strong { display: block; font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.companion-tasks small { color: var(--text-secondary); font-size: 11px; }
+.companion-dot { flex-shrink: 0; height: 6px; width: 6px; border-radius: 50%; background: #92928a; }
+.companion-dot.is-running, .companion-dot.is-starting { background: #40847d; }
+.companion-dot.is-approval { background: #b58535; }
+.companion-dot.is-error { background: #be5446; }
+.companion-navigation { margin-top: 12px; flex-wrap: wrap; }
+.companion-navigation > button { flex: 1 1 90px; }
+.companion-hide { display: block; margin: 12px auto 0; color: var(--text-secondary); font-size: 11px; background: transparent; border: 0; cursor: pointer; }
+.companion-error { color: #be5446; overflow-wrap: anywhere; }
+.task-companion button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 700px) { .task-companion { right: 12px; bottom: 8px; } .companion-launcher { padding: 7px 10px; } }

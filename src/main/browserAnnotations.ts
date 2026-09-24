@@ -28,6 +28,9 @@ export interface BrowserAnnotation {
   consoleErrors: string[]
   viewport?: BrowserAnnotationViewport
   createdAt: string
+  tabId?: string
+  contextEpoch?: string
+  navigationRevision?: number
 }
 
 export interface BrowserAnnotationInput {
@@ -42,6 +45,9 @@ export interface BrowserAnnotationInput {
   consoleErrors?: string[] | null
   viewport?: BrowserAnnotationViewport | null
   createdAt?: string
+  tabId?: string
+  contextEpoch?: string
+  navigationRevision?: number
 }
 
 export class BrowserAnnotationValidationError extends Error {
@@ -73,6 +79,12 @@ export function normalizeAnnotation(input: BrowserAnnotationInput): BrowserAnnot
   }
 
   const title = normalizeOptionalText(input.title, 'title')
+  if (input.tabId !== undefined) annotation.tabId = normalizeOptionalId(input.tabId, 'tabId')
+  if (input.contextEpoch !== undefined) annotation.contextEpoch = normalizeOptionalId(input.contextEpoch, 'contextEpoch')
+  if (input.navigationRevision !== undefined) {
+    if (!Number.isSafeInteger(input.navigationRevision) || input.navigationRevision < 0) throw new BrowserAnnotationValidationError('页面版本无效')
+    annotation.navigationRevision = input.navigationRevision
+  }
   if (title !== undefined) annotation.title = title
 
   const selector = normalizeOptionalText(input.selector, 'selector')

@@ -5,7 +5,7 @@ const invoke = (action: string, ...args: unknown[]) => ipcRenderer.invoke('appFe
 
 export const remoteContinuationApi: Pick<AgentDeskApi, keyof RemoteApi> = {
   getRemoteContinuation: () => invoke('get'),
-  createRemotePairingSession: (input?: { ttlMs?: number; projectId?: string }) => invoke('create-pairing', input),
+  createRemotePairingSession: (input?: { ttlMs?: number; projectId?: string; workspaceRead?: boolean; taskHandoff?: boolean }) => invoke('create-pairing', input),
   registerRemoteDevice: (input: { label: string; userId: string; publicKey: string; capabilities?: RemoteDeviceCapability[] }) => invoke('register-device', input),
   updateRemoteDeviceCapabilities: (deviceId: string, capabilities: RemoteDeviceCapability[]) => invoke('update-device-capabilities', deviceId, capabilities),
   unbindRemoteDevice: (deviceId: string) => invoke('unbind-device', deviceId),

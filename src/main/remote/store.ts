@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type {
   RemoteApprovalInput, RemoteApprovalRecord, RemoteCommandEnvelope, RemoteCommandRecord,
   RemoteContinuationSnapshot, RemoteDeviceCapability, RemoteDeviceIdentity,
-  RemoteResultProjection, RemoteRunnerLease, RemoteRunnerKind, RemoteConnectivity,
+  RemoteResultProjection, RemoteRunnerLease, RemoteRunnerKind, RemoteConnectivity, RemoteCommandPayload,
   RemoteCommandExecutionStatus
 } from '../../shared/remote-types'
 import { REMOTE_SCHEMA_VERSION } from '../../shared/remote-types'
@@ -14,7 +14,10 @@ import { canonicalJson, digest, requiredId, requiredText } from '../project-work
 import { createProductionProjectAggregateService } from '../project-aggregate'
 import { listRoutines } from '../routineStore'
 import { getRemoteWebhookStatus } from './webhook-status'
+import { assertActiveBusinessLine } from '../business-line-registry-reader'
+import { isBusinessLineId } from '../../shared/business-line-types'
 import type { RemoteApprovalDecisionEnvelope } from '../../shared/remote-types'
+import type { RemoteCreatedTaskProjection } from '../../shared/remote-created-task-types'
 
 const FILE_NAME = 'remote-continuation.json'
 const MAX_AUDIT = 2000
@@ -73,7 +76,7 @@ function snapshot(document: RemoteDocument): RemoteContinuationSnapshot {
 }
 
 function capabilities(input: readonly RemoteDeviceCapability[] | undefined): RemoteDeviceCapability[] {
-  const allowed: RemoteDeviceCapability[] = ['view_results', 'resume_work_item', 'approve_effect', 'trigger_routine', 'remote_runner']
+  const allowed: RemoteDeviceCapability[] = ['view_results', 'resume_work_item', 'create_task', 'control_work_item', 'approve_effect', 'trigger_routine', 'remote_runner', 'workspace_read', 'task_handoff']
   const values = input ?? ['view_results', 'resume_work_item', 'approve_effect']
   if (!Array.isArray(values) || values.some((value) => !allowed.includes(value))) throw new Error('Remote device capabilities are invalid')
   return [...new Set(values)]
@@ -94,6 +97,8 @@ function unsignedEnvelope(envelope: RemoteCommandEnvelope): Omit<RemoteCommandEn
 function commandCapability(kind: RemoteCommandEnvelope['kind']): RemoteDeviceCapability {
   if (kind === 'approve_effect') return 'approve_effect'
   if (kind === 'resume_work_item') return 'resume_work_item'
+  if (kind === 'create_task') return 'create_task'
+  if (kind === 'append_task' || kind === 'pause_work_item' || kind === 'cancel_work_item') return 'control_work_item'
   if (kind === 'trigger_routine') return 'trigger_routine'
   return 'view_results'
 }
@@ -233,6 +238,9 @@ export class RemoteContinuationStore {
   }
 
   async ingest(envelope: RemoteCommandEnvelope): Promise<RemoteCommandRecord> {
+    if (envelope.schemaVersion !== REMOTE_SCHEMA_VERSION || !['view_result', 'resume_work_item', 'approve_effect', 'trigger_routine', 'create_task', 'append_task', 'pause_work_item', 'cancel_work_item'].includes(envelope.kind)) throw new Error('Remote command kind or schema is invalid')
+    requiredId(envelope.commandId, 'commandId')
+    if (!envelope.scope || !Array.isArray(envelope.scope.artifactIds) || envelope.scope.artifactIds.some(id => typeof id !== 'string') || !['metadata_only', 'artifact_summary'].includes(envelope.scope.dataClass)) throw new Error('Remote command scope is invalid')
     const initialState = await this.read()
     const initialDevice = requireDevice(initialState, envelope.issuerDeviceId, commandCapability(envelope.kind))
     assertValidCommandSignature(initialDevice, envelope)
@@ -244,6 +252,7 @@ export class RemoteContinuationStore {
     const aggregate = await createProductionProjectAggregateService(this.rootDir).verifyLiveProject(envelope.scope.projectId)
     if (envelope.scope.goalId && !aggregate.goals.some((item) => item.id === envelope.scope.goalId)) throw new Error('Remote command Goal is outside Project scope')
     if (envelope.scope.workItemId && !aggregate.workItems.some((item) => item.id === envelope.scope.workItemId)) throw new Error('Remote command WorkItem is outside Project scope')
+    if (envelope.scope.goalId && envelope.scope.workItemId && !aggregate.workItems.some(item => item.id === envelope.scope.workItemId && item.goalId === envelope.scope.goalId)) throw new Error('Remote command WorkItem is outside Goal scope')
     if (envelope.scope.runId && !aggregate.workflow.runs.some((item) => item.id === envelope.scope.runId)) throw new Error('Remote command Run is outside Project scope')
     if (envelope.scope.artifactIds.some((id) => !aggregate.workflow.artifacts.some((item) => item.id === id))) throw new Error('Remote command Artifact is outside Project scope')
     if (envelope.kind === 'resume_work_item' && !envelope.scope.workItemId) throw new Error('Remote resume command requires a WorkItem')
@@ -254,6 +263,10 @@ export class RemoteContinuationStore {
     }
     if (!Number.isSafeInteger(envelope.createdAt) || !Number.isSafeInteger(envelope.expiresAt) || envelope.expiresAt <= envelope.createdAt) throw new Error('Remote command time bounds are invalid')
     if (!/^[0-9a-f]{64}$/.test(envelope.payloadDigest)) throw new Error('Remote command payloadDigest is invalid')
+    const expectedPayload = envelope.payload ?? { kind: envelope.kind, scope: envelope.scope, revision: envelope.revision }
+    if (envelope.payloadDigest !== digest(expectedPayload)) throw new Error('Remote command payload digest does not match signed payload')
+    validateCommandPayload(envelope.kind, envelope.payload, envelope.scope)
+    if (envelope.payload?.kind === 'create_task' && envelope.payload.businessLineId) assertActiveBusinessLine(envelope.payload.businessLineId, this.rootDir)
     return this.mutate((state, at) => {
       const device = requireDevice(state, envelope.issuerDeviceId, commandCapability(envelope.kind))
       assertValidCommandSignature(device, envelope)
@@ -316,6 +329,11 @@ export class RemoteContinuationStore {
         return command
       }
       if (command.status === 'offline' || command.status === 'expired' || command.status === 'rejected') return command
+      try { requireDevice(state, command.envelope.issuerDeviceId, commandCapability(command.envelope.kind)) }
+      catch {
+        command.status = 'rejected'; command.rejectionReason = 'device_or_capability_revoked'; command.updatedAt = at
+        return command
+      }
       if (command.execution) return command
       if (command.status !== 'pending' && command.status !== 'accepted') return command
       command.status = 'accepted'
@@ -330,13 +348,15 @@ export class RemoteContinuationStore {
     })
   }
 
-  finishCommandExecution(commandId: string, input: { status: RemoteCommandExecutionStatus; routineRunId?: string; runId?: string; error?: string }): Promise<RemoteCommandRecord | null> {
+  finishCommandExecution(commandId: string, input: { status: RemoteCommandExecutionStatus; routineRunId?: string; runId?: string; error?: string } & Partial<RemoteCreatedTaskProjection>): Promise<RemoteCommandRecord | null> {
     return this.mutate((state, at) => {
       const command = state.commands.find((item) => item.envelope.commandId === requiredId(commandId, 'commandId'))
       if (!command) return null
       if (command.execution && ['succeeded', 'failed'].includes(command.execution.status)) return command
+      if (input.createdTask && (command.envelope.kind !== 'create_task' || input.createdTask.projectId !== command.envelope.scope.projectId || input.createdTask.sessionId !== input.runId)) throw new Error('远端新任务回执绑定无效。')
       const error = input.error?.trim().slice(0, 1000)
-      command.execution = { status: input.status, ...(input.routineRunId ? { routineRunId: input.routineRunId } : {}), ...(input.runId ? { runId: input.runId } : {}), ...(error ? { error } : {}), updatedAt: at }
+      command.execution = { status: input.status, ...(input.routineRunId ? { routineRunId: input.routineRunId } : {}), ...(input.runId ? { runId: input.runId } : {}),
+        ...(input.createdTask ? { createdTask: input.createdTask } : {}), ...(input.createPhase ? { createPhase: input.createPhase } : {}), ...(error ? { error } : {}), updatedAt: at }
       command.updatedAt = at
       this.audit(state, `command_execution_${input.status}`, command.envelope.issuerDeviceId, command.envelope.commandId, command.envelope.scope.projectId, at, input.status === 'failed' ? 'rejected' : 'state_changed', input.routineRunId ?? error ?? command.envelope.payloadDigest)
       return command
@@ -442,6 +462,45 @@ export class RemoteContinuationStore {
   private audit(state: RemoteDocument, action: string, actorDeviceId: string | undefined, commandId: string | undefined, projectId: string | undefined, at: number, result: RemoteContinuationSnapshot['audit'][number]['result'], detail: string) {
     const entry = { id: randomUUID(), action, ...(actorDeviceId ? { actorDeviceId } : {}), ...(commandId ? { commandId } : {}), ...(projectId ? { projectId } : {}), at, result, detailDigest: sha256(detail) }; state.audit.push(entry); if (state.audit.length > MAX_AUDIT) state.audit.splice(0, state.audit.length - MAX_AUDIT); return entry
   }
+}
+
+function validateCommandPayload(kind: RemoteCommandEnvelope['kind'], payload: RemoteCommandPayload | undefined, scope: RemoteCommandEnvelope['scope']): void {
+  if (kind === 'approve_effect' && payload !== undefined) {
+    if (payload.kind !== kind || !scope.workItemId || scope.dataClass !== 'metadata_only') throw new Error('Remote approval payload scope mismatch')
+    assertPayloadKeys(payload, ['kind', 'sessionId', 'permissionRequestId', 'action', 'targetDigest', 'dataScope'])
+    for (const value of [payload.sessionId, payload.permissionRequestId, payload.action]) requiredId(value, 'approval field')
+    if (![payload.targetDigest, payload.dataScope].every(value => /^[a-f0-9]{64}$/.test(value))) throw new Error('Remote approval digest invalid')
+    return
+  }
+  if (kind === 'view_result' || kind === 'resume_work_item' || kind === 'approve_effect' || kind === 'trigger_routine') {
+    if (payload !== undefined) throw new Error(`Remote ${kind} command does not accept a task payload`)
+    return
+  }
+  if (!payload || payload.kind !== kind) throw new Error(`Remote ${kind} command requires a matching signed payload`)
+  if (scope.dataClass !== 'metadata_only' || scope.artifactIds.length || scope.runId || scope.routineId) throw new Error('Remote task command requires metadata_only task scope')
+  if (kind === 'create_task') {
+    const task = payload as Extract<RemoteCommandPayload, { kind: 'create_task' }>
+    assertPayloadKeys(task, ['kind', 'objective', 'businessLineId'])
+    if (typeof task.objective !== 'string' || !task.objective.trim() || task.objective.length > 20_000) throw new Error('Remote create task objective is invalid')
+    if (task.businessLineId !== undefined && !isBusinessLineId(task.businessLineId)) throw new Error('Remote create task businessLineId is invalid')
+    if (scope.workItemId || scope.goalId) throw new Error('Remote create task cannot bind an existing Goal or WorkItem')
+    return
+  }
+  if (!scope.workItemId) throw new Error(`Remote ${kind} command requires a WorkItem`)
+  if (kind === 'append_task') {
+    const append = payload as Extract<RemoteCommandPayload, { kind: 'append_task' }>
+    assertPayloadKeys(append, ['kind', 'text', 'clientRequestId'])
+    if (typeof append.text !== 'string' || !append.text.trim() || append.text.length > 200_000 || typeof append.clientRequestId !== 'string' || !/^[a-zA-Z0-9_-]{1,160}$/.test(append.clientRequestId)) throw new Error('Remote append task payload is invalid')
+  }
+  if (kind === 'pause_work_item' || kind === 'cancel_work_item') {
+    const control = payload as Extract<RemoteCommandPayload, { kind: 'pause_work_item' | 'cancel_work_item' }>
+    assertPayloadKeys(control, ['kind', 'reason'])
+    if (control.reason !== undefined && (typeof control.reason !== 'string' || control.reason.length > 2_000)) throw new Error(`Remote ${kind} reason is invalid`)
+  }
+}
+
+function assertPayloadKeys(payload: RemoteCommandPayload, allowed: string[]): void {
+  if (Object.keys(payload).some(key => !allowed.includes(key))) throw new Error('Remote task payload contains unsupported fields')
 }
 
 function assertApprovalDecisionSignature(device: StoredDevice, input: RemoteApprovalDecisionEnvelope): void {

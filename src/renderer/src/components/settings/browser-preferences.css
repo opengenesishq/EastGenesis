@@ -1,0 +1,19 @@
+.browser-preferences h3 { margin: 24px 0 12px; font-size: 14px; }
+.browser-management-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+.browser-management-row > input { flex: 1; min-width: 120px; }
+.browser-management-row > select { width: auto; }
+.browser-management-check { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
+.browser-management-record { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.browser-management-record > div:first-child { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.browser-management-record strong { font-size: 12px; overflow-wrap: anywhere; }
+.browser-management-record span, .browser-management-record small { font-size: 11px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.browser-management-record-actions { display: flex; flex-wrap: wrap; gap: 5px; flex-shrink: 0; }
+.browser-management-downloads, .browser-history { max-height: 440px; overflow-y: auto; }
+.browser-management-error { color: var(--danger, #bb5544) !important; }
+.browser-management-rule { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.browser-management-rule > span { flex: 1; min-width: 150px; overflow-wrap: anywhere; font-size: 12px; }
+.browser-management-rule > select { width: auto; font-size: 12px; }
+.browser-site-controls { flex: 0 0 auto; border-bottom: 1px solid var(--border); }
+.browser-site-controls-bar { display: flex; justify-content: flex-end; gap: 4px; padding: 2px 8px; }
+.browser-site-controls-content { padding: 6px 12px; max-height: 210px; overflow-y: auto; }
+.browser-site-controls-content .browser-management-row { margin: 4px 0; }

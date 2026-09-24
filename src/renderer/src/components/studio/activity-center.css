@@ -1,0 +1,29 @@
+.activity-center { width: min(900px, 100%); margin: 0 auto; padding: 22px 26px; color: var(--text-primary); }
+.activity-header, .activity-header > div, .activity-actions, .activity-filters { display: flex; align-items: center; gap: 12px; }
+.activity-header { justify-content: space-between; margin-bottom: 22px; }
+.activity-header h2 { font-size: 22px; margin: 0; font-weight: 600; }
+.activity-header span, .activity-note, .activity-row-open span { color: var(--text-secondary); font-size: 12px; }
+.activity-filters { gap: 6px; flex-wrap: wrap; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.activity-filters button { border: 0; background: transparent; color: var(--text-secondary); padding: 7px 12px; border-radius: 7px; cursor: pointer; }
+.activity-filters button[aria-pressed="true"] { color: var(--text-primary); background: var(--bg-tertiary, rgba(127,127,127,.12)); }
+.activity-filters label { display: flex; gap: 5px; margin-left: auto; font-size: 12px; align-items: center; color: var(--text-secondary); }
+.activity-row { display: flex; align-items: center; min-height: 70px; gap: 9px; border-bottom: 1px solid var(--border); }
+.activity-unread-dot { color: var(--accent, #6e70da); width: 9px; flex: 0 0 9px; }
+.activity-row-open { display: flex; flex: 1; min-width: 0; flex-direction: column; text-align: left; gap: 7px; border: 0; background: transparent; color: inherit; padding: 15px 2px; cursor: pointer; }
+.activity-row-open strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 450; }
+.activity-row.unread .activity-row-open strong { font-weight: 650; }
+.activity-empty { padding: 50px 12px; text-align: center; color: var(--text-secondary); font-size: 13px; }
+.activity-error { padding: 12px; color: var(--danger, #b94a48); border-radius: 8px; background: rgba(190,70,60,.08); margin: 12px 0; }
+.activity-record { padding-top: 18px; }
+.activity-record-message { padding: 14px 0; border-bottom: 1px solid var(--border); }
+.activity-record-message strong { font-size: 12px; color: var(--text-secondary); }
+.activity-record-message p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.65; }
+.activity-surface-tabs { display: flex; gap: 8px; padding: 12px 22px 0; }
+.activity-surface-tabs button[aria-pressed="true"] { background: var(--bg-tertiary, rgba(127,127,127,.12)); }
+.sidebar-unread-dot { color: var(--accent, #6e70da); display: inline-block; margin-right: 6px; font-size: 10px; }
+@media (max-width: 650px) { .activity-center { padding: 18px 12px; } .activity-header { gap: 6px; flex-wrap: wrap; } .activity-filters label { margin-left: 0; } }
+
+.activity-workspace { min-height: 0; width: 100%; height: 100%; overflow: auto; }
+.activity-sidebar-error { margin: 6px 10px; font-size: 11px; color: var(--danger, #b94a48); overflow-wrap: anywhere; }
+
+.experience-activity { flex: 1; min-height: 0; overflow: auto; }

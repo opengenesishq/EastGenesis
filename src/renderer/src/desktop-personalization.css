@@ -1,0 +1,16 @@
+/* Custom palettes inherit through the whole shell, including the settings surface. */
+html[data-custom-colors='true'] .desktop-settings {
+  --bg: var(--desktop-theme-bg); --bg-raised: var(--desktop-theme-bg-raised); --bg-card: var(--desktop-theme-bg-card); --bg-input: var(--desktop-theme-bg-input);
+  --border: var(--desktop-theme-border); --border-soft: var(--desktop-theme-border-soft);
+}
+html[data-custom-colors='true'] .desktop-settings .settings-tabs { background: var(--bg-raised); }
+html[data-custom-colors='true'] .desktop-settings .settings-search { background: var(--bg-input); }
+html[data-custom-colors='true'] .desktop-settings .settings-tab { color: var(--text); }
+html[data-custom-colors='true'] .desktop-settings .settings-tab-group-label { color: var(--text-dim); }
+html[data-custom-colors='true'] .desktop-settings .settings-tab.active,
+html[data-custom-colors='true'] .desktop-settings .settings-tab:hover { background: var(--accent-soft); color: var(--text); }
+html[data-custom-colors='true'] .desktop-preference-toggle[aria-checked='true'] { background: var(--accent); }
+html[data-custom-colors='true'] .desktop-preference-toggle[aria-checked='true'] span { background: var(--accent-text); }
+html[data-custom-colors='true'] .desktop-preference-control input[type='range'] { accent-color: var(--accent); }
+.sidebar-personal-trigger > span:nth-child(2), .sidebar-personal-identity > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-personal-identity strong { overflow: hidden; text-overflow: ellipsis; }

@@ -8,6 +8,7 @@ import { assertMemoryProjectWritable } from './memory-project-lifecycle'
 import { assertMemorySessionWritable } from './memory-session-lifecycle'
 import { layeredMemoryExpired, readMemoryRetentionPolicies } from './memory-retention-policy'
 import { memoryProjectHash, memoryProjectIdHash } from './memory-project-identity'
+import { assertSharedMemoryContributionAllowed, isTaskOwnedMemory } from './memory-preferences'
 export { memoryProjectHash, memoryProjectIdHash } from './memory-project-identity'
 
 export type MemoryLayer = 'working' | 'project' | 'user'
@@ -61,6 +62,8 @@ export interface MemorySearchInput {
   layers?: MemoryLayer[]
   includeArchived?: boolean
   limit?: number
+  /** Runtime retrieval only; human memory management may still inspect historical entries. */
+  sharedMemoryAllowed?: () => boolean
 }
 
 export interface MemorySearchHit {
@@ -108,6 +111,7 @@ export async function addMemory(rootDir: string, input: MemoryWriteInput): Promi
     if (input.projectId) assertMemoryProjectWritable(path.dirname(path.resolve(rootDir)), input.projectId)
     assertMemorySessionWritable(path.dirname(path.resolve(rootDir)), input)
     const file = await readStore(rootDir)
+    if (!isTaskOwnedMemory(input)) assertSharedMemoryContributionAllowed()
     const now = new Date().toISOString()
     const entry: LayeredMemoryEntry = {
       id: randomUUID(),
@@ -142,6 +146,7 @@ export async function searchMemories(rootDir: string, input: MemorySearchInput):
       .filter((entry) => layers.has(entry.layer))
       .filter((entry) => input.includeArchived || !entry.archivedAt)
       .filter((entry) => inScope(entry, input))
+      .filter((entry) => input.sharedMemoryAllowed?.() !== false || isTaskOwnedMemory(entry))
       .map((entry) => ({ entry, score: cosine(queryVector, entry.vector) }))
       .filter((hit) => hit.score > 0)
       .sort((a, b) => b.score - a.score || b.entry.updatedAt.localeCompare(a.entry.updatedAt))
@@ -152,7 +157,7 @@ export async function searchMemories(rootDir: string, input: MemorySearchInput):
       for (const hit of hits) hit.entry.lastUsedAt = now
       await writeStore(rootDir, file.entries)
     }
-    return hits
+    return hits.filter((hit) => input.sharedMemoryAllowed?.() !== false || isTaskOwnedMemory(hit.entry))
   })
 }
 
@@ -204,6 +209,7 @@ export async function updateMemory(
     if (index === -1) return null
     const current = file.entries[index]
     if (scope && !inScope(current, scope)) throw new Error('记忆不属于当前项目或任务')
+    if (!isTaskOwnedMemory(current)) assertSharedMemoryContributionAllowed()
     if (patch.expectedUpdatedAt !== undefined && patch.expectedUpdatedAt !== current.updatedAt) {
       throw new Error('记忆已被修改，请刷新后重新修订')
     }

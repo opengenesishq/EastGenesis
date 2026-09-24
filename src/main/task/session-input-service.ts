@@ -7,21 +7,27 @@ import { writeDurableFileSync } from '../durable-file'
 import { stableValueDigest } from './tool-idempotency'
 import { withDataLifecycleMutation } from '../data-lifecycle/data-lifecycle-mutation-lock'
 import { messagePayloadDigest } from '../message-payload-digest'
+import { normalizeGoalRevisionIntent } from '../../shared/session-goal-revision'
+import { applySessionGoalRevision } from './session-goal-revision'
 import { normalizeRequirementRevisionIntent } from '../../shared/session-requirement-revision'
 import { applySessionRequirementRevision } from './session-requirement-revision'
 import { withSessionOperationQueue } from '../session-operation-queue'
+import type { SessionInputQueueOptions } from '../../shared/session-follow-up'
+import { armSessionFollowUp, isSessionFollowUpActive, withdrawSessionFollowUp } from './session-follow-up-gate'
 
 export interface SessionInputRuntime {
   meta(sessionId: string): SessionMeta | undefined
   send(sessionId: string, payload: SendMessagePayload): Promise<boolean>
   accepted(record: SessionInputRecord): Promise<boolean>
   /** Deterministic local checks before a send barrier; rejection keeps the outbox queued. */
+  afterGoalRevision?(sessionId: string): Promise<void>
   preflight?(record: SessionInputRecord): Promise<void>
 }
 
 /** Receipts index the existing transcript/Run. They do not own task or execution state. */
 export class SessionInputService {
   private readonly operations = new Map<string, Promise<SessionInputRecord>>()
+  private readonly lastQueuedAt = new Map<string, number>()
 
   constructor(private readonly rootDir: string, private readonly runtime: SessionInputRuntime) {}
 
@@ -39,16 +45,18 @@ export class SessionInputService {
         throw new Error('补充要求的会话身份不一致')
       }
       // A currently sending operation owns its receipt; a read cannot race its write.
-      records.push(this.operations.has(this.key(sessionId, record.id)) ? record : await this.reconcile(record))
+      const reconciled = this.operations.has(this.key(sessionId, record.id)) ? record : await this.reconcile(record)
+      records.push(reconciled.followUp && !isSessionFollowUpActive(this.rootDir, reconciled, this.runtime.meta(sessionId))
+        ? { ...reconciled, followUp: { ...reconciled.followUp, state: 'paused' } } : reconciled)
     }
     return records.sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
   }
 
-  queue(sessionId: string, id: string, payload: SendMessagePayload): Promise<SessionInputRecord> {
-    return withDataLifecycleMutation(this.rootDir, async () => this.performQueue(sessionId, id, payload))
+  queue(sessionId: string, id: string, payload: SendMessagePayload, options?: SessionInputQueueOptions): Promise<SessionInputRecord> {
+    return withDataLifecycleMutation(this.rootDir, async () => this.performQueue(sessionId, id, payload, options))
   }
 
-  private performQueue(sessionId: string, id: string, payload: SendMessagePayload): SessionInputRecord {
+  private performQueue(sessionId: string, id: string, payload: SendMessagePayload, options?: SessionInputQueueOptions): SessionInputRecord {
     checkedId(sessionId)
     checkedId(id)
     const meta = this.runtime.meta(sessionId)
@@ -63,28 +71,38 @@ export class SessionInputService {
         (!payload.text.trim() && !payload.images?.length && !payload.documents?.length) || payload.messageId) {
       throw new Error('补充要求内容无效')
     }
+    if (payload.goalRevisionIntent) {
+      normalizeGoalRevisionIntent(payload.goalRevisionIntent)
+      if (!meta.workspaceId || !meta.goalId || !meta.workItemId || meta.parentSessionId || payload.requirementRevisionIntent || payload.officeRevisionIntent || payload.images?.length || payload.documents?.length) {
+        throw new Error('目标修订必须绑定原目标和工作项，且不能夹带其他意图或附件')
+      }
+    }
     if (payload.requirementRevisionIntent) {
       normalizeRequirementRevisionIntent(payload.requirementRevisionIntent)
       if (!meta.workspaceId || !meta.goalId || !meta.workItemId || meta.parentSessionId || payload.officeRevisionIntent || payload.images?.length || payload.documents?.length) {
         throw new Error('交付要求修订必须绑定原目标和工作项，且不能夹带文件执行或附件')
       }
     }
-    const now = Date.now()
+    const now = Math.max(Date.now(), (this.lastQueuedAt.get(sessionId) ?? 0) + 1)
     const record: SessionInputRecord = {
       schemaVersion: 1, revision: 1, id, sessionId,
       workspaceId: meta.workspaceId, goalId: meta.goalId, workItemId: meta.workItemId,
       messageId: `session-input:${sessionId}:${id}`, payload,
       phase: 'queued', createdAt: now, updatedAt: now
     }
+    if (options?.followUpBehavior && options.followUpBehavior !== 'manual' && !payload.requirementRevisionIntent && !payload.goalRevisionIntent) {
+      record.followUp = armSessionFollowUp(this.rootDir, meta, record.messageId, options.followUpBehavior)
+    }
     writeDurableFileSync(this.path(sessionId, id), JSON.stringify(record), { replace: false })
+    this.lastQueuedAt.set(sessionId, now)
     return record
   }
 
-  apply(sessionId: string, id: string): Promise<SessionInputRecord> {
+  apply(sessionId: string, id: string, beforeDispatch?: () => Promise<void>): Promise<SessionInputRecord> {
     const key = this.key(sessionId, id)
     const existing = this.operations.get(key)
     if (existing) return existing
-    const operation = this.performApply(sessionId, id).finally(() => this.operations.delete(key))
+    const operation = this.performApply(sessionId, id, beforeDispatch).finally(() => this.operations.delete(key))
     this.operations.set(key, operation)
     return operation
   }
@@ -94,12 +112,20 @@ export class SessionInputService {
       if (this.operations.has(this.key(sessionId, id))) throw new Error('补充要求正在提交，请等待结果')
       const record = this.required(sessionId, id)
       if (record.phase !== 'queued') throw new Error('只能撤回尚未提交的补充要求')
+      withdrawSessionFollowUp(record)
       return this.save(record, { phase: 'cancelled', error: undefined })
     })
   }
 
-  private async performApply(sessionId: string, id: string): Promise<SessionInputRecord> {
+  async suspendFollowUp(sessionId: string, id: string, error: string): Promise<void> {
+    const record = this.required(sessionId, id)
+    withdrawSessionFollowUp(record)
+    if (record.phase === 'queued') await this.save(record, { phase: 'queued', error })
+  }
+
+  private async performApply(sessionId: string, id: string, beforeDispatch?: () => Promise<void>): Promise<SessionInputRecord> {
     let record = await this.reconcile(this.required(sessionId, id))
+    if (record.phase === 'goal_revised') return record
     if (record.phase === 'applied' || record.phase === 'requirements_applied') return record
     if (record.phase !== 'queued') throw new Error(record.error ?? '此补充要求不能重发，请先核对执行记录')
     const meta = this.runtime.meta(sessionId)
@@ -107,7 +133,7 @@ export class SessionInputService {
     this.assertIdentity(record, meta)
     if (meta.status === 'running' || meta.status === 'starting') throw new Error('任务仍在运行；请等待本轮结束或先暂停')
     if (meta.status === 'closed') throw new Error('当前任务已关闭，请先恢复此任务')
-    if (record.payload.requirementRevisionIntent) {
+    if (record.payload.requirementRevisionIntent || record.payload.goalRevisionIntent) {
       return withSessionOperationQueue(sessionId, () => withDataLifecycleMutation(this.rootDir, async () => {
         const current = this.required(sessionId, id)
         const currentMeta = this.runtime.meta(sessionId)
@@ -117,14 +143,25 @@ export class SessionInputService {
         this.assertIdentity(current, currentMeta)
         if (currentMeta.parentSessionId) throw new Error('请回到原目标任务修改交付要求')
         if (current.phase !== 'queued') throw new Error('修订请求已变化，请核对原回执')
+        if (current.payload.goalRevisionIntent) {
+          const pending = await this.list(sessionId)
+          if (pending.some(item => item.id !== id && ['dispatching', 'needs_reconciliation'].includes(item.phase))) throw new Error('原任务仍有提交结果待核对，请先核对后修订目标')
+          const goalRevision = await applySessionGoalRevision(this.rootDir, current)
+          const saved = await this.save(current, { phase: 'goal_revised', error: undefined, goalRevision })
+          await this.runtime.afterGoalRevision?.(sessionId)
+          return saved
+        }
         const requirementRevision = await applySessionRequirementRevision(this.rootDir, current)
         return this.save(current, { phase: 'requirements_applied', error: undefined, requirementRevision })
       }))
     }
     await this.runtime.preflight?.(record)
+    await beforeDispatch?.()
     // Persist the dispatch barrier before entering the existing authorization/Run path.
     record = await this.save(record, { phase: 'dispatching', error: undefined })
     try {
+      // A local schedule may be paused/rebound while authorization or persistence waits.
+      await beforeDispatch?.()
       const accepted = await this.runtime.send(sessionId, { ...record.payload, messageId: record.messageId })
       if (await this.runtime.accepted(record)) return this.save(record, { phase: 'applied' })
       return this.save(record, { phase: 'needs_reconciliation', error: accepted
@@ -138,7 +175,7 @@ export class SessionInputService {
   }
 
   private async reconcile(record: SessionInputRecord): Promise<SessionInputRecord> {
-    if (record.phase === 'queued' && record.payload.requirementRevisionIntent) {
+    if (record.phase === 'queued' && (record.payload.requirementRevisionIntent || record.payload.goalRevisionIntent)) {
       // A failed canonical transaction stays queued. Explicit apply recovers its
       // command journal and matching source event before creating another revision.
       return record
@@ -153,7 +190,8 @@ export class SessionInputService {
 
   private assertIdentity(record: SessionInputRecord, meta: SessionMeta): void {
     if (record.sessionId !== meta.id || record.workspaceId !== meta.workspaceId ||
-        record.goalId !== meta.goalId || record.workItemId !== meta.workItemId) throw new Error('补充要求与原任务归属不一致')
+        record.goalId !== meta.goalId || record.workItemId !== meta.workItemId ||
+        (record.followUp && record.followUp.sessionCreatedAt !== meta.createdAt)) throw new Error('补充要求与原任务归属不一致')
   }
 
   private required(sessionId: string, id: string): SessionInputRecord {
@@ -176,13 +214,24 @@ export class SessionInputService {
   private parse(value: unknown): SessionInputRecord {
     const record = value as SessionInputRecord | null
     if (!record || record.schemaVersion !== 1 || typeof record.id !== 'string' || typeof record.sessionId !== 'string' ||
-        !['queued', 'dispatching', 'applied', 'requirements_applied', 'needs_reconciliation', 'cancelled'].includes(record.phase) ||
+        !['queued', 'dispatching', 'applied', 'requirements_applied', 'goal_revised', 'needs_reconciliation', 'cancelled'].includes(record.phase) ||
         record.messageId !== `session-input:${record.sessionId}:${record.id}` ||
         typeof record.payload?.text !== 'string' || record.payload.text.length > 200_000 || !Number.isFinite(record.createdAt) || !Number.isFinite(record.updatedAt)) {
       throw new Error('补充要求回执损坏，已阻止提交')
     }
     checkedId(record.id)
     checkedId(record.sessionId)
+    if (record.followUp && (!['queue', 'pause_and_apply'].includes(record.followUp.behavior) ||
+        typeof record.followUp.token !== 'string' || !/^[a-zA-Z0-9-]{1,160}$/.test(record.followUp.token) ||
+        !Number.isFinite(record.followUp.sessionCreatedAt) || !['armed', 'paused'].includes(record.followUp.state) ||
+        record.payload.goalRevisionIntent || record.payload.requirementRevisionIntent)) throw new Error('补充要求的自动继续记录无效')
+    if (record.payload.goalRevisionIntent) {
+      normalizeGoalRevisionIntent(record.payload.goalRevisionIntent)
+      if (record.payload.requirementRevisionIntent || record.payload.officeRevisionIntent || record.payload.images?.length || record.payload.documents?.length) throw new Error('目标修订意图冲突')
+    }
+    if (record.phase === 'goal_revised' && (!record.payload.goalRevisionIntent || record.goalRevision?.schemaVersion !== 1 ||
+        !record.goalRevision.sourceEventId || record.goalRevision.objective !== record.payload.text.trim() ||
+        !Number.isSafeInteger(record.goalRevision.goalRevision) || !Number.isSafeInteger(record.goalRevision.workItemRevision))) throw new Error('目标修订回执无效')
     if (record.payload.requirementRevisionIntent) normalizeRequirementRevisionIntent(record.payload.requirementRevisionIntent)
     if (record.phase === 'requirements_applied' && (!record.payload.requirementRevisionIntent ||
         record.requirementRevision?.schemaVersion !== 1 || !record.requirementRevision.sourceEventId ||
@@ -214,7 +263,7 @@ export class SessionInputService {
     return { ...record, revision: record.revision ?? 1 }
   }
 
-  private save(record: SessionInputRecord, patch: Pick<SessionInputRecord, 'phase'> & Pick<Partial<SessionInputRecord>, 'error' | 'requirementRevision'>): Promise<SessionInputRecord> {
+  private save(record: SessionInputRecord, patch: Pick<SessionInputRecord, 'phase'> & Pick<Partial<SessionInputRecord>, 'error' | 'requirementRevision' | 'goalRevision'>): Promise<SessionInputRecord> {
     return withDataLifecycleMutation(this.rootDir, async () => {
       // Serialize with deletion/retention and compare the durable version inside the same lock.
       const current = this.required(record.sessionId, record.id)

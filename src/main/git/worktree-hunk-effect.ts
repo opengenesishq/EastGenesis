@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSyncInExecutionEnvironment as execFileSync } from '../wsl/process'
 import { createHash } from 'node:crypto'
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -36,7 +36,7 @@ export function planDiscardWorkspaceHunk(
     if (inspection.ok === false) return { ok: false, error: inspection.error }
     const target = resolveWritableProjectPathSync(inspection.repoRoot, inspection.relativePath)
     const preContent = readRegularFile(target.fullPath)
-    const expected = applyReversePatchInSandbox(target.relativePath, patch, preContent)
+    const expected = applyReversePatchInSandbox(inspection.repoRoot, target.relativePath, patch, preContent)
     if (samePlannedState(preContent, expected)) {
       return { ok: false, error: '丢弃 hunk 的执行前状态与预期状态相同，已阻止空操作' }
     }
@@ -102,6 +102,7 @@ function normalizedPatch(value: unknown): string {
 }
 
 function applyReversePatchInSandbox(
+  executionCwd: string,
   relativePath: string,
   patch: string,
   preContent: Buffer | undefined
@@ -113,18 +114,19 @@ function applyReversePatchInSandbox(
       mkdirSync(dirname(sandboxTarget), { recursive: true })
       writeFileSync(sandboxTarget, preContent)
     }
-    runReverseApply(sandbox, patch, true)
-    runReverseApply(sandbox, patch, false)
+    runReverseApply(executionCwd, sandbox, patch, true)
+    runReverseApply(executionCwd, sandbox, patch, false)
     return readRegularFile(sandboxTarget)
   } finally {
     rmSync(sandbox, { recursive: true, force: true })
   }
 }
 
-function runReverseApply(cwd: string, patch: string, check: boolean): void {
+function runReverseApply(executionCwd: string, sandbox: string, patch: string, check: boolean): void {
   execFileSync(
     'git',
     withSafeLocalGitConfig([
+      '-C', sandbox,
       'apply',
       '-R',
       ...(check ? ['--check'] : []),
@@ -132,7 +134,7 @@ function runReverseApply(cwd: string, patch: string, check: boolean): void {
       '-'
     ]),
     {
-      cwd,
+      cwd: executionCwd,
       input: patch,
       encoding: 'utf8',
       env: isolatedLocalGitEnv(process.env),

@@ -5,6 +5,10 @@ import type {
   WorktreeApplyResult,
   WorktreePullRequestResult
 } from '../../shared/types'
+import { app } from 'electron'
+import type { WorktreePullRequestDraftSubmitInput } from '../../shared/worktree-pr-draft-types'
+import { getWorktreePullRequestDraftService } from '../git/worktree-pr-draft-runtime'
+import { effectMatchesDraft } from '../git/worktree-pr-draft-service'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { gitPush, type GitPushOperationResult } from '../git/git-helper'
@@ -374,25 +378,66 @@ function dagPatchTargetMatchesInput(effect: EffectRecord, input: TaskDagAutoMerg
     (target.mode ?? 'apply') === (input.direction ?? 'apply')
 }
 
+const activePrSubmissions = new Map<string, { input: string; result: Promise<WorktreePullRequestResult> }>()
 export async function executeInteractiveOperationEffectCreatePr(
-  id: string,
-  runOperation: OperationGateway
-) {
+  id: string, runOperation: OperationGateway, input?: WorktreePullRequestDraftSubmitInput
+): Promise<WorktreePullRequestResult> {
+  if (!input) return { ok: false, error: '请先打开 PR 准备页，核对差异并保存草稿后提交' }
+  const key = JSON.stringify(input), active = activePrSubmissions.get(id)
+  if (active) return active.input === key ? active.result : { ok: false, error: '当前任务已有 PR 提交正在处理' }
+  const result = submitWorktreeDraft(id, runOperation, input).finally(() => { if (activePrSubmissions.get(id)?.result === result) activePrSubmissions.delete(id) })
+  activePrSubmissions.set(id, { input: key, result })
+  return result
+}
+
+async function submitWorktreeDraft(id: string, runOperation: OperationGateway, input: WorktreePullRequestDraftSubmitInput): Promise<WorktreePullRequestResult> {
   const { sessionManager } = await import('../sessionManager.js')
   const session = sessionManager.get(id)
-  if (session?.meta.status === 'running') {
-    return { ok: false, error: '会话正在运行，停止后才能创建 PR' }
+  if (!session || ['running', 'starting', 'closed'].includes(session.meta.status)) return { ok: false, error: '请先停止并打开原任务，再提交 PR' }
+  const service = getWorktreePullRequestDraftService(app.getPath('userData'))
+  let phase: 'push' | 'pr' | undefined
+  try {
+    let draft = await service.freezeSubmission(id, input)
+    if (!draft.submission) throw new Error('PR 草稿缺少冻结提交回执')
+    if (draft.submission.status === 'completed') {
+      if (draft.submission.result?.ok) return draft.submission.result
+      const effect = await service.confirmedPrEffect(id, input)
+      if (!effect) return { ok: false, error: 'PR 已记录完成，原效果记录尚未核对；不会再次创建' }
+      const result = await completedPullRequestResult({ status: 'completed', effect, effectStatus: effect.status,
+        effectId: effect.id, operationId: draft.submission.prOperationId })
+      await service.recordOutcome(id, input, 'pr', { status: 'completed', effectId: effect.id, result })
+      return result
+    }
+    if (!['prepared', 'pushed'].includes(draft.submission.status)) {
+      const operationId = draft.submission.phase === 'pr' ? draft.submission.prOperationId : draft.submission.pushOperationId
+      return { ok: false, error: draft.submission.error ?? '原提交结果待核对；请使用执行记录核对原操作，不会自动重发',
+        operationId, snapshotId: `operation:${operationId}`, effectStatus: 'waiting_reconciliation' }
+    }
+    const prepared = prepareManagedWorktreePullRequestEffect(id, draft)
+    if ('error' in prepared) return { ok: false, error: prepared.error }
+    if ('unavailable' in prepared) return { ok: true, created: false, message: prepared.message }
+    let plan = prepared.plan
+    if (draft.submission.status === 'prepared') {
+      draft = await service.markPhase(id, input, 'push'); phase = 'push'; plan = { ...plan, draft }
+      const push = await pushWorktreeBranch(id, session.meta.projectId, plan, runOperation)
+      if (push.status === 'completed' && !effectMatchesDraft(push.effect, draft, 'push')) throw new Error('已完成的 Push 回执与冻结草稿不一致，请核对原操作')
+      draft = await service.recordOutcome(id, input, phase, { status: push.status, effectId: push.effectId,
+        ...('error' in push ? { error: push.error } : {}) })
+      phase = undefined
+      if (push.status !== 'completed') return incompleteOperationResult(push)
+    }
+    draft = await service.markPhase(id, input, 'pr'); phase = 'pr'; plan = { ...plan, draft }
+    const pullRequest = await createPullRequest(id, session.meta.projectId, plan, runOperation)
+    if (pullRequest.status === 'completed' && !effectMatchesDraft(pullRequest.effect, draft, 'pr')) throw new Error('已完成的 PR 回执与冻结草稿不一致，请核对原操作')
+    const result = pullRequest.status === 'completed' ? await completedPullRequestResult(pullRequest) : incompleteOperationResult(pullRequest)
+    await service.recordOutcome(id, input, phase, { status: pullRequest.status, effectId: pullRequest.effectId, result,
+      ...('error' in pullRequest ? { error: pullRequest.error } : {}) })
+    return result
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (phase) await service.recordOutcome(id, input, phase, { status: 'waiting_reconciliation', error: message }).catch(() => undefined)
+    return { ok: false, error: message, ...(phase ? { effectStatus: 'waiting_reconciliation' as const } : {}) }
   }
-  const prepared = prepareManagedWorktreePullRequestEffect(id)
-  if ('error' in prepared) return { ok: false, error: prepared.error }
-  if ('unavailable' in prepared) return { ok: true, created: false, message: prepared.message }
-  const plan = prepared.plan
-  const push = await pushWorktreeBranch(id, session?.meta.projectId, plan, runOperation)
-  if (push.status !== 'completed') return incompleteOperationResult(push)
-  const pullRequest = await createPullRequest(id, session?.meta.projectId, plan, runOperation)
-  return pullRequest.status === 'completed'
-    ? completedPullRequestResult(pullRequest)
-    : incompleteOperationResult(pullRequest)
 }
 
 function completedWorktreeCreateResult(
@@ -544,6 +589,8 @@ function pushWorktreeBranch(
 ): Promise<InteractiveOperationEffectOutcome<GitPushOperationResult>> {
   return runOperation({
     kind: 'git_push',
+    ...(plan.draft ? { rootDir: app.getPath('userData'), operationId: plan.draft.submission!.pushOperationId,
+      workspaceId: plan.draft.snapshot.binding.workspaceId, goalId: plan.draft.snapshot.binding.goalId, workItemId: plan.draft.snapshot.binding.workItemId } : {}),
     title: '推送 worktree 分支',
     sourceSessionId,
     projectId,
@@ -552,7 +599,11 @@ function pushWorktreeBranch(
     toolInput: { branch: plan.branch },
     execute: (effect) => {
       if (effect.target.kind !== 'git_push') throw new Error('git push EffectTarget 类型不匹配')
-      return gitPush(plan.worktreePath, plan.branch)
+      if (!plan.draft || !effectMatchesDraft(effect, plan.draft, 'push')) throw new Error('Push Effect 与已确认 PR 草稿不一致')
+      getWorktreePullRequestDraftService(app.getPath('userData')).assertCurrentDraft(sourceSessionId, {
+        draftId: plan.draft.id, expectedRevision: plan.draft.revision, snapshotDigest: plan.draft.snapshot.digest
+      }, 'push')
+      return gitPush(plan.worktreePath, plan.branch, effect.target)
     },
     isSuccess: (result) => result.ok,
     resultSummary: (result) => JSON.stringify(result)
@@ -567,6 +618,8 @@ function createPullRequest(
 ): Promise<InteractiveOperationEffectOutcome<PullRequestEffectExecutionResult>> {
   return runOperation({
     kind: 'pull_request_create',
+    ...(plan.draft ? { rootDir: app.getPath('userData'), operationId: plan.draft.submission!.prOperationId,
+      workspaceId: plan.draft.snapshot.binding.workspaceId, goalId: plan.draft.snapshot.binding.goalId, workItemId: plan.draft.snapshot.binding.workItemId } : {}),
     title: '创建 PR/MR',
     sourceSessionId,
     projectId,
@@ -577,6 +630,10 @@ function createPullRequest(
       if (effect.target.kind !== 'pull_request_create') {
         throw new Error('pull request EffectTarget 类型不匹配')
       }
+      if (!plan.draft || !effectMatchesDraft(effect, plan.draft, 'pr')) throw new Error('PR Effect 与已确认的草稿文案或 HEAD 不一致')
+      getWorktreePullRequestDraftService(app.getPath('userData')).assertCurrentDraft(sourceSessionId, {
+        draftId: plan.draft.id, expectedRevision: plan.draft.revision, snapshotDigest: plan.draft.snapshot.digest
+      }, 'pr')
       return executePullRequestEffectTarget({ target: effect.target, title: plan.title, body: plan.body })
     },
     isSuccess: (result) => result.ok,

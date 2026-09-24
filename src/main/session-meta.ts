@@ -8,6 +8,7 @@ import type {
   TaskStrategy,
   UsageTotals
 } from '../shared/types'
+import type { SideChatBinding } from '../shared/side-chat-types'
 
 function normalizeBudget(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
@@ -48,9 +49,11 @@ export function newSessionMeta(opts: {
    */
   permissionMode: PermissionModeId
   title?: string
+  sideChat?: SideChatBinding
 }): SessionMeta {
   return {
     id: randomUUID(),
+    sideChat: opts.sideChat,
     title: opts.title || '新会话',
     cwd: opts.cwd,
     driveMode: opts.driveMode,

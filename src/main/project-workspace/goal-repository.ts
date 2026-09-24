@@ -31,6 +31,7 @@ import type { ListOptions } from './repository-types'
 import { activeWorkspaceFrom, assertProject, goalFrom, workspaceFrom } from './state-access'
 import { assertProjectAuthorized, projectMutationActor } from './project-authorization'
 import type { SessionRequirementRevisionInput } from '../../shared/session-requirement-revision'
+import { reviseGoalObjective } from './goal-objective-revision'
 import { reviseGoalRequirements } from './goal-requirement-revision'
 
 const GOAL_TRANSITIONS: Record<GoalStatus, ReadonlySet<GoalStatus>> = {
@@ -48,6 +49,10 @@ const GOAL_TRANSITIONS: Record<GoalStatus, ReadonlySet<GoalStatus>> = {
 
 export class GoalRepository {
   constructor(private readonly persistence: ProjectWorkspacePersistence) {}
+
+  reviseObjective(id: string, input: import('../../shared/session-goal-revision').SessionGoalRevisionInput, options?: MutationOptions | number): Promise<Goal> {
+    return reviseGoalObjective(this.persistence, id, input, options)
+  }
 
   reviseRequirements(id: string, input: SessionRequirementRevisionInput, options?: MutationOptions | number): Promise<Goal> {
     return reviseGoalRequirements(this.persistence, id, input, options)

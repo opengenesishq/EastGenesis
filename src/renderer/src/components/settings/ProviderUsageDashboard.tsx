@@ -8,11 +8,12 @@ import type {
   ProviderUsageSummary
 } from '../../../../shared/provider-usage-types'
 import type { ProviderView } from '../../../../shared/types'
-import { formatCost, formatDuration, formatTokens } from '../../format'
+import { formatDuration, formatTokens } from '../../format'
 import { useT } from '../../i18n'
 import { useStore } from '../../store'
 import ProviderBillingReconciliation from './ProviderBillingReconciliation'
 import { DisclosureChevron } from '../DisclosureChevron'
+import { formatUsageCost, usageCostAmount, usageCostDetail } from './provider-usage-cost-view'
 
 type UsageRange = 'today' | '24h' | '7d' | '30d'
 type UsageView = 'requests' | 'providers' | 'models' | 'credentials'
@@ -42,12 +43,16 @@ export default function ProviderUsageDashboard({
   const [refreshInterval, setRefreshInterval] = useState<RefreshInterval>(DEFAULT_REFRESH_INTERVAL)
   const [view, setView] = useState<UsageView>('requests')
   const [requestPage, setRequestPage] = useState(0)
-  const [usage, setUsage] = useState<ProviderUsageSummary | null>(null)
+  const [usageSnapshot, setUsage] = useState<ProviderUsageSummary | null>(null)
+  const [loadedQueryKey, setLoadedQueryKey] = useState('')
   const [scopeUsage, setScopeUsage] = useState<ProviderUsageSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState(false)
   const [failed, setFailed] = useState(false)
   const requestId = useRef(0)
+  const queryKey = JSON.stringify([range, providerId, model, source, keyLabel, requestPage])
+  const usage = loadedQueryKey === queryKey ? usageSnapshot : null
 
   const reload = useCallback(async (): Promise<void> => {
     const currentRequest = requestId.current + 1
@@ -76,12 +81,13 @@ export default function ProviderUsageDashboard({
       if (requestId.current !== currentRequest) return
       setUsage(nextUsage)
       setScopeUsage(nextScope)
+      setLoadedQueryKey(queryKey)
     } catch {
       if (requestId.current === currentRequest) setFailed(true)
     } finally {
       if (requestId.current === currentRequest) setLoading(false)
     }
-  }, [keyLabel, model, providerId, range, requestPage, source])
+  }, [keyLabel, model, providerId, range, requestPage, source, queryKey])
 
   useEffect(() => {
     void reload()
@@ -109,6 +115,7 @@ export default function ProviderUsageDashboard({
 
   const exportUsage = useCallback(async (): Promise<void> => {
     setExporting(true)
+    setExportError(false)
     try {
       const to = Date.now()
       const exported = await window.agentDesk.queryProviderUsage({
@@ -122,9 +129,10 @@ export default function ProviderUsageDashboard({
         offset: 0,
         bucketCount: 24
       })
-      const header = ['time', 'provider', 'model', 'credential_id', 'credential_name', 'source', 'status', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'latency_ms', 'cost_usd', 'price_source']
+      const header = ['time', 'provider_id', 'provider', 'model', 'credential_id', 'credential_name', 'source', 'status', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'latency_ms', 'cost_usd', 'price_source']
       const rows = exported.recentRequests.map((request) => [
         new Date(request.startedAt).toISOString(),
+        request.providerId,
         providerNames.get(request.providerId) ?? request.providerId,
         request.model,
         request.keyLabel ?? '',
@@ -146,6 +154,8 @@ export default function ProviderUsageDashboard({
       anchor.download = `caogen-usage-${range}.csv`
       anchor.click()
       URL.revokeObjectURL(url)
+    } catch {
+      setExportError(true)
     } finally {
       setExporting(false)
     }
@@ -158,7 +168,7 @@ export default function ProviderUsageDashboard({
         refreshInterval={refreshInterval}
         loading={loading}
         exporting={exporting}
-        onRangeChange={(option) => { setRange(option); setModel(''); setKeyLabel(''); setRequestPage(0) }}
+        onRangeChange={(option) => { setRange(option); setModel(''); setSource(''); setKeyLabel(''); setRequestPage(0) }}
         onRefreshIntervalChange={setRefreshInterval}
         onRefresh={reload}
         onExport={exportUsage}
@@ -173,13 +183,14 @@ export default function ProviderUsageDashboard({
         usage={usage}
         loading={loading}
         language={language}
-        onProviderChange={(value) => { setProviderId(value); setModel(''); setKeyLabel(''); setRequestPage(0) }}
+        onProviderChange={(value) => { setProviderId(value); setModel(''); setSource(''); setKeyLabel(''); setRequestPage(0) }}
         onModelChange={(value) => { setModel(value); setRequestPage(0) }}
         onSourceChange={(value) => { setSource(value); setRequestPage(0) }}
         onCredentialChange={(value) => { setKeyLabel(value); setRequestPage(0) }}
       />
 
       {failed && <div className="notice notice-error" role="alert">{t('providerUsageUnavailable')}</div>}
+      {exportError && <div className="notice notice-error" role="alert">{language === 'zh' ? '导出失败，请重试。' : 'Export failed. Please try again.'}</div>}
       {!failed && usage && (
         <>
           <div className="provider-usage-hero">
@@ -189,9 +200,13 @@ export default function ProviderUsageDashboard({
             </div>
             <div className="provider-usage-hero-summary">
               <UsageMetric value={String(usage.requests)} label={t('providerUsageRequests')} />
-              <UsageMetric value={formatCost(usage.costUsd)} label={t('providerUsageCost')} />
+              <UsageMetric value={usageCostAmount(usage, language)} label={language === 'zh' ? '已计价费用 USD（含估算）' : 'Priced cost USD (includes estimates)'} />
             </div>
           </div>
+          <p className="settings-hint" data-provider-usage-cost-summary>{[
+            usageCostDetail(usage, language),
+            language === 'zh' ? '统计仅覆盖 EastGenesis 记录到的调用，实际账单以厂商为准。' : 'Covers calls recorded by EastGenesis; the provider invoice is authoritative.'
+          ].filter(Boolean).join(language === 'zh' ? '；' : '; ')}</p>
 
           <div className="provider-usage-token-strip" aria-label={t('providerUsageTokenBreakdown')}>
             <TokenMetric label={t('providerUsageInputTokens')} value={usage.inputTokens} />
@@ -262,7 +277,7 @@ export default function ProviderUsageDashboard({
                 />
               )}
               {view === 'providers' && <UsageAggregateTable title={t('providerUsageByProvider')} rows={usage.requestsByProvider} />}
-              {view === 'models' && <UsageAggregateTable title={t('providerUsageByModel')} rows={usage.requestsByModel} />}
+              {view === 'models' && <UsageAggregateTable title={language === 'zh' ? '厂商 × 模型统计' : 'Provider × model statistics'} rows={usage.requestsByProviderModel ?? []} />}
               {view === 'credentials' && <UsageAggregateTable title={t('providerUsageByCredential')} rows={usage.requestsByCredential} />}
             </>
           )}
@@ -321,7 +336,7 @@ function ProviderCostProvenance({ sources }: { sources: ProviderUsageCostSourceS
         {sources.map((item) => (
           <div className={`provider-usage-cost-source is-${item.source}`} key={item.source}>
             <span>{t(`providerUsageCostSource_${item.source}`)}</span>
-            <strong>{item.source === 'unpriced' ? '-' : formatCost(item.costUsd)}</strong>
+            <strong>{item.source === 'unpriced' ? '-' : formatUsageCost(item.costUsd)}</strong>
             <small>{t('providerUsageCostSourceRequests', { n: item.requests })}</small>
             <p>{t(`providerUsageCostSourceDescription_${item.source}`)}</p>
           </div>
@@ -437,7 +452,7 @@ function UsageTrend({ points, language }: { points: UsageTrendPoint[]; language:
           </div>
         </div>
         <div className="provider-usage-trend-y-axis is-cost" aria-hidden="true">
-          {scaleSteps.map((scale) => <span key={scale}>{formatCost(maxCost * scale)}</span>)}
+          {scaleSteps.map((scale) => <span key={scale}>{formatUsageCost(maxCost * scale)}</span>)}
         </div>
       </div>
       <div className="provider-usage-trend-axis-row">
@@ -468,6 +483,13 @@ function TokenMetric({ value, label }: { value: number; label: string }): React.
 
 function UsageAggregateTable({ title, rows }: { title: string; rows: ProviderUsageAggregate[] }): React.JSX.Element {
   const t = useT()
+  const language = useStore((state) => state.settings.language)
+  const [page, setPage] = useState(0)
+  const pageSize = 20
+  const currentPage = Math.min(page, Math.max(0, Math.ceil(rows.length / pageSize) - 1))
+  const offset = currentPage * pageSize
+  const shown = rows.slice(offset, offset + pageSize)
+  useEffect(() => { setPage(0) }, [title])
   return (
     <div className="provider-usage-aggregate">
       <div className="field-label">{title}</div>
@@ -475,19 +497,24 @@ function UsageAggregateTable({ title, rows }: { title: string; rows: ProviderUsa
         <table className="provider-usage-table provider-usage-aggregate-table">
           <thead><tr><th>{t('providerUsageName')}</th><th>{t('providerUsageRequests')}</th><th>{t('providerUsageSuccessRate')}</th><th>{t('providerUsageInputTokens')}</th><th>{t('providerUsageOutputTokens')}</th><th>{t('providerUsageCacheReadTokens')}</th><th>{t('providerUsageCost')}</th></tr></thead>
           <tbody>
-            {rows.slice(0, 8).map((item) => (
-              <tr key={item.id}>
-                <td title={item.label}>{item.label}</td>
+            {shown.map((item) => (
+              <tr key={item.id} data-provider-usage-aggregate-row={item.id}>
+                <td title={`${item.label} · ${item.id}`}>{item.label}</td>
                 <td>{item.requests}</td>
                 <td>{formatPercent(item.succeeded, item.succeeded + item.failed)}</td>
                 <td>{formatTokens(item.inputTokens)}</td>
                 <td>{formatTokens(item.outputTokens)}</td>
                 <td>{formatTokens(item.cacheReadTokens)}</td>
-                <td>{formatCost(item.costUsd)}</td>
+                <td><span>{usageCostAmount(item, language)}</span><small className="provider-usage-cost-detail">{usageCostDetail(item, language)}</small></td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+      <div className="provider-usage-pagination" aria-label={t('providerUsagePagination')}>
+        <button type="button" className="btn btn-ghost btn-icon-sm" aria-label={t('providerUsagePreviousPage')} disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={14} aria-hidden="true" /></button>
+        <span>{t('providerUsageRecentRange', { from: rows.length ? offset + 1 : 0, to: offset + shown.length, total: rows.length })}</span>
+        <button type="button" className="btn btn-ghost btn-icon-sm" aria-label={t('providerUsageNextPage')} disabled={offset + shown.length >= rows.length} onClick={() => setPage(currentPage + 1)}><ChevronRight size={14} aria-hidden="true" /></button>
       </div>
     </div>
   )
@@ -582,7 +609,7 @@ function RequestSummaryRow({ request, providerName, language, expanded, onToggle
     <td>{request.usage ? formatTokens(request.usage.inputTokens) : '-'}</td>
     <td>{request.usage ? formatTokens(request.usage.outputTokens) : '-'}</td>
     <td>{request.usage ? formatTokens(request.usage.cacheReadTokens ?? 0) : '-'}</td>
-    <td>{request.costUsd === undefined ? '-' : formatCost(request.costUsd)}</td>
+    <td>{request.costUsd === undefined ? (language === 'zh' ? '未知' : 'Unknown') : formatUsageCost(request.costUsd)}</td>
     <td>{formatLatency(request.latencyMs)}</td>
     <td><span className={`provider-usage-status provider-usage-status-${request.status}`}>{t(`providerUsageStatus_${request.status}`)}</span></td>
     <td title={request.source}>{request.source ?? '-'}</td>
@@ -714,6 +741,6 @@ function trendPointTitle(point: UsageTrendPoint, language: 'zh' | 'en', t: (key:
     `${t('providerUsageOutputTokens')}: ${formatTokens(point.outputTokens)}`,
     `${t('providerUsageCacheReadTokens')}: ${formatTokens(point.cacheReadTokens)}`,
     `${t('providerUsageCacheWriteTokens')}: ${formatTokens(point.cacheWriteTokens)}`,
-    `${t('providerUsageCost')}: ${formatCost(point.costUsd)}`
+    `${t('providerUsageCost')}: ${formatUsageCost(point.costUsd)}`
   ].join('\n')
 }

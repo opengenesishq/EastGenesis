@@ -441,7 +441,7 @@ async function generateDocumentBytes(title: string, spec: OfficeDocumentSpec): P
 
 async function generateSpreadsheetBytes(title: string, spec: OfficeSpreadsheetSpec): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook()
-  workbook.creator = 'CaoGen'
+    workbook.creator = 'EastGenesis'
   workbook.title = title
   workbook.created = new Date(OFFICE_METADATA_DATE.getTime())
   workbook.modified = new Date(OFFICE_METADATA_DATE.getTime())
@@ -516,8 +516,8 @@ async function generateOfficeArtifactBytes(title: string, spec: OfficeArtifactSp
 async function generatePresentationBytes(title: string, spec: OfficePresentationSpec): Promise<Buffer> {
   const presentation = new PptxGenJS()
   presentation.layout = 'LAYOUT_WIDE'
-  presentation.author = 'CaoGen'
-  presentation.company = 'CaoGen'
+    presentation.author = 'EastGenesis'
+    presentation.company = 'EastGenesis'
   presentation.subject = title
   presentation.title = title
   presentation.theme = {
@@ -574,7 +574,7 @@ async function generatePdfBytes(title: string, spec: OfficePdfSpec): Promise<Buf
       margins: { top: 56, right: 54, bottom: 56, left: 54 },
       info: {
         Title: title,
-        Author: 'CaoGen',
+        Author: 'EastGenesis',
         CreationDate: new Date(OFFICE_METADATA_DATE.getTime()),
         ModDate: new Date(OFFICE_METADATA_DATE.getTime())
       }

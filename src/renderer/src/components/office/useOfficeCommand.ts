@@ -74,10 +74,6 @@ export function useOfficeCommand(target: OfficeCommandTarget, zh: boolean) {
       setModelRequestSessionId(target.id)
       return true
     }
-    if (intent === 'palace') {
-      setMessage(zh ? '当前已在故宫，任务保持原状态。' : 'You are in the Palace. The task keeps its current state.')
-      return true
-    }
     if (intent === 'pause') {
       await useStore.getState().interrupt(target.id)
       setLastSessionId(target.id)

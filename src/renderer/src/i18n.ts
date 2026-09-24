@@ -17,6 +17,8 @@ import { DATA_RETENTION_TRANSLATIONS } from './i18n/dataRetentionTranslations'
 import { CONTROL_CENTER_TRANSLATIONS } from './i18n/controlCenterTranslations'
 import { WORKFLOW_LEDGER_TRANSLATIONS } from './i18n/workflowLedgerTranslations'
 import { OFFICE_TRANSLATIONS } from './i18n/officeTranslations'
+import { PROVIDER_QUICK_SETUP_TRANSLATIONS } from './i18n/providerQuickSetupTranslations'
+import { ROUTINE_TRANSLATIONS } from './i18n/routineTranslations'
 /** 轻量 i18n:按当前语言查字典,缺失回退中文再回退 key;支持 {name} 占位符插值。 */
 type Dict = Record<string, { zh: string; en: string }>
 const DICT: Dict = {
@@ -29,6 +31,8 @@ const DICT: Dict = {
   ...CONTROL_CENTER_TRANSLATIONS,
   ...WORKFLOW_LEDGER_TRANSLATIONS,
   ...OFFICE_TRANSLATIONS,
+  ...PROVIDER_QUICK_SETUP_TRANSLATIONS,
+  ...ROUTINE_TRANSLATIONS,
   contentSearchSection: { zh: '消息内容', en: 'Message content' },
   contentSearchEmpty: { zh: '消息内容无匹配', en: 'No matches in message content' },
   recoverableTasks: { zh: '可恢复任务', en: 'Recoverable tasks' },
@@ -159,7 +163,7 @@ const DICT: Dict = {
   welcomeSub: { zh: '多厂商 AI 工作桌面', en: 'Multi-vendor AI work desktop' },
   welcomeCta: { zh: '选择项目目录,开始工作', en: 'Pick a project folder to start' },
   welcomeAsk: { zh: '今天想完成什么？', en: 'What do you want to get done today?' },
-  welcomeInputPlaceholder: { zh: '描述你希望 CaoGen 完成的工作', en: 'Describe what you want CaoGen to do' },
+  welcomeInputPlaceholder: { zh: '描述你希望 EastGenesis 完成的工作', en: 'Describe what you want EastGenesis to do' },
   firstTaskRecommended: { zh: '推荐', en: 'Recommended' },
   firstTaskProgressCompute: { zh: '算力', en: 'Compute' },
   firstTaskProgressRun: { zh: '任务', en: 'Task' },
@@ -185,8 +189,8 @@ const DICT: Dict = {
   },
   welcomeOrganizeReport: { zh: '整理文件成报告', en: 'Organize files into a report' },
   welcomeOrganizeReportPrompt: {
-    zh: '整理当前工作区或会话中可访问的文件，保留原文件不变，并生成结构化 Markdown 报告 CaoGen-report.md。报告必须包含摘要、按主题归类的要点、来源文件引用、关键数据或结论、风险和待确认事项；若同名报告已存在，先读取后增量更新。若没有可用文件，请提示我选择目录或添加文件，不要虚构内容。',
-    en: 'Organize the files available in the current workspace or conversation without changing the source files, then create a structured Markdown report named CaoGen-report.md. Include an executive summary, findings grouped by topic, source file references, key data or conclusions, risks, and open questions. If the report already exists, read it before updating it. If no files are available, ask me to choose a folder or add files instead of fabricating content.'
+    zh: '整理当前工作区或会话中可访问的文件，保留原文件不变，并生成结构化 Markdown 报告 EastGenesis-report.md。报告必须包含摘要、按主题归类的要点、来源文件引用、关键数据或结论、风险和待确认事项；若同名报告已存在，先读取后增量更新。若没有可用文件，请提示我选择目录或添加文件，不要虚构内容。',
+    en: 'Organize the files available in the current workspace or conversation without changing the source files, then create a structured Markdown report named EastGenesis-report.md. Include an executive summary, findings grouped by topic, source file references, key data or conclusions, risks, and open questions. If the report already exists, read it before updating it. If no files are available, ask me to choose a folder or add files instead of fabricating content.'
   },
   welcomePlanTask: { zh: '规划复杂任务', en: 'Plan a complex task' },
   welcomePlanTaskPrompt: {
@@ -283,8 +287,8 @@ const DICT: Dict = {
   errNeedProjectDir: { zh: '请选择项目目录', en: 'Please pick a project directory' },
   creating: { zh: '创建中…', en: 'Creating…' },
   create: { zh: '创建', en: 'Create' },
-  // CaoGen 控制室
-  officeTitle: { zh: 'CaoTaiHub · 3D 控制室', en: 'CaoTaiHub · 3D Control Room' },
+  // EastGenesis 工作台
+  officeTitle: { zh: 'EastGenesis · 工作台', en: 'EastGenesis · Workbench' },
   officeHint: {
     zh: '跨业务线的统一运行状态',
     en: 'Operations across all business lines'
@@ -370,8 +374,8 @@ const DICT: Dict = {
   rewindChat: { zh: '对话', en: 'Chat' },
   rewindBoth: { zh: '两者', en: 'Both' },
   rewindComingSoon: {
-    zh: '对话回溯将恢复 CaoGen 聊天转录',
-    en: 'Chat rewind restores the CaoGen transcript'
+    zh: '对话回溯将恢复 EastGenesis 聊天转录',
+    en: 'Chat rewind restores the EastGenesis transcript'
   },
   rewindPreviewing: { zh: '正在预览回退范围…', en: 'Previewing rewind scope…' },
   rewindApplying: { zh: '回退中…', en: 'Rewinding…' },
@@ -413,7 +417,7 @@ const DICT: Dict = {
   commandSectionPlugin: { zh: '插件', en: 'Plugin' },
   worktreeShort: { zh: '⎇ Worktree', en: '⎇ Worktree' },
   worktreePanelTitle: { zh: '隔离工作区', en: 'Isolated worktree' },
-  worktreeNotIsolated: { zh: '当前会话未使用 CaoGen 管理的 Git worktree。', en: 'This session is not using a CaoGen-managed Git worktree.' },
+  worktreeNotIsolated: { zh: '当前会话未使用 EastGenesis 管理的 Git worktree。', en: 'This session is not using an EastGenesis-managed Git worktree.' },
   worktreeBranch: { zh: '分支', en: 'Branch' },
   worktreeBase: { zh: '基点', en: 'Base' },
   worktreeChangedFiles: { zh: '改动', en: 'Changes' },
@@ -457,7 +461,7 @@ const DICT: Dict = {
   },
   worktreeApplyConfirm: {
     zh: '确定把这个隔离 worktree 的 patch 应用到主工作区吗? 应用前会再次做 git apply --check。',
-    en: 'Apply this isolated worktree patch to the main workspace? CaoGen will run git apply --check again first.'
+    en: 'Apply this isolated worktree patch to the main workspace? EastGenesis will run git apply --check again first.'
   },
   worktreeRemove: { zh: '丢弃隔离副本', en: 'Discard worktree' },
   worktreeRemoveConfirm: {
@@ -599,7 +603,7 @@ const DICT: Dict = {
   tabPermissions: { zh: '权限', en: 'Permissions' },
   tabProject: { zh: '项目规则', en: 'Project rules' },
   tabPersona: { zh: '通用指令', en: 'Global instructions' },
-  tabOffice: { zh: '控制室 / 外观', en: 'Control Room / Appearance' },
+  tabOffice: { zh: '3D 故宫 / 外观', en: '3D Palace / Appearance' },
   tabProviders: { zh: '厂商', en: 'Providers' },
   tabNotifications: { zh: '消息', en: 'Messages' },
   tabPlugins: { zh: '插件 / 技能', en: 'Plugins / Skills' },
@@ -651,7 +655,7 @@ const DICT: Dict = {
   themeLight: { zh: '白天(主白副黑)', en: 'Light' },
   themeDark: { zh: '夜晚(主黑副白)', en: 'Dark' },
   themeSystem: { zh: '跟随系统', en: 'System' },
-  driveMode: { zh: 'CaoGen Drive 档位', en: 'CaoGen Drive mode' },
+  driveMode: { zh: 'EastGenesis Drive 档位', en: 'EastGenesis Drive mode' },
   driveModeOrthogonalHint: {
     zh: '驱动档位控制模型、预算和验证深度;任务策略(查看/规划/执行)在会话中单独选择。',
     en: 'Drive mode controls model, budget and validation depth; task strategy (view/plan/execute) is selected separately in the session.'
@@ -874,7 +878,7 @@ const DICT: Dict = {
   providerAddTitle: { zh: '添加 Provider', en: 'Add Provider' },
   providerQuickTitle: { zh: '快速开始', en: 'Quick start' },
   providerQuickRecommended: { zh: '推荐', en: 'Recommended' },
-  providerQuickName: { zh: 'CaoGen 快速服务', en: 'CaoGen Quick Service' },
+  providerQuickName: { zh: 'EastGenesis 快速服务', en: 'EastGenesis Quick Service' },
   providerQuickKeyLabel: { zh: '主账号', en: 'Primary' },
   providerQuickKeyPlaceholder: { zh: '粘贴 API Key', en: 'Paste API key' },
   providerQuickGetKey: { zh: '获取 API Key', en: 'Get an API key' },

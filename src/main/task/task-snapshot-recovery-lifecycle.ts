@@ -4,6 +4,8 @@ import type {
   ModelAttemptReconciliationView
 } from '../../shared/model-attempt-types'
 import type { TaskRunRecord, TaskSnapshotRecord } from '../../shared/types'
+import { app } from 'electron'
+import { assertSideChatBinding } from '../side-chat/side-chat-policy'
 import { verifyConversationLedgerEntries } from '../transcript'
 import { prepareSessionDomainOwnershipForActivation } from '../session-domain-activation'
 import {
@@ -201,6 +203,7 @@ function assertTaskSnapshotRecoverable(snapshot: TaskSnapshotRecord, finalizerRe
 
 function assertWorkspaceSnapshotOwnership(snapshot: TaskSnapshotRecord): void {
   if (snapshot.meta.workspaceId && !snapshot.meta.workItemId) {
+    if (assertSideChatBinding(snapshot.meta, app.getPath('userData'), { checkSource: false })) return
     throw new Error('Workspace 任务快照缺少 canonical WorkItem，已阻止创建或恢复孤立 Run。')
   }
 }

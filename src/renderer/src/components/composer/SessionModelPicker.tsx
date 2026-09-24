@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store'
-import { sessionRoutingForm } from './session-routing-form'
+import { routingFormTarget, sessionRoutingForm, sessionRoutingLabel } from './session-routing-form'
 import SessionRoutingFields from './SessionRoutingFields'
 
 export default function SessionModelPicker({ sessionId, onClose }: {
@@ -29,6 +29,12 @@ function TaskModelPicker({ sessionId, onClose }: {
     if (!inFlight.current) setControl(JSON.parse(savedControlKey))
   }, [savedControlKey, meta?.modelChange?.digest])
   const running = meta?.status === 'running' || meta?.status === 'starting'
+  const savedSelection = sessionRoutingForm(meta)
+  const selectedProviderId = savedSelection.kind === 'auto'
+    ? savedSelection.scope?.kind === 'provider' ? savedSelection.scope.providerId : undefined
+    : routingFormTarget(savedSelection).providerId
+  const currentProvider = providers.find(provider => provider.id === selectedProviderId)
+  const decision = meta?.modelRoutingDecision
   const apply = async (): Promise<void> => {
     if (inFlight.current || running || !meta) return
     inFlight.current = true
@@ -55,6 +61,24 @@ function TaskModelPicker({ sessionId, onClose }: {
     }
   }
   return <div className="composer-pending-inputs session-routing-picker" data-session-model-picker={sessionId}>
+    <div className="session-routing-heading">
+      <div>
+        <strong>{zh ? '模型与路由' : 'Models & routing'}</strong>
+        {meta && <p data-session-routing-current>{zh ? '当前设置：' : 'Current setting: '}
+          {sessionRoutingLabel(meta, zh)}
+          {currentProvider ? ` · ${currentProvider.name}` : ''}
+        </p>}
+        {decision && <p data-session-routing-last-target>{zh ? '最近路由：' : 'Last routed to: '}
+          {providers.find(provider => provider.id === decision.providerId)?.name ?? decision.providerName ?? decision.providerId} / {decision.model}
+        </p>}
+      </div>
+      <div className="routing-settings-links">
+        <button type="button" className="btn btn-ghost btn-sm" data-routing-settings-link="routing"
+          onClick={() => useStore.getState().setShowSettings(true, 'routing')}>{zh ? '自定义路由' : 'Routing rules'}</button>
+        <button type="button" className="btn btn-ghost btn-sm" data-routing-settings-link="providers"
+          onClick={() => useStore.getState().setShowSettings(true, 'providers')}>{zh ? '厂商与模型' : 'Providers & models'}</button>
+      </div>
+    </div>
     <SessionRoutingFields value={control} providers={providers} engine={meta?.engine} zh={zh}
       disabled={running || busy || !meta || meta.modelChange?.state === 'prepared'}
       onChange={next => { setControl(next); setError(''); setNotice('') }} />

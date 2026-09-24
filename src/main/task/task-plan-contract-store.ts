@@ -407,7 +407,7 @@ function normalizeMissionSource(input: TaskPlanMissionSource): TaskPlanMissionSo
 function normalizeRequirementSource(input: TaskPlanRequirementSource): TaskPlanRequirementSource {
   if (!input || typeof input !== 'object' || Array.isArray(input) ||
       Object.keys(input).some(key => !['eventId', 'goalRevision', 'contractDigest', 'artifacts'].includes(key)) ||
-      !/^goal-requirement:[a-f0-9]{64}$/.test(input.eventId) ||
+      !/^goal-(?:requirement|objective):[a-f0-9]{64}$/.test(input.eventId) ||
       !Number.isSafeInteger(input.goalRevision) || input.goalRevision < 1 ||
       !/^[a-f0-9]{64}$/.test(input.contractDigest)) throw new Error('交付要求计划来源无效')
   const artifacts = input.artifacts?.map(artifact => {

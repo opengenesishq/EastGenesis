@@ -46,7 +46,7 @@ export const DATA_RETENTION_TRANSLATIONS = {
   retentionRevision: { zh: '策略版本 {revision}', en: 'Policy revision {revision}' },
   retentionLoading: { zh: '正在读取保留策略…', en: 'Loading retention policy…' },
   retentionSubjectUnavailable: { zh: '没有可选对象', en: 'No subjects available' },
-  retentionApplicationSubject: { zh: 'CaoGen 本机数据', en: 'Local CaoGen data' },
+  retentionApplicationSubject: { zh: 'EastGenesis 本机数据', en: 'Local EastGenesis data' },
   retentionUpdatedAt: { zh: '更新于 {date}', en: 'Updated {date}' },
   retentionCreatedAt: { zh: '创建于 {date}', en: 'Created {date}' },
   retentionReleasedAt: { zh: '释放于 {date}', en: 'Released {date}' }

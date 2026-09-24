@@ -686,6 +686,8 @@ const interactiveOperationKinds = new Set<InteractiveOperationKind>([
   'workspace_hunk_discard',
   'git_commit',
   'git_index_update',
+  'workspace_handoff',
+  'task_handoff',
   'managed_worktree_create',
   'managed_worktree_remove',
   'worktree_patch_apply',

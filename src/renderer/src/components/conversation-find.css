@@ -1,0 +1,10 @@
+.conversation-find { flex: 0 0 auto; border-bottom: 1px solid var(--border); background: var(--bg-raised); padding: 8px 16px; min-width: 0; }
+.conversation-find-controls { display: flex; align-items: center; gap: 6px; color: var(--text-dim); }
+.conversation-find-controls input { flex: 1; min-width: 60px; padding: 6px 8px; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 12px; }
+.conversation-find-controls input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.conversation-find-count { flex-shrink: 0; font-size: 11px; font-variant-numeric: tabular-nums; }
+.conversation-find-excerpt { max-height: 3.2em; overflow: hidden; overflow-wrap: anywhere; margin: 6px 0 2px 21px; font-size: 11px; line-height: 1.5; color: var(--text-dim); white-space: pre-wrap; }
+.conversation-find-excerpt mark { background: var(--accent-soft); color: var(--text); font-weight: 600; border-radius: 2px; }
+.chat-message-row { display: flex; flex-direction: column; flex-shrink: 0; min-width: 0; }
+.chat-find-selected { outline: 2px solid var(--accent); outline-offset: 5px; border-radius: 6px; }
+@media (max-width: 600px) { .conversation-find { padding-inline: 9px; } .conversation-find-controls { gap: 3px; } .conversation-find-count { max-width: 96px; } }

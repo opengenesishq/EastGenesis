@@ -1,0 +1,26 @@
+.browser-panel-with-connections { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.browser-panel-with-connections > .browser-panel { flex: 1; min-height: 0; }
+.external-browser-section { flex: 0 0 auto; border-bottom: 1px solid var(--border); }
+.browser-panel-with-connections.is-external .external-browser-section { flex: 1; overflow: auto; }
+.external-browser-mode { display: flex; gap: 6px; align-items: center; padding: 8px 12px; flex-wrap: wrap; }
+.external-browser-mode .active { background: var(--bg-hover); font-weight: 600; }
+.external-browser-status { margin-left: auto; color: var(--text-muted); font-size: 12px; }
+.external-browser-content { padding: 12px 16px 20px; }
+.external-browser-content h3 { font-size: 14px; margin: 0 0 6px; }
+.external-browser-content p { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.external-browser-task { overflow-wrap: anywhere; }
+.external-browser-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+.external-browser-form label { display: grid; gap: 6px; font-size: 12px; flex: 1 1 140px; }
+.external-browser-form input { width: 100%; }
+.external-browser-connection { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
+.external-browser-actions { margin-left: auto; display: flex; gap: 6px; }
+.external-browser-tabs { display: grid; gap: 8px; }
+.external-browser-tab { text-align: left; display: grid; gap: 5px; width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); color: var(--text-primary); cursor: pointer; }
+.external-browser-tab.selected { border-color: var(--accent); background: var(--bg-hover); }
+.external-browser-tab span { overflow-wrap: anywhere; font-size: 12px; color: var(--text-muted); }
+.external-browser-tab small { color: var(--text-muted); }
+.external-browser-help { font-size: 12px; margin-top: 18px; color: var(--text-muted); }
+.external-browser-pairing { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
+.external-browser-pairing p { flex: 0 0 100%; margin: 0; }
+.external-browser-pairing input { min-width: 120px; flex: 1; }
+.external-browser-pairing small { color: var(--text-dim); }

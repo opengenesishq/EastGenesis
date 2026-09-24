@@ -32,7 +32,7 @@ export function buildSkillInvocationPrompt(options: SkillInvocationPromptOptions
   for (const match of matches) manager.authorize(match.skill)
 
   return [
-    '## 自动匹配的 CaoGen Skill',
+    '## 自动匹配的 EastGenesis Skill',
     '以下 Skill 与当前任务相似。请优先复用其中的步骤和验证方式；如果不适用，请简要说明原因后继续正常执行。',
     '',
     ...matches.flatMap(formatSkillMatch)

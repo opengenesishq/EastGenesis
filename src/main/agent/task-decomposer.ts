@@ -61,7 +61,7 @@ function estimateComplexity(request: string): { complexity: TaskDagComplexity; s
 
 function taskPrompt(source: string, task: TaskTemplate): string {
   return [
-    `你是 CaoGen DAG 子 Agent,角色: ${task.role}。`,
+    `你是 EastGenesis DAG 子 Agent,角色: ${task.role}。`,
     '',
     `父需求: ${source}`,
     `子任务: ${task.title}`,

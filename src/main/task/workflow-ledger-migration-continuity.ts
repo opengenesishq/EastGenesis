@@ -1,4 +1,5 @@
 import { dirname, join, resolve } from 'node:path'
+import { SessionDeletionJournal } from '../data-lifecycle/session-deletion-journal'
 import { listMigrationJournals } from './workflow-ledger-migration-storage'
 import {
   WORKFLOW_LEDGER_MIGRATION_KIND,
@@ -60,12 +61,37 @@ export function assertCommittedWorkflowLedgerTargetContinuity(input: {
       'Committed migration target store identity changed'
     )
   }
-  assertHighWaterNotRegressed(prior, input.current)
+  assertHighWaterNotRegressed(prior, input.current, authorizedConversationPurgeSince(input.committed))
+}
+
+function authorizedConversationPurgeSince(
+  committed: PreparedWorkflowLedgerMigration
+): { streams: number; generations: number; events: number } {
+  const committedAt = committed.journal.committedAt ?? committed.journal.updatedAt
+  try {
+    return new SessionDeletionJournal(dirname(committed.journal.targetPath))
+      .completedConversationPurgeReceipts()
+      .filter((receipt) => receipt.completedAt > committedAt)
+      .reduce((total, receipt) => ({
+        streams: total.streams + receipt.streams,
+        generations: total.generations + receipt.generations,
+        events: total.events + receipt.events
+      }), { streams: 0, generations: 0, events: 0 })
+  } catch {
+    // A missing or malformed external receipt must never weaken the continuity
+    // gate. The normal migration journal/DB checks remain fail-closed.
+    return { streams: 0, generations: 0, events: 0 }
+  }
 }
 
 function assertHighWaterNotRegressed(
   prior: WorkflowLedgerCanonicalReadinessReport,
-  current: WorkflowLedgerCanonicalReadinessReport
+  current: WorkflowLedgerCanonicalReadinessReport,
+  externalConversationPurge: { streams: number; generations: number; events: number } = {
+    streams: 0,
+    generations: 0,
+    events: 0
+  }
 ): void {
   const priorWorkflow = prior.verification?.workflowLedger
   const currentWorkflow = current.verification?.workflowLedger
@@ -76,6 +102,8 @@ function assertHighWaterNotRegressed(
   const priorRemoved = prior.authorizedPurges?.removed
   const currentRemoved = current.authorizedPurges?.removed
   const logical = (physical: number, removed: number | undefined): number => physical + (removed ?? 0)
+  const logicalConversation = (physical: number, removed: number | undefined, externallyRemoved: number): number =>
+    physical + (removed ?? 0) + externallyRemoved
   const regressed = logical(current.counts.workflowRuns, currentRemoved?.workflowRuns) <
       logical(prior.counts.workflowRuns, priorRemoved?.workflowRuns) ||
     logical(current.counts.taskRuns, currentRemoved?.taskRuns) <
@@ -93,11 +121,11 @@ function assertHighWaterNotRegressed(
       logical(currentEvidence.lastSeq, currentRemoved?.taskEvidence) <
         logical(priorEvidence.lastSeq, priorRemoved?.taskEvidence))) ||
     Boolean(priorConversation && (!currentConversation ||
-      logical(currentConversation.streams, currentRemoved?.conversationStreams) <
+      logicalConversation(currentConversation.streams, currentRemoved?.conversationStreams, externalConversationPurge.streams) <
         logical(priorConversation.streams, priorRemoved?.conversationStreams) ||
-      logical(currentConversation.generations, currentRemoved?.conversationGenerations) <
+      logicalConversation(currentConversation.generations, currentRemoved?.conversationGenerations, externalConversationPurge.generations) <
         logical(priorConversation.generations, priorRemoved?.conversationGenerations) ||
-      logical(currentConversation.events, currentRemoved?.conversationEvents) <
+      logicalConversation(currentConversation.events, currentRemoved?.conversationEvents, externalConversationPurge.events) <
         logical(priorConversation.events, priorRemoved?.conversationEvents)))
   if (regressed) {
     throw new WorkflowLedgerMigrationError(

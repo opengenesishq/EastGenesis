@@ -2,6 +2,10 @@ import type { SessionMeta, TaskRunRecord, TaskSnapshotRecord } from '../../share
 import type { WorkItem } from '../../shared/project-workspace-types'
 import { createProjectWorkspaceCommandService } from '../project-workspace/command-service'
 import { openProjectWorkspaceStore } from '../project-workspace/store'
+import { app } from 'electron'
+import { assertSideChatBinding } from '../side-chat/side-chat-policy'
+
+type CanonicalRunSession = Pick<SessionMeta, 'id' | 'workspaceId' | 'goalId' | 'workItemId'> & Partial<SessionMeta>
 
 export type WorkflowRunCanonicalBindingResult =
   | { disposition: 'unscoped' }
@@ -30,7 +34,7 @@ interface CanonicalRunBindingScope {
  * WorkItem row because that would invalidate the source revision/digest.
  */
 export async function bindWorkflowRunToCanonicalWorkItem(
-  meta: Pick<SessionMeta, 'id' | 'workspaceId' | 'goalId' | 'workItemId'>,
+  meta: CanonicalRunSession,
   run: TaskRunRecord,
   rootDir?: string
 ): Promise<WorkflowRunCanonicalBindingResult> {
@@ -62,10 +66,18 @@ export async function bindWorkflowRunToCanonicalWorkItem(
 
 /** Resolve and validate ownership without mutating the canonical WorkItem. */
 export async function resolveWorkflowRunCanonicalWorkItem(
-  meta: Pick<SessionMeta, 'id' | 'workspaceId' | 'goalId' | 'workItemId'>,
+  meta: CanonicalRunSession,
   run: TaskRunRecord,
   rootDir?: string
 ): Promise<WorkflowRunCanonicalResolution> {
+  if (meta.sideChat) {
+    // A verified side conversation observes its source Workspace, but never
+    // becomes an execution Run of that source Goal or WorkItem.
+    assertSideChatBinding(meta as SessionMeta, rootDir ?? app.getPath('userData'), { checkSource: false, allowClosed: true })
+    if (run.sessionId !== meta.id) throw new Error(`Run ${run.id} crosses session ownership`)
+    requiredId(run.id, 'runId')
+    return { disposition: 'unscoped' }
+  }
   const scope = resolveCanonicalRunBindingScope(meta)
   if (!scope) return { disposition: 'unscoped' }
   if (run.sessionId !== meta.id) throw new Error(`Run ${run.id} crosses session ownership`)

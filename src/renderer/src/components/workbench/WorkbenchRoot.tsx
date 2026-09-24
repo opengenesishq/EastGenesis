@@ -1,11 +1,15 @@
-import { createElement, memo, Suspense, useEffect, useRef, useState } from 'react'
+import { createElement, memo, Suspense, useEffect, useState } from 'react'
 import type * as React from 'react'
-import { PanelRightClose } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Globe2, PanelBottom, PanelRight, PanelRightClose, SquareTerminal } from 'lucide-react'
 import ChatView from '../ChatView'
 import RoutineEditor from '../RoutineEditor'
-import { HeaderIcon, type HeaderIconName } from '../ChatHeaderIcons'
+import { HeaderIcon } from '../ChatHeaderIcons'
 import { PANEL_REGISTRY, type PanelId } from './panels'
+import './modern-workbench.css'
+import WorkspaceBrowserPanel from './WorkspaceBrowserPanel'
 import { useStore } from '../../store'
+import { isShortcutCapture, matchesDesktopShortcut } from '../../desktop-keyboard'
 import { useT } from '../../i18n'
 import type { LayoutSettings, PluginRegistryItem, Routine, SessionMeta } from '../../../../shared/types'
 import {
@@ -15,22 +19,12 @@ import {
   useFirstTaskOnboardingRecord
 } from '../experience/first-task-onboarding'
 
-type RoutineEditorState = { mode: 'create' } | { mode: 'edit'; id: string }
+type RoutineEditorState = { mode: 'create'; sessionId?: string } | { mode: 'edit'; id: string }
 
 const SIDE_MIN_WIDTH = 320
 const SIDE_MAX_WIDTH = 720
 const DOCK_MIN_HEIGHT = 220
 const DOCK_MAX_HEIGHT = 520
-
-type DeskToolKey = 'review' | 'terminal' | 'browser' | 'files' | 'sideChat' | 'memory' | 'execution'
-
-interface DeskToolItem {
-  key: DeskToolKey
-  icon: HeaderIconName
-  label: string
-  active: boolean
-  onSelect: () => void
-}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)))
@@ -128,19 +122,55 @@ function resizeWorkbenchFromKeyboard(
   apply(clamp(next, min, max))
 }
 
-function WorkbenchRoot({ active = true }: { active?: boolean }): React.JSX.Element {
+const workspacePanels = new Set<PanelId>(['routine', 'pluginRegistry'])
+
+function WorkbenchRoot({ active = true, children }: { active?: boolean; children?: React.ReactNode }): React.JSX.Element {
   const t = useT()
   const [routineEditor, setRoutineEditor] = useState<RoutineEditorState | null>(null)
+  const [sideLauncherOpen, setSideLauncherOpen] = useState(false)
+  const [layoutControlsSlot, setLayoutControlsSlot] = useState<HTMLElement | null>(null)
+  useEffect(() => { setLayoutControlsSlot(document.getElementById('workbench-layout-controls-slot')) }, [])
+  const zh = useStore((s) => s.settings.language === 'zh')
   const activeId = useStore((s) => s.activeId)
   const order = useStore((s) => s.order)
   const sessions = useStore((s) => s.sessions)
   const activePanelId = useStore((s) => s.workbench.activePanelId)
   const mountedPanels = useStore((s) => s.workbench.mountedPanels)
+  const terminalDockOpen = useStore((s) => s.workbench.terminalDockOpen)
   const layout = useStore((s) => s.settings.layout)
   const updateSettings = useStore((s) => s.updateSettings)
   const openPanel = useStore((s) => s.openPanel)
   const closePanel = useStore((s) => s.closePanel)
-  const togglePanel = useStore((s) => s.togglePanel)
+  const openTerminalPanel = useStore((s) => s.openTerminalPanel)
+  const closeTerminalPanel = useStore((s) => s.closeTerminalPanel)
+  const welcome = Boolean(children)
+  useEffect(() => {
+    const openForSession = (event: Event): void => {
+      if (!active || welcome) return
+      const id = (event as CustomEvent<unknown>).detail
+      if (typeof id !== 'string') return
+      const meta = useStore.getState().sessions[id]?.meta
+      if (!meta || meta.status === 'closed') return
+      setRoutineEditor({ mode: 'create', sessionId: id })
+    }
+    window.addEventListener('caogen:routine-for-session', openForSession)
+    return () => window.removeEventListener('caogen:routine-for-session', openForSession)
+  }, [active, welcome])
+  useEffect(() => {
+    if (!welcome) return
+    const panel = useStore.getState().workbench.activePanelId
+    // A new task starts from a clean canvas. Persisted panels (especially
+    // routines/plugins from the previous task) belong to the old context and
+    // must not occupy the first screen. They remain available from the panel
+    // launcher after the user explicitly opens them.
+    if (panel) useStore.getState().closePanel()
+    setSideLauncherOpen(false)
+  }, [welcome])
+  const selectWorkPanel = (id: PanelId): void => {
+    if (!welcome || workspacePanels.has(id)) { openPanel(id); return }
+    // New-task panels must not operate on whichever task was selected previously.
+    useStore.setState((state) => ({ workbench: { ...state.workbench, activePanelId: id } }))
+  }
   const pluginRegistry = useStore((s) => s.workbench.pluginRegistry)
   const pluginRegistryLoading = useStore((s) => s.workbench.pluginRegistryLoading)
   const pluginRegistryError = useStore((s) => s.workbench.pluginRegistryError)
@@ -160,6 +190,7 @@ function WorkbenchRoot({ active = true }: { active?: boolean }): React.JSX.Eleme
   const routineMessage = useStore((s) => s.workbench.routineMessage)
   const selectedRoutineId = useStore((s) => s.workbench.selectedRoutineId)
   const memoryInitialForm = useStore((s) => s.workbench.memoryInitialForm)
+  const memoryInitialScope = useStore((s) => s.workbench.memoryInitialScope)
   const refreshPluginRegistryPanel = useStore((s) => s.refreshPluginRegistryPanel)
   const closePluginRegistryPanel = useStore((s) => s.closePluginRegistryPanel)
   const selectPluginRegistryItem = useStore((s) => s.selectPluginRegistryItem)
@@ -199,17 +230,8 @@ function WorkbenchRoot({ active = true }: { active?: boolean }): React.JSX.Eleme
   }
 
   const collapseSidePanel = (): void => {
-    closePanel()
-  }
-  const toggleSidePanel = (): void => {
-    if (sideOpen) {
-      closePanel()
-      return
-    }
-    openPanel('diff')
-  }
-  const toggleSummaryPanel = (): void => {
-    togglePanel('result')
+    setSideLauncherOpen(false)
+    if (activePanelId && activePanelId !== 'terminal') closePanel()
   }
   const closeRoutineEditor = (): void => {
     setRoutineEditor(null)
@@ -224,64 +246,40 @@ function WorkbenchRoot({ active = true }: { active?: boolean }): React.JSX.Eleme
         .filter((meta): meta is SessionMeta => Boolean(meta && meta.parentSessionId === activeId))
     : []
   const childResults = activeId ? sessions[activeId]?.childResults ?? {} : {}
-  const terminalOpen = activePanelId === 'terminal'
-  const sideOpen = activePanelId !== null && !terminalOpen
-  const deskTools: DeskToolItem[] = [
-    {
-      key: 'execution',
-      icon: 'summary',
-      label: t('deskExecution'),
-      active: activePanelId === 'execution',
-      onSelect: () => openPanel('execution')
-    },
-    {
-      key: 'review',
-      icon: 'review',
-      label: t('deskReview'),
-      active: activePanelId === 'diff' || activePanelId === 'worktree',
-      onSelect: () => openPanel('diff')
-    },
-    {
-      key: 'terminal',
-      icon: 'terminal',
-      label: t('deskTerminal'),
-      active: activePanelId === 'terminal',
-      onSelect: () => openPanel('terminal')
-    },
-    {
-      key: 'browser',
-      icon: 'browser',
-      label: t('deskBrowser'),
-      active: activePanelId === 'browser',
-      onSelect: () => openPanel('browser')
-    },
-    {
-      key: 'files',
-      icon: 'files',
-      label: t('deskFiles'),
-      active: activePanelId === 'files' || activePanelId === 'preview',
-      onSelect: () => openPanel('files')
-    },
-    {
-      key: 'sideChat',
-      icon: 'subagents',
-      label: t('deskSideChat'),
-      active: activePanelId === 'subagent',
-      onSelect: () => openPanel('subagent')
-    },
-    {
-      key: 'memory',
-      icon: 'memory',
-      label: t('memoryShort'),
-      active: activePanelId === 'memory',
-      onSelect: () => openPanel('memory')
+  const terminalOpen = terminalDockOpen || activePanelId === 'terminal'
+  const sideOpen = sideLauncherOpen || (activePanelId !== null && activePanelId !== 'terminal')
+  const toggleTerminal = (): void => {
+    if (terminalOpen) closeTerminalPanel()
+    else {
+      useStore.setState((state) => ({ workbench: { ...state.workbench, terminalScope: children ? 'workspace' : 'task' } }))
+      void openTerminalPanel()
     }
-  ]
+  }
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || isShortcutCapture(event.target) || !matchesDesktopShortcut(event, 'toggleTerminal', useStore.getState().settings.desktopShortcuts) || !active) return
+      event.preventDefault()
+      const state = useStore.getState()
+      if (state.workbench.terminalDockOpen || state.workbench.activePanelId === 'terminal') state.closeTerminalPanel()
+      else {
+        useStore.setState((current) => ({ workbench: { ...current.workbench, terminalScope: children ? 'workspace' : 'task' } }))
+        void state.openTerminalPanel()
+      }
+    }
+    window.addEventListener('keydown', keydown)
+    return () => window.removeEventListener('keydown', keydown)
+  }, [active, children])
 
   const renderPanelContent = (id: PanelId): Record<string, unknown> => {
     switch (id) {
+      case 'terminal':
+        return { workspaceMode: Boolean(children), active }
+      case 'browser':
+        return { active: active && !welcome && activePanelId === 'browser' }
       case 'execution':
-        return { sessionId: activeId, active: active && activePanelId === 'execution' }
+        return { sessionId: activeId, active: active && !welcome && activePanelId === 'execution' }
+      case 'sources':
+        return { sessionId: activeId, active: active && !welcome && activePanelId === 'sources' }
       case 'result':
         return { sessionId: activeId, standalone: false }
       case 'pluginRegistry':
@@ -323,6 +321,8 @@ function WorkbenchRoot({ active = true }: { active?: boolean }): React.JSX.Eleme
           onDispatch: dispatchSubagentText,
           onDecomposeAndDispatch: decomposeAndDispatchTaskDag
         }
+      case 'sidechat':
+        return { sourceSessionId: activeId, active: active && !welcome && activePanelId === 'sidechat' }
       case 'routine':
         return {
           routines,
@@ -331,12 +331,12 @@ function WorkbenchRoot({ active = true }: { active?: boolean }): React.JSX.Eleme
           error: routineError,
           message: routineMessage,
           selectedRoutineId,
-          subtitle: '本地持久化 · 定时执行已启用',
-          cloudSchedulingNote: 'Routine 在本机定时执行；云端托管定时尚未接入。',
           onAddRoutine: () => setRoutineEditor({ mode: 'create' }),
           onRefresh: refreshRoutinePanel,
           onClose: closeRoutinePanel,
           onSelectRoutine: (routine: Routine) => selectRoutine(routine.id),
+          onSelectAllRoutines: () => selectRoutine(null),
+          onOpenSession: selectSession,
           onEditRoutine: (routine: Routine) => setRoutineEditor({ mode: 'edit', id: routine.id }),
           onDeleteRoutine: (routine: Routine) => {
             if (window.confirm(`删除 Routine「${routine.name}」?`)) void deleteRoutine(routine.id)
@@ -346,30 +346,68 @@ function WorkbenchRoot({ active = true }: { active?: boolean }): React.JSX.Eleme
         }
       case 'memory':
         return activeId
-          ? { sessionId: activeId, initialForm: memoryInitialForm, onClose: closeMemoryPanel }
+          ? { sessionId: activeId, initialForm: memoryInitialForm, initialScope: memoryInitialScope, onClose: closeMemoryPanel }
           : {}
       default:
         return {}
     }
   }
 
+  const layoutControls = active ? <div className="workbench-layout-controls no-drag">
+    <button type="button" className={`icon-btn${terminalOpen ? ' icon-btn-active' : ''}`} aria-label={zh ? '切换底部面板' : 'Toggle bottom panel'} title={zh ? '切换底部面板 · ⌘J / Ctrl+J' : 'Toggle bottom panel · ⌘J / Ctrl+J'} aria-pressed={Boolean(terminalOpen)} onClick={toggleTerminal}><PanelBottom size={17} /></button>
+    <button type="button" className={`icon-btn${sideOpen ? ' icon-btn-active' : ''}`} aria-label={zh ? '切换右侧面板' : 'Toggle side panel'} title={zh ? '切换右侧面板' : 'Toggle side panel'} aria-pressed={sideOpen} onClick={() => sideOpen ? collapseSidePanel() : setSideLauncherOpen(true)}><PanelRight size={17} /></button>
+  </div> : null
   return (
     <div
-      className={`workbench ${sideOpen ? 'workbench-split' : ''} ${terminalOpen ? 'workbench-dock-open' : ''}`}
+      className={`workbench modern-workbench ${sideOpen ? 'workbench-split' : ''} ${terminalOpen ? 'workbench-dock-open' : ''}`}
       style={workbenchDimensions(sideWidth, dockHeight)}
+      data-workbench-welcome={children ? "true" : undefined}
+      data-layout-hosted={layoutControlsSlot ? 'true' : undefined}
     >
-      <DeskControlRail
-        sideOpen={sideOpen}
-        summaryOpen={activePanelId === 'result'}
-        tools={deskTools}
-        onToggleSummary={toggleSummaryPanel}
-        onToggleSidePanel={toggleSidePanel}
-      />
+      {layoutControlsSlot ? createPortal(layoutControls, layoutControlsSlot) : layoutControls}
+      <div className="workbench-main-row">
       <section className="workbench-pane workbench-primary">
         <section className="workbench-chat">
-          <FirstTaskWorkbenchStatus />
-          <ChatView />
+          {children ?? <><FirstTaskWorkbenchStatus /><ChatView /></>}
         </section>
+      </section>
+      <WorkbenchSidePanel
+        activePanelId={activePanelId}
+        open={sideOpen}
+        sideWidth={sideWidth}
+        onCollapse={collapseSidePanel}
+        onSelect={selectWorkPanel}
+        onPointerDown={(event) => startWorkbenchSideResize(event, sideWidth, setSideWidth, patchLayout)}
+        onResize={(value) => { setSideWidth(value); patchLayout({ workbenchSideWidth: value }) }}
+      >
+        {(activePanelId === null || activePanelId === 'terminal') && <div className="workbench-panel-launcher">
+          <button type="button" onClick={() => selectWorkPanel('browser')}><Globe2 size={17} /><span>{zh ? '浏览器' : 'Browser'}</span></button>
+          <button type="button" onClick={toggleTerminal}><SquareTerminal size={17} /><span>{zh ? '终端' : 'Terminal'}</span></button>
+        </div>}
+        <div className="workbench-panel" style={{ display: welcome && activePanelId === 'browser' ? 'flex' : 'none' }}>
+          <WorkspaceBrowserPanel active={active && welcome && activePanelId === 'browser'} />
+        </div>
+        {welcome && activePanelId && activePanelId !== 'terminal' && activePanelId !== 'browser' && !workspacePanels.has(activePanelId) && <WelcomePanelEmpty panelId={activePanelId} zh={zh} />}
+        <Suspense fallback={<div className="workbench-panel-loading" />}>
+          {PANEL_REGISTRY.filter((def) => def.id !== 'terminal').map((def) => {
+            const isActive = (!welcome || workspacePanels.has(def.id)) && activePanelId === def.id
+            const isMounted = mountedPanels.has(def.id)
+            if (!isActive && !isMounted) return null
+            const Component = def.component
+            return (
+              <div
+                key={def.id}
+                className="workbench-panel"
+                style={{ display: isActive ? 'flex' : 'none' }}
+                aria-hidden={!isActive}
+              >
+                {createElement(Component, renderPanelContent(def.id))}
+              </div>
+            )
+          })}
+        </Suspense>
+      </WorkbenchSidePanel>
+      </div>
         <div
           className="workbench-dock-gutter no-drag"
           role="separator"
@@ -394,7 +432,7 @@ function WorkbenchRoot({ active = true }: { active?: boolean }): React.JSX.Eleme
         >
           <Suspense fallback={<div className="workbench-panel-loading" />}>
             {PANEL_REGISTRY.filter((def) => def.id === 'terminal').map((def) => {
-              const isActive = activePanelId === def.id
+              const isActive = terminalOpen
               const isMounted = mountedPanels.has(def.id)
               if (!isActive && !isMounted) return null
               const Component = def.component
@@ -411,37 +449,11 @@ function WorkbenchRoot({ active = true }: { active?: boolean }): React.JSX.Eleme
             })}
           </Suspense>
         </section>
-      </section>
-      <WorkbenchSidePanel
-        activePanelId={activePanelId}
-        open={sideOpen}
-        sideWidth={sideWidth}
-        onCollapse={collapseSidePanel}
-        onPointerDown={(event) => startWorkbenchSideResize(event, sideWidth, setSideWidth, patchLayout)}
-        onResize={(value) => { setSideWidth(value); patchLayout({ workbenchSideWidth: value }) }}
-      >
-        <Suspense fallback={<div className="workbench-panel-loading" />}>
-          {PANEL_REGISTRY.filter((def) => def.id !== 'terminal').map((def) => {
-            const isActive = activePanelId === def.id
-            const isMounted = mountedPanels.has(def.id)
-            if (!isActive && !isMounted) return null
-            const Component = def.component
-            return (
-              <div
-                key={def.id}
-                className="workbench-panel"
-                style={{ display: isActive ? 'flex' : 'none' }}
-                aria-hidden={!isActive}
-              >
-                {createElement(Component, renderPanelContent(def.id))}
-              </div>
-            )
-          })}
-        </Suspense>
-      </WorkbenchSidePanel>
+
       {routineEditor && (routineEditor.mode === 'create' || selectedRoutine) && (
         <RoutineEditor
           routine={routineEditor.mode === 'edit' ? selectedRoutine : null}
+          initialSessionId={routineEditor.mode === 'create' ? routineEditor.sessionId : undefined}
           onClose={closeRoutineEditor}
         />
       )}
@@ -449,11 +461,58 @@ function WorkbenchRoot({ active = true }: { active?: boolean }): React.JSX.Eleme
   )
 }
 
+function WelcomePanelEmpty({ panelId, zh }: { panelId: PanelId; zh: boolean }): React.JSX.Element {
+  const copy: Record<string, { title: string; detail: string; icon: 'files' | 'review' | 'summary' }> = {
+    execution: {
+      title: zh ? '执行' : 'Run',
+      detail: zh ? '提交一项任务后，这里会显示计划、当前步骤和需要你处理的权限。' : 'Submit a task to see its plan, current step, and approvals here.',
+      icon: 'summary'
+    },
+    result: {
+      title: zh ? '结果' : 'Result',
+      detail: zh ? '完成一项任务后，这里会集中显示产物、验证记录和交付入口。' : 'Finish a task to see its artifacts, verification, and delivery actions here.',
+      icon: 'summary'
+    },
+    sources: {
+      title: zh ? '资料' : 'Sources',
+      detail: zh ? '提交任务并添加资料后，这里会显示本次任务使用的来源。' : 'Submit a task and add sources to see the context used for it here.',
+      icon: 'files'
+    },
+    files: {
+      title: zh ? '文件' : 'Files',
+      detail: zh ? '开始任务后，在这里打开当前任务的文件。' : 'Start a task to open its files here.',
+      icon: 'files'
+    },
+    diff: {
+      title: zh ? '差异' : 'Diff',
+      detail: zh ? '开始任务后，在这里查看当前任务的修改。' : 'Start a task to review its changes here.',
+      icon: 'review'
+    },
+    preview: {
+      title: zh ? '预览' : 'Preview',
+      detail: zh ? '任务产生可预览产物后，这里会显示预览。' : 'A preview appears here when the task produces a previewable artifact.',
+      icon: 'files'
+    },
+    worktree: {
+      title: zh ? '工作树' : 'Worktree',
+      detail: zh ? '选择项目并开始任务后，这里会显示工作树状态。' : 'Choose a project and start a task to see its worktree state here.',
+      icon: 'review'
+    }
+  }
+  const value = copy[panelId] ?? copy.files
+  return <div className="workbench-panel-empty">
+    <HeaderIcon name={value.icon} />
+    <strong>{value.title}</strong>
+    <p>{value.detail}</p>
+  </div>
+}
+
 function WorkbenchSidePanel({
   activePanelId,
   open,
   sideWidth,
   onCollapse,
+  onSelect,
   onPointerDown,
   onResize,
   children
@@ -462,6 +521,7 @@ function WorkbenchSidePanel({
   open: boolean
   sideWidth: number
   onCollapse: () => void
+  onSelect: (id: PanelId) => void
   onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void
   onResize: (value: number) => void
   children: React.ReactNode
@@ -484,7 +544,8 @@ function WorkbenchSidePanel({
       </div>
       <section className={`workbench-pane workbench-side ${activePanelId === 'files' ? 'workbench-side-files' : ''}`}
         style={{ display: open ? 'flex' : 'none' }}>
-        {children}
+        {activePanelId && activePanelId !== 'terminal' && <WorkbenchPanelTabs activePanelId={activePanelId} onSelect={onSelect} onClose={onCollapse} />}
+        <div className="workbench-side-content">{children}</div>
       </section>
     </>
   )
@@ -553,126 +614,40 @@ function FirstTaskWorkbenchStatus(): React.JSX.Element | null {
 
 export default memo(WorkbenchRoot)
 
-interface DeskControlRailProps {
-  sideOpen: boolean
-  summaryOpen: boolean
-  tools: DeskToolItem[]
-  onToggleSummary: () => void
-  onToggleSidePanel: () => void
-}
-
-function DeskControlRail({
-  sideOpen,
-  summaryOpen,
-  tools,
-  onToggleSummary,
-  onToggleSidePanel
-}: DeskControlRailProps): React.JSX.Element {
+function WorkbenchPanelTabs({ activePanelId, onSelect, onClose }: {
+  activePanelId: PanelId | null
+  onSelect: (id: PanelId) => void
+  onClose: () => void
+}): React.JSX.Element {
   const t = useT()
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const drawerRef = useRef<HTMLDivElement>(null)
-  const triggerRef = useRef<HTMLButtonElement>(null)
-
-  useEffect(() => {
-    if (!drawerOpen) return
-    const onPointerDown = (event: MouseEvent): void => {
-      if (drawerRef.current?.contains(event.target as Node)) return
-      setDrawerOpen(false)
-    }
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        setDrawerOpen(false)
-        triggerRef.current?.focus()
-      }
-    }
-    document.addEventListener('mousedown', onPointerDown, true)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown, true)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [drawerOpen])
-
-  useEffect(() => {
-    if (!drawerOpen) return
-    requestAnimationFrame(() => drawerRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus())
-  }, [drawerOpen])
-
-  const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (!['ArrowDown', 'ArrowUp', 'Home', 'End', 'Escape'].includes(event.key)) return
-    event.preventDefault()
-    if (event.key === 'Escape') {
-      setDrawerOpen(false)
-      triggerRef.current?.focus()
-      return
-    }
-    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-    if (items.length === 0) return
-    const current = Math.max(0, items.indexOf(document.activeElement as HTMLButtonElement))
-    const next = event.key === 'Home' ? 0
-      : event.key === 'End' ? items.length - 1
-        : event.key === 'ArrowDown' ? (current + 1) % items.length
-          : (current - 1 + items.length) % items.length
-    items[next]?.focus()
-  }
-
-  return (
-    <aside className="desk-rail no-drag" aria-label={t('deskRailLabel')}>
-      <button
-        type="button"
-        className={`desk-rail-button ${summaryOpen ? 'desk-rail-button-active' : ''}`}
-        aria-label={t('toggleDeskSummary')}
-        title={t('toggleDeskSummary')}
-        onClick={onToggleSummary}
-      >
-        <HeaderIcon name="summary" />
-      </button>
-
-      <div className="desk-rail-drawer-anchor" ref={drawerRef}>
-        <button
-          ref={triggerRef}
-          type="button"
-          className={`desk-rail-button ${drawerOpen ? 'desk-rail-button-active' : ''}`}
-          aria-label={t('openDeskTools')}
-          aria-haspopup="menu"
-          aria-expanded={drawerOpen}
-          title={t('openDeskTools')}
-          onClick={() => setDrawerOpen((open) => !open)}
-        >
-          <HeaderIcon name="tools" />
-        </button>
-        {drawerOpen && (
-          <div className="desk-tool-drawer" role="menu" aria-label={t('deskToolDrawer')}
-            onKeyDown={handleMenuKeyDown}>
-            {tools.map((tool) => (
-              <button
-                key={tool.key}
-                type="button"
-                className={`desk-tool-item ${tool.active ? 'desk-tool-item-active' : ''}`}
-                role="menuitem"
-                onClick={() => {
-                  triggerRef.current?.focus()
-                  setDrawerOpen(false)
-                  tool.onSelect()
-                }}
-              >
-                <HeaderIcon name={tool.icon} />
-                <span>{tool.label}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <button
-        type="button"
-        className={`desk-rail-button ${sideOpen ? 'desk-rail-button-active' : ''}`}
-        aria-label={sideOpen ? t('hideDeskPanel') : t('showDeskPanel')}
-        title={sideOpen ? t('hideDeskPanel') : t('showDeskPanel')}
-        onClick={onToggleSidePanel}
-      >
-        <HeaderIcon name="panel" />
-      </button>
-    </aside>
-  )
+  const zh = useStore((state) => state.settings.language === 'zh')
+  const tabs: Array<{ id: PanelId; label: string; icon: 'files' | 'review' | 'browser' | 'summary' }> = [
+    { id: 'execution', label: zh ? '执行' : 'Run', icon: 'summary' },
+    { id: 'result', label: zh ? '结果' : 'Result', icon: 'summary' },
+    { id: 'sources', label: zh ? '资料' : 'Sources', icon: 'files' },
+    { id: 'files', label: zh ? '文件' : 'Files', icon: 'files' },
+    { id: 'diff', label: zh ? '差异' : 'Diff', icon: 'review' },
+    { id: 'browser', label: zh ? '浏览器' : 'Browser', icon: 'browser' }
+  ]
+  const activeTab = activePanelId === 'preview' ? 'files' : activePanelId === 'worktree' ? 'diff' : activePanelId
+  const current = PANEL_REGISTRY.find((panel) => panel.id === activePanelId)
+  return <header className="workbench-panel-tabs no-drag">
+    <div role="tablist" aria-label={zh ? '工作面板' : 'Workspace panels'}>
+      {tabs.map((tab, index) => <button key={tab.id} type="button" role="tab"
+        id={`workbench-tab-${tab.id}`} aria-selected={activeTab === tab.id}
+        tabIndex={activeTab === tab.id || (!tabs.some((item) => item.id === activeTab) && index === 0) ? 0 : -1}
+        onClick={() => onSelect(tab.id)} onKeyDown={(event) => {
+          const nextIndex = event.key === 'ArrowRight' ? (index + 1) % tabs.length
+            : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length
+              : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1
+          if (nextIndex < 0) return
+          event.preventDefault(); onSelect(tabs[nextIndex].id)
+          requestAnimationFrame(() => document.getElementById(`workbench-tab-${tabs[nextIndex].id}`)?.focus())
+        }}><HeaderIcon name={tab.icon} /><span>{tab.label}</span></button>)}
+    </div>
+    {current && !tabs.some((tab) => tab.id === activeTab) && <span className="workbench-current-panel">{t(current.titleKey)}</span>}
+    <button type="button" className="icon-btn workbench-panel-close" aria-label={t('collapseToolPanel')} title={t('collapseToolPanel')} onClick={onClose}>
+      <PanelRightClose size={15} aria-hidden="true" />
+    </button>
+  </header>
 }

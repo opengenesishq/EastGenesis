@@ -21,6 +21,7 @@ writeReport()
 try {
   await build({ entryPoints: [path.join(repoRoot, 'scripts', 'session-routing-control-ui-entry.tsx')],
     outfile: path.join(tempRoot, 'harness.js'), bundle: true, platform: 'browser', format: 'iife', jsx: 'automatic',
+    loader: { '.png': 'dataurl' },
     define: { 'process.env.NODE_ENV': '"development"' } })
   const htmlPath = path.join(tempRoot, 'harness.html')
   const checksPath = path.join(tempRoot, `checks-${report.runId}.json`)

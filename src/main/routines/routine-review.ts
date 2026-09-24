@@ -35,7 +35,7 @@ export async function reviewRoutineRun(
   if (record.status !== 'succeeded' || record.inboxStatus !== 'needs_review') {
     throw new Error(`Routine Run ${id} is not ready for review`)
   }
-  if (record.projectId && record.workItemId) {
+  if (record.projectId && record.workItemId && !record.heartbeat) {
     await applyCanonicalReview(workspaceRoot, record, decision, note)
   }
   return reviewRoutineRunRecord(routineRoot, id, expectedDecision, note)

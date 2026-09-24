@@ -49,7 +49,7 @@ async function run() {
     const win = await waitForWindow()
     win.setSize(1200, 800)
     win.webContents.reload()
-    await waitForRenderer(win, `document.body.innerText.includes('CaoGen')`)
+    await waitForRenderer(win, `document.body.innerText.includes('EastGenesis')`)
     await selectSession(win, alpha.id)
     await waitForRenderer(win, `document.querySelectorAll('.msg-assistant .markdown').length === 1`)
     await verifyCopyActions(win)
@@ -241,7 +241,7 @@ async function verifySessionDrafts(win, alphaId, betaId) {
 
 async function verifyRestartPersistence(win, alphaId, betaId) {
   win.webContents.reload()
-  await waitForRenderer(win, `document.body.innerText.includes('CaoGen')`)
+    await waitForRenderer(win, `document.body.innerText.includes('EastGenesis')`)
   await selectSession(win, alphaId)
   check('first session draft survives renderer restart', await composerText(win) === 'alpha session draft')
   await selectSession(win, betaId)

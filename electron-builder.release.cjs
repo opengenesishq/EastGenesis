@@ -25,7 +25,8 @@ module.exports = {
     entitlementsInherit: 'resources/entitlements.mac.inherit.plist',
     extendInfo: {
       ...(baseMac.extendInfo || {}),
-      NSAppleEventsUsageDescription: 'CaoGen uses automation only for user-approved desktop actions.'
+      NSAppleEventsUsageDescription: 'EastGenesis uses automation only for user-approved desktop actions.',
+      NSMicrophoneUsageDescription: 'EastGenesis records your voice only when you start voice input, so you can preview and insert a transcription into your task draft.'
     }
   },
   win: {

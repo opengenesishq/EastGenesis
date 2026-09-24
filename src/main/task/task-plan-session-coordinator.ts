@@ -15,7 +15,7 @@ import { reconcileTaskPlanLedger, syncTaskPlanLedger } from './task-plan-ledger'
 import { buildCanonicalMissionTaskPlan, enrichCanonicalTaskPlanInstitutions } from './mission-task-plan'
 import { readGoalInstitutionContext } from '../project-workspace/institution-goal-binding'
 import { bindTaskPlanInstitutions } from './task-plan-institutions'
-import { assertTaskPlanRequirementsCurrent, requirementContinuationDraft } from './task-plan-requirements'
+import { currentTaskRequirementSource, assertTaskPlanRequirementsCurrent, requirementContinuationDraft } from './task-plan-requirements'
 
 export class TaskPlanSessionCoordinator {
   private readonly store: TaskPlanContractStore
@@ -246,6 +246,7 @@ export class TaskPlanSessionCoordinator {
       // A child WorkItem is not the Mission source. Validate the exact ancestor
       // that owns the approved plan, including when the child has its own plan.
       if (authority.version) await this.assertMissionSourceCurrent(authority.meta, authority.version)
+      else if (await currentTaskRequirementSource(authority.meta, this.userDataRoot())) throw new Error('目标或交付要求已更新，请先生成并确认新计划')
     }
     const latest = this.executionAuthorities(this.requireSession(meta.id).meta)
     if (executionAuthorityFingerprint(latest) !== fingerprint) {

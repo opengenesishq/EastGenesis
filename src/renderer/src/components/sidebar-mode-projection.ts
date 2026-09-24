@@ -10,8 +10,9 @@ export function splitAssistantEntries(entries: SidebarEntry[]): {
 } {
   const result: { archived: HistoryEntry[]; pinned: SidebarEntry[]; sessions: SidebarEntry[] } = { archived: [], pinned: [], sessions: [] }
   for (const group of groupTaskEntries(entries)) {
-    const live = group.entries.some((entry) => entry.kind === 'active' || !entry.history.archived)
-    if (!live) { result.archived.push(...group.entries.flatMap((entry) => entry.kind === 'history' ? [entry.history] : [])); continue }
+    const live = group.entries.some((entry) => !entry.history?.archived ||
+      (entry.kind === 'active' && (entry.meta.status === 'running' || entry.meta.status === 'starting' || entry.pendingCount > 0)))
+    if (!live) { result.archived.push(...group.entries.flatMap((entry) => entry.history ? [entry.history] : [])); continue }
     const pinned = group.entries.some((entry) => Boolean(entry.history?.pinned))
     result[pinned ? 'pinned' : 'sessions'].push(...group.entries)
   }

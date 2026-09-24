@@ -994,7 +994,7 @@ function shortCredential(value) { return value?.startsWith('sha256:') ? `SHA-256
 async function openProviderSettings() {
   const win = await waitForWindow()
   win.setSize(1200, 800)
-  await waitForRenderer(win, `document.body.innerText.includes('CaoGen')`)
+  await waitForRenderer(win, `document.body.innerText.includes('EastGenesis')`)
   await clickRendererText(win, '设置')
   await waitForRenderer(win, `Boolean(document.querySelector('.settings-page'))`)
   await rendererValue(win, `document.querySelector('[data-settings-tab="providers"]')?.click()`)

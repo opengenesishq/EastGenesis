@@ -138,9 +138,9 @@ async function saveStudioResult(
   const win = BrowserWindow.fromWebContents(sender) ?? BrowserWindow.getAllWindows()[0]
   const title = snapshot.workItems[0]?.title ?? snapshot.goal?.title ?? snapshot.workspace?.name ?? 'delivery'
   const result = await dialog.showSaveDialog(win, {
-    title: '导出 CaoGen 可移植交付包',
+    title: '导出 EastGenesis 可移植交付包',
     defaultPath: `caogen-delivery-${safeFileStem(title)}-${new Date(snapshot.generatedAt).toISOString().slice(0, 10)}.zip`,
-    filters: [{ name: 'CaoGen delivery package', extensions: ['zip'] }]
+    filters: [{ name: 'EastGenesis delivery package', extensions: ['zip'] }]
   })
   if (result.canceled || !result.filePath) return { canceled: true }
   const creatingRun = [...snapshot.runs]
@@ -160,7 +160,7 @@ async function saveStudioResult(
     producerInvocationId: `studio-result-export:${exportDigest}`,
     artifacts: [{
       kind: 'release_package',
-      title: `CaoGen portable delivery package: ${title}`,
+    title: `EastGenesis portable delivery package: ${title}`,
       content: { storageKind: 'blob', bytes: packageBytes },
       lineageKey: [
         'studio-result',

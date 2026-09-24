@@ -1,0 +1,18 @@
+.voice-draft-input { position: relative; display: inline-flex; }
+.voice-draft-panel { position: absolute; right: 0; bottom: calc(100% + 10px); z-index: 90; width: min(400px, calc(100vw - 48px)); padding: 16px; border: 1px solid var(--border, #d8d8de); border-radius: 12px; background: var(--bg-elevated, #fff); color: var(--text, #24242c); box-shadow: 0 12px 40px #0003; text-align: left; white-space: normal; font-size: 13px; font-weight: 400; line-height: 1.5; }
+.voice-draft-panel header, .voice-draft-panel footer { display: flex; align-items: center; gap: 8px; }
+.voice-draft-panel header { justify-content: space-between; }
+.voice-draft-panel footer { margin-top: 12px; flex-wrap: wrap; }
+.voice-draft-panel p { margin: 8px 0; }
+.voice-draft-target { font-size: 12px; overflow-wrap: anywhere; }
+.voice-draft-hint { color: var(--text-secondary, #777); font-size: 12px; }
+.voice-draft-panel audio { width: 100%; height: 36px; margin-top: 10px; }
+.voice-draft-panel label { display: block; margin-top: 10px; }
+.voice-draft-panel textarea { display: block; width: 100%; box-sizing: border-box; resize: vertical; margin-top: 5px; }
+.voice-draft-recording { display: flex; align-items: center; gap: 8px; padding: 12px 0; }
+.voice-draft-dot { width: 9px; height: 9px; background: #d84848; border-radius: 50%; animation: voice-recording-pulse 1.2s ease-in-out infinite; }
+.realtime-voice-status { display: flex; flex-direction: column; gap: 5px; padding: 10px 0; }
+.realtime-voice-status span { display: flex; align-items: center; gap: 6px; }
+.realtime-voice-transcript { max-height: 130px; overflow: auto; padding: 8px; background: var(--bg-secondary, #8881); border-radius: 6px; white-space: pre-wrap; }
+@keyframes voice-recording-pulse { 50% { opacity: .4; } }
+@media (prefers-reduced-motion: reduce) { .voice-draft-dot { animation: none; } }

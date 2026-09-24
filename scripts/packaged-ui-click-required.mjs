@@ -15,7 +15,7 @@
  */
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -209,7 +209,10 @@ async function main() {
     assertCondition(inbox.includes('data-work-inbox-action="create-goal"'), 'missing Work Inbox create-goal action')
   })
 
-  const tempUserData = await mkdtemp(path.join(tmpdir(), 'caogen-packaged-ui-click-'))
+  // macOS exposes os.tmpdir() through /var, a system symlink to /private/var.
+  // Canonicalize the parent so the handoff store's strict directory check can
+  // still run without weakening its symlink boundary.
+  const tempUserData = await mkdtemp(path.join(realpathSync(tmpdir()), 'caogen-packaged-ui-click-'))
   if (args.fixture) {
     const fixtureScript = path.join(repoRoot, 'scripts', `${args.fixture === 'plan-confirmation' ? 'plan-confirmation' : 'runs-review'}-fixture-runtime.ts`)
     const tsxBin = path.join(repoRoot, 'node_modules', '.bin', 'tsx')
@@ -262,6 +265,19 @@ async function main() {
     await page.waitForFunction(() => typeof window.agentDesk?.listProjectWorkspaces === 'function', { timeout: 30_000 })
     recordCheck('renderer and preload are ready')
 
+    // Fresh profiles now receive a first-launch provider guide. Dismiss it
+    // for this navigation smoke so the test can exercise the underlying
+    // workspace-mode path as a normal user would after the guide.
+    const onboardingContinue = await page.$('.first-launch-onboarding button.btn-ghost')
+    if (onboardingContinue) await onboardingContinue.click()
+    const personalMenu = await page.$('[data-sidebar-action="personal-menu"]')
+    if (personalMenu) await personalMenu.click()
+    // The compact sidebar keeps secondary workspace modes inside the
+    // "更多工具" disclosure. Open that disclosure before exercising the
+    // Studio entry, matching the real user path instead of waiting on a
+    // hidden descendant of a closed <details> element.
+    const moreTools = await page.$('[data-workspace-more-tools]:not([open]) > summary')
+    if (moreTools) await moreTools.click()
     await clickVisible(page, 'enter Studio', '[data-experience-mode-option="studio"]')
     await waitForVisible(page, '[data-studio-view]')
     recordCheck('Studio surface opened')
@@ -435,10 +451,16 @@ async function main() {
       await page.waitForSelector(`${workbench}[data-task-plan-status="approved"]`, { visible: true, timeout: 15_000 })
       recordCheck('TaskPlan approve click updates canonical status', 'approve IPC returned approved')
       clicks.push({ name: 'TaskPlan approve', at: new Date().toISOString() })
-      await page.click(`${workbench} .task-plan-actions button:not([data-task-plan-save]):not([data-task-plan-approve-execute])`)
+      await page.click(`${workbench} [data-task-plan-revoke="true"]`)
       await page.waitForSelector(`${workbench}[data-task-plan-status="pending"]`, { visible: true, timeout: 15_000 })
       recordCheck('TaskPlan revoke click restores pending status', 'revoke IPC returned pending')
       clicks.push({ name: 'TaskPlan revoke', at: new Date().toISOString() })
+      // Opening a task now switches to its conversation workspace. Re-enter
+      // Studio through the visible menu before continuing project navigation.
+      await clickVisible(page, 'Personal workspace menu after plan review', '[data-sidebar-action="personal-menu"][aria-expanded="false"]')
+      await clickVisible(page, 'More tools after plan review', '[data-workspace-more-tools]:not([open]) > summary')
+      await clickVisible(page, 'Return to Studio after plan review', '[data-experience-mode-option="studio"]')
+      await waitForVisible(page, '[data-studio-view]')
     }
     if (args.fixture === 'run-detail-delivery') {
       const recoveryRow = '[data-cross-project-work-inbox] [data-work-item-id="fixture-runs-review-recovery-item"]'

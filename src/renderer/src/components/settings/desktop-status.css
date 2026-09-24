@@ -1,0 +1,13 @@
+.desktop-status { display: flex; flex-direction: column; gap: 16px; max-width: 780px; }
+.desktop-status > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.desktop-status h3, .desktop-status-actions { display: flex; align-items: center; gap: 8px; }
+.desktop-status h3, .desktop-status h4 { margin: 0 0 8px; }
+.desktop-status p { font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.desktop-status article { border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.desktop-status-counts { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.desktop-status-counts > div { display: flex; flex-direction: column; gap: 4px; padding: 14px; background: var(--bg-tertiary); border-radius: 10px; }
+.desktop-status-counts strong { font-size: 24px; }.desktop-status-counts span { color: var(--text-secondary); font-size: 12px; }
+.desktop-status-provider { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 12px; border-bottom: 1px solid var(--border); padding: 10px 0; }
+.desktop-status-provider strong { flex-basis: 100%; overflow-wrap: anywhere; }
+.desktop-status-task { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; color: var(--text-primary); background: transparent; border: 0; border-bottom: 1px solid var(--border); cursor: pointer; text-align: left; }
+.desktop-status-task span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.desktop-status-task small { flex-shrink: 0; color: var(--text-secondary); }

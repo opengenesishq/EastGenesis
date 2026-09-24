@@ -19,6 +19,17 @@ import { assertSessionExecutorEngine } from '../../shared/session-executor-selec
 
 export type FrozenRetryProjection = Readonly<Pick<FrozenRunRoutingPolicyV1, 'initialTarget' | 'retryTargets' | 'effectivePolicy'>>
 export type NativeSessionRecoveryContext = Pick<NativeRecoveryCheck, 'anchor' | 'currentRequiredCapabilities'> & { initialExpertPolicy: RoutingExpertPolicy; frozenRetry?: FrozenRetryProjection }
+
+/** Undefined retains legacy scoring; a configured order with no target must stop. */
+export function configuredNextRetry(recovery: NativeSessionRecoveryContext, current: { providerId: string; model: string }):
+  { target?: FrozenRunRoutingPolicyV1['retryTargets'][number] } | undefined {
+  const policy = recovery.frozenRetry
+  if (policy?.effectivePolicy.selection.kind !== 'preferred' || policy.effectivePolicy.selection.alternativesOrder !== 'configured') return undefined
+  const ordered = [policy.initialTarget, ...policy.retryTargets]
+  const index = ordered.findIndex((target) => target.providerId === current.providerId && target.model === current.model)
+  return { target: index < 0 ? undefined : ordered[index + 1] }
+}
+
 const turnAnchors = new WeakMap<SessionMeta, { anchor: NativeRecoveryAnchor; initialExpertPolicy: RoutingExpertPolicy; frozenRetry?: FrozenRetryProjection }>()
 
 /** Initial selection owns this snapshot. Recovery must never recapture after it mutates SessionMeta. */

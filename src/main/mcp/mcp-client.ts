@@ -9,6 +9,7 @@ import {
   type AuthorizedMcpNetworkTarget
 } from './mcp-network-policy'
 import { buildAuthorizedSubprocessEnv } from '../security/subprocess-environment'
+import { assertMcpHttpAuthorized, mcpAuthorizationContext, mcpRuntimeHeaders } from './mcp-oauth-runtime'
 
 declare const __CAOGEN_APP_VERSION__: string
 
@@ -50,6 +51,8 @@ export interface McpPromptDefinition {
 }
 
 export interface McpDiscoveryResult {
+  /** Opaque local connection generation, never a token or external account identifier. */
+  authorizationContext?: string
   serverInfo?: { name?: string; version?: string }
   tools: McpToolDefinition[]
   resources: McpResourceDefinition[]
@@ -109,6 +112,7 @@ export async function discoverMcpServer(config: McpServerConfig, timeoutMs = DEF
       client.request('prompts/list').catch(() => ({ prompts: [] }))
     ])
     return {
+      ...(mcpAuthorizationContext(config) ? { authorizationContext: mcpAuthorizationContext(config) } : {}),
       serverInfo: readServerInfo(initialize),
       tools: readArrayField(tools, 'tools').filter(isMcpTool),
       resources: readArrayField(resources, 'resources').filter(isMcpResource),
@@ -190,10 +194,11 @@ function createHttpClient(config: McpServerConfig, timeoutMs: number): McpClient
         const body: JsonRpcRequest = { jsonrpc: '2.0', id: requestId, method, ...(params === undefined ? {} : { params }) }
         const { response } = await requestMcpNetworkUrl(url, {
           method: 'POST',
-          headers: { 'content-type': 'application/json', ...(config.headers ?? {}) },
+          headers: { 'content-type': 'application/json', ...await mcpRuntimeHeaders(config) },
           body: JSON.stringify(body),
           signal: controller.signal
         })
+        await assertMcpHttpAuthorized(config, response)
         if (!response.ok) throw new Error(`MCP HTTP ${response.status}`)
         if (isEventStreamResponse(response)) return await readSseResponse(response, requestId, controller)
         return decodeResponse(await readJsonResponse(response), requestId)
@@ -237,7 +242,7 @@ function createSseClient(config: McpServerConfig, timeoutMs: number): McpClient 
   }
   const ready = (async () => {
     target = await authorizeMcpNetworkUrl(url)
-    const opened = await openSseStream(target, config.headers, controller)
+    const opened = await openSseStream(target, await mcpRuntimeHeaders(config), controller, config)
     void consumeSseStream(opened.response, opened.finalUrl, target, (event, streamUrl, authorizedTarget) => {
       if (event.event === 'endpoint') {
         const resolved = resolveMcpSseEndpoint(authorizedTarget, streamUrl, event.data)
@@ -263,6 +268,7 @@ function createSseClient(config: McpServerConfig, timeoutMs: number): McpClient 
 
       const requestId = ++id
       const payload: JsonRpcRequest = { jsonrpc: '2.0', id: requestId, method, ...(params === undefined ? {} : { params }) }
+      const headers = await mcpRuntimeHeaders(config)
       return await new Promise<unknown>((resolvePromise, rejectPromise) => {
         const timer = setTimeout(() => {
           pending.delete(requestId)
@@ -271,10 +277,11 @@ function createSseClient(config: McpServerConfig, timeoutMs: number): McpClient 
         pending.set(requestId, { resolve: resolvePromise, reject: rejectPromise, timer })
         void requestAuthorizedMcpUrl(target as AuthorizedMcpNetworkTarget, endpoint as URL, {
           method: 'POST',
-          headers: { 'content-type': 'application/json', ...(config.headers ?? {}) },
+          headers: { 'content-type': 'application/json', ...headers },
           body: JSON.stringify(payload),
           signal: controller.signal
         }).then(async ({ response }) => {
+          await assertMcpHttpAuthorized(config, response)
           if (!response.ok) throw new Error(`MCP SSE POST ${response.status}`)
           await response.body?.cancel()
         }).catch((error) => {
@@ -451,7 +458,8 @@ async function readSseResponse(response: Response, id: number, controller: Abort
 async function openSseStream(
   target: AuthorizedMcpNetworkTarget,
   headers: Record<string, string> | undefined,
-  controller: AbortController
+  controller: AbortController,
+  config: McpServerConfig
 ): Promise<{ response: Response; finalUrl: URL }> {
   const opened = await requestAuthorizedMcpUrl(target, target.url, {
     method: 'GET',
@@ -459,6 +467,7 @@ async function openSseStream(
     signal: controller.signal
   })
   const { response } = opened
+  await assertMcpHttpAuthorized(config, response)
   if (!response.ok) throw new Error(`MCP SSE GET ${response.status}`)
   if (!response.body) throw new Error('MCP SSE stream 缺少 body')
   return opened
@@ -501,6 +510,7 @@ function safeMcpNetworkError(error: unknown): Error {
   const message = error instanceof Error ? error.message : ''
   if (
     /^MCP SSE (?:GET|POST) \d+$/.test(message) ||
+    /^MCP HTTP (?:401|403)：服务需要授权/.test(message) ||
     message === 'MCP SSE startup timed out' ||
     message === 'MCP SSE endpoint changed' ||
     message === 'MCP SSE event exceeded the size limit' ||

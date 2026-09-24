@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { buildSync } from 'esbuild'
 
 const repoRoot = process.cwd()
@@ -14,7 +15,7 @@ try {
   mkdirSync(userData, { recursive: true })
   const stub = path.join(fixtureRoot, 'electron-stub.ts')
   const bundle = path.join(fixtureRoot, 'local-plan-session.cjs')
-  writeFileSync(stub, `export const app = { getPath: () => ${JSON.stringify(userData)}, getVersion: () => '0.1.9', isPackaged: false };\nexport const safeStorage = { isEncryptionAvailable: () => false };\nexport const shell = {};\nexport const BrowserWindow = class {};\nexport const ipcMain = {};\nexport const desktopCapturer = {};\nexport const systemPreferences = {};\nexport const WebContentsView = class {};\nexport const Notification = class {};\nexport const powerSaveBlocker = {};\n`)
+  writeFileSync(stub, `export const app = { getPath: () => ${JSON.stringify(userData)}, getVersion: () => '0.1.9', isPackaged: false };\nexport const safeStorage = { isEncryptionAvailable: () => false };\nexport const shell = {};\nexport const dialog = {};\nexport const BrowserWindow = class {};\nexport const ipcMain = {};\nexport const desktopCapturer = {};\nexport const systemPreferences = {};\nexport const WebContentsView = class {};\nexport const Notification = class {};\nexport const powerSaveBlocker = {};\n`)
   for (const [name, source] of [
     ['tree-sitter', 'class Parser { setLanguage() {} parse() { return { rootNode: { hasError: false, namedChildren: [] } } } }\nmodule.exports = Parser\n'],
     ['tree-sitter-typescript', 'module.exports = { typescript: {}, tsx: {} }\n'],
@@ -25,7 +26,8 @@ try {
     writeFileSync(path.join(moduleDir, 'index.js'), source)
   }
   buildSync({ entryPoints: [path.join(repoRoot, 'scripts', 'local-plan-session-entry.ts')], outfile: bundle,
-    bundle: true, platform: 'node', format: 'cjs', target: 'node22', packages: 'external', alias: { electron: stub } })
+    bundle: true, platform: 'node', format: 'cjs', target: 'node22', packages: 'external',
+    define: { 'import.meta.url': JSON.stringify(pathToFileURL(bundle).href) }, alias: { electron: stub } })
   const env = { ...process.env, NODE_PATH: [path.join(fixtureRoot, 'node_modules'), path.join(repoRoot, 'node_modules')].join(path.delimiter) }
   for (const key of Object.keys(env)) if (/^(?:OPENAI|ANTHROPIC|GEMINI|GOOGLE)_(?:API_KEY|AUTH_TOKEN|BASE_URL)$/.test(key)) delete env[key]
   const output = execFileSync(process.execPath, [bundle, userData, '--prepare-legacy-cold-start'], { cwd: repoRoot, encoding: 'utf8', env })

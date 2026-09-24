@@ -38,3 +38,12 @@
 .remote-spin { animation: remote-spin .8s linear infinite; }
 @keyframes remote-spin { to { transform: rotate(360deg); } }
 @media (max-width: 860px) { .remote-continuation-fields { grid-template-columns: 1fr; } .remote-pairing-card { grid-template-columns: 1fr; } .remote-pairing-card small { white-space: normal; } .remote-result-projection code { margin-left: 0; width: 100%; } }
+
+.remote-connection-settings { margin: 12px 0 24px; }
+.remote-connection-settings h3 { margin: 0 0 10px; }
+.remote-connection-settings > p { color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+.remote-connection-fields { border: 0; padding: 0; display: grid; gap: 12px; max-width: 680px; }
+.remote-connection-fields > label { display: grid; gap: 6px; font-size: 12px; }
+.remote-connection-fields > label:has(input[type="checkbox"]) { display: flex; align-items: center; }
+.remote-connection-fields .input, .remote-connection-fields .select { width: 100%; }
+.remote-connection-buttons { display: flex; gap: 8px; }

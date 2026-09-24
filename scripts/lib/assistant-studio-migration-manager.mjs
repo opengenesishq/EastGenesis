@@ -89,6 +89,8 @@ async function applySelectedMigration({ assert, targetPage, targetProject }) {
 
 async function rollbackSelectedMigration({ targetPage, targetProject, waitForValue }) {
   await targetPage.click('[data-migration-rollback]')
+  await targetPage.waitForSelector('[data-migration-rollback-confirm]', { visible: true, timeout: 30_000 })
+  await targetPage.click('[data-migration-rollback-confirm]')
   try {
     await targetPage.waitForSelector('[data-migration-rollback]', { hidden: true, timeout: 30_000 })
   } catch (error) {

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { execFileSync, spawnSync } from 'node:child_process'
+import { parseWslHostPath } from './wsl/binding'
+import { execFileSyncInExecutionEnvironment as execFileSync, spawnSyncInExecutionEnvironment as spawnSync } from './wsl/process'
 import {
   mkdirSync,
   readFileSync,
@@ -439,9 +440,9 @@ function capText(text: string): { text: string; missing: boolean; truncated: boo
   return { text: sliced, missing: false, truncated: true }
 }
 
-export function detectPullRequestTool(): PullRequestTool | null {
+export function detectPullRequestTool(cwd?: string): PullRequestTool | null {
   for (const tool of ['gh', 'glab'] as const) {
-    if (commandExists(tool)) return tool
+    if (commandExists(tool, cwd)) return tool
   }
   return null
 }
@@ -468,7 +469,7 @@ export function createPullRequest(options: CreatePullRequestOptions): CreatePull
     if (!title) return failure('PR 标题不能为空')
     const body = typeof options.body === 'string' ? options.body : ''
 
-    const tool = detectPullRequestTool()
+    const tool = detectPullRequestTool(worktree)
     if (!tool) {
       return {
         ok: true,
@@ -495,7 +496,12 @@ export function createPullRequest(options: CreatePullRequestOptions): CreatePull
   }
 }
 
-function commandExists(command: string): boolean {
+function commandExists(command: string, cwd?: string): boolean {
+  if (cwd && parseWslHostPath(cwd)) {
+    try {
+      return spawnSync(command, ['--version'], { cwd, env: buildMinimalSubprocessEnv(), stdio: 'ignore', timeout: GIT_TIMEOUT_MS }).status === 0
+    } catch { return false }
+  }
   const probe = process.platform === 'win32' ? 'where' : 'which'
   try {
     execFileSync(probe, [command], {

@@ -1,4 +1,5 @@
-import { spawnSync } from 'node:child_process'
+import { spawnSyncInExecutionEnvironment as spawnSync } from '../wsl/process'
+import { assertManagedWorktreeExecutionPath } from './wsl-worktree-path'
 import {
   lstatSync,
   mkdirSync,
@@ -107,6 +108,7 @@ export function buildManagedWorktreeCreateTarget(
   assertExactManagedWorktreeInput(toolInput, CREATE_INPUT_KEYS)
   const common = parseManagedWorktreePlanInput(toolInput)
   const source = observeSource(cwd, common.sourceCwd)
+  assertManagedWorktreeExecutionPath(source.repoRoot, source.gitCommonDir, common.worktreePath, common.sessionId)
   assertNoExecutableCheckoutConfig(source.repoRoot)
   if (source.sourceHead !== common.baseSha || shortBranch(source.sourceHeadRef) !== common.baseBranch) {
     throw new Error('managed worktree create 的 baseSha/baseBranch 与当前 source HEAD/ref 不一致')
@@ -220,6 +222,7 @@ export function executeManagedWorktreeCreateTarget(
   target: ManagedWorktreeCreateTarget
 ): ManagedWorktreeLifecycleExecutionResult {
   try {
+    assertManagedWorktreeExecutionPath(target.repoRoot, target.gitCommonDir, target.worktreePath, target.sessionId)
     requireNotApplied(reconcileManagedWorktreeCreateTarget(target), 'create')
     mkdirSync(target.worktreeParentPath, { recursive: true })
     assertCreatedParentIsSafe(target)

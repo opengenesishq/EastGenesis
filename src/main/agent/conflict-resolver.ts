@@ -48,7 +48,7 @@ export function buildConflictResolverRequest(input: ConflictResolverInput): Conf
     main: file.main
   }))
   const prompt = [
-    '你是 CaoGen 的冲突解决 Agent。请结合 base/main/worktree 三份内容生成最终合并结果。',
+    '你是 EastGenesis 的冲突解决 Agent。请结合 base/main/worktree 三份内容生成最终合并结果。',
     `任务: ${input.taskId}`,
     input.sessionId ? `子会话: ${input.sessionId}` : '',
     input.branch ? `分支: ${input.branch}` : '',

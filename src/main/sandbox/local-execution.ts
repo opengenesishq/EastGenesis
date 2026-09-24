@@ -1,3 +1,5 @@
+import { createWslBinding, wslBindingForCwd } from '../wsl/binding'
+import { createWslJob } from '../wsl/job'
 import { createHash, randomUUID } from 'node:crypto'
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { constants } from 'node:fs'
@@ -98,6 +100,14 @@ export async function runLocalCommand(options: LocalCommandOptions): Promise<Loc
     }
   }
 
+  const binding = wslBindingForCwd(options.cwd)
+  if (binding) {
+    const exactBinding = binding.hostCwd === options.cwd ? binding : createWslBinding(binding.distribution, options.cwd)
+    const job = createWslJob(exactBinding, { command, timeoutMs: options.timeoutMs, environment: buildChinaMirrorEnv(options) })
+    const result = await execFilePromise(job.file, job.args, { cwd: job.cwd, timeoutMs: options.timeoutMs,
+      maxBufferBytes: options.maxBufferBytes, env: buildMinimalSubprocessEnv(), signal: options.signal, stopGuest: job.stop })
+    return formatResult(result, options.mode, false)
+  }
   return runHostCommand({ ...options, command })
 }
 
@@ -533,6 +543,7 @@ function execFilePromise(
     env?: NodeJS.ProcessEnv
     signal?: AbortSignal
     windowsVerbatimArguments?: boolean
+    stopGuest?: () => void
   }
 ): Promise<ExecFileResult> {
   return new Promise((resolvePromise) => {
@@ -567,6 +578,8 @@ function execFilePromise(
     const terminate = (): void => {
       if (!child || terminationRequested) return
       terminationRequested = true
+      try { options.stopGuest?.() }
+      catch (error) { stderr.push(Buffer.from(`\nWSL 子进程停止结果未确认：${error instanceof Error ? error.message : String(error)}\n`)) }
       forceKillTimer = terminateProcessTree(child)
     }
     const requestTermination = (reason: NonNullable<typeof forcedTermination>): void => {

@@ -1,3 +1,49 @@
+import { registerSiteDeploymentIpc } from './ipc/site-deployment-handlers'
+import { registerWorkspaceBehaviorIpc } from './ipc/workspace-behavior-handlers'
+import { registerBrowserExtensionIpc } from './ipc/browser-extension-handlers'
+import { registerChatSnapshotShareIpc } from './ipc/chat-snapshot-share-handlers'
+import { registerMcpOAuthIpc } from './ipc/mcp-oauth-handlers'
+import { registerHistoryQuestionIpc } from './ipc/history-question-handlers'
+import { registerWslIpc } from './ipc/wsl-handlers'
+import { registerMemoryPreferencesIpc } from './ipc/memory-preferences-handlers'
+import { registerMigrationSubscriptionIpc, rememberMigrationImport } from './ipc/migration-subscription-handlers'
+import { registerBrowserDebugIpc } from './ipc/browser-debug-handlers'
+import { registerTaskHandoffIpc } from './ipc/task-handoff-handlers'
+import { registerPluginCatalogIpc } from './ipc/plugin-catalog-ipc'
+import { readStoredMigrationScan } from './migration-scan-store'
+import { assertTaskExecutionEnvironment } from './wsl/binding'
+import { registerBrowserTabIpc } from './ipc/browser-tab-handlers'
+import type { BrowserTabTarget } from '../shared/browser-tab-types'
+import { registerLocalSiteCatalogIpc } from './ipc/local-site-catalog-handlers'
+import { registerLocalDevServerIpc } from './ipc/local-dev-server-handlers'
+import { registerCompanionAppearanceIpc } from './ipc/companion-appearance-handlers'
+import { registerBrowserStyleIpc } from './ipc/browser-style-handlers'
+import { registerRoutineInboxIpc } from './ipc/routine-inbox-handlers'
+import { registerHostedSiteIpc } from './ipc/hosted-site-handlers'
+import { registerBrowserManagementIpc } from './ipc/browser-management-handlers'
+import { registerPullRequestWorkspaceIpc } from './ipc/pull-request-workspace-handlers'
+import { registerWorktreePullRequestDraftIpc } from './ipc/worktree-pr-draft-handlers'
+import { registerSshIpc } from './ssh/service'
+import { registerTaskSourceIpc } from './ipc/task-source-handlers'
+import { clearSessionGoalMode } from './task/session-goal-mode'
+import { taskSessionForWindow } from './task-window'
+import { desktopWindowRole } from './desktop-window-registry'
+import { registerRemoteHostsIpc } from './remote-hosts/ipc'
+import { registerComputerHistoryIpc } from './ipc/computer-history-handlers'
+import { registerFeedbackIpc } from './ipc/feedback-handlers'
+import { registerSkillRecordingIpc } from './ipc/skill-recording-handlers'
+import { registerTemporaryTaskIpc } from './temporary-task/temporary-task-service'
+import { registerProjectHistoryIpc } from './ipc/project-history-handlers'
+import { inspectLocalRuntimes } from './local-runtime-status'
+import { listMigrationHistory, previewMigrationRollback, assertMigrationRollbackReview } from './migration-history'
+import { registerRemoteConnectionIpc } from './remote/connection-controller'
+import { registerExternalBrowserIpc } from './ipc/external-browser-handlers'
+import { registerActivityIpc } from './ipc/activity-handlers'
+import { registerImageCanvasIpc } from './ipc/image-canvas-handlers'
+import { workspaceBrowserRegistry } from './workspace-browser-context'
+import { assertTrustedWorkflowLedgerSender as assertTrustedWorkspaceTerminalSender } from './ipc/workflow-ledger-handlers'
+import { rememberWorkspaceTerminalDirectory, registerWorkspaceTerminalIpc } from './ipc/workspace-terminal-ipc'
+import { terminalVisibleToWindow } from './terminal-workspace-policy'
 import { attachmentRoot, isInsideAttachmentRoot, normalizeSendPayload } from './ipc/session-message-input'
 ﻿import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
 import { isAbsolute, join, relative, resolve } from 'node:path'
@@ -42,7 +88,7 @@ import {
 } from './providers'
 import { listHealth } from './scheduler'
 import { listEngines } from './engine'
-import { scanMigration } from './migration'
+import { scanMigration, rollbackMigration } from './migration'
 import {
   executeMigrationApplyEffect,
   executeMigrationImportEffect,
@@ -58,6 +104,7 @@ import { registerProjectMemoryIpc } from './ipc/memory-handlers'
 import { taskMemoryScope } from './memory/task-memory-scope'
 import { readProjectMemory } from './memoryStore'
 import { writeExtractedMemory } from './memory/memory-writer'
+import { currentTaskMemoryPreferences } from './memory/memory-preferences'
 import { shouldProposeMemory } from './memoryInject'
 import { suggestFiles } from './fileSuggest'
 import { registerFileIntelligenceIpc } from './ipc/file-intelligence-handlers'
@@ -87,7 +134,7 @@ import { registerProjectContextMutationIpc } from './ipc/project-context-mutatio
 import { registerMcpProbeIpc } from './ipc/mcp-probe-ipc'
 import { registerPluginInstallIpc } from './ipc/plugin-install-ipc'
 import { registerTerminalMutationIpc } from './ipc/terminal-mutation-ipc'
-import { registerBrowserMutationIpc } from './ipc/browser-mutation-ipc'
+import { assertRendererBrowserOwner, registerBrowserMutationIpc } from './ipc/browser-mutation-ipc'
 import { registerAssistantSearchIpc } from './ipc/assistant-search-handlers'
 import { executeInteractiveOperationEffect } from './task/operation-effect-gateway'
 import { executeProviderOperationEffect } from './provider/providerOperationEffect'
@@ -108,6 +155,7 @@ import {
 } from './plugin/caogen-extension-roots'
 import { listRoutines, markRun, updateRoutine, createRoutine, deleteRoutine } from './routineStore'
 import { runRoutineNow } from './routines/routine-executor'
+import { createRoutineDefinition, updateRoutineDefinition } from './routines/routine-definition-service'
 import { listRoutineRuns } from './routines/routine-runner'
 import { reviewRoutineRun } from './routines/routine-review'
 import { listRoutineTemplates } from './routines/routine-templates'
@@ -118,6 +166,7 @@ import { registerPreparationPermissionIpc } from './ipc/preparation-permission-h
 import { registerTaskExecutionAuthorityIpc } from './ipc/task-execution-authority-handlers'
 import { registerTaskBudgetIpc } from './ipc/task-budget-handlers'
 import { registerCouncilIpc } from './ipc/council-handlers'
+import { registerSideChatIpc } from './ipc/side-chat-handlers'
 import type {
   BrowserBounds,
   BrowserPickResult,
@@ -180,6 +229,7 @@ function isPluginRegistryItem(value: unknown): value is PluginRegistryItem {
 
 function pluginRegistryRoots(sessionId?: string): string[] {
   const session = typeof sessionId === 'string' ? sessionManager.get(sessionId) : undefined
+  if (session) assertTaskExecutionEnvironment(session.meta)
   const projectCwds = [session?.meta.sourceCwd, session?.meta.cwd].filter(
     (cwd): cwd is string => typeof cwd === 'string' && cwd.trim().length > 0
   )
@@ -195,7 +245,7 @@ function normalizePluginScanOptions(options?: PluginRegistryScanOptions): Plugin
   }
 }
 
-/** CaoGen 托管插件目录:本地安装/卸载的唯一操作区 */
+/** EastGenesis 托管插件目录:本地安装/卸载的唯一操作区 */
 function caogenPluginsRoot(): string {
   return caogenManagedPluginsRoot()
 }
@@ -207,6 +257,12 @@ function clampPositiveInt(value: number | undefined, fallback: number, max: numb
 
 function routineStoreRoot(): string {
   return join(app.getPath('userData'), 'routines')
+}
+
+function verifiedSessionCwd(id: string): string | undefined {
+  const meta = sessionManager.get(id)?.meta
+  if (meta) assertTaskExecutionEnvironment(meta)
+  return meta?.cwd
 }
 
 function previewAnnotationRoot(): string {
@@ -285,11 +341,51 @@ function effectIntentDescription(snapshot: TaskSnapshotRecord, effect: EffectRec
 }
 
 export function registerIpc(): void {
+  registerWorkspaceBehaviorIpc()
+  registerTaskHandoffIpc()
+  registerPluginCatalogIpc()
+  registerMigrationSubscriptionIpc(migrationBackupRoot)
+  registerBrowserDebugIpc({ getSessionMeta: id => sessionManager.get(id)?.meta, manager: browserViewManager })
+  registerBrowserExtensionIpc({ getSessionMeta: id => sessionManager.get(id)?.meta })
+  registerChatSnapshotShareIpc()
+  registerMcpOAuthIpc()
+  registerSshIpc()
+  registerTaskSourceIpc()
+  registerLocalSiteCatalogIpc()
+  registerLocalDevServerIpc()
+  registerCompanionAppearanceIpc()
+  registerBrowserStyleIpc({ getSessionMeta: id => sessionManager.get(id)?.meta, manager: browserViewManager })
+  registerRoutineInboxIpc()
+  registerHostedSiteIpc()
+  registerBrowserManagementIpc({ getSessionMeta: id => sessionManager.get(id)?.meta, manager: browserViewManager })
+  registerPullRequestWorkspaceIpc()
+  registerWorktreePullRequestDraftIpc()
+  ipcMain.handle('session-goal-mode:clear', sessionReadyHandler(async (event, sessionId: string) => {
+    assertTrustedWorkflowLedgerSender(event)
+    const win = BrowserWindow.fromWebContents(event.sender), role = win && desktopWindowRole(win)
+    if (!win || !['main', 'task'].includes(role ?? '') || role === 'task' && taskSessionForWindow(win) !== sessionId) throw new Error('请从原任务退出持续目标模式。')
+    return clearSessionGoalMode(sessionId, app.getPath('userData'))
+  }))
+  registerRemoteHostsIpc()
+  registerComputerHistoryIpc()
+  registerHistoryQuestionIpc()
+  registerWslIpc()
+  registerMemoryPreferencesIpc({ metaForSession: id => sessionManager.get(id)?.meta, updateSession: (id, overrides) => sessionManager.updateMemoryOverrides(id, overrides) })
+  registerSkillRecordingIpc()
+  registerFeedbackIpc()
+  registerTemporaryTaskIpc()
+  registerProjectHistoryIpc()
+  registerSiteDeploymentIpc()
+  registerRemoteConnectionIpc()
+  registerExternalBrowserIpc()
+  registerActivityIpc()
+  registerImageCanvasIpc()
   registerPreparationPermissionIpc()
   registerTaskExecutionAuthorityIpc()
   registerTaskBudgetIpc()
   registerSessionInputIpc()
   registerCouncilIpc()
+  registerSideChatIpc()
   configureMigrationOperationBackupRoot(migrationBackupRoot())
   for (const register of [registerQuickbarIpc, registerTaskRecoveryIpc, registerWorkflowLedgerIpc, registerProjectWorkspaceIpc, registerDataRetentionIpc, registerDigitalWorkerIpc, registerSupervisorIpc, registerInteractiveMutationIpc, registerAppFeatureIpc, registerProviderGatewayIpc, registerFileIntelligenceIpc, registerPermissionGrantIpc, registerPalaceSceneBuilderIpc]) register()
   // Search adapters are resolved only by an explicit main-process factory. The
@@ -303,6 +399,7 @@ export function registerIpc(): void {
     operationContext: mcpProbeOperationContext
   })
   registerPluginInstallIpc({ pluginsRoot: caogenPluginsRoot })
+  registerWorkspaceTerminalIpc()
   registerTerminalMutationIpc({
     assertExecutionAuthorized: (id, action) => sessionManager.assertInteractiveExecutionAuthorized(id, action),
     getSessionMeta: (id) => sessionManager.get(id)?.meta,
@@ -312,6 +409,7 @@ export function registerIpc(): void {
     getSessionMeta: (id) => sessionManager.get(id)?.meta,
     manager: browserViewManager
   })
+  registerBrowserTabIpc({ getSessionMeta: id => sessionManager.get(id)?.meta, manager: browserViewManager })
 
   ipcMain.handle('sessions:list', (event) => {
     assertTrustedWorkflowLedgerSender(event)
@@ -346,12 +444,12 @@ export function registerIpc(): void {
   )
 
   ipcMain.handle('sessions:suggestFiles', (_e, id: string, query: string) => {
-    const cwd = sessionManager.get(id)?.meta.cwd
+    const cwd = verifiedSessionCwd(id)
     return cwd ? suggestFiles(cwd, typeof query === 'string' ? query : '') : []
   })
 
   ipcMain.handle('git:status', (_e, id: string) => {
-    const cwd = sessionManager.get(id)?.meta.cwd
+    const cwd = verifiedSessionCwd(id)
     if (!cwd) {
       return {
         ok: false,
@@ -368,33 +466,33 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle('workspace:diff', (_e, id: string) => {
-    const cwd = sessionManager.get(id)?.meta.cwd
+    const cwd = verifiedSessionCwd(id)
     if (!cwd) {
       return { ok: false, cwd: '', files: [], rawBytes: 0, error: '会话不存在' }
     }
     return getWorkspaceDiff(cwd)
   })
 
-  ipcMain.handle('worktrees:summary', (_e, id: string) => getManagedWorktreeSummary(id))
+  ipcMain.handle('worktrees:summary', (_e, id: string) => { verifiedSessionCwd(id); return getManagedWorktreeSummary(id) })
 
-  ipcMain.handle('worktrees:mergeInspect', (_e, id: string) => inspectManagedWorktreeMerge(id))
+  ipcMain.handle('worktrees:mergeInspect', (_e, id: string) => { verifiedSessionCwd(id); return inspectManagedWorktreeMerge(id) })
 
-  ipcMain.handle('worktrees:applyCheck', (_e, id: string) => checkManagedWorktreeApply(id))
+  ipcMain.handle('worktrees:applyCheck', (_e, id: string) => { verifiedSessionCwd(id); return checkManagedWorktreeApply(id) })
 
   // 冲突三栏:apply-check 被拒时,取冲突文件的 基线/worktree/主工作区 三份内容。
-  ipcMain.handle('worktrees:conflictFiles', (_e, id: string) => getWorktreeConflictFiles(id))
+  ipcMain.handle('worktrees:conflictFiles', (_e, id: string) => { verifiedSessionCwd(id); return getWorktreeConflictFiles(id) })
 
   // 合并回执列表(最新在前),验收"上次到底合了什么"。
   ipcMain.handle('worktrees:mergeReceipts', () => listWorktreeMergeReceipts())
 
   ipcMain.handle('preview:prepare', (_e, id: string, relPath: string) => {
-    const cwd = sessionManager.get(id)?.meta.cwd
+    const cwd = verifiedSessionCwd(id)
     if (!cwd) return { ok: false, error: '会话不存在' }
     return preparePreview(cwd, typeof relPath === 'string' ? relPath : '')
   })
 
   ipcMain.handle('preview:prepareVisual', (_e, id: string, relPath: string) => {
-    const cwd = sessionManager.get(id)?.meta.cwd
+    const cwd = verifiedSessionCwd(id)
     if (!cwd) return { ok: false, source: 'quick-look', fidelity: 'first-page-thumbnail', error: '会话不存在' }
     return prepareOfficeVisualPreview(cwd, typeof relPath === 'string' ? relPath : '')
   })
@@ -417,51 +515,77 @@ export function registerIpc(): void {
     browserEventsRegistered = true
     browserViewManager.subscribe((event) => {
       for (const win of BrowserWindow.getAllWindows()) {
-        if (!win.isDestroyed()) win.webContents.send('browser:event', event)
+        if (!win.isDestroyed() && event.sessionId && workspaceBrowserRegistry.visible(event.sessionId, win.webContents.id) && browserViewManager.visibleToWindow(event.sessionId, win.webContents.id)) win.webContents.send('browser:event', event)
       }
     })
   }
 
-  ipcMain.handle('browser:captureAnnotation', (_e, id: string, note: string) =>
-    browserViewManager.captureAnnotation(id, typeof note === 'string' ? note : '')
-  )
+  const assertBrowserTarget = (id: string, target?: BrowserTabTarget): void => {
+    if (!target) return
+    if (target.contextId !== id) throw new Error('浏览器标签不属于当前任务。')
+    browserViewManager.assertTarget(target, true, true)
+  }
+  ipcMain.handle('browser:captureAnnotation', (event, id: string, note: string, target?: BrowserTabTarget) => {
+    assertRendererBrowserOwner(browserViewManager, event, id)
+    assertBrowserTarget(id, target)
+    return browserViewManager.captureAnnotation(id, typeof note === 'string' ? note : '')
+  })
 
-  ipcMain.handle('browser:listAnnotations', (_e, id: string) =>
-    browserViewManager.listAnnotations(id)
-  )
+  ipcMain.handle('browser:listAnnotations', (event, id: string) => {
+    assertRendererBrowserOwner(browserViewManager, event, id)
+    return browserViewManager.listAnnotations(id)
+  })
 
   // DOM 圈选:注入拾取器等用户点选;随后按结果截图落批注
-  ipcMain.handle('browser:pickElement', (_e, id: string) => browserViewManager.pickElement(id))
+  ipcMain.handle('browser:pickElement', (event, id: string, target?: BrowserTabTarget) => {
+    assertRendererBrowserOwner(browserViewManager, event, id)
+    assertBrowserTarget(id, target)
+    return browserViewManager.pickElement(id)
+  })
 
   ipcMain.handle(
     'browser:captureElementAnnotation',
-    (_e, id: string, pick: BrowserPickResult, note: string) =>
-      browserViewManager.captureElementAnnotation(id, pick, typeof note === 'string' ? note : '')
+    (event, id: string, pick: BrowserPickResult, note: string, target?: BrowserTabTarget) => {
+      assertRendererBrowserOwner(browserViewManager, event, id)
+      assertBrowserTarget(id, target)
+      return browserViewManager.captureElementAnnotation(id, pick, typeof note === 'string' ? note : '')
+    }
   )
 
   // Agent 只读观测:页面快照 + 控制台错误 + 网络失败(不注入不点击)
-  ipcMain.handle('browser:observe', (_e, id: string) => browserViewManager.observe(id))
+  ipcMain.handle('browser:observe', (event, id: string, target?: BrowserTabTarget) => {
+    assertRendererBrowserOwner(browserViewManager, event, id)
+    assertBrowserTarget(id, target)
+    return browserViewManager.observe(id)
+  })
 
   if (!terminalEventsRegistered) {
     terminalEventsRegistered = true
     terminalManager.subscribe((event) => {
       for (const win of BrowserWindow.getAllWindows()) {
-        if (!win.isDestroyed()) win.webContents.send('terminal:event', event)
+        if (!['main', 'task'].includes(desktopWindowRole(win) ?? '')) continue
+        const terminal = event.kind === 'started' ? event.terminal : event.id ? terminalManager.get(event.id) : undefined
+        if (!win.isDestroyed() && (!terminal || terminalVisibleToWindow(terminal, win.webContents.id))) win.webContents.send('terminal:event', event)
       }
     })
   }
 
-  ipcMain.handle('terminals:list', () => terminalManager.list())
+  ipcMain.handle('terminals:list', (event) => {
+    assertTrustedWorkspaceTerminalSender(event)
+    return terminalManager.list().filter((terminal) => terminalVisibleToWindow(terminal, event.sender.id))
+  })
   ipcMain.handle('sessions:create', sessionReadyHandler(async (_e, opts: CreateSessionOptions) => {
     if (!opts || typeof opts.cwd !== 'string') {
       throw new Error('创建会话参数无效')
     }
-    if (opts.cwd.trim().length === 0) {
-      if (!opts.workspaceId?.trim()) return createUnassignedSession(opts)
-      const cwd = await resolveWorkspaceSessionCwd(opts.workspaceId, app.getPath('userData'))
-      return sessionManager.createManaged({ ...opts, cwd })
+    // sideChat is minted by the side-chat service and is never accepted from renderer input.
+    const { sideChat: _forbiddenSideChat, ...rendererOptions } = opts
+    if (rendererOptions.cwd.trim().length === 0) {
+      if (!rendererOptions.workspaceId?.trim()) return createUnassignedSession(rendererOptions)
+      const cwd = await resolveWorkspaceSessionCwd(rendererOptions.workspaceId, app.getPath('userData'))
+      return sessionManager.createManaged({ ...rendererOptions, cwd })
     }
-    return sessionManager.createManaged(opts)
+    return sessionManager.createManaged(rendererOptions)
   }))
 
   ipcMain.handle('sessions:dispatchSubagents', sessionReadyHandler((_e, parentSessionId: string, input: DispatchSubagentsInput) => {
@@ -507,10 +631,11 @@ export function registerIpc(): void {
     const sessionMeta = sessionManager.get(id)?.meta
     if (
       payload.text && sessionMeta?.taskStrategy === 'execute' &&
+      currentTaskMemoryPreferences(sessionMeta).effective.contributeSharedMemory &&
       shouldProposeMemory(payload.text) && shouldEmitMemorySuggestion(id, payload.text)
     ) {
       for (const win of BrowserWindow.getAllWindows()) {
-        if (!win.isDestroyed()) win.webContents.send('memory:suggestion', { sessionId: id, text: payload.text })
+        if (!win.isDestroyed() && ['main', 'task'].includes(desktopWindowRole(win) ?? '')) win.webContents.send('memory:suggestion', { sessionId: id, text: payload.text })
       }
     }
     if (payload.text && sessionMeta?.taskStrategy === 'execute') {
@@ -520,6 +645,7 @@ export function registerIpc(): void {
         text: payload.text,
         projectRoot,
         projectId: sessionMeta.workspaceId,
+        sessionMeta,
         source: 'session:auto-extract',
         defaultLayer: projectRoot ? 'project' : 'user'
       }).catch((error) => {
@@ -544,6 +670,7 @@ export function registerIpc(): void {
     revokeGuiAutomationGrantsForSession(id)
     revokeToolCapabilityGrantsForSession(id)
     await sessionManager.close(id)
+    browserViewManager.close(id)
   }))
 
   ipcMain.handle(
@@ -648,6 +775,11 @@ export function registerIpc(): void {
 
   ipcMain.handle('providers:health', () => listHealth())
   ipcMain.handle('engines:list', () => listEngines())
+  ipcMain.handle('environment:runtimes', async event => {
+    assertTrustedWorkflowLedgerSender(event)
+    await sessionManager.whenInitialized()
+    return inspectLocalRuntimes()
+  })
 
   ipcMain.handle(
     'plugins:scan',
@@ -730,18 +862,21 @@ export function registerIpc(): void {
 
   ipcMain.handle('routines:list', () => listRoutines(routineStoreRoot()))
 
-  ipcMain.handle('routines:create', (_e, input: CreateRoutineInput) =>
-    createRoutine(routineStoreRoot(), input)
-  )
+  ipcMain.handle('routines:create', (event, input: CreateRoutineInput) => {
+    assertTrustedWorkspaceTerminalSender(event)
+    return createRoutineDefinition(routineStoreRoot(), input)
+  })
 
-  ipcMain.handle('routines:delete', (_e, id: string) => {
+  ipcMain.handle('routines:delete', (event, id: string) => {
+    assertTrustedWorkspaceTerminalSender(event)
     if (typeof id !== 'string' || id.trim().length === 0) return false
     return deleteRoutine(routineStoreRoot(), id)
   })
 
-  ipcMain.handle('routines:update', (_e, id: string, patch: UpdateRoutineInput) => {
+  ipcMain.handle('routines:update', (event, id: string, patch: UpdateRoutineInput) => {
+    assertTrustedWorkspaceTerminalSender(event)
     if (typeof id !== 'string' || id.trim().length === 0) return null
-    return updateRoutine(routineStoreRoot(), id, patch ?? {})
+    return updateRoutineDefinition(routineStoreRoot(), id, patch ?? {})
   })
 
   ipcMain.handle('routines:markRun', (_e, id: string, options?: MarkRunOptions) => {
@@ -749,7 +884,8 @@ export function registerIpc(): void {
     return markRun(routineStoreRoot(), id, options ?? {})
   })
 
-  ipcMain.handle('routines:runNow', (_e, id: string) => {
+  ipcMain.handle('routines:runNow', (event, id: string) => {
+    assertTrustedWorkspaceTerminalSender(event)
     if (typeof id !== 'string' || id.trim().length === 0) return null
     return runRoutineNow(routineStoreRoot(), id)
   })
@@ -768,6 +904,7 @@ export function registerIpc(): void {
   ipcMain.handle('startSuggestions:get', async (_e, id: string) => {
     const session = sessionManager.get(id)
     if (!session) return []
+    assertTaskExecutionEnvironment(session.meta)
     const projectRoot = session.meta.sourceCwd ?? session.meta.cwd
     const resolvedProjectRoot = resolve(projectRoot)
     const belongsToCurrentProject = (cwd: unknown): cwd is string =>
@@ -874,19 +1011,38 @@ export function registerIpc(): void {
     return executeMigrationImportEffect(cwd, paths, executeInteractiveOperationEffect)
   })
 
-  ipcMain.handle('migration:apply', (_e, input: MigrationApplyInput) => {
+  ipcMain.handle('migration:apply', async (event, input: MigrationApplyInput) => {
+    assertTrustedWorkflowLedgerSender(event)
     if (!input || typeof input !== 'object') throw new Error('迁移决策格式无效')
-    return executeMigrationApplyEffect(input, {
+    const stored = readStoredMigrationScan(input.scanId)
+    const result = await executeMigrationApplyEffect(input, {
       rootDir: app.getPath('userData'),
       backupRoot: migrationBackupRoot()
     })
+    return { ...result, subscriptionAssetIds: rememberMigrationImport(stored, result) }
   })
 
-  ipcMain.handle('migration:rollback', (_e, backupId: string) => {
+  ipcMain.handle('migration:history', event => {
+    assertTrustedWorkflowLedgerSender(event)
+    return listMigrationHistory(migrationBackupRoot())
+  })
+
+  ipcMain.handle('migration:rollback-preview', (event, backupId: string) => {
+    assertTrustedWorkflowLedgerSender(event)
+    if (typeof backupId !== 'string') throw new Error('必须指定迁移备份')
+    return previewMigrationRollback(migrationBackupRoot(), backupId)
+  })
+
+  ipcMain.handle('migration:rollback', (event, backupId: string, reviewDigest?: string) => {
+    assertTrustedWorkflowLedgerSender(event)
     if (typeof backupId !== 'string' || backupId.length === 0) throw new Error('必须指定迁移备份')
+    if (reviewDigest !== undefined) assertMigrationRollbackReview(migrationBackupRoot(), backupId, reviewDigest)
     return executeMigrationRollbackEffect(backupId, {
       rootDir: app.getPath('userData'),
       backupRoot: migrationBackupRoot()
+    }, undefined, reviewDigest === undefined ? undefined : (id, root) => {
+      assertMigrationRollbackReview(root ?? migrationBackupRoot(), id, reviewDigest)
+      return rollbackMigration(id, root)
     })
   })
 
@@ -921,6 +1077,7 @@ export function registerIpc(): void {
   }
   registerProjectMemoryIpc({
     memoryRoot,
+    metaForSession: id => sessionManager.get(id)?.meta,
     targetForSession: memoryTargetFor,
     taskScopeForSession: async sessionId => {
       const meta = sessionManager.get(sessionId)?.meta
@@ -929,7 +1086,7 @@ export function registerIpc(): void {
     }
   })
 
-  registerLearningIpc({ projectRootFor, targetForSession: memoryTargetFor, userDataRoot: () => app.getPath('userData') })
+  registerLearningIpc({ projectRootFor, targetForSession: memoryTargetFor, userDataRoot: () => app.getPath('userData'), metaForSession: id => sessionManager.get(id)?.meta })
 
   ipcMain.handle(
     'providers:fetchModels',
@@ -952,11 +1109,12 @@ export function registerIpc(): void {
     (_e, models: string[]) => fetchProviderPricingCatalog(Array.isArray(models) ? models : [])
   )
   ipcMain.handle('dialog:pickDirectory', async (e) => {
+    assertTrustedWorkspaceTerminalSender(e)
     const win = BrowserWindow.fromWebContents(e.sender)
     const result = win
       ? await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] })
       : await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
-    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+    return result.canceled || result.filePaths.length === 0 ? null : rememberWorkspaceTerminalDirectory(e.sender, result.filePaths[0])
   })
 }
 

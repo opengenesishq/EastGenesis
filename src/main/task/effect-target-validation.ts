@@ -1,3 +1,5 @@
+import { isWorkspaceHandoffTarget } from '../workspace-handoff'
+import { isTaskHandoffEffectTarget } from '../task-handoff/effect'
 import { isOfficeRevisionTarget } from '../office-revision/target-validation'
 import type { EffectTarget, FileSystemIdentity } from '../../shared/types'
 import { isManagedPluginEffectTarget } from '../plugin/plugin-effect-target-validation'
@@ -5,6 +7,13 @@ import { isAbsolute } from 'node:path'
 
 export function isEffectTarget(value: unknown): value is EffectTarget {
   if (!isRecord(value)) return false
+  if (value.executionEnvironment !== undefined) {
+    const env = value.executionEnvironment
+    if (!isRecord(env) || env.kind !== 'wsl' || env.schemaVersion !== 1 ||
+      !['distribution', 'hostCwd', 'guestCwd', 'guestRootIdentity', 'hostRootIdentity'].every(key => isString(env[key]))) return false
+  }
+  if (value.kind === 'workspace_handoff') return isWorkspaceHandoffTarget(value)
+  if (value.kind === 'task_handoff') return isTaskHandoffEffectTarget(value)
   if (value.kind === 'gui_postcondition') return isGuiPostconditionTarget(value)
   if (value.kind === 'file_content') return isFileContentTarget(value)
   if (value.kind === 'git_commit') return isGitCommitTarget(value)
@@ -30,7 +39,14 @@ export function isEffectTarget(value: unknown): value is EffectTarget {
   if (value.kind === 'project_permanent_deletion') return isProjectPermanentDeletionTarget(value)
   if (value.kind === 'provider_profile_operation') return isProviderProfileOperationTarget(value)
   if (value.kind === 'media_job_operation') return isMediaJobOperationTarget(value)
-  return value.kind === 'unsupported' && isString(value.toolName)
+  if (value.kind !== 'unsupported' || !isString(value.toolName)) return false
+  if (value.toolName === 'browser_debug_evaluate') {
+    const binding = value.browserDebug, page = value.browserPage
+    return isRecord(binding) && isString(binding.grantId) && /^[a-f0-9]{64}$/.test(String(binding.expressionDigest)) &&
+      isString(binding.executionContextUniqueId) && isRecord(page) && isRecord(page.embedded) && page.external === undefined &&
+      isRecord(page.actionTarget) && page.actionTarget.kind === 'browser_evaluate'
+  }
+  return value.browserDebug === undefined
 }
 
 function isMediaJobOperationTarget(record: Record<string, unknown>): boolean {

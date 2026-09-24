@@ -15,6 +15,7 @@ import {
   applyCodexNativeProviderImport,
   listProviderNativeImportBackups,
   previewCodexNativeProviderImport,
+  previewNativeProviderImports,
   rollbackProviderNativeImportBackup
 } from '../provider/providerNativeConfigImport'
 import { executeProviderProfileOperationDelivery } from '../provider/provider-profile-operation-delivery'
@@ -29,6 +30,8 @@ type ProviderProfileAction =
   | 'backup-apply'
   | 'backup-delete'
   | 'rollback'
+  | 'native-preview'
+  | 'native-apply'
   | 'native-codex-preview'
   | 'native-codex-apply'
   | 'native-backups'
@@ -67,9 +70,16 @@ export async function handleProviderProfileIpc(
       execute: () => deleteProviderProfileBackup(backupId)
     })
   }
+  if (action === 'native-preview') {
+    const client = args[0]
+    if (client !== 'codex' && client !== 'claude' && client !== 'gemini' && client !== 'opencode' && client !== 'cc-switch') {
+      throw new Error('本机配置来源无效')
+    }
+    return previewNativeProviderImports(client)
+  }
   if (action === 'native-codex-preview') return previewCodexNativeProviderImport()
   if (action === 'native-backups') return listProviderNativeImportBackups()
-  if (action === 'native-codex-apply') {
+  if (action === 'native-codex-apply' || action === 'native-apply') {
     const previewId = typeof args[0] === 'string' ? args[0] : ''
     const decision = args[1] === 'create' || args[1] === 'update' ? args[1] : 'skip'
     return applyCodexNativeProviderImport(previewId, decision)
@@ -124,6 +134,6 @@ async function previewProfile(sender: WebContents) {
 function isProviderProfileAction(value: unknown): value is ProviderProfileAction {
   return [
     'export', 'preview', 'apply', 'backups', 'backup-preview', 'backup-apply', 'backup-delete', 'rollback',
-    'native-codex-preview', 'native-codex-apply', 'native-backups', 'native-rollback'
+    'native-preview', 'native-apply', 'native-codex-preview', 'native-codex-apply', 'native-backups', 'native-rollback'
   ].includes(String(value))
 }

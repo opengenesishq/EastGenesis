@@ -37,9 +37,27 @@ export function projectRoutingPreview(result: RoutingEvaluationResult, receipt: 
     matchedRules: result.matchedRules.map((rule) => ({ id: rule.id, expectedVersion: rule.version, scope: rule.scope, source: rule.source })),
     ...(result.effectivePolicy ? { effectivePolicy: { selection: result.effectivePolicy.selection,
       strategy: result.effectivePolicy.strategy, failure: result.effectivePolicy.failure } } : {}),
-    ...(!blocked && result.status === 'ready' ? { initialTarget: result.initialTarget } : {}),
+    ...(!blocked && result.status === 'ready' ? { initialTarget: result.initialTarget, explanation: previewExplanation(result) } : {}),
     allowedAlternatives: !blocked && result.status === 'ready' ? result.allowedAlternatives : [],
     excludedTargets: result.excludedTargets,
     conflicts: diagnostics.filter((item) => item.code === 'PRIORITY_CONFLICT'), diagnostics,
     limitations: { kind: 'local_configuration_only', providerRequestsMade: false, realTaskVerified: false } }
+}
+
+function previewExplanation(result: Extract<RoutingEvaluationResult, { status: 'ready' }>): NonNullable<RoutingRulePreviewResult['explanation']> {
+  const sameTarget = (left: { providerId: string; model: string }, right: { providerId: string; model: string }): boolean =>
+    left.providerId === right.providerId && left.model === right.model
+  const strategy = { balanced: '均衡', quality: '质量优先', cost: '费用优先', speed: '速度优先' }[result.effectivePolicy.strategy]
+  const selection = result.effectivePolicy.selection
+  const selectionReason = selection.kind === 'fixed' ? '规则锁定此厂商和模型，选择偏好不会更换目标。'
+    : selection.kind === 'preferred' ? `规则要求先使用首选模型，备选仅在允许的失败条件下参与。${selection.alternativesOrder === 'configured' ? '模型切换遵循你设置的备选顺序；下一目标不合格时暂停。' : '备选由系统评分选择。'}`
+      : result.modelDecision.manualOverrideApplied ? '当前任务明确指定的目标或本地优先策略决定了选择。'
+        : `通过本次约束检查的 ${result.qualifiedTargets.length} 个模型，按“${strategy}”排序后选择此目标。`
+  return { selectionReason, taskKinds: [...result.task.taskKinds], warnings: [...result.modelDecision.warnings],
+    candidates: result.rankedCandidates.map((candidate) => {
+      const target = { providerId: candidate.profile.providerId, model: candidate.profile.model }
+      return { target, selected: sameTarget(target, result.initialTarget), reasons: [...candidate.reasons],
+        pricingBasis: result.pricing.find((row) => sameTarget(row.target, target))?.basis ?? 'heuristic_estimate',
+        acceptanceSamples: candidate.scoreBreakdown.acceptanceSamples }
+    }) }
 }

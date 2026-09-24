@@ -27,7 +27,7 @@ export function parseProjectAggregateImport(value: unknown): ProjectAggregateExp
       parsed.format !== PROJECT_AGGREGATE_EXPORT_FORMAT || !isRecord(parsed.aggregate) ||
       !isRecord(parsed.dependencies) || !Array.isArray(parsed.dependencies.roleTemplates) ||
       !isRecord(parsed.verification) || typeof parsed.exportDigest !== 'string') {
-    throw new Error('Project import must be a CaoGen Project Aggregate export')
+    throw new Error('Project import must be an EastGenesis Project Aggregate export')
   }
   const sourceBundle = parsed as unknown as ProjectAggregateExportBundle
   const { exportDigest, ...body } = sourceBundle

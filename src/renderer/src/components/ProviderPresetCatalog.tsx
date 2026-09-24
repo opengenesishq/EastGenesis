@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { PROVIDER_PRESETS, type ProviderPreset } from '../store'
 import type { EngineKind } from '../../../shared/types'
 import { useT } from '../i18n'
+import './provider-quick-setup.css'
 
 type CatalogFilter = 'all' | NonNullable<ProviderPreset['category']>
 
@@ -9,9 +10,11 @@ interface Props {
   onSelect: (preset: ProviderPreset) => void
   compact?: boolean
   presets?: ProviderPreset[]
+  selectedKey?: string
+  disabled?: boolean
 }
 
-export default function ProviderPresetCatalog({ onSelect, compact = false, presets: sourcePresets = PROVIDER_PRESETS }: Props): React.JSX.Element {
+export default function ProviderPresetCatalog({ onSelect, compact = false, presets: sourcePresets = PROVIDER_PRESETS, selectedKey, disabled = false }: Props): React.JSX.Element {
   const t = useT()
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<CatalogFilter>('all')
@@ -45,6 +48,7 @@ export default function ProviderPresetCatalog({ onSelect, compact = false, prese
               type="button"
               key={value}
               className={`btn btn-ghost btn-sm${filter === value ? ' is-active' : ''}`}
+              aria-pressed={filter === value}
               onClick={() => setFilter(value)}
             >
               {t(value === 'all' ? 'providerCatalogFilterAll' : `providerCatalogFilter${capitalize(value)}`)}
@@ -59,6 +63,13 @@ export default function ProviderPresetCatalog({ onSelect, compact = false, prese
         <div className="provider-preset-grid">
           {presets.map((preset) => {
             const meta = presetMeta(preset)
+            if (compact) return <button key={preset.key} type="button"
+              className={`provider-preset-choice${selectedKey === preset.key ? ' is-selected' : ''}`}
+              data-provider-preset={preset.key} aria-pressed={selectedKey === preset.key}
+              disabled={disabled} onClick={() => onSelect(preset)}>
+              <span className="provider-preset-monogram" aria-hidden="true">{meta.vendor.slice(0, 1)}</span>
+              <span><strong>{preset.label}</strong><small>{t(preset.key === 'custom' ? 'providerSimpleCustom' : regionKey(meta.region))}</small></span>
+            </button>
             return (
               <article className="provider-preset-card" key={preset.key}>
                 <div className="provider-preset-card-heading">
@@ -73,7 +84,7 @@ export default function ProviderPresetCatalog({ onSelect, compact = false, prese
                 <p>{preset.hint}</p>
                 <div className="provider-preset-card-footer">
                   <code>{preset.baseUrl || t('officialEndpoint')}</code>
-                  <button type="button" className="btn btn-primary btn-sm" onClick={() => onSelect(preset)}>
+                  <button type="button" className="btn btn-primary btn-sm" disabled={disabled} onClick={() => onSelect(preset)}>
                     {t('providerCatalogApply')}
                   </button>
                 </div>

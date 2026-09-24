@@ -1,6 +1,12 @@
-import { app, ipcMain } from 'electron'
+import { workspaceHandoffView } from '../workspace-handoff'
+import { app, BrowserWindow, ipcMain } from 'electron'
+import type { WorktreePullRequestDraftSubmitInput } from '../../shared/worktree-pr-draft-types'
+import { assertTrustedWorkflowLedgerSender } from './workflow-ledger-handlers'
+import { desktopWindowRole } from '../desktop-window-registry'
+import { taskSessionForWindow } from '../task-window'
 import type { CheckpointRestoreMode } from '../../shared/types'
 import { sessionManager } from '../sessionManager'
+import { assertTaskExecutionEnvironment } from '../wsl/binding'
 import { executeInteractiveOperationEffect } from '../task/operation-effect-gateway'
 import { registerExportedWorktreePatch } from '../task/worktree-patch-artifact'
 import { createManagedWorktreeMergePatch, exportManagedWorktreePatch } from '../worktrees'
@@ -27,6 +33,7 @@ function registerCheckpointMutationIpc(): void {
   ipcMain.handle('sessions:rewindFiles', async (_event, id: string, messageId: string, dryRun: boolean) => {
     const session = sessionManager.get(id)
     if (!session?.rewindFiles) return { canRewind: false, error: '会话不存在或引擎不支持' }
+    assertTaskExecutionEnvironment(session.meta)
     if (dryRun !== true) await authorize(id, '回溯文件')
     return sessionManager.rewindFiles(id, messageId, dryRun === true)
   })
@@ -36,6 +43,7 @@ function registerCheckpointMutationIpc(): void {
       const session = sessionManager.get(id)
       const safeMode = checkpointMode(mode)
       if (!session?.restoreCheckpoint) return unavailableCheckpoint(messageId, safeMode)
+      assertTaskExecutionEnvironment(session.meta)
       if (session.meta.status === 'running' || session.meta.status === 'starting') {
         return runningCheckpoint(messageId, safeMode)
       }
@@ -69,6 +77,15 @@ function registerGitMutationIpc(): void {
 }
 
 function registerWorktreeMutationIpc(): void {
+  ipcMain.handle('worktrees:handoff-state', (_event, id: string) => {
+    const session = sessionManager.get(id)
+    if (!session) throw new Error('任务不存在或已关闭。')
+    return workspaceHandoffView(session.meta)
+  })
+  ipcMain.handle('worktrees:handoff', async (_event, id: string) => {
+    await authorize(id, '交接工作目录')
+    return sessionManager.handoffWorkspace(id)
+  })
   ipcMain.handle('worktrees:exportPatch', async (_event, id: string) => {
     await authorize(id, '导出 worktree patch')
     const session = sessionManager.get(id)
@@ -94,9 +111,16 @@ function registerWorktreeMutationIpc(): void {
     await authorize(id, '应用 worktree patch')
     return executeInteractiveOperationEffectApplyPatch(id, executeInteractiveOperationEffect)
   })
-  ipcMain.handle('worktrees:createPr', async (_event, id: string) => {
+  ipcMain.handle('worktrees:createPr', async (event, id: string, input?: WorktreePullRequestDraftSubmitInput) => {
+    const trusted = (): void => {
+      assertTrustedWorkflowLedgerSender(event)
+      const window = BrowserWindow.fromWebContents(event.sender), role = window && desktopWindowRole(window)
+      if (!window || window.isDestroyed() || (role !== 'main' && role !== 'task') || role === 'task' && taskSessionForWindow(window) !== id) throw new Error('请从主工作台或原任务窗口提交 PR。')
+    }
+    trusted()
     await authorize(id, '创建 Pull Request')
-    return executeInteractiveOperationEffectCreatePr(id, executeInteractiveOperationEffect)
+    trusted()
+    return executeInteractiveOperationEffectCreatePr(id, executeInteractiveOperationEffect, input)
   })
   ipcMain.handle('worktrees:remove', async (_event, id: string, options?: { deleteBranch?: boolean; force?: boolean }) => {
     await authorize(id, '移除 worktree')
@@ -126,7 +150,11 @@ async function runGitIndex(
 }
 
 async function authorize(sessionId: string, title: string): Promise<void> {
+  const original = sessionManager.get(sessionId)?.meta
+  if (original) assertTaskExecutionEnvironment(original)
   await sessionManager.assertInteractiveExecutionAuthorized(sessionId, title)
+  const current = sessionManager.get(sessionId)?.meta
+  if (current) assertTaskExecutionEnvironment(current)
 }
 
 function checkpointMode(mode: CheckpointRestoreMode): CheckpointRestoreMode {

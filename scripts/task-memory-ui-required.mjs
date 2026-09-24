@@ -33,6 +33,20 @@ try {
         });
       };
       window.agentDesk = {
+        onSettingsChanged: () => () => {},
+        onSessionEvent: () => () => {},
+        readTaskMemoryPreferences: async () => ({
+          overrides: {},
+          defaults: { useSharedMemory: true, contributeSharedMemory: true },
+          effective: { useSharedMemory: true, contributeSharedMemory: true },
+          temporary: false
+        }),
+        updateTaskMemoryPreferences: async (_id, overrides) => ({
+          overrides,
+          defaults: { useSharedMemory: true, contributeSharedMemory: true },
+          effective: { useSharedMemory: overrides.useSharedMemory ?? true, contributeSharedMemory: overrides.contributeSharedMemory ?? true },
+          temporary: false
+        }),
         readProjectMemory: async id => ({ projectHash:'fixture',markdown:'',entries:[],drafts:[] }),
         listLearning: async () => ({ records:[],drafts:[],active:[],audit:[] }),
         listLayeredMemories: async id => entries.filter(x => !x.sessionId || x.sessionId === id),

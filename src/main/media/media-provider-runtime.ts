@@ -30,9 +30,9 @@ export async function executeRemoteMediaOperation(
   rootDir: string,
   dependencies: MediaProviderRuntimeDependencies = {}
 ): Promise<MediaRemoteJobObservation> {
-  if (!profile.providerId) throw new Error('Remote media Provider is missing a CaoGen Provider binding')
+  if (!profile.providerId) throw new Error('Remote media Provider is missing an EastGenesis Provider binding')
   const provider = getProvider(profile.providerId)
-  if (!provider) throw new Error('Bound CaoGen Provider was not found')
+  if (!provider) throw new Error('Bound EastGenesis Provider was not found')
   const target = resolveMediaExecutionTarget(provider, profile, job)
   assertRoutingExpertTargetAllowed(provider.id, target.baseUrl, getSettings().routingExpertPolicy)
   const scope = {

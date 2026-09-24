@@ -1,0 +1,20 @@
+.browser-body.has-style-sidebar { grid-template-columns: minmax(100px, 1fr) minmax(225px, 280px); }
+.browser-style-panel { min-height: 0; min-width: 0; overflow-y: auto; padding: 12px; border-left: 1px solid var(--border); background: var(--bg-raised); display: flex; flex-direction: column; gap: 10px; font-size: 12px; }
+.browser-style-heading p, .browser-style-hint { margin: 5px 0 0; color: var(--text-dim); line-height: 1.5; font-size: 11px; }
+.browser-style-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.browser-style-selector { display: block; overflow-wrap: anywhere; font-size: 10px; color: var(--text-dim); padding: 7px; background: var(--bg-secondary); border-radius: 6px; }
+.browser-style-fields { border: 0; border-top: 1px solid var(--border); margin: 0; padding: 8px 0 0; min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.browser-style-fields legend { font-size: 11px; padding-right: 6px; }
+.browser-style-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.browser-style-field > span { color: var(--text-dim); font-size: 10px; }
+.browser-style-field .input { min-width: 0; width: 100%; height: 29px; padding: 4px 6px; font-size: 11px; }
+.browser-style-changes { display: flex; flex-direction: column; gap: 7px; border-top: 1px solid var(--border); padding-top: 10px; }
+.browser-style-changes > div { display: flex; flex-direction: column; gap: 2px; font-size: 11px; overflow-wrap: anywhere; }
+.browser-style-changes code { color: var(--text-dim); font-size: 10px; }
+.browser-style-draft { align-self: flex-start; white-space: normal; }
+.browser-style-panel .notice { margin: 0; overflow-wrap: anywhere; }
+@container browser-workspace (max-width: 520px) {
+  .browser-body.has-style-sidebar { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(160px, 1fr) minmax(150px, 42%); }
+  .browser-style-panel { border-left: 0; border-top: 1px solid var(--border); }
+}
+.browser-panel-with-connections { container: browser-workspace / inline-size; }

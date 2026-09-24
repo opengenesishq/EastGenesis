@@ -1,3 +1,4 @@
+import { assertTaskExecutionEnvironment } from '../wsl/binding'
 import { ipcMain } from 'electron'
 import type { TypeScriptLanguageInput } from '../../shared/types'
 import { listProjectFiles, readTextFile, searchProjectText } from '../fileOps'
@@ -68,7 +69,9 @@ export function registerFileIntelligenceIpc(): void {
     const normalizedOperation = typeof operation === 'string' ? operation : ''
     const handler = FILE_INTELLIGENCE_HANDLERS[normalizedOperation]
     if (!handler) throw new Error(`不支持的文件智能操作: ${normalizedOperation || 'missing'}`)
-    const cwd = typeof sessionId === 'string' ? sessionManager.get(sessionId)?.meta.cwd : undefined
+    const meta = typeof sessionId === 'string' ? sessionManager.get(sessionId)?.meta : undefined
+    if (meta) assertTaskExecutionEnvironment(meta)
+    const cwd = meta?.cwd
     if (!cwd) return MISSING_SESSION_RESULTS[normalizedOperation as FileIntelligenceOperation]
     return handler(cwd, args)
   })

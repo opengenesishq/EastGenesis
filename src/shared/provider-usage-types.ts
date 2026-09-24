@@ -74,6 +74,15 @@ export interface ProviderUsageAggregate {
   cacheReadTokens: number
   cacheWriteTokens: number
   costUsd: number
+  /** Cost is a partial total when unpricedRequests is nonzero; zero is not proof of free usage. */
+  pricedRequests: number
+  unpricedRequests: number
+  costSources: ProviderUsageCostSourceSummary[]
+}
+
+export interface ProviderUsageModelAggregate extends ProviderUsageAggregate {
+  providerId: string
+  model: string
 }
 
 export interface ProviderUsageCredentialAggregate extends ProviderUsageAggregate {
@@ -117,6 +126,8 @@ export interface ProviderUsageSummary {
   costSources: ProviderUsageCostSourceSummary[]
   requestsByProvider: ProviderUsageAggregate[]
   requestsByModel: ProviderUsageAggregate[]
+  /** Connection/model pairs, retaining separate costs for same-named models. */
+  requestsByProviderModel: ProviderUsageModelAggregate[]
   requestsByCredential: ProviderUsageCredentialAggregate[]
   sources: string[]
   buckets: ProviderUsageBucket[]

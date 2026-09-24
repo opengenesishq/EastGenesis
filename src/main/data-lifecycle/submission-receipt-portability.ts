@@ -12,6 +12,7 @@ import { assertGoalStartDecision, goalPreparationDigest, normalizeGoalPreparatio
 import { goalTaskIds } from '../project-workspace/goal-task-service'
 import { assertNoCredentialMaterial, projectAggregateCanonicalJson, projectAggregateDigest } from '../project-aggregate/codec'
 import { listProjectSubmissionReceiptFiles } from './submission-receipt-files'
+import { normalizeGoalRevisionIntent } from '../../shared/session-goal-revision'
 import { normalizeRequirementRevisionIntent } from '../../shared/session-requirement-revision'
 
 type PortableContext = {
@@ -83,6 +84,16 @@ export function validateSubmissionReceiptBindings(slice: ProjectSubmissionReceip
     if (!record.goalId || !record.workItemId) fail('Project input has incomplete canonical task binding')
     const goal = goals.get(record.goalId), item = workItems.get(record.workItemId)
     if (!goal || goal.projectId !== slice.projectId || !item || item.projectId !== slice.projectId || item.goalId !== goal.id) fail('input task binding mismatch')
+    if (record.phase === 'goal_revised') {
+      const receipt = record.goalRevision!
+      const source = aggregate.audit.find(entry => entry.source === 'project_workspace' &&
+        isRecord(entry.value) && entry.value.id === receipt.sourceEventId)?.value
+      if (!isRecord(source) || !isRecord(source.payload) || source.kind !== 'goal.objective_revised' || source.entityId !== goal.id ||
+          source.payload.workItemId !== item.id || source.payload.sessionId !== record.sessionId || source.payload.requestId !== record.id ||
+          source.payload.payloadDigest !== (record.importedPayloadDigest ?? messagePayloadDigest(record.payload)) ||
+          source.payload.goalRevision !== receipt.goalRevision || source.payload.workItemRevision !== receipt.workItemRevision ||
+          source.payload.objective !== receipt.objective) fail('objective revision source binding mismatch')
+    }
     if (record.phase === 'requirements_applied') {
       const receipt = record.requirementRevision!
       const source = aggregate.audit.find(entry => entry.source === 'project_workspace' &&
@@ -98,7 +109,7 @@ export function validateSubmissionReceiptBindings(slice: ProjectSubmissionReceip
     const ids = goalTaskIds(slice.projectId, record.input.requestId)
     const goal = goals.get(ids.goalId), item = workItems.get(ids.workItemId)
     if (record.phase !== 'reserved' && (!goal || !item)) fail('prepared task is missing')
-    if (goal && (goal.projectId !== slice.projectId || goal.objective !== record.input.objective)) fail('Goal request binding mismatch')
+    if (goal && (goal.projectId !== slice.projectId || !matchesOriginalGoalObjective(goal.id, goal.objective, record.input.objective, aggregate))) fail('Goal request binding mismatch')
     if (item && (item.projectId !== slice.projectId || item.goalId !== ids.goalId ||
         (record.input.businessLineId && item.businessLineId !== record.input.businessLineId))) fail('WorkItem request binding mismatch')
   }
@@ -180,9 +191,34 @@ function assertEvidencePayload(item: PortableSessionInput): void {
   if (record.importedPayloadPaths && projectAggregateCanonicalJson(record.importedPayloadPaths) !== projectAggregateCanonicalJson(paths)) fail('imported source path binding mismatch')
 }
 
+/** The initial request remains immutable even after explicit audited goal edits. */
+function matchesOriginalGoalObjective(goalId: string, current: string, original: string, aggregate: ProjectAggregateSnapshot): boolean {
+  if (current === original) return true
+  const revisions = aggregate.audit.filter(entry => entry.source === 'project_workspace').map(entry => entry.value)
+    .filter((event): event is Record<string, unknown> => isRecord(event) && event.kind === 'goal.objective_revised' &&
+      event.entityId === goalId && event.projectId === aggregate.projectId && isRecord(event.payload))
+    .sort((a, b) => Number(a.revision) - Number(b.revision))
+  let objective = original
+  for (const event of revisions) {
+    const payload = event.payload as Record<string, unknown>
+    if (!isRecord(payload.before) || !isRecord(payload.before.goalContract) ||
+        payload.before.goalContract.objective !== objective || typeof payload.objective !== 'string' ||
+        payload.source !== 'confirmed_session_input') return false
+    objective = payload.objective
+  }
+  return objective === current
+}
+
 function parseSessionInput(value: unknown): SessionInputRecord {
   if (!isRecord(value) || value.schemaVersion !== 1 || !isRecord(value.payload)) fail('invalid Session input')
   const record = value as unknown as SessionInputRecord
+  if (record.payload.goalRevisionIntent) {
+    normalizeGoalRevisionIntent(record.payload.goalRevisionIntent)
+    if (record.payload.requirementRevisionIntent || record.payload.officeRevisionIntent || record.payload.images?.length || record.payload.documents?.length) fail('mixed objective revision intent')
+  }
+  if (record.phase === 'goal_revised' && (!record.payload.goalRevisionIntent || record.goalRevision?.schemaVersion !== 1 ||
+      !record.goalRevision.sourceEventId || record.goalRevision.objective !== record.payload.text.trim() ||
+      !Number.isSafeInteger(record.goalRevision.goalRevision) || !Number.isSafeInteger(record.goalRevision.workItemRevision))) fail('invalid objective revision receipt')
   if (record.payload.requirementRevisionIntent) normalizeRequirementRevisionIntent(record.payload.requirementRevisionIntent)
   if (record.phase === 'requirements_applied' && (!record.payload.requirementRevisionIntent ||
       record.requirementRevision?.schemaVersion !== 1 || !record.requirementRevision.sourceEventId ||
@@ -190,7 +226,7 @@ function parseSessionInput(value: unknown): SessionInputRecord {
   if (typeof record.sessionId !== 'string' || typeof record.id !== 'string' ||
       !/^[A-Za-z0-9_-]{1,160}$/.test(record.sessionId) || !/^[A-Za-z0-9_-]{1,160}$/.test(record.id) ||
       record.messageId !== `session-input:${record.sessionId}:${record.id}` ||
-      !['queued', 'dispatching', 'applied', 'requirements_applied', 'needs_reconciliation', 'cancelled'].includes(record.phase) ||
+      !['queued', 'dispatching', 'applied', 'requirements_applied', 'goal_revised', 'needs_reconciliation', 'cancelled'].includes(record.phase) ||
       typeof record.payload.text !== 'string' || record.payload.text.length > 200_000 ||
       record.payload.messageId || !timestamp(record.createdAt) || !timestamp(record.updatedAt) ||
       (record.revision !== undefined && (!Number.isSafeInteger(record.revision) || record.revision < 1))) fail('invalid Session input record')

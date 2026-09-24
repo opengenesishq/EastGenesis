@@ -182,12 +182,12 @@ export const PROJECT_STUDIO_ENGLISH: Readonly<Record<string, unknown>> = {
   deleteProjectTitle: 'Delete this project?',
   purgeProjectTitle: 'Permanently delete this project?',
   deleteProjectHint: 'The project will be marked as deleted and can be restored later. Linked local directories, repositories, and external data will not be deleted.',
-  purgeProjectHint: 'The project and its CaoGen records will be permanently removed and cannot be recovered. Linked local directories, repositories, and external data will not be deleted.',
+  purgeProjectHint: 'The project and its EastGenesis records will be permanently removed and cannot be recovered. Linked local directories, repositories, and external data will not be deleted.',
   confirmProjectName: (name: string) => `Enter “${name}” to confirm`,
   confirmDelete: 'Confirm deletion',
   confirmPurge: 'Delete permanently',
   archivedProjectNotice: 'This project is archived. Restore it before creating or editing project content.',
-  deletedProjectNotice: 'This project is soft-deleted. Restore it, or permanently delete its CaoGen records.',
+  deletedProjectNotice: 'This project is soft-deleted. Restore it, or permanently delete its EastGenesis records.',
   unknownError: 'The action could not be completed. Try again.',
   projectDetails: 'Project details',
   projectDetailsDescription: 'Portfolio, remote continuation, project settings, resources, and knowledge',
@@ -229,7 +229,7 @@ export const PROJECT_STUDIO_ENGLISH: Readonly<Record<string, unknown>> = {
   templateTaskSkeleton: 'Task outline',
   templateExpectedArtifacts: 'Expected artifacts',
   templateResourceSuggestions: 'Suggested resources',
-  templateResourcePolicy: 'Resources are suggestions only. CaoGen will not read directories, connect services, or grant permissions automatically.'
+  templateResourcePolicy: 'Resources are suggestions only. EastGenesis will not read directories, connect services, or grant permissions automatically.'
 }
 
 export const PROJECT_COLLAB_ENGLISH: Readonly<Record<string, unknown>> = {
@@ -319,7 +319,7 @@ const VIDEO_STUDIO_TEXT = {
     projectPickerLabel: '选择视频归属项目',
     loadingProjects: '加载项目...',
     quickStartTitle: '从脚本开始制作',
-    quickStartDescription: '输入标题和脚本，CaoGen 会直接创建分镜草稿；素材、生成任务和成片会在同一条制作记录中持续保存。',
+    quickStartDescription: '输入标题和脚本，EastGenesis 会直接创建分镜草稿；素材、生成任务和成片会在同一条制作记录中持续保存。',
     titlePlaceholder: '标题，例如：产品宣传片',
     titleLabel: '视频标题',
     scriptPlaceholder: '粘贴脚本或描述你想生成的片子',

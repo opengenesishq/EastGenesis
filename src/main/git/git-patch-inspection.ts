@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSyncInExecutionEnvironment as execFileSync } from '../wsl/process'
 import path from 'node:path'
 import { isolatedLocalGitEnv, withSafeLocalGitConfig } from './safe-git'
 

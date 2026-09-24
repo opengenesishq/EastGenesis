@@ -218,12 +218,13 @@ function useProjectMutations(
     'resource',
     () => window.agentDesk.updateProjectWorkspace(
       project.id,
-      { resources: project.resources.filter((resource) => resource.id !== resourceId) },
+      { resources: project.resources.filter((resource) => resource.id !== resourceId),
+        ...(project.primaryResourceId === resourceId ? { primaryResourceId: null } : {}) },
       { expectedRevision: project.revision }
     ),
     refreshProject,
     TEXT.resourceRemoved
-  ), [project.id, project.resources, project.revision, refreshProject, run])
+  ), [project.id, project.resources, project.revision, project.primaryResourceId, refreshProject, run])
   const mutateConnector = useCallback((resourceId: string, mutation: ProjectConnectorMutation) => run(
     'resource',
     () => window.agentDesk.mutateProjectConnector(project.id, resourceId, mutation, { expectedRevision: project.revision }),

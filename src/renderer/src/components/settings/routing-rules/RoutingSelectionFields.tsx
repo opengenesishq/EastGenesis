@@ -1,8 +1,9 @@
 import { useId } from 'react'
 import type { RoutingSelection, RoutingTargetRef } from '../../../../../shared/routing-policy-types'
 import RoutingTargetPicker from './RoutingTargetPicker'
+import RoutingCandidateChecklist from './RoutingCandidateChecklist'
 import type { RoutingProviderOption } from './routing-ui-props'
-import { emptyTarget, replaceTarget, selectionWithKind } from './routing-form-state'
+import { emptyTarget, moveTarget, replaceTarget, selectionWithKind } from './routing-form-state'
 import { options, SELECTION_LABELS } from './routing-form-options'
 
 interface Props {
@@ -28,10 +29,23 @@ function SelectionTargets({ value, providers, maxTargets, onChange }: Props): Re
     case 'global_auto': return <p>在所有符合任务要求的可用模型中自动选择。</p>
     case 'provider_auto': return <ProviderScope value={value.providerId} providers={providers} onChange={(providerId) => onChange({ ...value, providerId })} />
     case 'fixed': return <RoutingTargetPicker label="固定目标" value={value.target} providers={providers} onChange={(target) => onChange({ ...value, target })} />
-    case 'candidate_set': return <TargetList title="候选集合" values={value.targets} max={maxTargets} providers={providers} onChange={(targets) => onChange({ ...value, targets })} required />
+    case 'candidate_set': return <>
+      <p className="rr-hint">候选模型按当前选择偏好评分。需要指定首选和回退顺序时，请使用“首选和明确备选”。</p>
+      <RoutingCandidateChecklist values={value.targets} max={maxTargets} providers={providers} onChange={(targets) => onChange({ ...value, targets })} />
+      <TargetList title="候选集合" values={value.targets} max={maxTargets} providers={providers} onChange={(targets) => onChange({ ...value, targets })} required />
+    </>
     case 'preferred': return <>
-      <RoutingTargetPicker label="首选目标" value={value.primary} providers={providers} onChange={(primary) => onChange({ ...value, primary })} />
-      <TargetList title="明确备选" values={value.alternatives} max={maxTargets - 1} providers={providers} onChange={(alternatives) => onChange({ ...value, alternatives })} />
+      <RoutingTargetPicker label="首选目标" value={value.primary} providers={providers} onChange={(primary) => onChange({ ...value, primary,
+        alternatives: value.alternatives.filter((target) => target.providerId !== primary.providerId || target.model !== primary.model) })} />
+      <label>备选顺序<select data-routing-alternatives-order value={value.alternativesOrder ?? 'score'} onChange={(event) => {
+        const { alternativesOrder: _order, ...selection } = value
+        onChange(event.target.value === 'configured' ? { ...selection, alternativesOrder: 'configured' } : selection)
+      }}><option value="configured">按下方顺序依次回退</option><option value="score">由系统根据评分选择备选</option></select></label>
+      <p className="rr-hint">{value.alternativesOrder === 'configured'
+        ? '允许切换模型时按下方顺序执行；下一备选不可用时停止，不跳过它。仍受失败原因和最多重试次数限制。'
+        : '已有规则沿用系统评分。选择按顺序回退后，可以调整各备选位置。'}</p>
+      <RoutingCandidateChecklist values={value.alternatives} primary={value.primary} max={maxTargets - 1} providers={providers} onChange={(alternatives) => onChange({ ...value, alternatives })} />
+      <TargetList title="明确备选" values={value.alternatives} max={maxTargets - 1} providers={providers} ordered={value.alternativesOrder === 'configured'} onChange={(alternatives) => onChange({ ...value, alternatives })} />
     </>
   }
 }
@@ -45,14 +59,18 @@ function ProviderScope({ value, providers, onChange }: {
     {providers.map((item) => <option key={item.id} value={item.id} disabled={!item.available}>{item.name}{item.available ? '' : '（暂不可用）'}</option>)}
   </select>{(!provider || !provider.available) && <span className="rr-error">请选择可用厂商；原范围不会被自动替换。</span>}</label>
 }
-function TargetList({ title, values, max, providers, required = false, onChange }: {
+function TargetList({ title, values, max, providers, required = false, ordered = false, onChange }: {
   title: string; values: readonly RoutingTargetRef[]; max: number; providers: readonly RoutingProviderOption[]
-  required?: boolean; onChange(values: RoutingTargetRef[]): void
+  required?: boolean; ordered?: boolean; onChange(values: RoutingTargetRef[]): void
 }): React.JSX.Element {
   return <div className="rr-target-list" data-routing-target-list={required ? 'candidates' : 'alternatives'}>
     <h5>{title}</h5>
     {values.map((target, index) => <div key={index} className="rr-target-row" data-routing-target-index={index}>
       <RoutingTargetPicker label={`${title} ${index + 1}`} value={target} providers={providers} onChange={(next) => onChange(replaceTarget(values, index, next))} />
+      {ordered && <span className="rr-target-order-actions">
+        <button type="button" data-routing-move-target="up" disabled={index === 0} aria-label={`上移${title} ${index + 1}`} onClick={() => onChange(moveTarget(values, index, -1))}>上移</button>
+        <button type="button" data-routing-move-target="down" disabled={index === values.length - 1} aria-label={`下移${title} ${index + 1}`} onClick={() => onChange(moveTarget(values, index, 1))}>下移</button>
+      </span>}
       <button type="button" data-routing-remove-target aria-label={`移除${title} ${index + 1}`} onClick={() => onChange(values.filter((_, at) => at !== index))}>移除</button>
     </div>)}
     {!values.length && <p className={required ? 'rr-error' : 'rr-hint'}>{required ? '至少明确选择一个候选目标。' : '尚无备选：只考虑首选目标，不会自动添加其它厂商或旧的备用模型。'}</p>}

@@ -145,6 +145,8 @@ try {
   boundary('src/main/routineStore.ts', {})
   boundary('src/main/routines/personal-os.ts', { runWithPersonalOsPowerBlocker: (_options, operation) => operation() })
   boundary('src/main/routines/routine-session-lifecycle.ts', { initializeRoutineSessionLifecycle: () => {} })
+  let heartbeatRoutine
+  boundary('src/main/routines/routine-heartbeat-runtime.ts', { routineHeartbeatService: () => ({ trigger: async routine => { heartbeatRoutine = routine; return { id: 'original-task-run' } } }) })
   boundary('src/main/routines/routine-project-runtime.ts', { prepareRoutineProjectExecution: async (_root, _routine, _run, bind) => {
     const binding = { projectId: 'project', goalId: 'goal', workItemId: 'work', cwd: root }
     await bind(binding); return binding
@@ -174,8 +176,18 @@ try {
     assert.equal(createdOptions.goalId, 'goal')
     assert.equal(createdOptions.workItemId, 'work')
     assert.equal(sentPrompt, routine.prompt)
+    assert.equal(createdOptions.isolated, false)
+    await executeRoutine(root, { ...routine, model: 'fixture-model', executionLocation: 'worktree', reasoningEffort: 'high' }, { sendDelayMs: 0, nextRunAt: null })
+    assert.equal(createdOptions.isolated, true)
+    assert.equal(createdOptions.reasoningEffort, 'high')
     await executeRoutine(root, { ...routine, engine: undefined }, { sendDelayMs: 0, nextRunAt: null })
     assert.equal(createdOptions.executorEngine, undefined)
+    assert.equal(createdOptions.reasoningEffort, undefined)
+    createdOptions = undefined
+    const heartbeat = { ...routine, executionTarget: { kind: 'existing_session', sessionId: 'original-task' } }
+    await executeRoutine(root, heartbeat, { sendDelayMs: 0, nextRunAt: null })
+    assert.equal(heartbeatRoutine, heartbeat)
+    assert.equal(createdOptions, undefined)
   })
   console.log(`${passed}/${passed} routine executor selection checks passed; no Provider I/O`)
 } finally { rmSync(root, { recursive: true, force: true }) }

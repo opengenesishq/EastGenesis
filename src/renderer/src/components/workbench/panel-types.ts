@@ -11,14 +11,17 @@ export type PanelId =
   | 'terminal'
   | 'browser'
   | 'files'
+  | 'sources'
   | 'preview'
   | 'worktree'
   | 'pluginRegistry'
   | 'subagent'
+  | 'sidechat'
   | 'routine'
   | 'memory'
 
 export interface PanelOpenContext {
   url?: string
   path?: string
+  memoryScope?: 'task' | 'project'
 }

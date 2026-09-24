@@ -22,7 +22,7 @@ import type {
 } from '../scheduler'
 import { synchronizeProviderReliabilityPolicies } from '../providerHealth'
 import { assertNativeRecoveryTargetAllowed, evaluateNativeRecoveryTarget, filterNativeRecoveryModels } from '../model/native-recovery-eligibility'
-import { frozenRetryAllows, frozenSameTargetRetryAllows, type NativeSessionRecoveryContext } from '../model/native-recovery-session'
+import { configuredNextRetry, frozenRetryAllows, frozenSameTargetRetryAllows, type NativeSessionRecoveryContext } from '../model/native-recovery-session'
 import type { RoutingRetryReason } from '../../shared/routing-policy-types'
 import { ModelRouteError } from '../model/model-route-error'
 
@@ -174,6 +174,8 @@ function recoverProviderKey(input: AnthropicRecoveryInput): AnthropicRecoveryRes
 
 function recoverProviderModel(input: AnthropicRecoveryInput): AnthropicRecoveryResult | undefined {
   const { current, failure, providers, state } = input
+  const ordered = configuredNextRetry(input.recovery, current)
+  if (ordered && (!ordered.target || ordered.target.providerId !== current.providerId)) return undefined
   const provider = providers.find((candidate) =>
     candidate.id === current.providerId && candidate.engine === (input.engineKind ?? 'anthropic') && candidate.hasToken
   )
@@ -219,11 +221,14 @@ function recoverProviderModel(input: AnthropicRecoveryInput): AnthropicRecoveryR
 
 function recoverProvider(input: AnthropicRecoveryInput): AnthropicRecoveryResult | undefined {
   const { current, failure, providers, state } = input
+  const ordered = configuredNextRetry(input.recovery, current)
+  if (ordered && (!ordered.target || ordered.target.providerId === current.providerId)) return undefined
   if (!failure.switchable) return undefined
   const candidates = providers
+    .filter((provider) => !ordered || ordered.target?.providerId === provider.id)
     .filter((provider) => provider.engine === (input.engineKind ?? 'anthropic') && provider.hasToken)
     .filter((provider) => recoveryProviderAllowed(input, provider))
-    .filter((provider) => providerAllowedByOutboundContext(
+    .filter((provider) => ordered || providerAllowedByOutboundContext(
       input.outboundContext,
       provider,
       current.model
@@ -232,12 +237,12 @@ function recoverProvider(input: AnthropicRecoveryInput): AnthropicRecoveryResult
     .filter((provider) => provider.models.length > 0)
   const selected = input.pickFailoverTarget({
     candidates,
-    exclude: state.triedProviders,
+    exclude: ordered ? new Set([current.providerId]) : state.triedProviders,
     desiredModel: current.model,
     fallbackProviderId: input.recovery.frozenRetry?.effectivePolicy.selection.kind === 'preferred' ? undefined : input.settings.fallbackProviderId,
     fallbackModel: input.recovery.frozenRetry?.effectivePolicy.selection.kind === 'preferred' ? undefined : input.settings.fallbackModel
   })
-  if (!selected || state.triedProviders.has(selected.providerId)) return undefined
+  if (!selected || (!ordered && state.triedProviders.has(selected.providerId))) return undefined
   state.triedProviders.add(selected.providerId)
   let target: AnthropicMessagesTarget
   try {
@@ -269,6 +274,7 @@ function recoverProvider(input: AnthropicRecoveryInput): AnthropicRecoveryResult
 }
 
 function resolvableModels(input: AnthropicRecoveryInput, provider: ProviderView): string[] {
+  const ordered = configuredNextRetry(input.recovery, input.current)
   return filterNativeRecoveryModels({ ...input.recovery, provider })
     .map((model) => {
       try {
@@ -277,7 +283,8 @@ function resolvableModels(input: AnthropicRecoveryInput, provider: ProviderView)
         return ''
       }
     })
-    .filter((model) => model && providerAllowedByOutboundContext(input.outboundContext, provider, model)
+    .filter((model) => model && (!ordered || (ordered.target?.providerId === provider.id && ordered.target.model === model))
+      && providerAllowedByOutboundContext(input.outboundContext, provider, model)
       && evaluateNativeRecoveryTarget({ ...input.recovery, provider, model }).allowed
       && (!input.recovery.frozenRetry || frozenRetryAllows({ recovery: input.recovery, providerId: provider.id,
         model, protocol: recoveryProtocol(input), attempt: input.state.attempts + 1,

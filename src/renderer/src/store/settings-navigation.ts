@@ -1,18 +1,33 @@
 export type SettingsTab =
   | 'control'
   | 'routing'
+  | 'usage'
   | 'general'
+  | 'appearance'
+  | 'voice'
+  | 'appshots'
+  | 'remote'
+  | 'ssh'
+  | 'remote-hosts'
+  | 'computer-history'
+  | 'terminal'
+  | 'git'
+  | 'archived'
+  | 'profile'
+  | 'models'
+  | 'environment'
   | 'permissions'
-  | 'project'
-  | 'persona'
   | 'office'
   | 'providers'
   | 'notifications'
   | 'plugins'
   | 'data'
   | 'migrate'
+  | 'feedback'
+  | 'status'
+  | 'browser'
 
-export type SettingsContext = 'welcome-provider-recovery' | 'provider-recovery-exhausted'
+export type SettingsContext = 'welcome-provider-recovery' | 'welcome-provider-import' | 'provider-recovery-exhausted' | 'first-launch-provider-onboarding'
 
 export interface SettingsNavigationSlice {
   showSettings: boolean
@@ -31,9 +46,9 @@ export function createSettingsNavigationSlice(
 ): SettingsNavigationSlice {
   return {
     showSettings: false,
-    settingsTab: 'control',
+    settingsTab: 'general',
     settingsContext: null,
-    setShowSettings: (showSettings, settingsTab = 'control', settingsContext) =>
+    setShowSettings: (showSettings, settingsTab = 'general', settingsContext) =>
       set({
         showSettings,
         settingsTab,

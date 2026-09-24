@@ -56,7 +56,8 @@ export function buildProjectWorkspaceImportAuthorityEvent(
 export function isLocalProjectWorkspaceAuthorityEvent(value: unknown): boolean {
   return isRecord(value) && (
     value.kind === PROJECT_WORKSPACE_MIGRATION_EVENT_KIND ||
-    value.kind === PROJECT_WORKSPACE_IMPORT_AUTHORITY_EVENT_KIND
+    value.kind === PROJECT_WORKSPACE_IMPORT_AUTHORITY_EVENT_KIND ||
+    value.kind === 'workflow.task-handoff.imported'
   )
 }
 
@@ -65,6 +66,16 @@ export function projectWorkspaceAuthorityOwnsWorkItem(
   projectId: string,
   workItemId: string
 ): boolean {
+  // A handoff grants projection authority only over its declared task closure,
+  // never over a sealed copy of the whole source Project.
+  if (event.kind === 'workflow.task-handoff.imported') {
+    const payload = event.payload
+    return event.entityType === 'system' && event.entityId === projectId && event.projectId === projectId &&
+      payload.format === 'caogen.task-handoff-authority.v1' && payload.projectId === projectId &&
+      isId(payload.sessionId) && isDigest(payload.bundleDigest) && isId(payload.sourceHostId) &&
+      Array.isArray(payload.workItems) && payload.workItems.every(isImportWorkItemBinding) &&
+      payload.workItems.some(item => item.id === workItemId)
+  }
   if (event.kind === PROJECT_WORKSPACE_MIGRATION_EVENT_KIND && event.entityId === projectId) {
     return payloadOwnsWorkItem(event.payload.workItems, workItemId)
   }

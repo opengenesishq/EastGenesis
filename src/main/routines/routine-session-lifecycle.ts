@@ -15,6 +15,7 @@ import {
 import { transitionRoutineGoal, transitionRoutineWorkItem } from './routine-project-runtime'
 import { getSettings } from '../settings'
 import { persistRoutineResultEvidence } from './routine-result-artifact'
+import { routineHeartbeatService } from './routine-heartbeat-runtime'
 
 let installedRoot: string | undefined
 let installedWorkspaceRoot: string | undefined
@@ -23,8 +24,9 @@ const sessionQueues = new Map<string, Promise<void>>()
 
 export async function reconcileRoutineRunsAtStartup(rootDir: string, workspaceRoot: string): Promise<void> {
   initializeRoutineSessionLifecycle(rootDir, workspaceRoot)
+  await routineHeartbeatService(rootDir, workspaceRoot).sweep()
   const routines = new Map((await listRoutines(rootDir)).map((routine) => [routine.id, routine]))
-  const running = (await listRoutineRuns(rootDir)).filter((record) => record.status === 'running')
+  const running = (await listRoutineRuns(rootDir)).filter((record) => record.status === 'running' && !record.heartbeat)
   for (const record of running) {
     try {
       await reconcileRoutineRun(rootDir, workspaceRoot, record, routines.get(record.routineId))
@@ -75,8 +77,9 @@ async function handleRoutineEvent(
   workspaceRoot: string,
   payload: SessionEventPayload
 ): Promise<void> {
+  await routineHeartbeatService(rootDir, workspaceRoot).sweep(payload.sessionId)
   const record = (await listRoutineRuns(rootDir)).find((run) =>
-    run.sessionId === payload.sessionId && run.status === 'running'
+    run.sessionId === payload.sessionId && run.status === 'running' && !run.heartbeat
   )
   if (!record) return
   const event = payload.event
@@ -266,5 +269,5 @@ async function finalizeRoutineEvent(
 function isRoutineLifecycleEvent(payload: SessionEventPayload): boolean {
   const event = payload.event
   return event.kind === 'permission-request' || event.kind === 'permission-resolved' ||
-    event.kind === 'turn-result' || (event.kind === 'status' && event.status === 'error')
+    event.kind === 'turn-result' || event.kind === 'status'
 }

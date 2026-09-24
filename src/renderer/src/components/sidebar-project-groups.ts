@@ -1,5 +1,7 @@
 import type { HistoryEntry, Project, ProjectWorkspace, SessionMeta } from '../../../shared/types'
-import type { SidebarProjectSort } from './SidebarProjectSections'
+
+/** Retained only for legacy store compatibility; projects are no longer a user-facing sidebar surface. */
+export type SidebarProjectSort = 'recent' | 'name'
 
 export type SidebarEntry =
   | { kind: 'active'; id: string; meta: SessionMeta; history?: HistoryEntry; pendingCount: number }

@@ -64,7 +64,7 @@ const LOCAL_COMMAND_ENV_KEYS = new Set([
   'SSH_ASKPASS_REQUIRE'
 ])
 
-// Repository-local fsmonitor commands are executable code. CaoGen's structured
+// Repository-local fsmonitor commands are executable code. EastGenesis' structured
 // Git reads must never run them implicitly, especially for permission-free tools.
 export function withSafeLocalGitConfig(args: readonly string[]): string[] {
   return [...SAFE_LOCAL_GIT_CONFIG, ...args]

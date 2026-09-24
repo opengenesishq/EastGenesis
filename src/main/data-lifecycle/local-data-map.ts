@@ -578,7 +578,7 @@ export const LOCAL_DATA_LIFECYCLE_MAP: LocalDataLifecycleEntry[] = [
   },
   {
     id: 'workflow-delivery-identity',
-    title: 'System-encrypted CaoGen Project delivery signing identity',
+    title: 'System-encrypted EastGenesis Project delivery signing identity',
     paths: [
       'userData/private/workflow-delivery-identity.json',
       'userData/private/workflow-delivery-identity-trust.json'
@@ -587,7 +587,7 @@ export const LOCAL_DATA_LIFECYCLE_MAP: LocalDataLifecycleEntry[] = [
       'src/main/task/workflow-delivery-identity.ts',
       'src/main/task/workflow-delivery-trust-store.ts'
     ],
-    owner: { scope: 'user', key: 'local CaoGen application profile' },
+    owner: { scope: 'user', key: 'local EastGenesis application profile' },
     sensitivity: 'credential',
     backup: { behavior: 'private_local', status: 'enforced' },
     retention: { rule: 'The local Ed25519 identity, bounded retired-key lineage, trusted/revoked identity records, and organization trust policy persist until application data is reset; key rotation retains a revoked continuity record.', status: 'enforced' },
@@ -825,7 +825,7 @@ export const PERSISTENCE_SCAN_EXCLUSIONS: PersistenceScanExclusion[] = [
   {
     sourceModule: 'src/main/fileOps.ts',
     boundary: 'external_user_action',
-    reason: 'Writes user-selected workspace files; CaoGen application data deletion must leave them untouched.'
+    reason: 'Writes user-selected workspace files; EastGenesis application data deletion must leave them untouched.'
   },
   {
     sourceModule: 'src/main/previewOps.ts',

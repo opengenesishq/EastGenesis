@@ -26,7 +26,7 @@ const MAX_RESPONSE_BYTES = 1024 * 1024
 const PROBE_TIMEOUT_MS = 900
 const STARTUP_TIMEOUT_MS = 8_000
 const STARTUP_POLL_MS = 200
-const LOCAL_COMPUTE_PROVIDER_NOTE = 'CaoGen 自动发现的本机模型服务'
+const LOCAL_COMPUTE_PROVIDER_NOTE = 'EastGenesis 自动发现的本机模型服务'
 let activation: Promise<LocalComputeActivationResult> | null = null
 let activationCanStart = false
 

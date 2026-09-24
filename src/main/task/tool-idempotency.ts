@@ -24,6 +24,7 @@ export const OPENAI_PERMISSION_READ_ONLY_TOOLS = new Set([
   'memory_search',
   'browser_automation_status',
   'browser_read',
+  'browser_debug_snapshot',
   'git_status',
   'git_diff'
 ])
@@ -67,6 +68,7 @@ const DUPLICATE_CONFIRMATION_TOOLS = new Set([
   'browser_click',
   'browser_type',
   'browser_evaluate',
+  'browser_debug_evaluate',
   'git_stage_all',
   'mcp_call_tool',
   'send_notification',

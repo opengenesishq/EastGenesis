@@ -805,7 +805,7 @@ async function removeManagedMediaSource(rootDir: string, projectId: string, sour
   if (!isAbsolute(sourcePath)) throw new Error('MediaAsset source path is invalid')
   const scoped = relative(projectRoot, resolve(sourcePath))
   if (!scoped || scoped === '..' || scoped.startsWith(`..${sep}`) || isAbsolute(scoped)) {
-    throw new Error('MediaAsset source is outside CaoGen managed storage')
+    throw new Error('MediaAsset source is outside EastGenesis managed storage')
   }
   try {
     const state = await lstat(sourcePath)

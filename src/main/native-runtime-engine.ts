@@ -18,6 +18,8 @@ import { NativeRuntimeContractError } from './native-runtime-contract'
 import { NativeRuntimeGuard } from './native-runtime-guard'
 import type { NativeProtocolAdapter } from './protocol-adapters/types'
 import { taskRuntimeRegistry } from './task/task-runtime-registry'
+import { app } from 'electron'
+import { getTaskHostExecutionGate, taskHostSubject } from './task-handoff/execution-gate'
 
 export interface NativeRuntimeBoundEngine extends Engine {
   readonly nativeRuntimeAdapter: NativeRuntimeAdapterDeclaration
@@ -108,7 +110,7 @@ class ContractBoundEngine implements NativeRuntimeBoundEngine {
 
   async start(): Promise<void> {
     this.assertIdentity()
-    await this.engine.start()
+    await getTaskHostExecutionGate(app.getPath('userData')).withPermit(taskHostSubject(this.meta), () => this.engine.start())
     this.assertIdentity()
   }
 
@@ -118,7 +120,7 @@ class ContractBoundEngine implements NativeRuntimeBoundEngine {
     const run = taskRuntimeRegistry.get(this.meta.id)
     if (!run) fail('run_missing', 'native runtime send requires a canonical TaskRun')
     this.runtime.bindRun(run)
-    this.engine.send(request)
+    getTaskHostExecutionGate(app.getPath('userData')).withPermitSync(taskHostSubject(this.meta), () => this.engine.send(request))
   }
 
   rejectSend(message: string): void {
@@ -132,6 +134,7 @@ class ContractBoundEngine implements NativeRuntimeBoundEngine {
 
   respondPermission(requestId: string, allow: boolean, message?: string): void {
     requiredString(requestId, 'permission request id')
+    if (allow) getTaskHostExecutionGate(app.getPath('userData')).assert(taskHostSubject(this.meta))
     this.engine.respondPermission(requestId, allow, message)
   }
 
@@ -179,7 +182,7 @@ class ContractBoundEngine implements NativeRuntimeBoundEngine {
 
   rewindFiles(messageId: string, dryRun: boolean): Promise<RewindResult> {
     requiredString(messageId, 'checkpoint message id')
-    if (this.engine.rewindFiles) return this.engine.rewindFiles(messageId, dryRun)
+    if (this.engine.rewindFiles) return getTaskHostExecutionGate(app.getPath('userData')).withPermit(taskHostSubject(this.meta), () => this.engine.rewindFiles!(messageId, dryRun))
     return Promise.resolve({ canRewind: false, error: 'Engine adapter has no native file rewind' })
   }
 
@@ -189,7 +192,7 @@ class ContractBoundEngine implements NativeRuntimeBoundEngine {
     dryRun: boolean
   ): Promise<CheckpointRestoreResult> {
     requiredString(messageId, 'checkpoint message id')
-    if (this.engine.restoreCheckpoint) return this.engine.restoreCheckpoint(messageId, mode, dryRun)
+    if (this.engine.restoreCheckpoint) return getTaskHostExecutionGate(app.getPath('userData')).withPermit(taskHostSubject(this.meta), () => this.engine.restoreCheckpoint!(messageId, mode, dryRun))
     return Promise.resolve({
       mode,
       checkpointId: messageId,

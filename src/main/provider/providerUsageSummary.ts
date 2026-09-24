@@ -5,6 +5,7 @@ import type {
   ProviderUsageCostSource,
   ProviderUsageCostSourceSummary,
   ProviderUsageCredentialAggregate,
+  ProviderUsageModelAggregate,
   ProviderUsageQuery,
   ProviderUsageRequest,
   ProviderUsageSummary,
@@ -147,12 +148,16 @@ function summarize(
 ): Omit<ProviderUsageSummary, 'from' | 'to' | 'truncated' | 'recentOffset' | 'recentTotal' | 'recentHasMore' | 'recentRequests'> {
   const providerAggregates = new Map<string, ProviderUsageAggregate>()
   const modelAggregates = new Map<string, ProviderUsageAggregate>()
+  const providerModelAggregates = new Map<string, ProviderUsageModelAggregate>()
   const credentialAggregates = new Map<string, ProviderUsageCredentialAggregate>()
   const totals = emptyUsageTotals()
   for (const request of requests) {
     addUsageTotals(totals, request)
     addAggregate(providerAggregates, request.providerId, providers.get(request.providerId)?.name ?? request.providerId, request)
     addAggregate(modelAggregates, request.model, request.model, request)
+    const providerModel = providerModelAggregate(providerModelAggregates, request.providerId, request.model,
+      providers.get(request.providerId)?.name ?? request.providerId)
+    addAggregateRecord(providerModel, request)
     addCredentialAggregate(credentialAggregates, request, providers.get(request.providerId)?.name ?? request.providerId)
   }
   for (const rollup of historical) {
@@ -160,6 +165,9 @@ function summarize(
     addRollupAggregate(providerAggregates, rollup.providerId,
       providers.get(rollup.providerId)?.name ?? rollup.providerName, rollup)
     addRollupAggregate(modelAggregates, rollup.model, rollup.model, rollup)
+    const providerModel = providerModelAggregate(providerModelAggregates, rollup.providerId, rollup.model,
+      providers.get(rollup.providerId)?.name ?? rollup.providerName)
+    addRollupRecord(providerModel, rollup)
   }
   const historicalRequests = historical.reduce((total, rollup) => total + rollup.requestCount, 0)
   return {
@@ -180,6 +188,7 @@ function summarize(
     costSources: summarizeCostSources(requests, historical),
     requestsByProvider: sortAggregates(providerAggregates),
     requestsByModel: sortAggregates(modelAggregates),
+    requestsByProviderModel: sortAggregates(providerModelAggregates),
     requestsByCredential: sortAggregates(credentialAggregates),
     sources: [...new Set([
       ...requests.flatMap((request) => request.source ? [request.source] : []),
@@ -207,7 +216,7 @@ function summarizeCostSources(
     const current = totals.get(request.costSource)
     if (!current) continue
     current.requests += 1
-    current.costUsd = round(current.costUsd + (request.costUsd ?? 0))
+    current.costUsd += request.costUsd ?? 0
   }
   const imported = totals.get('imported')
   if (imported) {
@@ -215,6 +224,7 @@ function summarizeCostSources(
     imported.costUsd = round(historical.reduce((total, rollup) => total + rollup.costUsd, 0))
   }
   return order.map((source) => totals.get(source)!).filter((item) => item.requests > 0)
+    .map((item) => ({ ...item, costUsd: round(item.costUsd) }))
 }
 
 function emptyUsageTotals() {
@@ -280,7 +290,7 @@ function addCredentialAggregate(
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
-    costUsd: 0
+    costUsd: 0, pricedRequests: 0, unpricedRequests: 0, costSources: []
   }
   addAggregateRecord(current, request)
   target.set(id, current)
@@ -317,7 +327,7 @@ function buildBuckets(
     bucket.outputTokens += request.usage?.outputTokens ?? 0
     bucket.cacheReadTokens += request.usage?.cacheReadTokens ?? 0
     bucket.cacheWriteTokens += request.usage?.cacheWriteTokens ?? 0
-    bucket.costUsd = round(bucket.costUsd + (request.costUsd ?? 0))
+    bucket.costUsd += request.costUsd ?? 0
   }
   for (const rollup of historical) {
     const at = Math.max(from, Math.min(to, rollup.dayStartedAt + 12 * 60 * 60 * 1000))
@@ -330,9 +340,9 @@ function buildBuckets(
     bucket.outputTokens += rollup.outputTokens
     bucket.cacheReadTokens += rollup.cacheReadTokens
     bucket.cacheWriteTokens += rollup.cacheWriteTokens
-    bucket.costUsd = round(bucket.costUsd + rollup.costUsd)
+    bucket.costUsd += rollup.costUsd
   }
-  return buckets
+  return buckets.map((bucket) => ({ ...bucket, costUsd: round(bucket.costUsd) }))
 }
 
 function addAggregate(
@@ -351,7 +361,7 @@ function addAggregate(
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
-    costUsd: 0
+    costUsd: 0, pricedRequests: 0, unpricedRequests: 0, costSources: []
   }
   addAggregateRecord(current, request)
   target.set(id, current)
@@ -365,7 +375,7 @@ function addAggregateRecord(current: ProviderUsageAggregate, request: ProviderUs
   current.outputTokens += request.usage?.outputTokens ?? 0
   current.cacheReadTokens += request.usage?.cacheReadTokens ?? 0
   current.cacheWriteTokens += request.usage?.cacheWriteTokens ?? 0
-  current.costUsd = round(current.costUsd + (request.costUsd ?? 0))
+  addAggregateCost(current, request.costSource, 1, request.costUsd)
 }
 
 function addRollupAggregate(
@@ -376,8 +386,13 @@ function addRollupAggregate(
 ): void {
   const current = target.get(id) ?? {
     id, label, requests: 0, succeeded: 0, failed: 0, inputTokens: 0, outputTokens: 0,
-    cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0
+    cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, pricedRequests: 0, unpricedRequests: 0, costSources: []
   }
+  addRollupRecord(current, rollup)
+  target.set(id, current)
+}
+
+function addRollupRecord(current: ProviderUsageAggregate, rollup: ResolvedImportedProviderUsageRollup): void {
   current.requests += rollup.requestCount
   current.succeeded += rollup.successCount
   current.failed += rollup.requestCount - rollup.successCount
@@ -385,12 +400,34 @@ function addRollupAggregate(
   current.outputTokens += rollup.outputTokens
   current.cacheReadTokens += rollup.cacheReadTokens
   current.cacheWriteTokens += rollup.cacheWriteTokens
-  current.costUsd = round(current.costUsd + rollup.costUsd)
-  target.set(id, current)
+  addAggregateCost(current, 'imported', rollup.requestCount, rollup.costUsd)
 }
 
 function sortAggregates<T extends ProviderUsageAggregate>(values: Map<string, T>): T[] {
   return [...values.values()].sort((left, right) => right.costUsd - left.costUsd || right.requests - left.requests)
+    .map((value) => ({ ...value, costUsd: round(value.costUsd),
+      costSources: value.costSources.map((source) => ({ ...source, costUsd: round(source.costUsd) })) }))
+}
+
+function addAggregateCost(current: ProviderUsageAggregate, source: ProviderUsageCostSource, requests: number, costUsd: number | undefined): void {
+  if (costUsd === undefined) current.unpricedRequests += requests
+  else { current.pricedRequests += requests; current.costUsd += costUsd }
+  let costSource = current.costSources.find((item) => item.source === source)
+  if (!costSource) { costSource = { source, requests: 0, costUsd: 0 }; current.costSources.push(costSource) }
+  costSource.requests += requests
+  costSource.costUsd += costUsd ?? 0
+}
+
+function providerModelAggregate(target: Map<string, ProviderUsageModelAggregate>, providerId: string, model: string, providerName: string): ProviderUsageModelAggregate {
+  const id = JSON.stringify([providerId, model])
+  let current = target.get(id)
+  if (!current) {
+    current = { id, providerId, model, label: `${providerName} / ${model}`, requests: 0, succeeded: 0, failed: 0,
+      inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0,
+      pricedRequests: 0, unpricedRequests: 0, costSources: [] }
+    target.set(id, current)
+  }
+  return current
 }
 
 function credentialNameForAttempt(provider: UsageProvider | undefined, keyLabel: string | undefined): string | undefined {

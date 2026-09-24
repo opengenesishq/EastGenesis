@@ -1,20 +1,16 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { SessionMeta } from '../src/shared/types'
-import { withDataLifecycleMutation } from '../src/main/data-lifecycle/data-lifecycle-mutation-lock'
-import { preparationPaths, purgePreparationData } from '../src/main/data-lifecycle/preparation-data-files'
-import { PROJECT_DELETION_PHASES, ProjectDeletionJournal } from '../src/main/data-lifecycle/project-deletion-journal'
-import { SESSION_DELETION_PHASES, SessionDeletionJournal } from '../src/main/data-lifecycle/session-deletion-journal'
-import { executeCodingTool } from '../src/main/openaiTools'
-import { withActivePreparationSession } from '../src/main/permission/preparation-permission-lifecycle'
-import { PreparationPermissionStore } from '../src/main/permission/preparation-permission-store'
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'caogen-preparation-lifecycle-')))
 const report = join(process.cwd(), 'test-results', 'preparation-permission-lifecycle', 'latest.json')
 const checks: { name: string; status: 'passed' | 'failed'; detail?: string }[] = []
+let PreparationPermissionStore: typeof import('../src/main/permission/preparation-permission-store').PreparationPermissionStore
+let withActivePreparationSession: typeof import('../src/main/permission/preparation-permission-lifecycle').withActivePreparationSession
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done }); return { promise, resolve } }
 function fixture() {
   const dir = mkdtempSync(join(root, 'case-')), cwd = join(dir, 'formal')
@@ -32,7 +28,24 @@ async function check(name: string, action: () => Promise<void>) {
   catch (error) { checks.push({ name, status: 'failed', detail: String(error) }) }
 }
 async function main() {
+  // These production modules import Electron's app singleton at module load.
+  // Keep this contract test runnable under plain Node with an isolated userData
+  // root, just like the Electron runtime would provide.
+  const require = createRequire(import.meta.url)
+  const moduleLoader = require('node:module') as { _load: Function }
+  const originalLoad = moduleLoader._load
+  moduleLoader._load = function fixtureElectronLoad(request: string, parent: unknown, isMain: boolean) {
+    if (request === 'electron') return { app: { getPath: () => root } }
+    return originalLoad.call(this, request, parent, isMain)
+  }
   try {
+    const { withDataLifecycleMutation } = await import('../src/main/data-lifecycle/data-lifecycle-mutation-lock')
+    const { preparationPaths, purgePreparationData } = await import('../src/main/data-lifecycle/preparation-data-files')
+    const { PROJECT_DELETION_PHASES, ProjectDeletionJournal } = await import('../src/main/data-lifecycle/project-deletion-journal')
+    const { SESSION_DELETION_PHASES, SessionDeletionJournal } = await import('../src/main/data-lifecycle/session-deletion-journal')
+    const { executeCodingTool } = await import('../src/main/openaiTools')
+    ;({ withActivePreparationSession } = await import('../src/main/permission/preparation-permission-lifecycle'))
+    ;({ PreparationPermissionStore } = await import('../src/main/permission/preparation-permission-store'))
     await check('queued grant resolves live Session only after deletion lock releases', async () => {
       const f = fixture(), entered = deferred(), release = deferred(), before = f.reads()
       const deletion = withDataLifecycleMutation(f.dir, async () => { entered.resolve(); await release.promise; f.clear() })
@@ -141,6 +154,7 @@ async function main() {
       status: failed.length ? 'failed' : 'passed', providerCalls: false, checks,
       limitations: ['Controlled Session lookup and ownership validation; production journals, permission store and physical writer.', 'No Electron IPC or Provider execution.'] }, null, 2) + '\n')
     rmSync(root, { recursive: true, force: true })
+    moduleLoader._load = originalLoad
     console.log(`Preparation lifecycle: ${checks.length - failed.length}/${checks.length}; ${report}`)
     if (failed.length) { console.error(failed); process.exitCode = 1 }
   }

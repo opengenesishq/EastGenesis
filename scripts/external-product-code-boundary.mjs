@@ -98,7 +98,7 @@ const lock = readJson('package-lock.json')
 const rootLock = lock.packages?.[''] ?? {}
 
 requireEqual(manifest.name, 'caogen', 'package.json name must remain caogen')
-requireEqual(manifest.productName, 'CaoGen', 'package.json productName must remain CaoGen')
+requireEqual(manifest.productName, 'EastGenesis', 'package.json productName must remain EastGenesis')
 requireEqual(lock.name, manifest.name, 'package-lock.json name must match package.json')
 requireEqual(lock.version, manifest.version, 'package-lock.json version must match package.json')
 requireEqual(rootLock.name, manifest.name, 'package-lock root package name must match package.json')

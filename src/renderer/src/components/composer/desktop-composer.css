@@ -1,0 +1,18 @@
+.composer .composer-row { display: flex; flex-direction: column; gap: 9px; align-items: stretch; width: min(820px, 100%); padding: 13px 13px 9px; border-radius: 22px; background: var(--bg-input, #292929); box-shadow: none; }
+.composer .composer-input { width: 100%; min-height: 47px; padding: 0; font-size: 14px; }
+.composer .composer-controls { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.composer .composer-attach { width: 28px; height: 28px; flex-basis: 28px; }
+.composer-permission-menu, .composer-context-menu { position: relative; font-size: 12px; color: var(--text-dim); }
+.composer-permission-menu > summary, .composer-context-menu > summary { display: flex; align-items: center; gap: 5px; cursor: pointer; list-style: none; white-space: nowrap; }
+.composer-permission-menu > summary::-webkit-details-marker, .composer-context-menu > summary::-webkit-details-marker { display: none; }
+.composer-permission-menu > summary { color: #d98948; }
+.composer-permission-popover, .composer-context-popover { position: absolute; bottom: calc(100% + 14px); left: 0; z-index: 35; width: min(460px, calc(100vw - 310px)); max-height: 60vh; overflow: auto; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-raised); box-shadow: 0 8px 28px #0004; }
+.composer-permission-popover .preparation-permission { width: 100%; padding: 8px 0; }
+.composer-context-popover .outbound-context-preview { width: 100%; flex-wrap: wrap; }
+.composer-model-trigger { display: flex; align-items: center; gap: 5px; max-width: 46%; margin-left: auto; padding: 4px 0 4px 8px; border: 0; background: transparent; color: var(--text-dim); cursor: pointer; font-size: 12px; }
+.composer-model-trigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-model-trigger svg { flex-shrink: 0; }
+.composer-model-trigger:hover { color: var(--text); }
+.composer .composer-send { width: 30px; height: 30px; flex-basis: 30px; }
+.composer .voice-draft-input { flex: 0 0 auto; }
+@media (max-width: 760px) { .composer-context-menu { display: none; } .composer-permission-popover { width: min(420px, calc(100vw - 75px)); } }

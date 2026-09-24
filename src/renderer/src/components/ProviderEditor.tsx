@@ -30,12 +30,11 @@ import ProviderConnectionDiagnostic from './ProviderConnectionDiagnostic'
 import ProviderPresetCatalog from './ProviderPresetCatalog'
 import ProviderGenerationProbe from './ProviderGenerationProbe'
 
-const DEFAULT_PROVIDER_BASE_URL = PROVIDER_PRESETS.find((preset) => preset.key === 'caogen-relay')?.baseUrl ?? ''
-
 interface Props {
   /** null = 新建;否则编辑该 Provider */
   provider: ProviderView | null
   initialDiagnostic?: ProviderModelFetchError
+  initialDraft?: ProviderInput
   onClose: (result: ProviderEditorCloseResult) => void
 }
 
@@ -75,11 +74,12 @@ export default function ProviderEditorEntry(props: Props): React.JSX.Element {
 function NewProviderEditor({ onClose }: Pick<Props, 'onClose'>): React.JSX.Element {
   const [advanced, setAdvanced] = useState(false)
   const [savedProvider, setSavedProvider] = useState<ProviderView | null>(null)
+  const [draft, setDraft] = useState<ProviderInput>()
   return advanced
-    ? <ProviderEditor provider={savedProvider} onClose={onClose} />
+    ? <ProviderEditor provider={savedProvider} initialDraft={draft} onClose={onClose} />
     : (
         <ProviderQuickSetup
-          onAdvanced={() => setAdvanced(true)}
+          onAdvanced={(value) => { setDraft(value); setAdvanced(true) }}
           onCancel={() => onClose({ reason: 'cancelled' })}
           onSaved={(provider) => onClose({ reason: 'saved', provider })}
           onEditSaved={(provider) => { setSavedProvider(provider); setAdvanced(true) }}
@@ -120,27 +120,27 @@ function ProviderEditorIntro({ provider, isEdit, presetHint, onClose, onApplyPre
   </>
 }
 
-function ProviderEditor({ provider, initialDiagnostic, onClose }: Props): React.JSX.Element {
+function ProviderEditor({ provider, initialDiagnostic, initialDraft, onClose }: Props): React.JSX.Element {
   const t = useT()
   const editorRef = useRef<HTMLElement>(null)
   const createProvider = useStore((s) => s.createProvider)
   const updateProvider = useStore((s) => s.updateProvider)
-  const [name, setName] = useState(provider?.name ?? '')
-  const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? DEFAULT_PROVIDER_BASE_URL)
-  const [modelsText, setModelsText] = useState((provider?.models ?? []).join('\n'))
-  const [engine, setEngine] = useState<EngineKind>(provider?.engine ?? 'openai')
-  const [authMode, setAuthMode] = useState<ProviderAuthMode>(provider?.authMode ?? 'api-key')
+  const [name, setName] = useState(provider?.name ?? initialDraft?.name ?? '')
+  const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? initialDraft?.baseUrl ?? '')
+  const [modelsText, setModelsText] = useState((provider?.models ?? initialDraft?.models ?? []).join('\n'))
+  const [engine, setEngine] = useState<EngineKind>(provider?.engine ?? initialDraft?.engine ?? 'openai')
+  const [authMode, setAuthMode] = useState<ProviderAuthMode>(provider?.authMode ?? initialDraft?.authMode ?? 'api-key')
   const [customHeaders, setCustomHeaders] = useState(provider?.customHeaders ?? '')
   const [credentialHeaderNamesText, setCredentialHeaderNamesText] = useState(
-    (provider?.credentialHeaderNames ?? [defaultCredentialHeaderName(provider?.engine ?? 'openai')]).join('\n')
+    (provider?.credentialHeaderNames ?? initialDraft?.credentialHeaderNames ?? [defaultCredentialHeaderName(provider?.engine ?? initialDraft?.engine ?? 'openai')]).join('\n')
   )
   const [budgetUsd, setBudgetUsd] = useState(provider?.budgetUsd ? String(provider.budgetUsd) : '')
-  const [openaiProtocol, setOpenaiProtocol] = useState<OpenAIProtocol>(provider?.openaiProtocol ?? 'responses')
+  const [openaiProtocol, setOpenaiProtocol] = useState<OpenAIProtocol>(provider?.openaiProtocol ?? initialDraft?.openaiProtocol ?? 'chat')
   const [note, setNote] = useState(provider?.note ?? '')
   const [advancedConfigText, setAdvancedConfigText] = useState(
     provider?.advancedConfig ? JSON.stringify(provider.advancedConfig, null, 2) : ''
   )
-  const [token, setToken] = useState('')
+  const [token, setToken] = useState(initialDraft?.token ?? '')
   const [tokenLabel, setTokenLabel] = useState(provider?.activeKeyLabel ?? '')
   const [tokenTouched, setTokenTouched] = useState(false)
   const [additionalKeysText, setAdditionalKeysText] = useState('')
@@ -283,11 +283,12 @@ function ProviderEditor({ provider, initialDiagnostic, onClose }: Props): React.
     setPresetHint(preset.hint)
     setGenerationProbe(null)
     if (preset.key === 'custom') return
-    if (!name.trim()) setName(preset.label)
+    if (!name.trim() || PROVIDER_PRESETS.some(item => item.label === name)) setName(preset.label)
     setBaseUrl(preset.baseUrl)
     setModelsText(preset.models.join('\n'))
     handleEngineChange(preset.engine)
-    handleAuthModeChange(preset.key === 'local-openai' ? 'none' : 'api-key')
+    handleAuthModeChange(preset.auth === 'none' ? 'none' : 'api-key')
+    setCredentialHeaderNamesText((preset.credentialHeaderNames ?? [defaultCredentialHeaderName(preset.engine)]).join('\n'))
     setOpenaiProtocol(preset.openaiProtocol ?? 'responses')
     setModelSourceKey(providerModelSourceKey(provider?.id, preset.baseUrl, preset.engine, preset.openaiProtocol ?? 'responses'))
   }

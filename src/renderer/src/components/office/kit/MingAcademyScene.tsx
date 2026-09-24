@@ -48,7 +48,7 @@ export default function MingAcademyScene({
     <group onClick={(event) => { event.stopPropagation(); onSelectCommand?.() }}
       userData={{ officeCommandHall: true }}>
       <MingBusinessStation position={CONTROL_ROOM_LAYOUT.command} variant="command" scale={1.15} count={signals.incidents} />
-      <MingPlaque label={labels?.command ?? '议政殿'} position={[0, 5.1, -15.5]} width={2.3} brand />
+      <MingPlaque label={labels?.command ?? '议事区'} position={[0, 5.1, -15.5]} width={2.3} brand />
     </group>
     <MingBusinessStation position={CONTROL_ROOM_LAYOUT.plan} variant="command" />
     <MingBusinessStation position={CONTROL_ROOM_LAYOUT.approval} variant="approval" count={signals.incidents} />

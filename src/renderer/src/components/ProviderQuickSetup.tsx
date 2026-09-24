@@ -6,23 +6,29 @@ import type {
   ProviderGenerationProbeResult,
   ProviderModelFetchError,
   ProviderModelSuggestedAction,
-  ProviderView
+  ProviderView,
+  ProviderInput
 } from '../../../shared/types'
 import type {
   ProviderAuthorizationService,
   ProviderQuickDeviceAuthorizationView
 } from '../../../shared/provider-authorization-types'
 import { useT } from '../i18n'
-import { PROVIDER_PRESETS, useStore } from '../store'
+import { PROVIDER_PRESETS, useStore, type ProviderPreset } from '../store'
 import ProviderConnectionDiagnostic from './ProviderConnectionDiagnostic'
 import ProviderPresetCatalog from './ProviderPresetCatalog'
 import ProviderGenerationProbe from './ProviderGenerationProbe'
 import ProviderSetupReceipt, { useProviderSetupCompletion } from './ProviderSetupReceipt'
 
-const QUICK_API_PRESETS = PROVIDER_PRESETS.filter((item) => item.key !== 'custom' && item.key !== 'local-openai')
+const QUICK_API_PRESETS = PROVIDER_PRESETS
+type QuickProtocol = 'chat' | 'responses' | 'anthropic' | 'gemini'
+
+function presetProtocol(preset: ProviderPreset): QuickProtocol {
+  return preset.engine === 'openai' ? preset.openaiProtocol ?? 'chat' : preset.engine
+}
 
 interface ProviderQuickSetupProps {
-  onAdvanced: () => void
+  onAdvanced: (draft?: ProviderInput) => void
   onCancel: () => void
   onSaved: (provider: ProviderView) => void
   onEditSaved: (provider: ProviderView) => void
@@ -115,105 +121,41 @@ function ProviderQuickAccountOptions({ oauthFlow, oauthBusy, busy, localBusy, on
   </>
 }
 
-function ProviderConnectionDetails({
-  open,
-  name,
-  baseUrl,
-  modelsText,
-  busy,
-  probingGeneration,
-  generationProbe,
-  onToggle,
-  onNameChange,
-  onBaseUrlChange,
-  onModelsChange,
-  onProbe
-}: {
-  open: boolean
-  name: string
-  baseUrl: string
-  modelsText: string
-  busy: boolean
-  probingGeneration: boolean
-  generationProbe: ProviderGenerationProbeResult | null
-  onToggle: (open: boolean) => void
-  onNameChange: (value: string) => void
-  onBaseUrlChange: (value: string) => void
-  onModelsChange: (value: string) => void
-  onProbe: () => void
-}): React.JSX.Element {
-  const t = useT()
-  return <details
-    className="provider-quick-connection-details"
-    data-provider-quick-connection-details
-    open={open}
-    onToggle={(event) => onToggle(event.currentTarget.open)}
-  >
-    <summary>{t('providerQuickConnectionDetails')}</summary>
-    <p className="provider-quick-connection-hint">{t('providerQuickConnectionDetailsHint')}</p>
-    <div className="provider-quick-api-grid">
-      <label className="field-label">
-        {t('nameLabel')}
-        <input className="input input-block" data-provider-quick-field="name" value={name} onChange={(event) => onNameChange(event.target.value)} />
-      </label>
-    </div>
-    <label className="field-label">
-      {t('baseUrlLabel')}
-      <input
-        className="input input-block"
-        data-provider-quick-field="base-url"
-        value={baseUrl}
-        placeholder="https://your-gateway.example.com"
-        onChange={(event) => onBaseUrlChange(event.target.value)}
-      />
-    </label>
-    <label className="field-label">
-      {t('providerQuickFallbackModelsLabel')}
-      <textarea
-        className="input input-block textarea"
-        data-provider-quick-field="models"
-        rows={3}
-        value={modelsText}
-        placeholder="gpt-4.1\nclaude-sonnet-4"
-        onChange={(event) => onModelsChange(event.target.value)}
-      />
-    </label>
-    <button type="button" className="btn btn-ghost" disabled={busy || probingGeneration || !baseUrl.trim()} onClick={onProbe}>
-      {probingGeneration ? t('providerGenerationProbeRunning') : t('providerGenerationProbeButton')}
-    </button>
-    {generationProbe && <ProviderGenerationProbe result={generationProbe} />}
-  </details>
+function modelNames(text: string): string[] {
+  return [...new Set(text.split(/\r?\n/).map(value => value.trim()).filter(Boolean))]
 }
 
-function ProviderQuickProtocol({ preset }: { preset: (typeof QUICK_API_PRESETS)[number] }): React.JSX.Element {
+function ModelChoices({ preset, value, onChange }: { preset: ProviderPreset; value: string; onChange(value: string): void }): React.JSX.Element {
   const t = useT()
-  return (
-        <div className="provider-quick-protocol">
-          <span>{preset.engine === 'anthropic'
-            ? t('providerEngineAnthropic')
-            : preset.engine === 'gemini' ? t('providerEngineGemini') : t('providerEngineOpenAI')}</span>
-          {preset.engine === 'openai' && (
-            <span>{preset.openaiProtocol === 'chat' ? t('openaiProtocolChat') : t('openaiProtocolResponses')}</span>
-          )}
-        </div>
-  )
+  const selected = modelNames(value)
+  const manualField = <textarea className="input input-block textarea" data-provider-quick-field="models" rows={3} value={value}
+    aria-label={t('providerSimpleModels')} placeholder={t('providerSimpleModelPlaceholder')} onChange={event => onChange(event.target.value)} />
+  return <>
+    {preset.models.length > 0 && <div className="provider-simple-model-options">
+      {preset.models.map(model => <label key={model}><input type="checkbox" checked={selected.includes(model)}
+        onChange={event => onChange((event.target.checked ? [...selected, model] : selected.filter(item => item !== model)).join('\n'))} />{model}</label>)}
+    </div>}
+    {preset.models.length ? <details className="provider-simple-manual-models">
+      <summary>{t('providerSimpleOtherModels')}</summary>{manualField}
+    </details> : manualField}
+  </>
 }
 
 export default function ProviderQuickSetup({ onAdvanced, onCancel, onSaved, onEditSaved }: ProviderQuickSetupProps): React.JSX.Element {
   const t = useT()
   const setupRef = useRef<HTMLElement>(null)
-  const createProvider = useStore((state) => state.createProvider)
-  const activateLocalCompute = useStore((state) => state.activateLocalCompute)
+  const connecting = useRef(false)
+  const createProvider = useStore(state => state.createProvider)
+  const activateLocalCompute = useStore(state => state.activateLocalCompute)
   const { saved, complete } = useProviderSetupCompletion()
+  const [presetKey, setPresetKey] = useState('')
+  const preset = useMemo(() => QUICK_API_PRESETS.find(item => item.key === presetKey), [presetKey])
+  const [choosing, setChoosing] = useState(true)
   const [token, setToken] = useState('')
-  const [presetKey, setPresetKey] = useState('caogen-relay')
-  const preset = useMemo(
-    () => QUICK_API_PRESETS.find((item) => item.key === presetKey) ?? QUICK_API_PRESETS[0],
-    [presetKey]
-  )
-  const [name, setName] = useState(preset?.label ?? '')
-  const [baseUrl, setBaseUrl] = useState(preset?.baseUrl ?? '')
-  const [modelsText, setModelsText] = useState((preset?.models ?? []).join('\n'))
+  const [name, setName] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
+  const [modelsText, setModelsText] = useState('')
+  const [protocol, setProtocol] = useState<QuickProtocol>('chat')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [diagnostic, setDiagnostic] = useState<ProviderModelFetchError | null>(null)
@@ -225,276 +167,209 @@ export default function ProviderQuickSetup({ onAdvanced, onCancel, onSaved, onEd
   const [oauthFlow, setOauthFlow] = useState<ProviderQuickDeviceAuthorizationView | null>(null)
   const [nextPollAt, setNextPollAt] = useState(0)
   const [showConnectionDetails, setShowConnectionDetails] = useState(false)
+  const pending = busy || localBusy || oauthBusy || Boolean(oauthFlow) || probingGeneration
+  const authMode = preset?.auth === 'none' ? 'none' : 'api-key'
+  const engine = protocol === 'anthropic' || protocol === 'gemini' ? protocol : 'openai'
+  const credentialHeaderNames = preset?.key === 'custom' ? [engine === 'anthropic'
+    ? 'x-api-key' : engine === 'gemini' ? 'x-goog-api-key' : 'authorization'] : preset?.credentialHeaderNames
 
   useEffect(() => {
     if (!diagnostic) return
     setShowConnectionDetails(true)
-    const frame = requestAnimationFrame(() => {
-      setupRef.current?.querySelector('[data-provider-connection-diagnostic]')?.scrollIntoView({
-        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
-        block: 'center'
-      })
-    })
+    const frame = requestAnimationFrame(() => setupRef.current?.querySelector('[data-provider-connection-diagnostic]')?.scrollIntoView({ block: 'nearest' }))
     return () => cancelAnimationFrame(frame)
   }, [diagnostic])
 
   useEffect(() => {
     if (!oauthFlow) return
     let cancelled = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const poll = (): void => {
-      timer = setTimeout(async () => {
-        try {
-          const result = await window.agentDesk.pollQuickProviderAuthorization(oauthFlow.flowId)
-          if (cancelled) return
-          if (result.status === 'pending') {
-            setNextPollAt(result.nextPollAt)
-            return
-          }
-          setOauthFlow(null)
-          await complete(result.provider, 'account')
-        } catch (cause) {
-          if (cancelled) return
-          setOauthFlow(null)
-          setError(cause instanceof Error ? cause.message : String(cause))
-        }
-      }, Math.max(0, nextPollAt - Date.now()))
-    }
-    poll()
-    return () => {
-      cancelled = true
-      if (timer) clearTimeout(timer)
-    }
+    const timer = setTimeout(async () => {
+      try {
+        const result = await window.agentDesk.pollQuickProviderAuthorization(oauthFlow.flowId)
+        if (cancelled) return
+        if (result.status === 'pending') { setNextPollAt(result.nextPollAt); return }
+        setOauthFlow(null)
+        await complete(result.provider, 'account')
+      } catch (cause) {
+        if (!cancelled) { setOauthFlow(null); setError(cause instanceof Error ? cause.message : String(cause)) }
+      }
+    }, Math.max(0, nextPollAt - Date.now()))
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [nextPollAt, oauthFlow, complete])
 
   const connectOAuth = async (service: ProviderAuthorizationService): Promise<void> => {
-    setOauthBusy(true)
-    setError('')
+    if (pending) return
+    setOauthBusy(true); setError('')
     try {
       const started = await window.agentDesk.startQuickProviderAuthorization(service)
-      setOauthFlow(started)
-      setNextPollAt(Date.now())
+      setOauthFlow(started); setNextPollAt(Date.now())
       window.open(started.verificationUri, '_blank', 'noopener,noreferrer')
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setOauthBusy(false)
-    }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+    finally { setOauthBusy(false) }
   }
-
   const connectLocal = async (): Promise<void> => {
-    setLocalBusy(true)
-    setError('')
+    if (pending) return
+    setLocalBusy(true); setError('')
     try {
       const outcome = await activateQuickLocalCompute(activateLocalCompute)
       setLocalReason(outcome.reason)
       if (outcome.provider) await complete(outcome.provider, 'local')
       else setError(t(providerQuickLocalErrorKey(outcome.reason)))
-    } finally {
-      setLocalBusy(false)
-    }
+    } finally { setLocalBusy(false) }
   }
+  const input = (models = modelNames(modelsText)): ProviderInput | undefined => preset ? {
+    name: name.trim() || preset.label, baseUrl: baseUrl.trim(), models,
+    engine, openaiProtocol: protocol === 'responses' ? 'responses' : 'chat', authMode,
+    credentialHeaderNames, ...(authMode === 'api-key' ? { token: token.trim(), tokenLabel: t('providerQuickKeyLabel') } : {})
+  } : undefined
 
-  const saveProvider = async (models: string[], nextToken: string, source: 'discovered' | 'manual'): Promise<void> => {
-    if (!preset) throw new Error(t('providerQuickUnavailable'))
-    const created = await createProvider({
-      name: name.trim() || preset.label,
-      baseUrl: baseUrl.trim(),
-      models,
-      engine: preset.engine,
-      openaiProtocol: preset.openaiProtocol ?? 'chat',
-      token: nextToken,
-      tokenLabel: t('providerQuickKeyLabel')
-    })
-    await complete(created, source)
+  const validConnection = (): boolean => {
+    if (!preset) { setError(t('providerSimpleSelectFirst')); return false }
+    if (!baseUrl.trim()) { setError(t('providerQuickBaseUrlRequired')); return false }
+    if (authMode === 'api-key' && !token.trim()) { setError(t('providerQuickKeyRequired')); return false }
+    return true
   }
-
-  const connect = async (): Promise<void> => {
-    const nextToken = token.trim()
-    if (!nextToken) {
-      setError(t('providerQuickKeyRequired'))
-      return
+  const connect = async (manual = false): Promise<void> => {
+    if (connecting.current || pending || !validConnection()) return
+    const request = input()!
+    if ((manual || preset?.requiresModelId) && !request.models.length) {
+      setError(t('providerSimpleModelRequired')); return
     }
-    if (!preset) {
-      setError(t('providerQuickUnavailable'))
-      return
-    }
-    if (!baseUrl.trim()) {
-      setError(t('providerQuickBaseUrlRequired'))
-      return
-    }
-    setBusy(true)
-    setError('')
-    setDiagnostic(null)
+    connecting.current = true; setBusy(true); setError(''); setDiagnostic(null)
     try {
-      const discovery = await window.agentDesk.fetchProviderModels({
-        baseUrl: baseUrl.trim(),
-        token: nextToken,
-        credentialHeaderNames: [preset.engine === 'anthropic'
-          ? 'x-api-key'
-          : preset.engine === 'gemini' ? 'x-goog-api-key' : 'Authorization'],
-        engine: preset.engine,
-        openaiProtocol: preset.openaiProtocol ?? 'chat',
-        authMode: 'api-key'
-      })
-      if (!discovery.ok || discovery.models.length === 0) {
-        if (discovery.error) setDiagnostic(discovery.error)
-        else setError(t('providerQuickUnavailable'))
-        return
+      if (!manual && !preset?.requiresModelId) {
+        const discovery = await window.agentDesk.fetchProviderModels({
+          baseUrl: request.baseUrl, token: request.token, credentialHeaderNames: request.credentialHeaderNames,
+          engine: request.engine, openaiProtocol: request.openaiProtocol, authMode: request.authMode
+        })
+        if (!discovery.ok || !discovery.models.length) {
+          if (discovery.error) setDiagnostic(discovery.error)
+          else { setError(t('providerQuickUnavailable')); setShowConnectionDetails(true) }
+          return
+        }
+        request.models = discovery.models
       }
-      await saveProvider(discovery.models, nextToken, 'discovered')
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setBusy(false)
-    }
+      const created = await createProvider(request)
+      setToken('')
+      await complete(created, manual || preset?.requiresModelId ? 'manual' : authMode === 'none' ? 'local' : 'discovered')
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+    finally { connecting.current = false; setBusy(false) }
   }
-
   const probeGeneration = async (): Promise<void> => {
-    const model = modelsText.split(/\r?\n/).map((item) => item.trim()).find(Boolean)
-    if (!model) {
-      setError(t('providerGenerationProbeModelRequired'))
-      setupRef.current?.querySelector<HTMLElement>('[data-provider-quick-field="models"]')?.focus()
-      return
-    }
-    if (!preset) return
-    setProbingGeneration(true)
-    setGenerationProbe(null)
-    setError('')
+    if (pending || !validConnection()) return
+    const model = modelNames(modelsText)[0]
+    if (!model) { setError(t('providerGenerationProbeModelRequired')); return }
+    const request = input()!
+    setProbingGeneration(true); setGenerationProbe(null); setError('')
     try {
       setGenerationProbe(await window.agentDesk.probeProviderGeneration({
-        baseUrl: baseUrl.trim(),
-        token: token.trim() || undefined,
-        credentialHeaderNames: [preset.engine === 'anthropic'
-          ? 'x-api-key'
-          : preset.engine === 'gemini' ? 'x-goog-api-key' : 'Authorization'],
-        engine: preset.engine,
-        openaiProtocol: preset.openaiProtocol ?? 'chat',
-        authMode: 'api-key',
-        model
+        baseUrl: request.baseUrl, token: request.token, credentialHeaderNames: request.credentialHeaderNames,
+        engine: request.engine, openaiProtocol: request.openaiProtocol, authMode: request.authMode, model
       }))
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setProbingGeneration(false)
-    }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+    finally { setProbingGeneration(false) }
   }
-
-  const useManualModels = async (): Promise<void> => {
-    const models = modelsText.split(/\r?\n/).map((model) => model.trim()).filter(Boolean)
-    if (models.length === 0) {
-      setupRef.current?.querySelector<HTMLElement>('[data-provider-quick-field="models"]')?.focus()
-      return
-    }
-    setBusy(true)
-    setError('')
-    try {
-      await saveProvider([...new Set(models)], token.trim(), 'manual')
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setBusy(false)
-    }
+  const selectPreset = (next: ProviderPreset): void => {
+    if (pending) return
+    if (next.key !== presetKey) setToken('')
+    setPresetKey(next.key); setName(next.label); setBaseUrl(next.baseUrl); setModelsText(next.models.join('\n'))
+    setProtocol(presetProtocol(next))
+    setChoosing(false); setDiagnostic(null); setGenerationProbe(null); setError(''); setLocalReason(null); setShowConnectionDetails(false)
+    requestAnimationFrame(() => setupRef.current?.querySelector<HTMLInputElement>(next.requiresBaseUrl
+      ? '[data-provider-quick-field="base-url"]' : '[data-provider-quick-field="api-key"]')?.focus())
   }
-
-  const selectPreset = (key: string): void => {
-    const next = QUICK_API_PRESETS.find((item) => item.key === key)
-    if (!next) return
-    setPresetKey(next.key)
-    setName(next.label)
-    setBaseUrl(next.baseUrl)
-    setModelsText(next.models.join('\n'))
-    setDiagnostic(null)
-    setGenerationProbe(null)
-    setError('')
-  }
-
   const handleDiagnosticAction = (action: ProviderModelSuggestedAction): void => {
     setShowConnectionDetails(true)
-    if (action === 'enter_models_manually') {
-      setupRef.current?.querySelector<HTMLElement>('[data-provider-quick-field="models"]')?.focus()
-      return
-    }
-    const field = action === 'enter_credentials' || action === 'review_credentials'
-      ? 'api-key'
-      : action === 'review_base_url_and_credentials' || action === 'review_configuration'
-        ? 'base-url'
-        : ''
-    if (field) {
-      setupRef.current?.querySelector<HTMLElement>(`[data-provider-quick-field="${field}"]`)?.focus()
-      return
-    }
-    void connect()
+    const field = action === 'enter_models_manually' ? 'models'
+      : action === 'enter_credentials' || action === 'review_credentials' ? 'api-key'
+      : action === 'review_base_url_and_credentials' || action === 'review_configuration' ? 'base-url' : ''
+    if (field) requestAnimationFrame(() => {
+      const target = setupRef.current?.querySelector<HTMLElement>(`[data-provider-quick-field="${field}"]`)
+      const modelDetails = target?.closest('details.provider-simple-manual-models')
+      if (modelDetails instanceof HTMLDetailsElement) modelDetails.open = true
+      target?.focus()
+    })
+    else void connect()
   }
 
   if (saved) return <ProviderSetupReceipt {...saved} onDone={onSaved} onEdit={onEditSaved} />
-
-  return (
-    <section ref={setupRef} className="provider-editor" aria-label={t('providerQuickTitle')} data-provider-quick-setup>
-      <header className="provider-editor-header">
-        <button type="button" className="provider-editor-back" aria-label={t('backToProviders')} title={t('backToProviders')} onClick={onCancel}>←</button>
-        <h2 className="provider-editor-title">{t('providerQuickTitle')}</h2>
-      </header>
-      <div className="provider-quick-setup">
-        <ProviderQuickAccountOptions oauthFlow={oauthFlow} oauthBusy={oauthBusy} busy={busy} localBusy={localBusy} onConnectOAuth={connectOAuth} onConnectLocal={connectLocal} />
-        <div className="provider-quick-divider"><span>{t('providerQuickOrKey')}</span></div>
-        <label className="field-label">{t('providerQuickTemplateLabel')}</label>
-        <ProviderPresetCatalog compact presets={QUICK_API_PRESETS} onSelect={(next) => selectPreset(next.key)} />
-        <ProviderQuickProtocol preset={preset} />
-        <label className="field-label" htmlFor="provider-quick-key">{t('apiKeyLabel')}</label>
-        <input
-          id="provider-quick-key"
-          className="input input-block"
-          data-provider-quick-field="api-key"
-          type="password"
-          autoComplete="off"
-          value={token}
-          placeholder={t('providerQuickKeyPlaceholder')}
-          onChange={(event) => { setToken(event.target.value); setDiagnostic(null); setGenerationProbe(null); setError('') }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.nativeEvent.isComposing) void connect()
-          }}
-        />
-        <ProviderConnectionDetails
-          open={showConnectionDetails}
-          name={name}
-          baseUrl={baseUrl}
-          modelsText={modelsText}
-          busy={busy}
-          probingGeneration={probingGeneration}
-          generationProbe={generationProbe}
-          onToggle={setShowConnectionDetails}
-          onNameChange={setName}
-          onBaseUrlChange={(value) => { setBaseUrl(value); setDiagnostic(null); setGenerationProbe(null); setError('') }}
-          onModelsChange={(value) => { setModelsText(value); setGenerationProbe(null) }}
-          onProbe={() => void probeGeneration()}
-        />
-        {diagnostic && (
-          <ProviderConnectionDiagnostic
-            error={diagnostic}
-            onAction={() => handleDiagnosticAction(diagnostic.suggestedAction)}
-          />
-        )}
-        {diagnostic?.suggestedAction === 'enter_models_manually' && modelsText.trim() && (
-          <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void useManualModels()}>
-            {t('providerQuickUseManualModels')}
-          </button>
-        )}
-        <ProviderQuickErrorNotice error={error} localReason={localReason} />
-      </div>
-      <div className="provider-editor-actions">
-        <button
-          className="btn btn-ghost"
-          data-provider-quick-action="advanced"
-          disabled={oauthBusy || Boolean(oauthFlow)}
-          onClick={onAdvanced}
-        >
-          {t('providerQuickAdvanced')}
-        </button>
-        <button className="btn btn-primary" data-provider-quick-action="save" disabled={busy || localBusy || oauthBusy || Boolean(oauthFlow)} onClick={() => void connect()}>
-          {busy ? t('providerQuickConnecting') : t('providerQuickConnect')}
-        </button>
-      </div>
-    </section>
-  )
+  return <section ref={setupRef} className="provider-editor" aria-label={t('providerQuickTitle')} data-provider-quick-setup>
+    <header className="provider-editor-header">
+      <button type="button" className="provider-editor-back" disabled={pending} aria-label={t('backToProviders')} onClick={onCancel}>←</button>
+      <h2 className="provider-editor-title">{t('providerQuickTitle')}</h2>
+    </header>
+    <div className="provider-quick-setup">
+      <p className="provider-simple-intro">{t('providerSimpleIntro')}</p>
+      {choosing && <ProviderPresetCatalog compact presets={QUICK_API_PRESETS} selectedKey={presetKey} disabled={pending} onSelect={selectPreset} />}
+      {preset && !choosing && <>
+        <div className="provider-simple-selection" data-provider-selected={preset.key}>
+          <div><strong>{preset.label}</strong><code>{baseUrl || t('providerSimpleAddressHint')}</code>
+            {preset.docsUrl && <a className="provider-simple-docs" href={preset.docsUrl} target="_blank" rel="noreferrer">{t('providerSimpleDocs')}</a>}</div>
+          <button type="button" className="btn btn-ghost btn-sm" disabled={pending} onClick={() => setChoosing(true)}>{t('providerSimpleChange')}</button>
+        </div>
+        <fieldset className="provider-simple-fields" disabled={pending}>
+          {preset.requiresBaseUrl && <label className="field-label">{t('providerSimpleAddress')}
+            <input className="input input-block" data-provider-quick-field="base-url" value={baseUrl}
+              placeholder={preset.baseUrlPlaceholder || 'https://your-service.example.com/v1'}
+              onChange={event => { setBaseUrl(event.target.value); setDiagnostic(null); setGenerationProbe(null) }} /></label>}
+          {preset.key === 'custom' && <label className="field-label">{t('providerSimpleProtocol')}
+            <select className="select select-block" data-provider-quick-field="protocol" value={protocol}
+              onChange={event => {
+                setProtocol(event.target.value as QuickProtocol); setModelsText(''); setDiagnostic(null); setGenerationProbe(null)
+              }}>
+              <option value="chat">OpenAI Chat Completions</option>
+              <option value="responses">OpenAI Responses</option>
+              <option value="anthropic">Anthropic Messages</option>
+              <option value="gemini">Google Gemini</option>
+            </select>
+            <span className="field-hint">{t('providerSimpleProtocolHint')}</span>
+          </label>}
+          {authMode === 'none' ? <p className="field-hint">{t('providerSimpleLocal')}</p> : <>
+            <div className="provider-simple-key-heading"><label className="field-label" htmlFor="provider-quick-key">{t('apiKeyLabel')}</label>
+              {preset.apiKeyUrl && <a href={preset.apiKeyUrl} target="_blank" rel="noreferrer">{t('providerSimpleGetKey')}</a>}</div>
+            <input id="provider-quick-key" className="input input-block" data-provider-quick-field="api-key" type="password" autoComplete="off"
+              value={token} placeholder={t('providerQuickKeyPlaceholder')}
+              onChange={event => { setToken(event.target.value); setDiagnostic(null); setGenerationProbe(null); setError('') }}
+              onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) void connect() }} />
+          </>}
+          {preset.requiresModelId ? <>
+            <label className="field-label">{t('providerSimpleModels')}</label>
+            <p className="field-hint">{t('providerSimpleModelsHint')}</p>
+            <ModelChoices preset={preset} value={modelsText} onChange={value => { setModelsText(value); setGenerationProbe(null) }} />
+          </> : <p className="field-hint">{t('providerSimpleModelsAuto')}</p>}
+          <details className="provider-quick-connection-details" data-provider-quick-connection-details open={showConnectionDetails}
+            onToggle={event => setShowConnectionDetails(event.currentTarget.open)}>
+            <summary>{t('providerQuickConnectionDetails')}</summary>
+            <label className="field-label">{t('nameLabel')}<input className="input input-block" data-provider-quick-field="name" value={name} onChange={event => setName(event.target.value)} /></label>
+            {!preset.requiresBaseUrl && <label className="field-label">{t('baseUrlLabel')}<input className="input input-block" data-provider-quick-field="base-url" value={baseUrl}
+              onChange={event => { setBaseUrl(event.target.value); setDiagnostic(null); setGenerationProbe(null) }} /></label>}
+            <div className="provider-quick-protocol"><span>{t(engine === 'anthropic' ? 'providerEngineAnthropic' : engine === 'gemini' ? 'providerEngineGemini' : 'providerEngineOpenAI')}</span>
+              {engine === 'openai' && <span>{t(protocol === 'responses' ? 'openaiProtocolResponses' : 'openaiProtocolChat')}</span>}</div>
+            {authMode === 'none' && <p className="field-hint">{t('providerSimpleLocalOnly')}</p>}
+            {!preset.requiresModelId && <><label className="field-label">{t('providerQuickFallbackModelsLabel')}</label>
+              <ModelChoices preset={preset} value={modelsText} onChange={value => { setModelsText(value); setGenerationProbe(null) }} />
+              {modelsText.trim() && <><p className="field-hint">{t('providerSimpleManualHint')}</p>
+                <button type="button" className="btn btn-ghost" data-provider-quick-action="manual-save" onClick={() => void connect(true)}>{t('providerSimpleManualSave')}</button></>}
+            </>}
+            <p className="field-hint">{t('providerGenerationProbeBillingNotice')}</p>
+            <button type="button" className="btn btn-ghost" disabled={!modelNames(modelsText).length} onClick={() => void probeGeneration()}>{t('providerGenerationProbeButton')}</button>
+            {generationProbe && <ProviderGenerationProbe result={generationProbe} />}
+          </details>
+        </fieldset>
+        {diagnostic && <ProviderConnectionDiagnostic error={diagnostic} onAction={() => handleDiagnosticAction(diagnostic.suggestedAction)} />}
+      </>}
+      <ProviderQuickErrorNotice error={error} localReason={localReason} />
+      <details className="provider-simple-other-methods" open={oauthFlow ? true : undefined}>
+        <summary>{t('providerSimpleOtherMethods')}</summary>
+        <ProviderQuickAccountOptions oauthFlow={oauthFlow} oauthBusy={oauthBusy} busy={busy || probingGeneration} localBusy={localBusy}
+          onConnectOAuth={connectOAuth} onConnectLocal={connectLocal} />
+      </details>
+    </div>
+    <div className="provider-editor-actions">
+      <button className="btn btn-ghost" data-provider-quick-action="advanced" disabled={pending} onClick={() => onAdvanced(input())}>{t('providerQuickAdvanced')}</button>
+      <button className="btn btn-primary" data-provider-quick-action="save" disabled={pending || !preset || choosing} onClick={() => void connect()}>
+        {t(busy ? 'providerQuickConnecting' : 'providerQuickConnect')}
+      </button>
+    </div>
+  </section>
 }

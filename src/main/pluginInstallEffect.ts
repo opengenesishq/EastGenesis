@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import type { EffectRecord } from '../shared/effect-types'
 import type { PluginInstallResult, PluginUninstallResult } from '../shared/types'
 import {
@@ -45,15 +46,32 @@ export async function installLocalPluginWithEffect(
   const transitionId = createTransitionId()
   const prepared = preparePluginInstall(sourcePath, pluginsRoot, overwrite, transitionId)
   if ('ok' in prepared) return prepared
+  return installPreparedPluginWithEffect(prepared, undefined, undefined, dependencies)
+}
+
+/** Catalog previews retain their operation id and frozen source/target. The caller
+ * persists intent before calling and reconciles retries rather than executing again. */
+export async function installPreparedPluginWithEffect(
+  prepared: PreparedPluginInstall,
+  reviewedTarget?: ManagedPluginInstallTarget,
+  rootDir?: string,
+  dependencies: PluginInstallEffectDependencies = {}
+): Promise<PluginInstallResult> {
   const outcome = await (dependencies.runOperation ?? executeInteractiveOperationEffect)({
-    operationId: transitionId,
+    rootDir,
+    operationId: prepared.transitionId,
     kind: 'plugin_install',
     title: '安装本地插件',
     sourceSessionId: 'plugin-management:settings',
     cwd: prepared.operationCwd,
     toolName: 'managed_plugin_install',
     toolInput: pluginInstallToolInput(prepared),
-    execute: (effect) => runInstall(effect, prepared, dependencies),
+    execute: (effect) => {
+      if (reviewedTarget && !isDeepStrictEqual(effect.target, reviewedTarget)) {
+        return { ok: false, error: '插件安装目标在预览后发生变化，请重新准备预览。' }
+      }
+      return runInstall(effect, prepared, dependencies)
+    },
     isSuccess: (result) => result.ok,
     resultSummary: summarizeInstallResult
   })
@@ -116,6 +134,9 @@ function projectInstallOutcome(
   outcome: InteractiveOperationEffectOutcome<PluginInstallResult>
 ): PluginInstallResult {
   if (outcome.status === 'completed') {
+    if (outcome.effectStatus === 'compensated') {
+      return { ok: false, error: '原插件安装已补偿撤销，未保留本次安装。', effectStatus: 'compensated', operationId: outcome.operationId }
+    }
     if (outcome.value?.ok) {
       return { ...outcome.value, effectStatus: outcome.effectStatus, operationId: outcome.operationId }
     }

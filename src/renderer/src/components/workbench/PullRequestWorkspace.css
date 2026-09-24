@@ -1,0 +1,27 @@
+.pr-workspace { display: grid; gap: 12px; min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 16px; background: var(--bg-raised); font-size: 12px; }
+.pr-workspace h3, .pr-workspace p { margin: 0; }
+.pr-workspace h3 { font-size: 14px; overflow-wrap: anywhere; }
+.pr-workspace-header { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
+.pr-workspace-header p { margin-top: 5px; color: var(--text-dim); line-height: 1.6; }
+.pr-workspace-hint { color: var(--text-dim); line-height: 1.6; overflow-wrap: anywhere; }
+.pr-workspace-actions, .pr-workspace-pagination { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pr-workspace select { color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font: inherit; }
+.pr-workspace-list { display: grid; gap: 4px; max-height: 340px; overflow: auto; }
+.pr-workspace-row { display: grid; gap: 4px; text-align: left; border: 1px solid transparent; border-radius: 6px; color: var(--text); background: transparent; padding: 10px; font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+.pr-workspace-row:hover, .pr-workspace-row.active { background: var(--bg-card); border-color: var(--border-soft); }
+.pr-workspace-row span, .pr-workspace-row small { color: var(--text-dim); }
+.pr-workspace-detail { display: grid; gap: 12px; border-top: 1px solid var(--border); padding-top: 16px; min-width: 0; }
+.pr-workspace-tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--border-soft); }
+.pr-workspace-tabs button { background: transparent; color: var(--text-dim); border: 0; border-bottom: 2px solid transparent; padding: 8px 10px; font: inherit; cursor: pointer; }
+.pr-workspace-tabs button[aria-pressed=true] { color: var(--text); border-color: var(--accent); }
+.pr-workspace-prose { font: inherit; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; max-height: 420px; overflow: auto; }
+.pr-workspace-file { padding: 10px; background: var(--bg-card); border-radius: 6px; min-width: 0; }
+.pr-workspace-file summary { cursor: pointer; overflow-wrap: anywhere; }
+.pr-workspace-patch { font: 11px/1.65 var(--mono); overflow: auto; max-height: 400px; }
+.pr-workspace-commit, .pr-workspace-check { display: flex; gap: 9px; align-items: baseline; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--border-soft); overflow-wrap: anywhere; }
+.pr-workspace-feedback { display: grid; gap: 8px; background: var(--bg-card); padding: 12px; border-radius: 8px; min-width: 0; }
+.pr-workspace-feedback header { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.pr-workspace-feedback label { display: flex; gap: 7px; align-items: center; }
+.pr-workspace-feedback small, .pr-workspace-feedback header > span { color: var(--text-dim); }
+.pr-workspace-pagination { justify-content: center; padding-top: 8px; color: var(--text-dim); }
+.pr-workspace :disabled { cursor: default; opacity: .55; }

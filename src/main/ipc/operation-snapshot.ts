@@ -17,11 +17,11 @@ export function assertAgentRecoverySnapshot(snapshot: TaskSnapshotRecord): void 
 
 export async function reconcileInteractiveOperationSnapshot(
   snapshot: TaskSnapshotRecord,
-  options: { requireStored?: boolean } = {}
+  options: { requireStored?: boolean; rootDir?: string } = {}
 ): Promise<TaskSnapshotRecord | null> {
   if (isInteractiveOperationActive(snapshot)) return null
   const reconciled = options.requireStored
-    ? await reconcileExistingPersistedTaskSnapshot(snapshot)
-    : await reconcilePersistedTaskSnapshot(snapshot)
-  return reconciled ? settleStoppedInteractiveOperationSnapshot(reconciled) : null
+    ? await reconcileExistingPersistedTaskSnapshot(snapshot, options.rootDir)
+    : await reconcilePersistedTaskSnapshot(snapshot, options.rootDir)
+  return reconciled ? settleStoppedInteractiveOperationSnapshot(reconciled, options.rootDir) : null
 }

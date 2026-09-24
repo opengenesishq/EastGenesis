@@ -4,8 +4,18 @@ import type { SessionInputRecord } from '../../../../shared/session-input-types'
 import { useStore } from '../../store'
 import { COMPOSER_DRAFTS_DELETED_EVENT, isDeletedComposerDraft } from '../../store/composer-draft-persistence'
 import { REQUIREMENTS_CHANGED_EVENT, announceRequirementRevision } from '../experience/requirement-revision-events'
+import { normalizeSessionFollowUpBehavior, type SessionFollowUpBehavior, type SessionInputQueueOptions } from '../../../../shared/session-follow-up'
 
 export function useSessionInputs(sessionId: string | null, running: boolean) {
+  const defaultBehavior = useStore(state => normalizeSessionFollowUpBehavior(state.settings.followUpBehavior))
+  const [behaviorOverrides, setBehaviorOverrides] = useState<Record<string, SessionFollowUpBehavior>>({})
+  const storedBehavior = sessionId ? window.localStorage.getItem(`caogen.follow-up-behavior:${sessionId}`) : null
+  const behavior = sessionId ? behaviorOverrides[sessionId] ?? (storedBehavior ? normalizeSessionFollowUpBehavior(storedBehavior) : defaultBehavior) : defaultBehavior
+  const setBehavior = (value: SessionFollowUpBehavior): void => {
+    if (!sessionId) return
+    window.localStorage.setItem(`caogen.follow-up-behavior:${sessionId}`, value)
+    setBehaviorOverrides(current => ({ ...current, [sessionId]: value }))
+  }
   const [state, setState] = useState<{ sessionId: string | null; records: SessionInputRecord[] }>({ sessionId, records: [] })
   const [errorState, setErrorState] = useState<{ sessionId: string | null; message: string }>({ sessionId, message: '' })
   const [busy, setBusy] = useState<string | null>(null)
@@ -42,6 +52,13 @@ export function useSessionInputs(sessionId: string | null, running: boolean) {
     return () => window.removeEventListener(REQUIREMENTS_CHANGED_EVENT, changed)
   }, [refresh, running, sessionId])
 
+  const automaticallyPending = records.some(record => record.phase === 'dispatching' || (record.phase === 'queued' && record.followUp?.state === 'armed'))
+  useEffect(() => {
+    if (!automaticallyPending) return
+    const timer = window.setInterval(() => { void refresh().catch(() => undefined) }, 1500)
+    return () => window.clearInterval(timer)
+  }, [automaticallyPending, refresh])
+
   useEffect(() => {
     const clear = (): void => {
       if (!sessionId || !isDeletedComposerDraft(sessionId)) return
@@ -59,18 +76,18 @@ export function useSessionInputs(sessionId: string | null, running: boolean) {
     const key = `caogen.session-input-request.v1:${sessionId}`
     const serialized = JSON.stringify(payload)
     const raw = window.localStorage.getItem(key)
-    let pending: { id: string; payload: string } | null = raw ? JSON.parse(raw) : null
+    let pending: { id: string; payload: string; options?: SessionInputQueueOptions } | null = raw ? JSON.parse(raw) : null
     if (pending && (typeof pending.id !== 'string' || typeof pending.payload !== 'string')) throw new Error('补充要求的提交记录无效')
     if (pending && pending.payload !== serialized) {
       const saved = await window.agentDesk.listSessionInputs(sessionId)
       if (!saved.some((record) => record.id === pending!.id)) throw new Error('上一次补充要求的保存结果尚未确认，请先恢复原文重试')
       pending = null
     }
-    pending ??= { id: crypto.randomUUID(), payload: serialized }
+    pending ??= { id: crypto.randomUUID(), payload: serialized, options: { followUpBehavior: behavior } }
     // Preserve the same request identity if IPC response or renderer is lost.
     if (isDeletedComposerDraft(sessionId)) throw new Error('当前任务已删除')
     window.localStorage.setItem(key, JSON.stringify(pending))
-    const record = await window.agentDesk.queueSessionInput(sessionId, pending.id, payload)
+    const record = await window.agentDesk.queueSessionInput(sessionId, pending.id, payload, pending.options ?? { followUpBehavior: 'manual' })
     if (record.sessionId !== sessionId || record.id !== pending.id) throw new Error('补充要求回执身份不一致')
     if (currentSessionId.current === sessionId && !isDeletedComposerDraft(sessionId)) {
       refreshSequence.current++
@@ -98,7 +115,7 @@ export function useSessionInputs(sessionId: string | null, running: boolean) {
         ? { sessionId: current.sessionId, records: current.records.map((item) => item.id === updated.id ? updated : item) }
         : current)
       if (action === 'apply') await useStore.getState().syncSession(record.sessionId)
-      if (updated.phase === 'requirements_applied') announceRequirementRevision(record.sessionId)
+      if ((updated.phase === 'requirements_applied' || updated.phase === 'goal_revised')) announceRequirementRevision(record.sessionId)
     } catch (cause) {
       if (currentSessionId.current === sessionId) setErrorState({ sessionId, message: errorText(cause) })
     } finally {
@@ -107,7 +124,7 @@ export function useSessionInputs(sessionId: string | null, running: boolean) {
     }
   }
 
-  return { records, queue, queueRecord, busy, error, ready: loadedGeneration === sessionGeneration.current && state.sessionId === sessionId, refresh,
+  return { records, queue, queueRecord, busy, error, behavior, setBehavior, ready: loadedGeneration === sessionGeneration.current && state.sessionId === sessionId, refresh,
     apply: (record: SessionInputRecord) => act(record, 'apply'), cancel: (record: SessionInputRecord) => act(record, 'cancel') }
 }
 

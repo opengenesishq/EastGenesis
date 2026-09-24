@@ -4,16 +4,23 @@ import { newBusinessLineId } from './business-line-ownership'
 import { assertSessionDomainOwnership } from './session-create-lifecycle'
 import { createProjectWorkspaceReadService } from './project-workspace/canonical-read-service'
 import { openProjectWorkspaceStore } from './project-workspace/store'
+import { assertSideChatBinding } from './side-chat/side-chat-policy'
 
-type ExecutionClaim = Pick<SessionMeta, 'workspaceId' | 'goalId' | 'workItemId' | 'businessLineId'>
+type ExecutionClaim = Pick<SessionMeta, 'workspaceId' | 'goalId' | 'workItemId' | 'businessLineId'> & Partial<SessionMeta>
 type WorkspaceExecutionState = { workspace?: ProjectWorkspace; goals: Goal[]; workItems: WorkItem[] }
 
 /** History activation remains readable; only starting execution requires live owners. */
 export async function assertPersistedSessionExecutionAllowed(meta: ExecutionClaim, rootDir: string): Promise<void> {
+  const sideChat = assertSideChatBinding(meta as SessionMeta, rootDir)
   const ownership = assertSessionDomainOwnership(meta)
   if (!ownership.workspaceId) return
   const store = await openProjectWorkspaceStore(rootDir)
   const state = await store.getState()
+  if (sideChat) {
+    const workspace = state.workspaces.find(item => item.id === ownership.workspaceId)
+    if (!workspace || workspace.status !== 'active') throw new Error('侧聊所属工作区已不存在或不再活动。')
+    return
+  }
   // Reject obvious stale identities from one source revision before a canonical
   // read can reconcile projections. Then verify the complete canonical view.
   assertExecutionOwner(meta, { ...state, workspace: state.workspaces.find((item) => item.id === ownership.workspaceId) })

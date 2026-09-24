@@ -174,7 +174,7 @@ class TypeScriptLspClient {
         tsserver: { path: tsserverPath },
         preferences: { includeCompletionsForModuleExports: true, includeCompletionsWithInsertText: true }
       },
-      clientInfo: { name: 'CaoGen', version: '0.1.8' }
+        clientInfo: { name: 'EastGenesis', version: '0.1.8' }
     })
     this.notify('initialized', {})
   }

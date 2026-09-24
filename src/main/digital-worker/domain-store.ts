@@ -93,7 +93,7 @@ import {
  * Every mutation reloads the latest document while holding a process/file lock,
  * validates the complete candidate, then writes via fsync + rename.  The
  * in-process queue makes Promise.all races deterministic; the lock covers a
- * second CaoGen process and fails closed when another live writer owns it.
+ * second EastGenesis process and fails closed when another live writer owns it.
  */
 export class DigitalWorkerStore {
   readonly filePath: string

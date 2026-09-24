@@ -117,6 +117,8 @@ interface GuiListWindowsResult extends GuiBaseResult {
 
 interface GuiScreenshotResult extends GuiBaseResult {
   path?: string
+  captureSha256?: string
+  capturedAt?: number
   sourceId?: string
   sourceName?: string
   sourceCount?: number
@@ -385,7 +387,7 @@ export function createGuiController(cwd: string): GuiController {
         if (nativeImageIsEmpty(source.thumbnail)) {
           return {
             ok: false,
-            error: '截图源缩略图为空；请确认系统 Screen Recording/屏幕录制权限已授予 CaoGen，并重新打开应用后再试。',
+      error: '截图源缩略图为空；请确认系统 Screen Recording/屏幕录制权限已授予 EastGenesis，并重新打开应用后再试。',
             sourceId: source.id,
             sourceName: source.name,
             sourceCount: all.length,
@@ -406,12 +408,17 @@ export function createGuiController(cwd: string): GuiController {
           }
         }
         mkdirSync(dirname(outPath), { recursive: true })
-        writeFileSync(outPath, image.toPNG())
+        const capturedAt = Date.now()
+        const png = image.toPNG()
+        const captureSha256 = createHash('sha256').update(png).digest('hex')
+        writeFileSync(outPath, png)
         const size = image.getSize()
         const ocr = input.includeOcr ? await ocrImage(outPath) : undefined
         return {
           ok: true,
           path: outPath,
+          captureSha256,
+          capturedAt,
           sourceId: source.id,
           sourceName: source.name,
           sourceCount: all.length,

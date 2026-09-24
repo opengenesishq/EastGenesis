@@ -1,0 +1,26 @@
+.local-sites-page { padding: 28px 32px; overflow: auto; height: 100%; min-height: 0; color: var(--text); }
+.local-sites-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 24px; }
+.local-sites-heading h1 { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; font-size: 23px; }
+.local-sites-heading p, .local-site-task { color: var(--text-muted); margin: 6px 0; }
+.local-sites-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.local-sites-actions button { display: inline-flex; align-items: center; gap: 6px; }
+.local-sites-filters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; align-items: center; }
+.local-sites-page input, .local-sites-page select { background: var(--bg); border: 1px solid var(--border); border-radius: 7px; color: var(--text); padding: 9px 11px; min-width: 0; }
+.local-sites-filters input { flex: 1 1 220px; }
+.local-sites-filters select { max-width: min(50%, 400px); }
+.local-sites-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 16px; }
+.local-site-card { padding: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-secondary, var(--bg)); display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.local-site-title { display: flex; align-items: center; gap: 8px; }
+.local-site-title h2 { font-size: 16px; margin: 0; flex: 1; overflow-wrap: anywhere; }
+.local-site-title > span { font-size: 11px; color: var(--text-muted); }
+.local-site-path { display: block; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; color: var(--text-muted); }
+.local-site-publication { border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; overflow-wrap: anywhere; }
+.local-site-card p { margin: 0; font-size: 12px; line-height: 1.6; }
+.local-site-card > .local-sites-actions { margin-top: auto; }
+.local-sites-empty { text-align: center; padding: 48px 20px; color: var(--text-muted); }
+.local-sites-empty h2 { font-size: 17px; color: var(--text); }
+.local-site-registration { padding: 18px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 20px; display: grid; gap: 12px; }
+.local-site-registration label { display: grid; gap: 6px; font-size: 12px; }
+.local-site-registration p { color: var(--text-muted); font-size: 12px; margin: 0; }
+.local-site-registration button { justify-self: start; }
+@media (max-width: 720px) { .local-sites-page { padding: 18px; } .local-sites-heading { flex-direction: column; } .local-sites-filters select { max-width: 100%; } }

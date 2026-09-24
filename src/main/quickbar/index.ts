@@ -2,16 +2,21 @@ import {
   BrowserWindow,
   app,
   clipboard,
+  desktopCapturer,
   dialog,
   globalShortcut,
-  ipcMain
+  ipcMain,
+  systemPreferences
 } from 'electron'
 import { statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
-import { copyImageAttachment } from '../attachmentOps'
-import { createGuiController } from '../gui/gui-controller'
+import { saveImageAttachmentBytes } from '../attachmentOps'
+import { ocrImage } from '../imageOcr'
+import { assertTrustedWorkflowLedgerSender } from '../ipc/workflow-ledger-handlers'
 import { sessionManager } from '../sessionManager'
+import { getSettings } from '../settings'
+import { shortcutFor } from '../../shared/desktop-shortcuts'
 import type {
   ImageAttachmentView,
   QuickbarClipboardInput,
@@ -26,8 +31,7 @@ import type {
   SendMessagePayload
 } from '../../shared/types'
 
-const DEFAULT_ACCELERATOR = 'CommandOrControl+Shift+Space'
-const FALLBACK_ACCELERATOR = 'CommandOrControl+Alt+Space'
+const DEFAULT_ACCELERATOR = shortcutFor('quickbar')!
 const QUICKBAR_FILE_LIMIT = 40
 
 interface QuickbarControllerOptions {
@@ -56,7 +60,9 @@ class QuickbarController {
 
   registerGlobalShortcut(): QuickbarState {
     this.unregisterGlobalShortcut()
-    const candidates = [DEFAULT_ACCELERATOR, FALLBACK_ACCELERATOR]
+    const configured = shortcutFor('quickbar', getSettings().desktopShortcuts)
+    if (!configured) { this.accelerator = ''; this.registrationError = undefined; return this.getState() }
+    const candidates = [configured]
     for (const candidate of candidates) {
       const ok = globalShortcut.register(candidate, () => {
         this.setVisible(!this.visible, 'global-shortcut')
@@ -68,16 +74,14 @@ class QuickbarController {
         return this.getState()
       }
     }
-    this.accelerator = DEFAULT_ACCELERATOR
+    this.accelerator = configured
     this.registered = false
-    this.registrationError = 'Quickbar 全局快捷键注册失败:系统可能已占用 Command/Ctrl+Shift+Space 和 Command/Ctrl+Alt+Space'
+    this.registrationError = `Quickbar 全局快捷键注册失败：系统可能已占用 ${configured}。请在设置中更换快捷键。`
     return this.getState()
   }
 
   unregisterGlobalShortcut(): void {
-    for (const accelerator of [DEFAULT_ACCELERATOR, FALLBACK_ACCELERATOR]) {
-      if (globalShortcut.isRegistered(accelerator)) globalShortcut.unregister(accelerator)
-    }
+    if (this.registered && this.accelerator && globalShortcut.isRegistered(this.accelerator)) globalShortcut.unregister(this.accelerator)
     this.registered = false
   }
 
@@ -90,6 +94,8 @@ class QuickbarController {
       visible: this.visible,
       accelerator: this.accelerator,
       registered: this.registered,
+      platform: process.platform,
+      ...(process.platform === 'darwin' ? { screenCapturePermission: systemPreferences.getMediaAccessStatus('screen') } : {}),
       ...(this.registrationError ? { registrationError: this.registrationError } : {})
     }
   }
@@ -123,20 +129,25 @@ export function disposeQuickbar(): void {
 }
 
 export function registerQuickbarIpc(): void {
-  ipcMain.handle('quickbar:getState', () => quickbarController.getState())
-  ipcMain.handle('quickbar:setVisible', (_e, visible: boolean) =>
-    quickbarController.setVisible(visible === true, 'renderer')
-  )
-  ipcMain.handle('quickbar:getWindowContext', (_e, cwd?: string, sourceId?: string) =>
-    getQuickbarWindowContext(cwd, sourceId)
-  )
-  ipcMain.handle('quickbar:readClipboard', (_e, input?: QuickbarClipboardInput) =>
-    readQuickbarClipboard(input)
-  )
-  ipcMain.handle('quickbar:captureScreenshot', (_e, input: QuickbarScreenshotInput) =>
-    captureQuickbarScreenshot(input)
-  )
+  ipcMain.handle('quickbar:getState', (event) => { assertTrustedWorkflowLedgerSender(event); return quickbarController.getState() })
+  ipcMain.handle('quickbar:setVisible', (event, visible: boolean) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return quickbarController.setVisible(visible === true, 'renderer')
+  })
+  ipcMain.handle('quickbar:getWindowContext', (event, cwd?: string, sourceId?: string) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return getQuickbarWindowContext(cwd, sourceId)
+  })
+  ipcMain.handle('quickbar:readClipboard', (event, input?: QuickbarClipboardInput) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return readQuickbarClipboard(input)
+  })
+  ipcMain.handle('quickbar:captureScreenshot', (event, input: QuickbarScreenshotInput) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return captureQuickbarScreenshot(input)
+  })
   ipcMain.handle('quickbar:pickFiles', async (event) => {
+    assertTrustedWorkflowLedgerSender(event)
     const win = BrowserWindow.fromWebContents(event.sender)
     const result = win
       ? await dialog.showOpenDialog(win, {
@@ -147,9 +158,10 @@ export function registerQuickbarIpc(): void {
         })
     return result.canceled ? [] : result.filePaths
   })
-  ipcMain.handle('quickbar:prepareFiles', (_e, input: QuickbarFileInput) =>
-    prepareQuickbarFiles(input)
-  )
+  ipcMain.handle('quickbar:prepareFiles', (event, input: QuickbarFileInput) => {
+    assertTrustedWorkflowLedgerSender(event)
+    return prepareQuickbarFiles(input)
+  })
 }
 
 export async function getQuickbarWindowContext(
@@ -158,17 +170,17 @@ export async function getQuickbarWindowContext(
 ): Promise<QuickbarContextResult> {
   const resolvedCwd = resolveCwd(cwd)
   try {
-    const result = await createGuiController(resolvedCwd).listWindows({ includeElements: false })
-    const windows = (result.windows ?? []).map(toWindowContext)
-    const current =
-      pickCurrentWindow(windows, typeof sourceId === 'string' ? sourceId : undefined) ?? undefined
+    // Enumerate names only. Opening Quickbar must not capture pixels or AX text.
+    const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false })
+    const windows: QuickbarWindowContext[] = sources.map(source => ({ id: source.id, name: source.name,
+      kind: source.id.startsWith('screen:') ? 'screen' : 'window', platform: 'electron' }))
+    const current = sourceId ? windows.find(item => item.id === sourceId) : undefined
     return {
-      ok: result.ok,
+      ok: true,
       cwd: resolvedCwd,
       capturedAt: Date.now(),
       ...(current ? { current } : {}),
-      windows: windows.slice(0, 30),
-      ...(result.error ? { error: result.error } : {})
+      windows
     }
   } catch (err) {
     return {
@@ -189,7 +201,7 @@ export async function readQuickbarClipboard(
   const context = input.includeWindowContext === false ? undefined : await getQuickbarWindowContext(input.cwd)
   const payload: SendMessagePayload = {
     text: [
-      '[CaoGen Quickbar 剪贴板上下文]',
+  '[EastGenesis Quickbar 剪贴板上下文]',
       contextLines(context),
       input.note?.trim() ? `备注: ${input.note.trim()}` : '',
       '',
@@ -205,52 +217,40 @@ export async function captureQuickbarScreenshot(
   input: QuickbarScreenshotInput
 ): Promise<QuickbarPayloadResult> {
   const sessionId = typeof input?.sessionId === 'string' ? input.sessionId.trim() : ''
-  if (!sessionId || !sessionManager.get(sessionId)) return { ok: false, error: '截图投递需要一个有效会话' }
-
-  const cwd = resolveCwd(input.cwd, sessionId)
-  const context = input.includeWindowContext === false
-    ? undefined
-    : await getQuickbarWindowContext(cwd, input.sourceId)
-  const screenshot = await createGuiController(cwd).screenshot({
-    sourceId: input.sourceId?.trim() || undefined,
-    maxWidth: input.maxWidth
-  })
-  if (!screenshot.ok || !screenshot.path) {
-    return {
-      ok: false,
-      error: screenshot.error || '截图失败',
-      ...(context ? { context } : {})
+  const session = sessionId ? sessionManager.get(sessionId) : undefined
+  if (!session || session.meta.status === 'closed') return { ok: false, error: '截图需要一个仍然存在的目标任务。' }
+  const sourceId = typeof input.sourceId === 'string' ? input.sourceId.trim() : ''
+  const expectedName = typeof input.expectedSourceName === 'string' ? input.expectedSourceName : ''
+  if (!sourceId || !expectedName) return { ok: false, error: '请明确选择要截取的窗口或屏幕。' }
+  try {
+    const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 3840, height: 2160 }, fetchWindowIcons: false })
+    const source = sources.find(item => item.id === sourceId)
+    if (!source || source.name !== expectedName) return { ok: false, error: '所选窗口已关闭或来源发生变化，请刷新并重新选择。' }
+  if (!source.thumbnail || source.thumbnail.isEmpty()) return { ok: false, error: '截图为空。请检查系统屏幕录制权限，必要时重新启动 EastGenesis。' }
+    if (!sessionManager.get(sessionId) || sessionManager.get(sessionId)?.meta.status === 'closed') return { ok: false, error: '目标任务已关闭，截图未附加。' }
+    const requestedWidth = typeof input.maxWidth === 'number' && Number.isFinite(input.maxWidth) ? input.maxWidth : 1440
+    const width = Math.min(source.thumbnail.getSize().width, Math.max(320, Math.min(3840, Math.floor(requestedWidth))))
+    const screenshot = source.thumbnail.resize({ width })
+    if (screenshot.isEmpty()) return { ok: false, error: '截图数据不可用，请重新选择。' }
+    const copied = await saveImageAttachmentBytes(screenshot.toPNG(), attachmentRoot(sessionId), { mime: 'image/png' })
+    if (!copied.ok) return copied
+    const ocr = input.includeOcr === true ? await ocrImage(copied.path) : undefined
+    if (!sessionManager.get(sessionId) || sessionManager.get(sessionId)?.meta.status === 'closed') return { ok: false, error: '目标任务已关闭，截图未附加。' }
+    const { ok: _ok, ...image } = copied
+    const selected: QuickbarWindowContext = { id: source.id, name: source.name, kind: source.id.startsWith('screen:') ? 'screen' : 'window', platform: 'electron' }
+    const context: QuickbarContextResult = { ok: true, cwd: session.meta.cwd, capturedAt: Date.now(), current: selected, windows: [selected] }
+    const size = screenshot.getSize()
+    const payload: SendMessagePayload = {
+      text: [input.note?.trim(), `截图来源：${source.name}`, `尺寸：${size.width} × ${size.height}`,
+        ocr?.ok && ocr.text ? `截图文字识别（${ocr.engine ?? '本机 OCR'}，可能有误）：\n${ocr.text}` : ''].filter(Boolean).join('\n\n'),
+      images: [image as ImageAttachmentView]
     }
+    return { ok: true, sessionId, payload, screenshotPath: copied.path, context,
+      imagePreviews: { [image.id]: screenshot.resize({ width: Math.min(360, size.width) }).toDataURL() },
+      ...(ocr && !ocr.ok ? { warning: ocr.error || '未识别到文字，截图已加入草稿。' } : {}) }
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) }
   }
-
-  const copied = await copyImageAttachment(screenshot.path, attachmentRoot(sessionId))
-  if (!copied.ok) {
-    return {
-      ok: false,
-      error: copied.error,
-      screenshotPath: screenshot.path,
-      ...(context ? { context } : {})
-    }
-  }
-
-  const { ok: _ok, ...image } = copied
-  const payload: SendMessagePayload = {
-    text: [
-      '[CaoGen Quickbar 截图上下文]',
-      `截图源: ${screenshot.sourceName || screenshot.sourceId || '默认屏幕'}`,
-      typeof screenshot.width === 'number' && typeof screenshot.height === 'number'
-        ? `尺寸: ${screenshot.width}x${screenshot.height}`
-        : '',
-      contextLines(context),
-      input.note?.trim() ? `备注: ${input.note.trim()}` : '',
-      '',
-      '请把随附截图作为当前任务上下文。'
-    ]
-      .filter(Boolean)
-      .join('\n'),
-    images: [image as ImageAttachmentView]
-  }
-  return { ok: true, payload, screenshotPath: screenshot.path, ...(context ? { context } : {}) }
 }
 
 export async function prepareQuickbarFiles(input: QuickbarFileInput): Promise<QuickbarPayloadResult> {
@@ -265,7 +265,7 @@ export async function prepareQuickbarFiles(input: QuickbarFileInput): Promise<Qu
   const context = input.includeWindowContext === false ? undefined : await getQuickbarWindowContext(cwd)
   const payload: SendMessagePayload = {
     text: [
-      '[CaoGen Quickbar 文件路径上下文]',
+  '[EastGenesis Quickbar 文件路径上下文]',
       `工作目录: ${cwd}`,
       contextLines(context),
       input.note?.trim() ? `备注: ${input.note.trim()}` : '',
@@ -288,50 +288,6 @@ function resolveCwd(cwd?: string, sessionId?: string): string {
   const sessionCwd = sessionId ? sessionManager.get(sessionId)?.meta.cwd : undefined
   const raw = cwd?.trim() || sessionCwd || homedir()
   return resolve(raw)
-}
-
-function toWindowContext(item: {
-  id: string
-  name: string
-  kind: 'screen' | 'window'
-  title?: string
-  processName?: string
-  pid?: number
-  platform?: NodeJS.Platform | 'electron'
-  minimized?: boolean
-}): QuickbarWindowContext {
-  return {
-    id: item.id,
-    name: item.name,
-    kind: item.kind,
-    ...(item.title ? { title: item.title } : {}),
-    ...(item.processName ? { processName: item.processName } : {}),
-    ...(typeof item.pid === 'number' ? { pid: item.pid } : {}),
-    ...(item.platform ? { platform: item.platform } : {}),
-    ...(typeof item.minimized === 'boolean' ? { minimized: item.minimized } : {})
-  }
-}
-
-function pickCurrentWindow(
-  windows: QuickbarWindowContext[],
-  sourceId?: string
-): QuickbarWindowContext | null {
-  if (sourceId) {
-    const byId = windows.find((item) => item.id === sourceId)
-    if (byId) return byId
-  }
-  return (
-    windows.find((item) => item.kind === 'window' && !item.minimized && !isCaoGenWindow(item)) ??
-    windows.find((item) => item.kind === 'window' && !item.minimized) ??
-    windows.find((item) => item.kind === 'screen') ??
-    windows[0] ??
-    null
-  )
-}
-
-function isCaoGenWindow(item: QuickbarWindowContext): boolean {
-  const haystack = [item.name, item.title, item.processName].filter(Boolean).join(' ').toLowerCase()
-  return haystack.includes('caogen') || haystack.includes('electron')
 }
 
 function contextLines(context: QuickbarContextResult | undefined): string {

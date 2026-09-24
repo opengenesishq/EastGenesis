@@ -124,6 +124,7 @@ export class AnthropicModelAttemptTracker {
       `model-request:${run.id}:${this.messageId || 'system'}:${++this.sequence}`
     return {
       budgetScope: input.budgetScope,
+      sessionId: run.sessionId,
       runId: run.id,
       requestId,
       stepId,

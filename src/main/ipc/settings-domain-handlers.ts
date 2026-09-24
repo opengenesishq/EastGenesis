@@ -4,6 +4,7 @@ import { getSettings, updateSettings, getRoutingSettingsBoundary } from '../sett
 import { listProviders, getProviderConnectionIdentity } from '../providers'
 import { configureProviderCircuitBreaker } from '../providerHealth'
 import { revokeAllGuiAutomationGrants } from '../permission/permission-manager'
+import { browserDebugController } from '../browser-debug/controller'
 import { buildRoutingSettingsCatalog } from '../routing-service/routing-catalog'
 import { createRoutingRuleService } from '../routing-service/routing-rule-service'
 import { resolveRoutingPreviewContext } from '../routing-service/routing-preview-context'
@@ -113,6 +114,7 @@ export function registerSettingsDomainIpc(ipcMain: IpcMain): void {
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('settings-domain:update requires one object argument')
     const next = updateSettings(patch)
     if (!next.guiAutomationEnabled) revokeAllGuiAutomationGrants()
+    if (next.browserDebug?.enabled !== true) browserDebugController.revokeAll()
     configureProviderCircuitBreaker(next.providerCircuitBreaker)
     return next
   })

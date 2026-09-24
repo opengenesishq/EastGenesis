@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import SkillRecordingWizard from './SkillRecordingWizard'
 
 export interface SkillPageItem {
   id: string
@@ -18,6 +19,7 @@ export interface SkillsPageProps {
 
 export default function SkillsPage({ skills, onExportSkill, onImportSkill, onRunSkill }: SkillsPageProps): React.JSX.Element {
   const [query, setQuery] = useState('')
+  const [recordingOpen, setRecordingOpen] = useState(false)
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
     if (!needle) return skills
@@ -28,12 +30,13 @@ export default function SkillsPage({ skills, onExportSkill, onImportSkill, onRun
 
   return (
     <section className="skills-page">
+      {recordingOpen && <SkillRecordingWizard onClose={() => setRecordingOpen(false)} />}
       <header className="skills-page-header">
         <div>
           <h2>Skills</h2>
           <p>项目与全局自动化工作流</p>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={onImportSkill}>导入</button>
+        <div className="skills-page-actions"><button className="btn btn-ghost btn-sm" onClick={() => setRecordingOpen(true)}>+ 录制技能</button><button className="btn btn-ghost btn-sm" onClick={onImportSkill}>导入</button></div>
       </header>
       <input className="input" value={query} placeholder="搜索 Skill" onChange={(event) => setQuery(event.target.value)} />
       <div className="skills-page-list">

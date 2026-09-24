@@ -1,0 +1,16 @@
+.html-file-workspace { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.html-file-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--border); }
+.html-file-tabs { display: flex; gap: 4px; }
+.html-file-tabs button, .html-file-toolbar > button { display: inline-flex; align-items: center; gap: 6px; }
+.html-file-tabs button { border: 0; border-radius: 6px; padding: 6px 9px; background: transparent; color: var(--text-muted); }
+.html-file-tabs button.is-active { background: var(--bg-tertiary, var(--bg-secondary)); color: var(--text); }
+.html-file-source { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.html-file-source[hidden] { display: none; }
+.html-file-static { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+.html-file-static > .preview-renderer { flex: 1; min-height: 260px; }
+.html-preview-description { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 9px 12px; color: var(--text-muted); font-size: 12px; }
+.html-preview-description select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 5px; padding: 4px 6px; }
+.html-preview-version { padding: 12px; border-bottom: 1px solid var(--border); }
+.html-preview-version p { margin: 0 0 10px; font-size: 12px; }
+.html-preview-version > div { display: flex; gap: 8px; flex-wrap: wrap; }
+.html-preview-hint { margin: 0; padding: 7px 12px; font-size: 11px; line-height: 1.5; color: var(--text-muted); border-top: 1px solid var(--border); }

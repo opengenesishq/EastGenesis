@@ -3,26 +3,9 @@ import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
 import process from 'node:process'
-import { openProjectWorkspaceCommandService } from '../src/main/project-workspace/command-service'
-import { openProjectWorkspaceStore } from '../src/main/project-workspace/store'
-import { createCanonicalSupervisorRun } from '../src/main/task/supervisor-taskrun-bridge'
-import { SupervisorStateStore } from '../src/main/task/supervisor-state'
-import { buildTaskSnapshot, saveTaskSnapshot } from '../src/main/task/task-snapshot'
-import { prepareTaskSnapshotRecovery } from '../src/main/task/task-snapshot-recovery-lifecycle'
-import { transitionTaskRun } from '../src/main/task/task-run'
-import { bindFrozenRunRoutingPolicy } from '../src/main/task/frozen-routing-binding'
-import { sealFrozenRoutingPolicy } from '../src/main/task/frozen-routing-policy'
-import { compileMission, missionCompilationToTaskPlanDraft } from '../src/main/task/mission-compiler'
-import { evaluateContextUsage, planCompressionBoundary, type ContextMessage } from '../src/main/agent/context-compressor'
-import {
-  createWorkflowArtifact,
-  createWorkflowArtifactLocation,
-  createWorkflowArtifactAcceptance,
-  createWorkflowEvidence,
-  createWorkflowEvidenceLink,
-  saveWorkflowAcceptance
-} from '../src/main/task/workflow-ledger-api'
+import type { ContextMessage } from '../src/main/agent/context-compressor'
 import type { SessionMeta, TaskRunRecord } from '../src/shared/types'
 
 const projectId = 'fixture-product-launch-v2'
@@ -38,6 +21,39 @@ runFixture().catch((error: unknown) => {
 })
 
 async function runFixture(): Promise<void> {
+  // This fixture executes selected main-process modules in plain Node. Electron's
+  // native package exposes an undefined `app` object outside an Electron runtime,
+  // while those modules construct their singleton services at import time. Install
+  // a narrowly scoped userData stub before dynamically importing them so the
+  // fixture exercises the same persistence paths in an isolated temporary root.
+  const require = createRequire(import.meta.url)
+  const moduleLoader = require('node:module') as { _load: Function }
+  const originalLoad = moduleLoader._load
+  moduleLoader._load = function fixtureElectronLoad(request: string, parent: unknown, isMain: boolean) {
+    if (request === 'electron') return { app: { getPath: () => rootDir } }
+    return originalLoad.call(this, request, parent, isMain)
+  }
+  const {
+    openProjectWorkspaceCommandService
+  } = await import('../src/main/project-workspace/command-service')
+  const { openProjectWorkspaceStore } = await import('../src/main/project-workspace/store')
+  const { createCanonicalSupervisorRun } = await import('../src/main/task/supervisor-taskrun-bridge')
+  const { SupervisorStateStore } = await import('../src/main/task/supervisor-state')
+  const { buildTaskSnapshot, saveTaskSnapshot } = await import('../src/main/task/task-snapshot')
+  const { prepareTaskSnapshotRecovery } = await import('../src/main/task/task-snapshot-recovery-lifecycle')
+  const { transitionTaskRun } = await import('../src/main/task/task-run')
+  const { bindFrozenRunRoutingPolicy } = await import('../src/main/task/frozen-routing-binding')
+  const { sealFrozenRoutingPolicy } = await import('../src/main/task/frozen-routing-policy')
+  const { compileMission, missionCompilationToTaskPlanDraft } = await import('../src/main/task/mission-compiler')
+  const { evaluateContextUsage, planCompressionBoundary } = await import('../src/main/agent/context-compressor')
+  const {
+    createWorkflowArtifact,
+    createWorkflowArtifactLocation,
+    createWorkflowArtifactAcceptance,
+    createWorkflowEvidence,
+    createWorkflowEvidenceLink,
+    saveWorkflowAcceptance
+  } = await import('../src/main/task/workflow-ledger-api')
 try {
   const mission = compileMission({
     projectId,
@@ -491,6 +507,7 @@ try {
   writeFileSync(reportPath, `${JSON.stringify({ ...result, generatedAt: new Date().toISOString() }, null, 2)}\n`, 'utf8')
   console.log(JSON.stringify(result, null, 2))
 } finally {
+  moduleLoader._load = originalLoad
   rmSync(rootDir, { recursive: true, force: true })
 }
 }

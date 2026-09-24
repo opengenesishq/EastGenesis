@@ -334,7 +334,7 @@ export function transcriptForkSeedEntries(
   if (!source) throw new Error('分叉来源 sdkSessionId 不能为空')
   const sourceEntries = readEntriesStrict(transcriptFile(source)).map(unsealedEntry)
   if (sourceEntries.length === 0) {
-    throw new Error('分叉来源没有可移植的 CaoGen 会话账本，不能伪装恢复隐藏 Provider 上下文')
+    throw new Error('分叉来源没有可移植的 EastGenesis 会话账本，不能伪装恢复隐藏 Provider 上下文')
   }
   let candidates = sourceEntries
   if (checkpointId !== undefined) {

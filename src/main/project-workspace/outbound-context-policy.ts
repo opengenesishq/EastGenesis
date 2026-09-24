@@ -15,6 +15,7 @@ import {
   type ProjectResourceContext
 } from './resource-context'
 import { openProjectWorkspaceStore } from './store'
+import { frozenSideChatResourceContext } from '../side-chat/side-chat-policy'
 
 export type OutboundContextPolicyErrorCode =
   | 'OUTBOUND_CONTEXT_DENIED'
@@ -34,7 +35,7 @@ export interface PreparedOutboundContext {
 }
 
 interface PrepareOutboundContextInput {
-  meta: Pick<SessionMeta, 'id' | 'projectId' | 'workspaceId' | 'providerId' | 'model' | 'engine' | 'routingScope'>
+  meta: Pick<SessionMeta, 'id' | 'projectId' | 'workspaceId' | 'providerId' | 'model' | 'engine' | 'routingScope'> & Partial<SessionMeta>
   rootDir: string
   payload: Pick<SendMessagePayload, 'text' | 'images' | 'documents'>
   providerId?: string
@@ -46,7 +47,8 @@ interface PrepareOutboundContextInput {
 export async function prepareOutboundContext(
   input: PrepareOutboundContextInput
 ): Promise<PreparedOutboundContext> {
-  const resourceContext = await buildProjectResourceContext(input.meta, input.rootDir)
+  const resourceContext = await frozenSideChatResourceContext(input.meta as SessionMeta, input.rootDir) ??
+    await buildProjectResourceContext(input.meta, input.rootDir)
   const receiver = resolveOutboundContextReceiver(
     input.providerId ?? input.meta.providerId,
     input.model ?? input.meta.model,
@@ -200,6 +202,8 @@ function evaluateOutboundContextPolicy(
   if (receiver.locality === 'unknown') blockReasons.push('Provider 接收方未知')
   const s3 = included.find((item) => item.dataClass === 'S3')
   if (s3) blockReasons.push(`${s3.label} 属于 S3，禁止进入 Provider 请求`)
+  const denied = included.find(item => item.egressPolicy === 'deny')
+  if (denied) blockReasons.push(`${denied.label} 禁止外发`)
   const localOnly = included.find((item) => item.egressPolicy === 'local_only')
   if (localOnly && receiver.locality !== 'local') {
     blockReasons.push(`${localOnly.label} 仅允许发送到本机回环 Provider`)

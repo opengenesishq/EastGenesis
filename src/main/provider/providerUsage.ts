@@ -1,3 +1,4 @@
+import { readVoiceInputUsageAttempts } from '../voice-input/usage'
 import type { ModelAttemptRecord } from '../../shared/model-attempt-types'
 import type {
   ProviderUsageQuery,
@@ -46,7 +47,7 @@ export async function queryProviderUsage(query: ProviderUsageQuery = {}): Promis
     }))
   const providers = listProviders()
   return summarizeProviderUsage(
-    [...attemptResult.attempts, ...gatewayAttempts],
+    [...attemptResult.attempts, ...gatewayAttempts, ...readVoiceInputUsageAttempts()],
     providers,
     query,
     Date.now(),

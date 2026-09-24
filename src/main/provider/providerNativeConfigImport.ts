@@ -19,6 +19,7 @@ import { parse as parseToml } from '@iarna/toml'
 import type {
   ProviderAdvancedConfig,
   ProviderInput,
+  ProviderNativeClient,
   ProviderNativeCredentialKind,
   ProviderNativeImportApplyResult,
   ProviderNativeImportBackupView,
@@ -32,14 +33,14 @@ import type {
 } from '../../shared/types'
 import { createProvider, deleteProvider, listProviders, updateProvider } from '../providers'
 import { normalizeBaseUrl } from './providerBaseUrl'
+import { readNativeClientSnapshot } from './providerNativeClientConfig'
 
 const PREVIEW_TTL_MS = 15 * 60 * 1_000
 const MAX_FILE_BYTES = 2 * 1024 * 1024
-const MAX_PENDING = 12
+const MAX_PENDING = 128
 const BACKUP_KIND = 'caogen-provider-native-import-backup'
 const BACKUP_VERSION = 1
 const BACKUP_ID = /^[0-9TZ-]{19,40}-[0-9a-f-]{36}$/i
-const IMPORTED_KEY_LABEL = 'Codex import'
 const OFFICIAL_API_BASE = 'https://api.openai.com/v1'
 
 interface ParsedCodexConfig {
@@ -62,13 +63,14 @@ interface PendingNativeImport {
   token?: string
   sourceDigest: string
   providerDigest: string
+  readSourceDigest: () => string
 }
 
 interface NativeImportBackupDocument {
   kind: typeof BACKUP_KIND
   schemaVersion: typeof BACKUP_VERSION
   id: string
-  client: 'codex'
+  client: ProviderNativeClient
   createdAt: string
   action: 'create' | 'update'
   providerId: string
@@ -83,7 +85,24 @@ const pendingImports = new Map<string, PendingNativeImport>()
 
 export function previewCodexNativeProviderImport(): ProviderNativeImportPreview {
   prunePendingImports()
-  const parsed = parseCodexNativeConfig()
+  return createNativePreview(parseCodexNativeConfig(), 'codex', () => parseCodexNativeConfig().sourceDigest)
+}
+
+export async function previewNativeProviderImports(client: ProviderNativeClient): Promise<ProviderNativeImportPreview[]> {
+  if (client === 'codex') return [previewCodexNativeProviderImport()]
+  const snapshot = await readNativeClientSnapshot(client, app.getPath('home'))
+  if (snapshot.candidates.length === 0) throw new Error('未找到可导入的 API 厂商配置。登录订阅与凭据助手不会转换成 API 密钥。')
+  return snapshot.candidates.map((candidate) => createNativePreview({
+    ...candidate, credentialImportable: Boolean(candidate.token),
+    ignoredSections: [], warnings: candidate.token ? [] : ['credential_missing'],
+    configPresent: true, authPresent: Boolean(candidate.token), source: snapshot.source, sourceDigest: snapshot.sourceDigest
+  }, client, snapshot.readDigest, candidate.sourceLabel))
+}
+
+function createNativePreview(
+  parsed: ParsedCodexConfig, client: ProviderNativeClient, readSourceDigest: () => string, sourceLabel?: string
+): ProviderNativeImportPreview {
+  prunePendingImports()
   const providers = listProviders()
   const match = matchProvider(parsed.input, providers)
   const diffs = buildDiffs(parsed, match.target)
@@ -94,14 +113,15 @@ export function previewCodexNativeProviderImport(): ProviderNativeImportPreview 
   const previewId = randomUUID()
   const preview: ProviderNativeImportPreview = {
     previewId,
-    client: 'codex',
+    client,
+    sourceLabel,
     source: parsed.source,
     configPresent: parsed.configPresent,
     authPresent: parsed.authPresent,
     providerName: parsed.input.name,
     baseUrl: parsed.input.baseUrl,
     models: [...parsed.input.models],
-    protocol: parsed.input.openaiProtocol ?? 'responses',
+    protocol: nativeProtocol(parsed.input),
     runtime: parsed.input.advancedConfig?.runtime,
     credentialKind: parsed.credentialKind,
     credentialImportable: parsed.credentialImportable && !Boolean(match.target?.hasToken),
@@ -126,8 +146,10 @@ export function previewCodexNativeProviderImport(): ProviderNativeImportPreview 
     input: parsed.input,
     token: parsed.token,
     sourceDigest: parsed.sourceDigest,
-    providerDigest: providerConfigurationDigest(providers)
+    providerDigest: providerConfigurationDigest(providers),
+    readSourceDigest
   })
+  prunePendingImports()
   return preview
 }
 
@@ -137,18 +159,18 @@ export function applyCodexNativeProviderImport(
 ): ProviderNativeImportApplyResult {
   prunePendingImports()
   const pending = pendingImports.get(previewId.trim())
-  if (!pending) throw new Error('Codex import preview expired; scan the native configuration again')
+  if (!pending) throw new Error('Native import preview expired; scan the configuration again')
   if (!pending.preview.allowedActions.includes(action) || action === 'skip') {
-    throw new Error('Codex import action is not applicable')
+    throw new Error('Native import action is not applicable')
   }
-  if (parseCodexNativeConfig().sourceDigest !== pending.sourceDigest) {
+  if (pending.readSourceDigest() !== pending.sourceDigest) {
     pendingImports.delete(previewId)
-    throw new Error('Codex configuration changed after preview; scan it again before applying')
+    throw new Error('Native configuration changed after preview; scan it again before applying')
   }
   const beforeProviders = listProviders()
   if (providerConfigurationDigest(beforeProviders) !== pending.providerDigest) {
     pendingImports.delete(previewId)
-    throw new Error('CaoGen Provider configuration changed after preview; scan it again before applying')
+    throw new Error('EastGenesis Provider configuration changed after preview; scan it again before applying')
   }
 
   const operationId = randomUUID()
@@ -157,7 +179,7 @@ export function applyCodexNativeProviderImport(
   if (action === 'create') {
     provider = createProvider(nativeCreateInput(pending))
     try {
-      backup = writeNativeBackup({ operationId, action, provider, addedKeyIds: provider.apiKeys?.map((key) => key.id) ?? [] })
+      backup = writeNativeBackup({ operationId, client: pending.preview.client, action, provider, addedKeyIds: provider.apiKeys?.map((key) => key.id) ?? [] })
     } catch (error) {
       deleteProvider(provider.id)
       throw error
@@ -168,7 +190,7 @@ export function applyCodexNativeProviderImport(
     provider = updateProvider(target.id, nativeUpdateInput(pending, target))
     const addedKeyIds = (provider.apiKeys ?? []).map((key) => key.id).filter((id) => !beforeKeyIds.has(id))
     try {
-      backup = writeNativeBackup({ operationId, action, provider, previous: target, addedKeyIds })
+      backup = writeNativeBackup({ operationId, client: pending.preview.client, action, provider, previous: target, addedKeyIds })
     } catch (error) {
       restoreUpdatedProvider(target, addedKeyIds)
       throw error
@@ -287,7 +309,7 @@ function parseCodexNativeConfig(): ParsedCodexConfig {
     configPresent,
     authPresent,
     source,
-    sourceDigest: createHash('sha256').update(configText).update('\0').update(authText).digest('hex')
+    sourceDigest: createHash('sha256').update(configText).update('\0').update(authText).update('\0').update(token ?? '').digest('hex')
   }
 }
 
@@ -309,10 +331,14 @@ function codexRuntime(config: Record<string, unknown>): ProviderRuntimeConfig | 
   return Object.values(runtime).some((value) => value !== undefined) ? runtime : undefined
 }
 
+function nativeProtocol(input: Pick<ProviderInput, 'engine' | 'openaiProtocol'>): ProviderNativeImportPreview['protocol'] {
+  return !input.engine || input.engine === 'openai' ? input.openaiProtocol ?? 'responses' : input.engine
+}
+
 function nativeCreateInput(pending: PendingNativeImport): ProviderInput {
   return {
     ...pending.input,
-    ...(pending.token ? { token: pending.token, tokenLabel: IMPORTED_KEY_LABEL } : {})
+    ...(pending.token ? { token: pending.token, tokenLabel: `${pending.preview.client} import` } : {})
   }
 }
 
@@ -322,12 +348,12 @@ function nativeUpdateInput(pending: PendingNativeImport, target: ProviderView): 
     name: target.name,
     baseUrl: pending.input.baseUrl,
     models: pending.input.models.length > 0 ? pending.input.models : target.models,
-    engine: 'openai',
+    engine: pending.input.engine,
     openaiProtocol: pending.input.openaiProtocol,
-    authMode: target.authMode,
-    credentialHeaderNames: target.credentialHeaderNames,
+    authMode: importCredential ? pending.input.authMode : target.authMode,
+    credentialHeaderNames: importCredential ? pending.input.credentialHeaderNames : target.credentialHeaderNames,
     advancedConfig: mergeAdvancedConfig(target.advancedConfig, pending.input.advancedConfig ?? undefined),
-    ...(importCredential ? { token: pending.token, tokenLabel: IMPORTED_KEY_LABEL } : {})
+    ...(importCredential ? { token: pending.token, tokenLabel: `${pending.preview.client} import` } : {})
   }
 }
 
@@ -350,8 +376,8 @@ function matchProvider(input: ProviderInput, providers: ProviderView[]): {
 } {
   const exact = providers.filter((provider) =>
     normalizedUrl(provider.baseUrl) === normalizedUrl(input.baseUrl)
-      && provider.engine === 'openai'
-      && (provider.openaiProtocol ?? 'responses') === (input.openaiProtocol ?? 'responses'))
+      && provider.engine === input.engine
+      && (input.engine !== 'openai' || (provider.openaiProtocol ?? 'responses') === (input.openaiProtocol ?? 'responses')))
   if (exact.length === 1) return { target: exact[0], conflict: 'same_provider' }
   if (exact.length > 1) return { conflict: 'ambiguous' }
   const byName = providers.filter((provider) => provider.name.trim().toLowerCase() === input.name.trim().toLowerCase())
@@ -366,7 +392,7 @@ function buildDiffs(parsed: ParsedCodexConfig, target: ProviderView | undefined)
       { field: 'name', incoming: parsed.input.name },
       { field: 'baseUrl', incoming: parsed.input.baseUrl },
       { field: 'models', incoming: parsed.input.models.join(', ') || '-' },
-      { field: 'protocol', incoming: parsed.input.openaiProtocol ?? 'responses' },
+      { field: 'protocol', incoming: nativeProtocol(parsed.input) },
       { field: 'runtime', incoming: runtimeSummary(parsed.input.advancedConfig?.runtime) },
       { field: 'credential', incoming: parsed.credentialKind }
     ]
@@ -374,7 +400,7 @@ function buildDiffs(parsed: ParsedCodexConfig, target: ProviderView | undefined)
   const diffs: ProviderNativeImportDiff[] = []
   addDiff(diffs, 'baseUrl', target.baseUrl, parsed.input.baseUrl)
   addDiff(diffs, 'models', target.models.join(', ') || '-', parsed.input.models.join(', ') || target.models.join(', ') || '-')
-  addDiff(diffs, 'protocol', target.openaiProtocol ?? 'responses', parsed.input.openaiProtocol ?? 'responses')
+  addDiff(diffs, 'protocol', nativeProtocol(target), nativeProtocol(parsed.input))
   const mergedRuntime = { ...(target.advancedConfig?.runtime ?? {}), ...(parsed.input.advancedConfig?.runtime ?? {}) }
   addDiff(diffs, 'runtime', runtimeSummary(target.advancedConfig?.runtime), runtimeSummary(mergedRuntime))
   if (parsed.credentialImportable && !target.hasToken) {
@@ -412,6 +438,7 @@ function restoreUpdatedProvider(previous: ProviderView, addedKeyIds: string[]): 
 
 function writeNativeBackup(input: {
   operationId: string
+  client: ProviderNativeClient
   action: 'create' | 'update'
   provider: ProviderView
   previous?: ProviderView
@@ -423,7 +450,7 @@ function writeNativeBackup(input: {
     kind: BACKUP_KIND,
     schemaVersion: BACKUP_VERSION,
     id,
-    client: 'codex' as const,
+    client: input.client,
     createdAt,
     action: input.action,
     providerId: input.provider.id,
@@ -517,7 +544,7 @@ function providerConfigurationDigest(providers: ProviderView[]): string {
 function prunePendingImports(): void {
   const expired = Date.now() - PREVIEW_TTL_MS
   for (const [id, pending] of pendingImports) if (pending.createdAt < expired) pendingImports.delete(id)
-  while (pendingImports.size >= MAX_PENDING) {
+  while (pendingImports.size > MAX_PENDING) {
     const first = pendingImports.keys().next().value as string | undefined
     if (!first) break
     pendingImports.delete(first)
@@ -526,7 +553,7 @@ function prunePendingImports(): void {
 
 function requireTarget(id: string | undefined, providers: ProviderView[]): ProviderView {
   const target = id ? providers.find((provider) => provider.id === id) : undefined
-  if (!target) throw new Error('Codex import target Provider is unavailable')
+  if (!target) throw new Error('Native import target Provider is unavailable')
   return target
 }
 

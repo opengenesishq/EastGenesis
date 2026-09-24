@@ -1,0 +1,40 @@
+.usage-and-costs {
+  min-width: 0;
+}
+
+.usage-and-costs > .provider-settings-surfaces {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.usage-and-costs .provider-usage-toolbar,
+.usage-and-costs .provider-usage-toolbar-actions,
+.usage-and-costs .provider-usage-filters {
+  flex-wrap: wrap;
+}
+
+.usage-and-costs .provider-usage-toolbar-actions {
+  max-width: 100%;
+}
+
+.usage-and-costs .provider-usage-aggregate-table {
+  min-width: 920px;
+}
+
+.usage-and-costs .provider-usage-aggregate-table :is(th, td):first-child {
+  width: 28%;
+}
+
+.usage-and-costs .provider-usage-aggregate-table :is(th, td):last-child {
+  width: 26%;
+}
+
+.provider-usage-cost-detail {
+  display: block;
+  color: var(--text-dim);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.palace-treasury > header {
+  gap: 12px;
+}

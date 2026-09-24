@@ -150,8 +150,8 @@ const MAX_QUERY_CHARS = 512
 const MAX_SUMMARY_CHARS = 1_024
 
 /**
- * CaoGen-owned search contract. Adapters only provide bounded citations; routing,
- * idempotency, durable attempt state and Evidence identity remain in CaoGen.
+ * EastGenesis-owned search contract. Adapters only provide bounded citations; routing,
+ * idempotency, durable attempt state and Evidence identity remain in EastGenesis.
  */
 export class SearchBroker {
   private readonly attemptsPath: string

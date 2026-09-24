@@ -66,7 +66,7 @@ export async function readGoalInstitutionContext(rootDir: string, projectId: str
 }> {
   const state = await (await openProjectWorkspaceStore(rootDir)).getState()
   const workspace = state.workspaces.find((entry) => entry.id === projectId)
-  if (!workspace || workspace.status !== 'active') throw new Error('计划所属项目不存在或不可用')
+  if (!workspace || workspace.status !== 'active') throw new Error('计划所属 Project 不存在或不可用')
   if (goalId && !state.goals.some((goal) => goal.id === goalId && goal.projectId === projectId)) {
     throw new Error('机构职责与原目标归属不一致')
   }

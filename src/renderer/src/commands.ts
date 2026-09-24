@@ -1,6 +1,5 @@
 import type { AppTheme, PluginRegistryItem } from '../../shared/types'
 import type { TParams } from './i18n'
-import type { ExperienceMode } from './store/experience-mode'
 import {
   buildPluginSlashCommands,
   pluginSlashCommandMatches,
@@ -61,13 +60,9 @@ export interface PluginCommandHandlers {
 }
 
 export interface PaletteCommandContext extends ComposerCommandContext {
-  experienceMode: ExperienceMode
   setShowNewSession(value: boolean): void
   setShowSettings(value: boolean): void
   focusSidebarSearch(): void
-  openNewProject(): void
-  openNewVideo(): void
-  openControlRoom(): void
 }
 
 export function buildComposerSlashCommands(ctx: ComposerCommandContext): CommandDescriptor[] {
@@ -185,29 +180,13 @@ export function buildPaletteCommands(ctx: PaletteCommandContext): CommandDescrip
     id: `slash:${cmd.id}`,
     searchText: [cmd.searchText, cmd.title, cmd.title.replace(/^\//, ''), cmd.hint].filter(Boolean).join(' ')
   }))
-  const primaryCommand: CommandDescriptor = ctx.experienceMode === 'studio'
-    ? {
-        id: 'app:new-project',
-        title: ctx.t('newProject'),
-        hint: 'Cmd+N',
-        searchText: 'new project 新建 项目',
-        run: ctx.openNewProject
-      }
-    : ctx.experienceMode === 'video'
-      ? {
-          id: 'app:new-video',
-          title: ctx.t('newVideo'),
-          hint: 'Cmd+N',
-          searchText: 'new video production 新建 视频 制作',
-          run: ctx.openNewVideo
-        }
-      : {
-          id: 'app:new-session',
-          title: ctx.t('commandNewSession'),
-          hint: 'Cmd+N',
-          searchText: 'new session 新建 会话',
-          run: () => ctx.setShowNewSession(true)
-        }
+  const primaryCommand: CommandDescriptor = {
+    id: 'app:new-session',
+    title: ctx.t('commandNewSession'),
+    hint: 'Cmd+N',
+    searchText: 'new session 新建 会话',
+    run: () => ctx.setShowNewSession(true)
+  }
   return [
     primaryCommand,
     {
@@ -217,19 +196,12 @@ export function buildPaletteCommands(ctx: PaletteCommandContext): CommandDescrip
       searchText: 'settings preferences 设置 偏好',
       run: () => ctx.setShowSettings(true)
     },
-    ...(ctx.experienceMode === 'video' ? [] : [{
+    {
       id: 'app:search',
       title: ctx.t('commandSearchSessions'),
       hint: 'Cmd+F',
       searchText: 'find search sessions 搜索 会话',
       run: () => ctx.focusSidebarSearch()
-    }]),
-    {
-      id: 'app:control-room',
-      title: ctx.t('commandControlRoom'),
-      hint: ctx.t('commandControlRoomHint'),
-      searchText: 'control room office 控制室 运行状态 高级',
-      run: () => ctx.openControlRoom()
     },
     ...slashCommands
   ]

@@ -1,0 +1,25 @@
+.task-sources-panel { height: 100%; overflow: auto; padding: 18px 16px 28px; color: var(--text); }
+.task-sources-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.task-sources-heading h2 { margin: 0 0 6px; font-size: 18px; font-weight: 600; }
+.task-sources-heading p, .task-sources-note { margin: 4px 0 10px; color: var(--text-dim); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
+.task-sources-search { display: block; margin: 16px 0; }
+.task-sources-search input { width: 100%; }
+.task-sources-search .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.task-sources-group { margin-top: 20px; }
+.task-sources-group h3, .task-source-detail h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 12px; font-weight: 600; }
+.task-sources-group h3 > span { color: var(--text-dim); font-weight: 400; }
+.task-sources-group ul { list-style: none; padding: 0; margin: 0; }
+.task-source-row { display: flex; align-items: flex-start; gap: 9px; padding: 10px 8px; width: 100%; border: 1px solid transparent; border-radius: 8px; color: var(--text); background: transparent; text-align: left; cursor: pointer; }
+.task-source-row > svg { flex-shrink: 0; margin-top: 2px; color: var(--text-dim); }
+.task-source-row > span { min-width: 0; flex: 1; }
+.task-source-row strong { display: block; font-size: 12px; line-height: 1.5; font-weight: 500; overflow-wrap: anywhere; }
+.task-source-row small { display: block; margin-top: 3px; color: var(--text-dim); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.task-source-row:hover, .task-source-row.is-selected { background: var(--bg-hover); border-color: var(--border-soft); }
+.task-source-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.task-source-row .task-source-unavailable { color: var(--warning, #a76b28); }
+.task-sources-empty { padding: 6px 8px; color: var(--text-dim); font-size: 12px; line-height: 1.65; }
+.task-source-detail { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-soft); }
+.task-source-detail > .btn { margin-top: 12px; gap: 6px; }
+.task-source-detail .workspace-preview { min-height: 200px; }
+.task-source-digest { display: block; margin: 8px 0 12px; font-size: 10px; color: var(--text-dim); overflow-wrap: anywhere; }
+.task-source-memory { padding-top: 16px; border-top: 1px solid var(--border-soft); }

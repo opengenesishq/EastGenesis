@@ -116,6 +116,7 @@ export class OpenAIModelAttemptTracker {
       try {
         return await executePersistedModelAttempt({
           budgetScope: input.budgetScope,
+          sessionId: input.run!.sessionId,
           runId: input.run!.id,
           requestId: logical.requestId,
           stepId: logical.stepId,

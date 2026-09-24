@@ -1,10 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createRequire } from 'node:module'
 import assert from 'node:assert/strict'
-import { buildTaskSnapshot, saveTaskSnapshot, getTaskSnapshot } from '../src/main/task/task-snapshot'
-import { prepareTaskSnapshotRecovery } from '../src/main/task/task-snapshot-recovery-lifecycle'
-import { recoverTaskExecutionState } from '../src/main/task/task-execution'
 import type { SessionMeta, TaskRunRecord } from '../src/shared/types'
 
 const now = 1_800_000_000_000
@@ -46,7 +44,17 @@ function meta(): SessionMeta {
 
 async function main(): Promise<void> {
   const checks: string[] = []
+  const require = createRequire(import.meta.url)
+  const moduleLoader = require('node:module') as { _load: Function }
+  const originalLoad = moduleLoader._load
+  moduleLoader._load = function fixtureElectronLoad(request: string, parent: unknown, isMain: boolean) {
+    if (request === 'electron') return { app: { getPath: () => rootDir } }
+    return originalLoad.call(this, request, parent, isMain)
+  }
   try {
+    const { buildTaskSnapshot, saveTaskSnapshot, getTaskSnapshot } = await import('../src/main/task/task-snapshot')
+    const { prepareTaskSnapshotRecovery } = await import('../src/main/task/task-snapshot-recovery-lifecycle')
+    const { recoverTaskExecutionState } = await import('../src/main/task/task-execution')
     const base = runBase()
     const recovered = recoverTaskExecutionState(base, now)
     assert.equal(recovered.steps?.[0].status, 'completed')
@@ -77,6 +85,7 @@ async function main(): Promise<void> {
     writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n')
     console.log(JSON.stringify(report, null, 2))
   } finally {
+    moduleLoader._load = originalLoad
     rmSync(rootDir, { recursive: true, force: true })
   }
 }

@@ -1,0 +1,14 @@
+.imperial-city-navigation{display:flex;flex-direction:column;gap:6px;padding:7px 16px;border-bottom:1px solid var(--border);background:var(--bg-elevated,var(--bg));flex-shrink:0}
+.imperial-city-navigation nav,.imperial-city-location{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.imperial-city-navigation [aria-pressed=true]{background:var(--bg-hover);box-shadow:inset 0 -2px currentColor}
+.imperial-city-navigation small{color:var(--text-secondary);font-size:11px;line-height:1.5}
+.imperial-city-location{font-size:12px}
+.imperial-city-location select{max-width:220px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;color:var(--text);background:var(--bg)}
+.imperial-city-location [data-imperial-continue]{max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.imperial-city-marker{display:flex;flex-direction:column;gap:3px;min-width:110px;max-width:190px;padding:7px 11px;border:1px solid #8d7359;border-radius:6px;background:#f5eddcf0;color:#392d21;box-shadow:0 3px 10px #0003;text-align:center;font-size:12px;cursor:pointer}
+.imperial-city-marker small{font-size:10px;color:#766047}
+.imperial-city-marker:focus-visible{outline:3px solid #7c9fa6;outline-offset:3px}
+.imperial-city-role-actions{display:flex;gap:5px;align-items:center;white-space:nowrap}
+.imperial-city-role-actions button{border:1px solid #9d8369;background:#f5eddcf2;color:#392d21;border-radius:5px;padding:5px 9px;font-size:11px;cursor:pointer}
+.office[data-city-zone]:not([data-city-zone=palace]) .office-facility-panel{max-height:calc(100% - 90px);overflow-y:auto}
+@media(max-width:760px){.imperial-city-navigation{padding:6px 9px}.imperial-city-location [data-imperial-continue]{max-width:220px}.imperial-city-navigation small{font-size:10px}}

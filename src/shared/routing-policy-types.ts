@@ -13,7 +13,9 @@ export type RoutingSelection =
   | { kind: 'global_auto' }
   | { kind: 'provider_auto'; providerId: string }
   | { kind: 'candidate_set'; targets: RoutingTargetRef[] }
-  | { kind: 'preferred'; primary: RoutingTargetRef; alternatives: RoutingTargetRef[] }
+  | { kind: 'preferred'; primary: RoutingTargetRef; alternatives: RoutingTargetRef[];
+      /** Omitted on existing rules: retain scored recovery. Explicit order never silently skips a target. */
+      alternativesOrder?: 'configured' }
   | { kind: 'fixed'; target: RoutingTargetRef }
 
 /** Only known refusal categories. Unknown charges/effects never authorize replay. */
@@ -100,12 +102,26 @@ export interface RoutingRulePreviewInput { draft: RoutingRuleSetDraftV1; context
 /** Main computes previewDigest from canonical draft, catalog and trusted context.
  * It is an opaque receipt. Echoing it grants no authority; main revalidates the binding. */
 export interface RoutingPreviewReceipt { draftDigest: string; catalogDigest: string; contextDigest: string; previewDigest: string }
+/** Read-only scoring evidence from the same evaluation used to choose the target. */
+export interface RoutingPreviewExplanation {
+  selectionReason: string
+  taskKinds: ModelRoutingTaskKind[]
+  warnings: string[]
+  candidates: Array<{
+    target: RoutingTargetRef
+    selected: boolean
+    reasons: string[]
+    pricingBasis: 'declared' | 'heuristic_estimate'
+    acceptanceSamples: number
+  }>
+}
 export interface RoutingRulePreviewResult extends RoutingPreviewReceipt {
   status: 'ready' | 'blocked'
   /** Source is resolved by main from saved IDs or assigned user for a new draft. */
   matchedRules: { id: string; expectedVersion: number | null; scope: RoutingRuleScope; source: RoutingRuleSource }[]
   effectivePolicy?: { selection: RoutingSelection; strategy: SchedulerStrategy; failure: RoutingFailurePolicy }
   initialTarget?: RoutingTargetRef
+  explanation?: RoutingPreviewExplanation
   allowedAlternatives: RoutingTargetRef[]
   excludedTargets: { target: RoutingTargetRef; diagnostics: RoutingDiagnostic[] }[]
   conflicts: RoutingDiagnostic[]

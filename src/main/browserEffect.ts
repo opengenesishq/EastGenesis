@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import type { BrowserWindow } from 'electron'
 import type { EffectRecord } from '../shared/effect-types'
 import type { BrowserStateActionResult, BrowserViewState } from '../shared/browser-operation-types'
+import type { BrowserTabTarget } from '../shared/browser-tab-types'
 import { DEFAULT_BROWSER_URL, normalizeBrowserNavigationUrl } from './browserNavigation'
 import {
   executeInteractiveOperationEffect,
@@ -13,12 +14,19 @@ type OperationGateway = typeof executeInteractiveOperationEffect
 type BrowserAction = 'open' | 'navigate' | 'back' | 'forward' | 'reload'
 
 export interface BrowserEffectContext {
+  browserTarget?: BrowserTabTarget
+  /** Main-process lifecycle and window ownership guard. */
+  assertActive?: () => void
+  sourceKind?: 'task' | 'workspace_human'
   sourceSessionId: string
   projectId?: string
   cwd: string
 }
 
 export interface BrowserEffectManager {
+  boundTarget?: BrowserTabTarget
+  bind?(sessionId: string, target?: BrowserTabTarget): BrowserEffectManager
+  assertWindowOwner(sessionId: string, owner: BrowserWindow): void
   getState(sessionId: string): BrowserViewState | undefined
   open(owner: BrowserWindow, sessionId: string, url?: string): Promise<BrowserViewState>
   navigate(sessionId: string, url: string): Promise<BrowserViewState>
@@ -42,10 +50,17 @@ export async function openBrowserWithEffect(
   rawUrl?: string,
   runOperation: OperationGateway = executeInteractiveOperationEffect
 ): Promise<BrowserStateActionResult<BrowserViewState>> {
-  const existing = manager.getState(context.sourceSessionId)
+  context.assertActive?.()
+  manager.assertWindowOwner(context.sourceSessionId, owner)
+  let existing = manager.getState(context.sourceSessionId)
+  // Creating a blank local view establishes the target before an async Effect
+  // gateway. The requested navigation cannot drift onto a subsequently selected tab.
+  if (!existing && manager.bind) existing = await manager.open(owner, context.sourceSessionId, DEFAULT_BROWSER_URL)
+  if (existing && manager.bind) manager = manager.bind(context.sourceSessionId)
+  context = { ...context, browserTarget: manager.boundTarget }
   const url = normalizeBrowserNavigationUrl(rawUrl ?? DEFAULT_BROWSER_URL)
   if (existing && (rawUrl === undefined || url === DEFAULT_BROWSER_URL)) {
-    return { ok: true, state: existing }
+    return { ok: true, state: existing, sourceKind: context.sourceKind ?? 'task' }
   }
   return executeBrowserNavigation(
     context,
@@ -62,7 +77,9 @@ export async function navigateBrowserWithEffect(
   rawUrl: string,
   runOperation: OperationGateway = executeInteractiveOperationEffect
 ): Promise<BrowserStateActionResult<BrowserViewState>> {
-  const missing = requireBrowserState(context.sourceSessionId, manager)
+  if (manager.bind) manager = manager.bind(context.sourceSessionId)
+  context = { ...context, browserTarget: manager.boundTarget }
+  const missing = requireBrowserState(context, manager)
   if ('error' in missing) return missing
   const url = normalizeBrowserNavigationUrl(rawUrl)
   return executeBrowserNavigation(
@@ -79,7 +96,9 @@ export async function browserGoBackWithEffect(
   manager: BrowserEffectManager,
   runOperation: OperationGateway = executeInteractiveOperationEffect
 ): Promise<BrowserStateActionResult<BrowserViewState>> {
-  const current = requireBrowserState(context.sourceSessionId, manager)
+  if (manager.bind) manager = manager.bind(context.sourceSessionId)
+  context = { ...context, browserTarget: manager.boundTarget }
+  const current = requireBrowserState(context, manager)
   if ('error' in current) return current
   if (!current.state.canGoBack) return current
   return executeBrowserNavigation(
@@ -96,7 +115,9 @@ export async function browserGoForwardWithEffect(
   manager: BrowserEffectManager,
   runOperation: OperationGateway = executeInteractiveOperationEffect
 ): Promise<BrowserStateActionResult<BrowserViewState>> {
-  const current = requireBrowserState(context.sourceSessionId, manager)
+  if (manager.bind) manager = manager.bind(context.sourceSessionId)
+  context = { ...context, browserTarget: manager.boundTarget }
+  const current = requireBrowserState(context, manager)
   if ('error' in current) return current
   if (!current.state.canGoForward) return current
   return executeBrowserNavigation(
@@ -113,7 +134,9 @@ export async function reloadBrowserWithEffect(
   manager: BrowserEffectManager,
   runOperation: OperationGateway = executeInteractiveOperationEffect
 ): Promise<BrowserStateActionResult<BrowserViewState>> {
-  const current = requireBrowserState(context.sourceSessionId, manager)
+  if (manager.bind) manager = manager.bind(context.sourceSessionId)
+  context = { ...context, browserTarget: manager.boundTarget }
+  const current = requireBrowserState(context, manager)
   if ('error' in current) return current
   return executeBrowserNavigation(
     context,
@@ -141,29 +164,37 @@ async function executeBrowserNavigation(
     toolName,
     toolInput: {
       action,
+      ...(context.browserTarget ? { browserTab: context.browserTarget } : {}),
+      sourceKind: context.sourceKind ?? 'task',
       sessionIdDigest: stableValueDigest(context.sourceSessionId),
       ...(url ? browserUrlEvidence(url) : {})
     },
     execute: async (effect) => {
       assertOpaqueBrowserEffect(effect, toolName)
+      context.assertActive?.()
+      let state: BrowserViewState
       try {
-        return await execute()
+        state = await execute()
       } catch {
         throw new Error(`浏览器${browserActionLabel(action)}执行失败`)
       }
+      context.assertActive?.()
+      return state
     },
     isSuccess: (state) => isBrowserViewState(state, context.sourceSessionId),
     resultSummary: summarizeBrowserState
   })
-  return browserStateOutcome(outcome, browserActionLabel(action))
+  return { ...browserStateOutcome(outcome, browserActionLabel(action)), sourceKind: context.sourceKind ?? 'task' }
 }
 
 function requireBrowserState(
-  sessionId: string,
+  context: BrowserEffectContext,
   manager: BrowserEffectManager
 ): BrowserStateActionResult<BrowserViewState> {
-  const state = manager.getState(sessionId)
-  return state ? { ok: true, state } : { ok: false, error: '浏览器面板尚未打开' }
+  context.assertActive?.()
+  const state = manager.getState(context.sourceSessionId)
+  const sourceKind = context.sourceKind ?? 'task'
+  return state ? { ok: true, state, sourceKind } : { ok: false, error: '浏览器面板尚未打开', sourceKind }
 }
 
 function browserUrlEvidence(url: string): Record<string, unknown> {
@@ -198,6 +229,7 @@ function summarizeBrowserState(state: BrowserViewState): string {
   return JSON.stringify({
     sessionIdDigest: stableValueDigest(state.sessionId),
     urlDigest: sha256(state.url),
+    tabId: state.tabId, contextEpoch: state.contextEpoch, selectionRevision: state.selectionRevision, navigationRevision: state.navigationRevision,
     loading: state.loading,
     canGoBack: state.canGoBack,
     canGoForward: state.canGoForward

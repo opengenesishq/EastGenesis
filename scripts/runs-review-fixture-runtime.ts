@@ -162,7 +162,7 @@ await saveWorkflowAcceptance({
   goalId,
   workItemId: recoveryItem.id,
   criteria: ['Recovery remains locally actionable'],
-  status: 'failed',
+  status: 'pending',
   evidenceRefs: []
 }, rootDir, { caller: 'system', actorId: 'runs-review-ui-fixture' })
 const recoveryRun: TaskRunRecord = {
@@ -214,6 +214,28 @@ const recoveryBinding = await ensureSupervisorRunBinding(recoveryMeta, recoveryR
 if (recoveryBinding.disposition !== 'attached' && recoveryBinding.disposition !== 'existing') {
   throw new Error(`expected recovery fixture binding, got ${recoveryBinding.disposition}`)
 }
+await saveWorkflowAcceptance({
+  id: 'fixture-runs-review-recovery-acceptance',
+  projectId,
+  goalId,
+  workItemId: recoveryItem.id,
+  criteria: ['Recovery remains locally actionable'],
+  status: 'verifying',
+  evidenceRefs: [],
+  revision: 2
+}, rootDir, { caller: 'system', actorId: 'runs-review-ui-fixture' })
+await saveWorkflowAcceptance({
+  id: 'fixture-runs-review-recovery-acceptance',
+  projectId,
+  goalId,
+  workItemId: recoveryItem.id,
+  criteria: ['Recovery remains locally actionable'],
+  status: 'failed',
+  evidenceRefs: [],
+  revision: 3,
+  verifier: 'runs-review-ui-fixture',
+  verifiedAt: now
+}, rootDir, { caller: 'system', actorId: 'runs-review-ui-fixture' })
 console.log(JSON.stringify({
   status: 'passed',
   kind: 'caogen.runs-review-ui-fixture',

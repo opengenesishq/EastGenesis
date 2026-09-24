@@ -5,8 +5,12 @@ const http = require('node:http')
 const { app, BrowserWindow, ipcMain } = require('electron')
 
 const repoOut = path.resolve(__dirname, '..', 'out', 'main')
-const tmpUserData = fs.mkdtempSync(path.join(os.tmpdir(), 'caogen-provider-recheck-'))
-const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'caogen-provider-work-'))
+// macOS exposes os.tmpdir() through /var, which is a system symlink to
+// /private/var. The handoff store deliberately rejects symlinked ancestors,
+// so give the runtime a canonical temporary root while keeping that invariant.
+const tempRoot = fs.realpathSync(os.tmpdir())
+const tmpUserData = fs.mkdtempSync(path.join(tempRoot, 'caogen-provider-recheck-'))
+const workDir = fs.mkdtempSync(path.join(tempRoot, 'caogen-provider-work-'))
 const reportPath = path.resolve(__dirname, '..', 'test-results', 'provider-restart-recheck', 'latest.json')
 process.env.CAOGEN_USER_DATA_DIR = tmpUserData
 

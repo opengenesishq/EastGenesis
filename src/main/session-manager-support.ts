@@ -13,6 +13,8 @@ import type {
 } from '../shared/types'
 import { settingsForCaoGenDrive } from './model/drive'
 import type { Engine } from './engine'
+import { app } from 'electron'
+import { assertSideChatBinding } from './side-chat/side-chat-policy'
 import { getProvider } from './providers'
 import {
   builtinOpenAiPricingForModel,
@@ -89,7 +91,11 @@ export function managedTaskRunSendGateError(
   budgetError: string | null
 ): string | undefined {
   if (meta.workspaceId && !meta.workItemId) {
-    return '当前会话已关联 Workspace，但未指定 WorkItem；已阻止创建脱离业务任务的 Run。'
+    try {
+      if (!assertSideChatBinding(meta, app.getPath('userData'))) {
+        return '当前会话已关联 Workspace，但未指定 WorkItem；已阻止创建脱离业务任务的 Run。'
+      }
+    } catch (error) { return error instanceof Error ? error.message : String(error) }
   }
   if (hasUnresolvedEffects) {
     return unresolvedEffectSendError
@@ -417,7 +423,7 @@ function buildTaskStepReplayPrompt(
       `- ${execution.toolName}${execution.idempotencyKey ? ` (${execution.idempotencyKey})` : ''}`
     )
   return [
-    '【CaoGen 断点续跑】程序从任务快照恢复。请继续完成上一条未完成的用户请求。',
+    '【EastGenesis 断点续跑】程序从任务快照恢复。请继续完成上一条未完成的用户请求。',
     '',
     `原始用户请求(messageId=${messageId ?? 'unknown'}, step=${sequence}):`,
     requestText,

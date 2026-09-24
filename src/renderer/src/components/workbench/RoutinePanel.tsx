@@ -1,13 +1,21 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { RoutineRunRecord } from '../../../../shared/types'
+import RoutineRunInbox from './RoutineRunInbox'
+import { useStore } from '../../store'
+import { useT } from '../../i18n'
+import '../routines/routine-editor.css'
 
 export type RoutinePanelRunState = 'idle' | 'queued' | 'running' | 'succeeded' | 'failed'
 export type RoutinePanelTimestamp = Date | number | string | null | undefined
 
 export interface RoutinePanelItem {
+  executionTarget?: { kind: 'existing_session'; sessionId: string }
   id: string
   name: string
   schedule: string
+  timeZone?: string
+  scheduleState?: 'active' | 'exhausted' | 'invalid'
+  scheduleError?: string
   enabled: boolean
   prompt?: string
   projectId?: string
@@ -29,6 +37,7 @@ export interface RoutinePanelEmptyState {
 }
 
 export interface RoutinePanelProps {
+  onOpenSession?: (id: string) => void
   routines: readonly RoutinePanelItem[]
   className?: string
   title?: ReactNode
@@ -44,11 +53,12 @@ export interface RoutinePanelProps {
   cloudSchedulingNote?: ReactNode
   emptyState?: RoutinePanelEmptyState
   onAddRoutine?: () => void
-  onRefresh?: () => void | Promise<void>
+  onRefresh?: (quiet?: boolean) => void | Promise<void>
   onClose?: () => void
   onDeleteRoutine?: (routine: RoutinePanelItem) => void
   onEditRoutine?: (routine: RoutinePanelItem) => void
   onSelectRoutine?: (routine: RoutinePanelItem) => void
+  onSelectAllRoutines?: () => void
   onToggleRoutine?: (routine: RoutinePanelItem, enabled: boolean) => void
   onRunRoutine?: (routine: RoutinePanelItem) => void
 }
@@ -58,12 +68,6 @@ interface TimeDisplay {
   secondary: string
   title?: string
 }
-
-const DEFAULT_TITLE = 'Routines'
-const DEFAULT_SUBTITLE = '本地定时'
-const DEFAULT_CLOUD_NOTE = '云端定时未接入；当前仅管理本机定时。'
-const DEFAULT_EMPTY_TITLE = '暂无 Routine'
-const DEFAULT_EMPTY_MESSAGE = '保存后会显示下次运行和最近状态。'
 
 function toDate(value: RoutinePanelTimestamp): Date | null {
   if (value === null || value === undefined || value === '') return null
@@ -100,77 +104,93 @@ function formatFull(date: Date): string {
   }).format(date)
 }
 
-function formatRelative(date: Date, base: Date): string {
+function formatRelative(date: Date, base: Date, zh: boolean): string {
   const diffMs = date.getTime() - base.getTime()
   const absMs = Math.abs(diffMs)
   const minute = 60_000
   const hour = 60 * minute
   const day = 24 * hour
 
-  if (absMs < minute) return diffMs >= 0 ? '1 分钟内' : '刚刚'
+  if (absMs < minute) return diffMs >= 0 ? zh ? '1 分钟内' : 'Within a minute' : zh ? '刚刚' : 'Just now'
   if (absMs < hour) {
     const minutes = Math.ceil(absMs / minute)
-    return diffMs >= 0 ? `${minutes} 分钟后` : `${minutes} 分钟前`
+    return diffMs >= 0 ? zh ? `${minutes} 分钟后` : `In ${minutes} minutes` : zh ? `${minutes} 分钟前` : `${minutes} minutes ago`
   }
   if (absMs < day) {
     const hours = Math.ceil(absMs / hour)
-    return diffMs >= 0 ? `${hours} 小时后` : `${hours} 小时前`
+    return diffMs >= 0 ? zh ? `${hours} 小时后` : `In ${hours} hours` : zh ? `${hours} 小时前` : `${hours} hours ago`
   }
 
   const days = Math.ceil(absMs / day)
-  return diffMs >= 0 ? `${days} 天后` : `${days} 天前`
+  return diffMs >= 0 ? zh ? `${days} 天后` : `In ${days} days` : zh ? `${days} 天前` : `${days} days ago`
 }
 
-function nextRunDisplay(routine: RoutinePanelItem, now: Date): TimeDisplay {
+function nextRunDisplay(routine: RoutinePanelItem, now: Date, zh: boolean): TimeDisplay {
+  if (routine.scheduleState === 'exhausted') return { primary: zh ? '排期已结束' : 'Schedule ended', secondary: zh ? '次数或截止时间已用尽' : 'Run count or end date reached' }
+  if (routine.scheduleState === 'invalid') return { primary: zh ? '排期需修正' : 'Schedule needs editing', secondary: routine.scheduleError ?? (zh ? '请编辑时间规则' : 'Edit the schedule rule') }
   if (!routine.enabled) {
     return {
-      primary: '已停用',
-      secondary: '启用后恢复定时'
+      primary: zh ? '已停用' : 'Disabled',
+      secondary: zh ? '启用后恢复定时' : 'Enable to resume scheduling'
     }
   }
 
   const nextRun = toDate(routine.nextRunAt)
   if (!nextRun) {
     return {
-      primary: '未安排',
-      secondary: '暂无本地下次运行'
+      primary: zh ? '未安排' : 'Not scheduled',
+      secondary: zh ? '暂无本地下次运行' : 'No next local run'
     }
   }
 
   return {
-    primary: formatRelative(nextRun, now),
-    secondary: formatAbsolute(nextRun),
-    title: formatFull(nextRun)
+    primary: formatRelative(nextRun, now, zh),
+    secondary: routine.timeZone ? formatInZone(nextRun, routine.timeZone) : formatAbsolute(nextRun),
+    title: routine.timeZone ? formatInZone(nextRun, routine.timeZone) : formatFull(nextRun)
   }
 }
 
-function lastRunDisplay(routine: RoutinePanelItem, now: Date): TimeDisplay {
+function formatInZone(date: Date, timeZone: string): string {
+  try { return `${new Intl.DateTimeFormat(undefined, { timeZone, dateStyle: 'medium', timeStyle: 'long' }).format(date)} · ${timeZone}` }
+  catch { return formatFull(date) }
+}
+
+function lastRunDisplay(routine: RoutinePanelItem, now: Date, zh: boolean): TimeDisplay {
   const lastRun = toDate(routine.lastRunAt)
   if (!lastRun) {
     return {
-      primary: '从未运行',
-      secondary: '暂无运行记录'
+      primary: zh ? '从未运行' : 'Never run',
+      secondary: zh ? '暂无运行记录' : 'No run records'
     }
   }
 
   return {
-    primary: formatRelative(lastRun, now),
+    primary: formatRelative(lastRun, now, zh),
     secondary: formatAbsolute(lastRun),
     title: formatFull(lastRun)
   }
 }
 
 function visualState(routine: RoutinePanelItem): string {
+  if (routine.scheduleState === 'invalid') return 'failed'
   if (routine.lastError || routine.runState === 'failed') return 'failed'
   if (routine.runState === 'running') return 'running'
   if (routine.runState === 'queued') return 'queued'
+  if (routine.scheduleState === 'exhausted') return 'exhausted'
   if (!routine.enabled) return 'paused'
   if (routine.runState === 'succeeded') return 'succeeded'
   return 'active'
 }
 
-function stateLabel(state: string): string {
+function projectBindingUnavailable(routine: RoutinePanelItem): boolean {
+  return Boolean(routine.lastError && /Routine Project (?:does not exist|is not active):|项目不存在|项目已停用|关联项目已失效/i.test(routine.lastError))
+}
+
+function stateLabel(state: string, zh: boolean): string {
+  if (!zh) return ({ exhausted: 'Ended', failed: 'Failed', running: 'Running', queued: 'Queued', paused: 'Disabled', succeeded: 'Succeeded' } as Record<string, string>)[state] ?? 'Enabled'
   switch (state) {
+    case 'exhausted':
+      return '排期已结束'
     case 'failed':
       return '失败'
     case 'running':
@@ -183,23 +203,6 @@ function stateLabel(state: string): string {
       return '已成功'
     default:
       return '已启用'
-  }
-}
-
-function runStatusLabel(run: RoutineRunRecord): string {
-  if (run.inboxStatus === 'waiting_approval') return '待审批'
-  if (run.inboxStatus === 'needs_review') return '待验收'
-  if (run.inboxStatus === 'accepted') return '已验收'
-  if (run.inboxStatus === 'rejected') return '已驳回'
-  switch (run.status) {
-    case 'failed':
-      return '失败'
-    case 'running':
-      return '运行中'
-    case 'queued':
-      return '排队中'
-    default:
-      return '成功'
   }
 }
 
@@ -241,12 +244,14 @@ function RoutineRow({
   routine: RoutinePanelItem
   selected: boolean
 }): React.JSX.Element {
+  const zh = useStore(state => state.settings.language === 'zh')
   const state = visualState(routine)
-  const nextRun = nextRunDisplay(routine, now)
-  const lastRun = lastRunDisplay(routine, now)
+  const bindingUnavailable = projectBindingUnavailable(routine)
+  const nextRun = nextRunDisplay(routine, now, zh)
+  const lastRun = lastRunDisplay(routine, now, zh)
   const running = routine.runState === 'running'
   const queued = routine.runState === 'queued'
-  const runDisabled = disabled || Boolean(routine.runDisabled) || running || queued || !onRunRoutine
+  const runDisabled = disabled || bindingUnavailable || Boolean(routine.runDisabled) || running || queued || !onRunRoutine
   const toggleDisabled = disabled || Boolean(routine.toggleDisabled) || !onToggleRoutine
   const modelLabel = [routine.providerId, routine.model].filter(Boolean).join(' / ')
 
@@ -265,21 +270,22 @@ function RoutineRow({
         <div className="routine-panel-item-top">
           <div className="routine-panel-title-row">
             <h3 className="routine-panel-name">{routine.name}</h3>
-            <span className={`routine-panel-status routine-panel-status-${state}`}>{stateLabel(state)}</span>
+            <span className={`routine-panel-status routine-panel-status-${state}`}>{bindingUnavailable ? zh ? '需修复' : 'Needs repair' : stateLabel(state, zh)}</span>
           </div>
           <div className="routine-panel-schedule" title={routine.schedule}>
             {routine.schedule}
+            {routine.timeZone && <span> · {routine.timeZone}</span>}
           </div>
         </div>
 
         <div className="routine-panel-metrics">
           <div className="routine-panel-metric" title={nextRun.title}>
-            <span className="routine-panel-metric-label">下次运行</span>
+            <span className="routine-panel-metric-label">{zh ? '下次运行' : 'Next run'}</span>
             <strong className="routine-panel-metric-value">{nextRun.primary}</strong>
             <span className="routine-panel-metric-sub">{nextRun.secondary}</span>
           </div>
           <div className="routine-panel-metric" title={lastRun.title}>
-            <span className="routine-panel-metric-label">上次运行</span>
+            <span className="routine-panel-metric-label">{zh ? '上次运行' : 'Last run'}</span>
             <strong className="routine-panel-metric-value">{lastRun.primary}</strong>
             <span className="routine-panel-metric-sub">{lastRun.secondary}</span>
           </div>
@@ -287,7 +293,8 @@ function RoutineRow({
 
         {(routine.projectId || routine.projectCwd || modelLabel || routine.prompt) && (
           <div className="routine-panel-meta">
-            {routine.projectId && <span className="routine-panel-model">项目任务</span>}
+            {routine.executionTarget && <span className="routine-panel-model">{zh ? '继续原任务' : 'Continue original task'}</span>}
+            {routine.projectId && <span className="routine-panel-model">{zh ? '项目任务' : 'Project task'}</span>}
             {routine.projectCwd && (
               <span className="routine-panel-path" title={routine.projectCwd}>
                 {routine.projectCwd}
@@ -303,7 +310,7 @@ function RoutineRow({
         )}
 
         {(routine.lastError || state === 'failed') && (
-          <div className="routine-panel-error">{routine.lastError || '上次运行失败。'}</div>
+          <div className="routine-panel-error">{routine.lastError || (zh ? '上次运行失败。' : 'The last run failed.')}</div>
         )}
       </RoutineMain>
 
@@ -314,22 +321,22 @@ function RoutineRow({
             type="checkbox"
             checked={routine.enabled}
             disabled={toggleDisabled}
-            aria-label={`${routine.name} 启停`}
+            aria-label={zh ? `${routine.name} 启停` : `Enable ${routine.name}`}
             onChange={(event) => onToggleRoutine?.(routine, event.currentTarget.checked)}
           />
           <span className="routine-panel-switch-track" aria-hidden="true">
             <span className="routine-panel-switch-thumb" />
           </span>
-          <span className="routine-panel-switch-label">{routine.enabled ? '开' : '关'}</span>
+          <span className="routine-panel-switch-label">{routine.enabled ? zh ? '开' : 'On' : zh ? '关' : 'Off'}</span>
         </label>
         <button
           className="routine-panel-run"
           type="button"
           disabled={runDisabled}
-          title={routine.disabledReason}
+          title={bindingUnavailable ? (zh ? '项目已失效，请编辑计划重新绑定项目。' : 'The project is unavailable. Edit this schedule to bind a project again.') : routine.disabledReason}
           onClick={() => onRunRoutine?.(routine)}
         >
-          {running ? '运行中' : queued ? '排队中' : '立即运行'}
+          {running ? zh ? '运行中' : 'Running' : queued ? zh ? '排队中' : 'Queued' : zh ? '立即运行' : 'Run now'}
         </button>
         <div className="routine-panel-row-buttons">
           <button
@@ -338,7 +345,7 @@ function RoutineRow({
             disabled={disabled || !onEditRoutine}
             onClick={() => onEditRoutine?.(routine)}
           >
-            编辑
+            {zh ? '编辑' : 'Edit'}
           </button>
           <button
             className="routine-panel-secondary routine-panel-secondary-danger"
@@ -346,7 +353,7 @@ function RoutineRow({
             disabled={disabled || !onDeleteRoutine}
             onClick={() => onDeleteRoutine?.(routine)}
           >
-            删除
+            {zh ? '删除' : 'Delete'}
           </button>
         </div>
       </div>
@@ -356,7 +363,7 @@ function RoutineRow({
 
 export default function RoutinePanel({
   className,
-  cloudSchedulingNote = DEFAULT_CLOUD_NOTE,
+  cloudSchedulingNote,
   disabled = false,
   emptyState,
   error,
@@ -369,41 +376,64 @@ export default function RoutinePanel({
   onEditRoutine,
   onRefresh,
   onRunRoutine,
+  onOpenSession,
   onSelectRoutine,
+  onSelectAllRoutines,
   onToggleRoutine,
   runs = [],
   routines,
   selectedRoutineId,
   showCloudSchedulingNote = true,
-  subtitle = DEFAULT_SUBTITLE,
-  title = DEFAULT_TITLE
+  subtitle,
+  title
 }: RoutinePanelProps): React.JSX.Element {
+  const t = useT(), zh = useStore(state => state.settings.language === 'zh')
+  const [planStatus, setPlanStatus] = useState('all')
+  const [planQuery, setPlanQuery] = useState('')
+  const [planProject, setPlanProject] = useState('')
+  const hasActivePlans = routines.some((item) => item.enabled) || runs.some((item) => item.status === 'running' || item.status === 'queued')
+  useEffect(() => {
+    if (!onRefresh || !hasActivePlans) return
+    let pending = false
+    const timer = window.setInterval(() => {
+      if (pending || document.visibilityState === 'hidden') return
+      pending = true
+      void Promise.resolve(onRefresh(true)).finally(() => { pending = false }).catch(() => undefined)
+    }, 15_000)
+    return () => window.clearInterval(timer)
+  }, [onRefresh, hasActivePlans])
   const nowDate = toDate(now) ?? new Date()
+  const selectedRoutine = selectedRoutineId ? routines.find(item => item.id === selectedRoutineId) : undefined
+  const staleRoutine = selectedRoutine ?? routines.find(item => runs.some(run => run.routineId === item.id && projectBindingUnavailable({ ...item, lastError: run.error ?? item.lastError })))
+  const inboxRoutine = selectedRoutine ?? staleRoutine
   const rootClassName = ['routine-panel', className].filter(Boolean).join(' ')
-  const visibleRuns = (selectedRoutineId ? runs.filter((run) => run.routineId === selectedRoutineId) : runs).slice(0, 6)
+  const visiblePlans = routines.filter(routine =>
+    (planStatus === 'all' || planStatus === 'enabled' && routine.enabled || planStatus === 'paused' && !routine.enabled || planStatus === 'problem' && (routine.lastError || routine.runState === 'failed')) &&
+    (!planProject || routine.projectId === planProject) && (!planQuery.trim() || [routine.name, routine.prompt, routine.projectCwd].some(value => value?.toLocaleLowerCase().includes(planQuery.trim().toLocaleLowerCase()))))
+  const planProjects = [...new Map(routines.filter(routine => routine.projectId).map(routine => [routine.projectId!, routine.projectCwd || routine.projectId!])).entries()]
 
   return (
     <section className={rootClassName}>
       <header className="routine-panel-header">
         <div className="routine-panel-heading">
-          <h2 className="routine-panel-title">{title}</h2>
-          {subtitle && <div className="routine-panel-subtitle">{subtitle}</div>}
+          <h2 className="routine-panel-title">{title ?? t('routinePanelTitle')}</h2>
+          <div className="routine-panel-subtitle">{subtitle ?? t('routinePanelSubtitle')}</div>
         </div>
         <div className="routine-panel-header-actions">
-          <div className="routine-panel-count">{loading ? '加载中' : `${routines.length} 个`}</div>
+          <div className="routine-panel-count">{loading ? zh ? '加载中' : 'Loading' : zh ? `${routines.length} 个` : `${routines.length}`}</div>
           {onAddRoutine && (
             <button className="btn btn-primary btn-sm" disabled={loading} onClick={onAddRoutine}>
-              新增
+              {zh ? '新建' : 'New'}
             </button>
           )}
           {onRefresh && (
             <button className="btn btn-ghost btn-sm" disabled={loading} onClick={() => void onRefresh()}>
-              刷新
+              {zh ? '刷新' : 'Refresh'}
             </button>
           )}
           {onClose && (
             <button className="btn btn-ghost btn-sm" onClick={onClose}>
-              关闭
+              {zh ? '关闭' : 'Close'}
             </button>
           )}
         </div>
@@ -411,18 +441,25 @@ export default function RoutinePanel({
 
       {error && <div className="notice notice-error routine-panel-notice">{error}</div>}
       {message && <div className="notice notice-info routine-panel-notice">{message}</div>}
-      {showCloudSchedulingNote && <div className="routine-panel-cloud-note">{cloudSchedulingNote}</div>}
+      {showCloudSchedulingNote && <div className="routine-panel-cloud-note">{cloudSchedulingNote ?? t('routinePanelNote')}</div>}
+
+      <div className="routine-plan-filters">
+        {onSelectAllRoutines && <button type="button" className={`btn btn-sm ${!selectedRoutineId ? 'btn-primary' : 'btn-ghost'}`} onClick={onSelectAllRoutines}>{zh ? '全部计划' : 'All schedules'}</button>}
+        <input aria-label={zh ? '搜索计划任务' : 'Search scheduled tasks'} value={planQuery} placeholder={zh ? '搜索计划' : 'Search schedules'} onChange={event => setPlanQuery(event.target.value)} />
+        <select aria-label={zh ? '计划任务状态' : 'Schedule status'} value={planStatus} onChange={event => setPlanStatus(event.target.value)}><option value="all">{zh ? '全部状态' : 'All statuses'}</option><option value="enabled">{zh ? '已启用' : 'Enabled'}</option><option value="paused">{zh ? '已停用' : 'Disabled'}</option><option value="problem">{zh ? '有异常' : 'Needs attention'}</option></select>
+        <select aria-label={zh ? '计划任务项目' : 'Schedule project'} value={planProject} onChange={event => setPlanProject(event.target.value)}><option value="">{zh ? '全部项目' : 'All projects'}</option>{planProjects.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select>
+      </div>
 
       <div className="routine-panel-list" role="list">
         {loading && routines.length === 0 ? (
-          <div className="routine-panel-empty">正在加载 Routine...</div>
+          <div className="routine-panel-empty">{zh ? '正在加载计划任务…' : 'Loading scheduled tasks…'}</div>
         ) : routines.length === 0 ? (
           <div className="routine-panel-empty">
-            <strong>{emptyState?.title ?? DEFAULT_EMPTY_TITLE}</strong>
-            <span>{emptyState?.message ?? DEFAULT_EMPTY_MESSAGE}</span>
+            <strong>{emptyState?.title ?? t('routineEmptyTitle')}</strong>
+            <span>{emptyState?.message ?? t('routineEmptyMessage')}</span>
           </div>
         ) : (
-          routines.map((routine) => (
+          visiblePlans.map((routine) => (
             <RoutineRow
               key={routine.id}
               disabled={disabled}
@@ -438,25 +475,14 @@ export default function RoutinePanel({
           ))
         )}
       </div>
-
-      {visibleRuns.length > 0 && (
-        <section className="routine-panel-history">
-          <div className="routine-panel-result-head">
-            <span>运行历史</span>
-            <b>{visibleRuns.length}</b>
-          </div>
-          <div className="routine-panel-history-list">
-            {visibleRuns.map((run) => (
-              <div key={run.id} className={`routine-panel-history-item routine-panel-history-${run.status}`}>
-                <span>{runStatusLabel(run)}</span>
-                <strong>{run.routineName}</strong>
-                <time title={formatFull(new Date(run.startedAt))}>{formatRelative(new Date(run.startedAt), nowDate)}</time>
-                {run.error && <small title={run.error}>{run.error}</small>}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+      {routines.length > 0 && visiblePlans.length === 0 && <p className="routine-panel-empty">{zh ? '当前筛选下没有计划任务。' : 'No scheduled tasks match the current filters.'}</p>}
+      <RoutineRunInbox
+        routineId={selectedRoutineId}
+        refreshKey={runs}
+        onOpenSession={onOpenSession}
+        onRepairRoutine={inboxRoutine && onEditRoutine ? () => onEditRoutine(inboxRoutine) : undefined}
+        onDeleteRoutine={inboxRoutine && onDeleteRoutine ? () => onDeleteRoutine(inboxRoutine) : undefined}
+      />
     </section>
   )
 }

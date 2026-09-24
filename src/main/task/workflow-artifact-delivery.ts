@@ -340,7 +340,7 @@ export async function exportWorkflowProjectDeliveryPackageToPath(
   rawTargetPath: string,
   rootDir?: string
 ): Promise<Exclude<WorkflowProjectDeliveryPackageExportResult, { canceled: true }>> {
-  if (!rootDir?.trim()) throw new Error('Delivery package signing requires the CaoGen application data root')
+  if (!rootDir?.trim()) throw new Error('Delivery package signing requires the EastGenesis application data root')
   const resolved = await resolveWorkflowProjectDelivery(rawProjectId, rootDir)
   const verification = resolved.verification
   const readyReports = verification.artifacts.filter((report) => report.verdict === 'ready')

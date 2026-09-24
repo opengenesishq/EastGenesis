@@ -92,6 +92,7 @@ export interface ProjectEditDraft {
   kind: ProjectWorkspaceKind
   ownerId: string
   rulesRef: string
+  primaryResourceId: string
 }
 
 export interface ProjectResourceDraft {
@@ -301,12 +302,14 @@ export function projectEditDraft(project: {
   kind: ProjectWorkspaceKind
   ownerId?: string
   rulesRef?: string
+  primaryResourceId?: string
 }): ProjectEditDraft {
   return {
     name: project.name,
     kind: project.kind,
     ownerId: project.ownerId ?? '',
-    rulesRef: project.rulesRef ?? ''
+    rulesRef: project.rulesRef ?? '',
+    primaryResourceId: project.primaryResourceId ?? ''
   }
 }
 

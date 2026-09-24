@@ -1,12 +1,12 @@
 import { AcademyGeometry, academyRoof, type AcademyGeometryPart, type AcademyPoint } from './academyGeometry'
 import { ACADEMY_COURTYARD_SLOTS } from './academyLayout'
 
-export function createAcademyArchitecture(): AcademyGeometryPart[] {
+export function createAcademyArchitecture({ includePeerHalls = true }: { includePeerHalls?: boolean } = {}): AcademyGeometryPart[] {
   const geometry = new AcademyGeometry()
   courtyardGround(geometry)
   perimeter(geometry)
   hall(geometry, [0, 0, -8.05], 10.2, 2.1, 0)
-  for (const [x, , z] of ACADEMY_COURTYARD_SLOTS) {
+  for (const [x, , z] of includePeerHalls ? ACADEMY_COURTYARD_SLOTS : []) {
     // A roof behind the task-facing apron preserves the selected subject's view.
     hall(geometry, [x, 0, z - 1.5], 3.6, 1.45, 0, 3.2, z > 0)
     geometry.box('stone', [3.9, 0.075, 3.45], [x, 0.02, z - 0.35])

@@ -6,18 +6,25 @@ import type {
 } from '../../../../shared/provider-billing-types'
 import type { ProviderBillingQueryCapabilityView } from '../../../../shared/provider-billing-query-types'
 import type { ProviderView } from '../../../../shared/types'
-import { formatCost } from '../../format'
+import { formatUsageCost } from './provider-usage-cost-view'
 import { useT } from '../../i18n'
 
-export default function ProviderBillingReconciliation({
-  providerId,
-  providers,
-  period
-}: {
+type Props = {
   providerId: string
   providers: Array<Pick<ProviderView, 'id' | 'name'>>
   period: { from: number; to: number }
-}): React.JSX.Element {
+}
+
+/** A provider switch starts a fresh editor and request state; late promises stay in the old scope. */
+export default function ProviderBillingReconciliation(props: Props): React.JSX.Element {
+  return <ProviderBillingScope key={props.providerId || 'all-providers'} {...props} />
+}
+
+function ProviderBillingScope({
+  providerId,
+  providers,
+  period
+}: Props): React.JSX.Element {
   const t = useT()
   const data = useBillingData(providerId, t)
   const editor = useBillingEditor({ providerId, period, data, t })
@@ -85,6 +92,11 @@ function useBillingEditor({ providerId, period, data, t }: { providerId: string;
   const [periodEnd, setPeriodEnd] = useState(toLocalInput(Math.min(period.to, Date.now())))
   const [amount, setAmount] = useState('')
   const [source, setSource] = useState<ProviderBillingStatementSource>('provider-console')
+  const numericAmount = Number(amount)
+  const startTimestamp = new Date(periodStart).getTime()
+  const endTimestamp = new Date(periodEnd).getTime()
+  const valid = amount.trim() !== '' && Number.isFinite(numericAmount) && numericAmount >= 0 && numericAmount <= 1_000_000_000
+    && Number.isFinite(startTimestamp) && Number.isFinite(endTimestamp) && endTimestamp > startTimestamp
   useEffect(() => {
     if (editing) return
     setPeriodStart(toLocalInput(period.from))
@@ -92,6 +104,7 @@ function useBillingEditor({ providerId, period, data, t }: { providerId: string;
   }, [editing, period.from, period.to])
   const prepare = (): void => { data.setLoading(true); data.setError(''); setNotice('') }
   const save = async (): Promise<void> => {
+    if (!valid || data.loading) return
     prepare()
     try {
       await window.agentDesk.saveProviderBillingStatement({ providerId, periodStart: new Date(periodStart).getTime(), periodEnd: new Date(periodEnd).getTime(), billedCostUsd: Number(amount), source })
@@ -128,7 +141,7 @@ function useBillingEditor({ providerId, period, data, t }: { providerId: string;
       data.setLoading(false)
     }
   }
-  return { editing, notice, periodStart, periodEnd, amount, source, setEditing, setPeriodStart, setPeriodEnd, setAmount, setSource, save, remove, syncOfficialBill }
+  return { editing, notice, periodStart, periodEnd, amount, source, valid, setEditing, setPeriodStart, setPeriodEnd, setAmount, setSource, save, remove, syncOfficialBill }
 }
 
 type BillingEditor = ReturnType<typeof useBillingEditor>
@@ -154,7 +167,7 @@ function BillingForm({ editor, loading }: { editor: BillingEditor; loading: bool
     <label><span>{t('providerBillingSource')}</span><select className="select" value={editor.source} onChange={(event) => editor.setSource(event.target.value as ProviderBillingStatementSource)}>{(['provider-api', 'provider-console', 'invoice', 'balance-export', 'other'] as const).map((value) => <option key={value} value={value} disabled={value === 'provider-api'}>{t(`providerBillingSource_${value}`)}</option>)}</select></label>
     <div className="provider-billing-form-actions">
       <button type="button" className="btn btn-ghost btn-sm" disabled={loading} onClick={() => editor.setEditing(false)}>{t('cancel')}</button>
-      <button type="button" className="btn btn-primary btn-sm" disabled={loading || !editor.amount || !editor.periodStart || !editor.periodEnd} onClick={() => void editor.save()}>{t('save')}</button>
+      <button type="button" className="btn btn-primary btn-sm" disabled={loading || !editor.valid} onClick={() => void editor.save()}>{t('save')}</button>
     </div>
   </div>
 }
@@ -181,8 +194,8 @@ function BillingReconciliationRow({
         {formatDateTime(row.statement.periodStart)} - {formatDateTime(row.statement.periodEnd)}
       </div>
       <div className="provider-billing-values">
-        <BillingValue label={t('providerBillingOfficial')} value={formatCost(row.statement.billedCostUsd)} />
-        <BillingValue label={t('providerBillingLocal')} value={formatCost(row.localCostUsd)} />
+        <BillingValue label={t('providerBillingOfficial')} value={formatUsageCost(row.statement.billedCostUsd)} />
+        <BillingValue label={t('providerBillingLocal')} value={formatUsageCost(row.localCostUsd)} />
         <BillingValue label={t('providerBillingDifference')} value={signedCost(row.differenceUsd)} />
         <BillingValue label={t('providerBillingRequests')} value={String(row.localRequests)} />
       </div>
@@ -219,8 +232,8 @@ function formatDateTime(value: number): string {
 }
 
 function signedCost(value: number): string {
-  if (value === 0) return formatCost(0)
-  return `${value > 0 ? '+' : '-'}${formatCost(Math.abs(value))}`
+  if (value === 0) return formatUsageCost(0)
+  return `${value > 0 ? '+' : '-'}${formatUsageCost(Math.abs(value))}`
 }
 
 function syncErrorMessage(errorCode: string | undefined, t: ReturnType<typeof useT>): string {

@@ -25,7 +25,7 @@ import {
 } from './workflow-acceptance-repair-coordinator'
 import { isWorkflowAcceptanceRepairWorkItemId } from '../../shared/workflow-repair'
 
-const SETTLEMENT_OWNER = { type: 'human' as const, id: 'local-user', displayName: 'CaoGen Repair Settlement' }
+  const SETTLEMENT_OWNER = { type: 'human' as const, id: 'local-user', displayName: 'EastGenesis Repair Settlement' }
 const SETTLEMENT_LEASE_MS = 30_000
 
 export interface WorkflowAcceptanceRepairMaterialization {

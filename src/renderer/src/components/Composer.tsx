@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, LoaderCircle, Paperclip } from 'lucide-react'
+import { ArrowUp, ChevronDown, LoaderCircle, Plus, ShieldCheck } from 'lucide-react'
 import { modelOptionsForProvider, useStore } from '../store'
 import { useT } from '../i18n'
+import { matchesDesktopShortcut } from '../desktop-keyboard'
 import type { DocumentAttachmentView, ImageAttachmentView, SessionMeta } from '../../../shared/types'
 import DocumentAttachmentTray from './DocumentAttachmentTray'
 import ImageAttachmentTray from './ImageAttachmentTray'
@@ -20,6 +21,7 @@ import { useSessionComposerDraft } from './composer/useSessionComposerDraft'
 import { useSessionInputs } from './composer/useSessionInputs'
 import { sessionInputIntent, sessionRequirementRevisionText } from './composer/session-input-intent'
 import SessionInputQueue from './composer/SessionInputQueue'
+import SessionFollowUpSelect from './composer/SessionFollowUpSelect'
 import SessionModelPicker from './composer/SessionModelPicker'
 import TaskRequirementRevision from './experience/TaskRequirementRevision'
 import PreparationPermission from './composer/PreparationPermission'
@@ -27,6 +29,10 @@ import TaskExecutionAuthority from './composer/TaskExecutionAuthority'
 import './composer/session-inputs.css'
 import { useAutosizeTextarea } from './useAutosizeTextarea'
 import { COMPOSER_DRAFTS_DELETED_EVENT, isDeletedComposerDraft } from '../store/composer-draft-persistence'
+import VoiceDraftInput from './VoiceDraftInput'
+import RealtimeVoiceInput from './RealtimeVoiceInput'
+import './composer/desktop-composer.css'
+import { COMPOSER_DRAFT_ADDED_EVENT, takeComposerDraftAdditions } from '../store/composer-draft-inbox'
 
 interface Mention {
   start: number
@@ -149,16 +155,54 @@ export default function Composer({ running, onModelRequest }: { running: boolean
   const [dragActive, setDragActive] = useState(false)
   const [modelRequestSessionId, setModelRequestSessionId] = useState<string | null>(null)
   const [requirementRevision, setRequirementRevision] = useState<{ sessionId: string; text: string }>()
+  const [voiceMode, setVoiceMode] = useState<'dictation' | 'conversation' | null>(null)
   const currentSessionId = useRef(activeId)
   currentSessionId.current = activeId
   const attachments = activeId ? attachmentsBySession[activeId] ?? [] : []
   const documents = activeId ? documentsBySession[activeId] ?? [] : []
   const sessionInputs = useSessionInputs(activeId, running)
-  const hasPendingInputs = !sessionInputs.ready || sessionInputs.records.some((record) => record.phase !== 'applied' && record.phase !== 'requirements_applied' && record.phase !== 'cancelled')
+  const hasPendingInputs = !sessionInputs.ready || sessionInputs.records.some((record) => !['applied', 'requirements_applied', 'goal_revised', 'cancelled'].includes(record.phase))
   const localInput = sessionInputIntent(text, attachments.length > 0 || documents.length > 0) !== 'message'
   const localSubmission = localInput || running || hasPendingInputs
   const outbound = useComposerOutboundPreview(activeId, activeSession?.meta, text, attachments, documents)
   useAutosizeTextarea(textareaRef, text)
+
+  useEffect(() => {
+    if (!activeId) return
+    const receive = (): void => {
+      const additions = takeComposerDraftAdditions(activeId)
+      if (!additions.length) return
+      const extraText = additions.map(item => item.payload.text.trim()).filter(Boolean).join('\n\n')
+      if (extraText) setText(current => [current.trimEnd(), extraText].filter(Boolean).join('\n\n'))
+      setAttachmentsBySession(current => {
+        const existing = current[activeId] ?? []
+        const seen = new Set(existing.map(item => item.id))
+        const incoming = additions.flatMap(item => (item.payload.images ?? []).flatMap(image => {
+          if (seen.has(image.id)) return []
+          seen.add(image.id)
+          return [{ ...image, name: item.imageNames?.[image.id] ?? (zh ? '窗口截图' : 'Window screenshot'), previewUrl: item.imagePreviews?.[image.id] }]
+        }))
+        const next = { ...current, [activeId]: [...existing, ...incoming] }
+        imageAttachmentDrafts = next
+        return next
+      })
+      setDocumentsBySession(current => {
+        const existing = current[activeId] ?? []
+        const seen = new Set(existing.map(item => item.id))
+        const incoming = additions.flatMap(item => (item.payload.documents ?? []).filter(document => {
+          if (seen.has(document.id)) return false
+          seen.add(document.id); return true
+        }))
+        const next = { ...current, [activeId]: [...existing, ...incoming] }
+        documentAttachmentDrafts = next
+        return next
+      })
+      textareaRef.current?.focus()
+    }
+    receive()
+    window.addEventListener(COMPOSER_DRAFT_ADDED_EVENT, receive)
+    return () => window.removeEventListener(COMPOSER_DRAFT_ADDED_EVENT, receive)
+  }, [activeId, setText, zh])
 
   useEffect(() => {
     imageAttachmentDrafts = attachmentsBySession
@@ -287,7 +331,6 @@ export default function Composer({ running, onModelRequest }: { running: boolean
       if (intent === 'message') return false
       if (!activeId) throw new Error('请先选择当前任务')
       if (intent === 'pause') await useStore.getState().interrupt(activeId)
-      if (intent === 'palace') useStore.getState().setView('office')
       if (intent === 'model') (onModelRequest ?? setModelRequestSessionId)(activeId)
       if (intent === 'requirements') setRequirementRevision({ sessionId: activeId, text: sessionRequirementRevisionText(text) ?? text })
       return true
@@ -469,6 +512,7 @@ export default function Composer({ running, onModelRequest }: { running: boolean
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return
     if (slashOpen) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -513,7 +557,7 @@ export default function Composer({ running, onModelRequest }: { running: boolean
         return
       }
     }
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (matchesDesktopShortcut(e.nativeEvent, 'sendMessage', useStore.getState().settings.desktopShortcuts)) {
       e.preventDefault()
       void submit()
     }
@@ -609,18 +653,20 @@ export default function Composer({ running, onModelRequest }: { running: boolean
         }}
       />
       {attachmentError && <div className="composer-error">{attachmentError}</div>}
-      {activeId && <PreparationPermission key={activeId} sessionId={activeId} running={running} />}
-      {activeId && <TaskExecutionAuthority key={`authority:${activeId}`} sessionId={activeId} running={running} />}
+      {activeSession?.meta.executionEnvironment?.kind === 'wsl' && <div className="settings-hint" data-task-execution-environment="wsl">
+        WSL2 · {activeSession.meta.executionEnvironment.distribution} · {activeSession.meta.executionEnvironment.guestCwd}
+      </div>}
       <SessionInputQueue
         zh={zh}
         records={sessionInputs.records} running={running} busy={sessionInputs.busy} error={sessionInputs.error}
         onApply={sessionInputs.apply} onCancel={sessionInputs.cancel} onRefresh={sessionInputs.refresh}
       />
+      {running && <SessionFollowUpSelect value={sessionInputs.behavior} onChange={sessionInputs.setBehavior} zh={zh} />}
       {modelRequestSessionId && modelRequestSessionId === activeId && <SessionModelPicker
         key={activeId} sessionId={activeId} onClose={() => setModelRequestSessionId(null)} />}
       {requirementRevision?.sessionId === activeId && <TaskRequirementRevision key={activeId}
         sessionId={requirementRevision.sessionId} initialText={requirementRevision.text} onClose={() => setRequirementRevision(undefined)} />}
-      <OutboundContextPreview manifest={outbound.manifest} error={outbound.error} />
+      {(outbound.manifest?.blocked || outbound.error) && <OutboundContextPreview manifest={outbound.manifest} error={outbound.error} />}
       <div className="composer-row">
         <input
           ref={fileInputRef}
@@ -635,20 +681,15 @@ export default function Composer({ running, onModelRequest }: { running: boolean
             event.currentTarget.value = ''
           }}
         />
-        <button
-          type="button"
-          className="composer-attach"
-          aria-label={t('addAttachment')}
-          title={t('addAttachment')}
-          disabled={!activeId || attachmentsDisabled}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <Paperclip size={18} strokeWidth={1.9} aria-hidden="true" />
-        </button>
         <textarea
           ref={textareaRef}
           className="composer-input"
-          placeholder={running ? zh ? '补充要求会保存到当前任务；也可以说“暂停这个任务”' : 'Additions are saved to this task. You can also say “pause this task”.' : t('composerPlaceholder')}
+          placeholder={running ? sessionInputs.behavior === 'queue'
+            ? zh ? '补充要求，本轮结束后自动继续…' : 'Add a follow-up for the next turn…'
+            : sessionInputs.behavior === 'pause_and_apply'
+              ? zh ? '补充要求，安全暂停后应用…' : 'Add a follow-up to apply after a safe pause…'
+              : zh ? '保存补充要求，稍后手动继续…' : 'Save an addition to continue manually…'
+            : t('composerPlaceholder')}
           value={text}
           rows={1}
           onChange={(e) => {
@@ -662,6 +703,45 @@ export default function Composer({ running, onModelRequest }: { running: boolean
           data-composer-autosize="true"
           autoFocus
         />
+        <div className="composer-controls">
+        <button
+          type="button"
+          className="composer-attach"
+          aria-label={t('addAttachment')}
+          title={t('addAttachment')}
+          disabled={!activeId || attachmentsDisabled}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <Plus size={18} strokeWidth={1.9} aria-hidden="true" />
+        </button>
+          {activeId && <details className="composer-permission-menu">
+            <summary><ShieldCheck size={15} /><span>{zh ? '权限' : 'Permissions'}</span><ChevronDown size={12} /></summary>
+            <div className="composer-permission-popover">
+              <PreparationPermission key={activeId} sessionId={activeId} running={running} />
+              <TaskExecutionAuthority key={`authority:${activeId}`} sessionId={activeId} running={running} />
+            </div>
+          </details>}
+          {outbound.manifest && !outbound.manifest.blocked && !outbound.error && <details className="composer-context-menu">
+            <summary>{zh ? '上下文' : 'Context'}</summary>
+            <div className="composer-context-popover"><OutboundContextPreview manifest={outbound.manifest} error={null} /></div>
+          </details>}
+          <button type="button" className="composer-model-trigger" title={zh ? '选择模型与路由' : 'Choose model and routing'}
+            disabled={!activeId} onClick={() => activeId && (onModelRequest ?? setModelRequestSessionId)(activeId)}>
+            <span>{activeSession?.meta.model && activeSession.meta.model !== 'auto' ? activeSession.meta.model : t('autoRoute')}</span><ChevronDown size={13} />
+          </button>
+        {activeId && <VoiceDraftInput key={activeId} contextId={activeId}
+          disabled={attachmentsDisabled || voiceMode === 'conversation'}
+          onOpenChange={open => setVoiceMode(open ? 'dictation' : null)}
+          onOpenSettings={() => useStore.getState().setShowSettings(true, 'voice')}
+          onInsert={transcript => {
+            if (currentSessionId.current !== activeId) return
+            setText(current => current ? `${current}\n${transcript}` : transcript)
+            textareaRef.current?.focus()
+          }} />}
+        {activeId && <RealtimeVoiceInput key={`voice:${activeId}`} sessionId={activeId}
+          disabled={attachmentsDisabled || voiceMode === 'dictation'}
+          onOpenChange={open => setVoiceMode(open ? 'conversation' : null)}
+          onInputsChanged={() => { void sessionInputs.refresh().catch(() => undefined) }} />}
         <button
           className="btn btn-primary composer-send"
           aria-label={uploadingAttachment ? zh ? '添加中' : 'Adding' : running && !localInput ? zh ? '保存补充要求' : 'Save addition' : t('send')}
@@ -673,6 +753,7 @@ export default function Composer({ running, onModelRequest }: { running: boolean
             ? <LoaderCircle className="composer-send-spinner" size={17} aria-hidden="true" />
             : <ArrowUp size={17} strokeWidth={2.2} aria-hidden="true" />}
         </button>
+        </div>
       </div>
     </div>
   )

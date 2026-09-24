@@ -310,7 +310,7 @@ export function registerWorkflowLedgerIpc(): void {
     assertTrustedWorkflowLedgerSender(event)
     const window = BrowserWindow.fromWebContents(event.sender) ?? BrowserWindow.getAllWindows()[0]
     const result = await dialog.showOpenDialog(window, {
-      title: '验证 CaoGen 交付包',
+      title: '验证 EastGenesis 交付包',
       properties: ['openFile'],
       filters: [{ name: 'ZIP 交付包', extensions: ['zip'] }]
     })
@@ -347,7 +347,7 @@ export function registerWorkflowLedgerIpc(): void {
     const result = await dialog.showSaveDialog(window, {
       title: '导出交付身份信任包',
       defaultPath: suggestedWorkflowDeliveryIdentityTrustBundleName(),
-      filters: [{ name: 'CaoGen 信任包', extensions: ['json'] }]
+      filters: [{ name: 'EastGenesis 信任包', extensions: ['json'] }]
     })
     if (result.canceled || !result.filePath) return { canceled: true as const }
     return { canceled: false as const, ...await exportWorkflowDeliveryIdentityTrustBundleToPath(app.getPath('userData'), result.filePath) }
@@ -359,7 +359,7 @@ export function registerWorkflowLedgerIpc(): void {
     const result = await dialog.showOpenDialog(window, {
       title: '导入交付身份信任包',
       properties: ['openFile'],
-      filters: [{ name: 'CaoGen 信任包', extensions: ['json'] }]
+      filters: [{ name: 'EastGenesis 信任包', extensions: ['json'] }]
     })
     if (result.canceled || result.filePaths.length !== 1) return { canceled: true as const }
     const imported = await importWorkflowDeliveryIdentityTrustBundleAtPath(
@@ -385,9 +385,9 @@ export function registerWorkflowLedgerIpc(): void {
     const profile = await getWorkflowDeliveryIdentityProfile(app.getPath('userData'))
     const window = BrowserWindow.fromWebContents(event.sender) ?? BrowserWindow.getAllWindows()[0]
     const result = await dialog.showSaveDialog(window, {
-      title: '备份 CaoGen 交付签名身份',
+      title: '备份 EastGenesis 交付签名身份',
       defaultPath: suggestedWorkflowDeliveryIdentityBackupName(profile.fingerprint),
-      filters: [{ name: 'CaoGen 身份备份', extensions: ['json'] }]
+      filters: [{ name: 'EastGenesis 身份备份', extensions: ['json'] }]
     })
     if (result.canceled || !result.filePath) return { canceled: true as const }
     return { canceled: false as const, ...await exportWorkflowDeliveryIdentityBackupToPath(
@@ -401,9 +401,9 @@ export function registerWorkflowLedgerIpc(): void {
     const input = { passphrase: requiredString(rawInput.passphrase, 'passphrase') } satisfies WorkflowDeliveryIdentityPassphraseInput
     const window = BrowserWindow.fromWebContents(event.sender) ?? BrowserWindow.getAllWindows()[0]
     const result = await dialog.showOpenDialog(window, {
-      title: '恢复 CaoGen 交付签名身份',
+      title: '恢复 EastGenesis 交付签名身份',
       properties: ['openFile'],
-      filters: [{ name: 'CaoGen 身份备份', extensions: ['json'] }]
+      filters: [{ name: 'EastGenesis 身份备份', extensions: ['json'] }]
     })
     if (result.canceled || result.filePaths.length !== 1) return { canceled: true as const }
     const restored = await restoreWorkflowDeliveryIdentityBackupAtPath(

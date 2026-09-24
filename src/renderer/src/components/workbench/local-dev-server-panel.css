@@ -1,0 +1,11 @@
+.local-dev-server { display: flex; flex-direction: column; gap: 10px; padding: 10px 0; }
+.local-dev-server > p { margin: 0; color: var(--text-secondary); line-height: 1.6; }
+.local-dev-server label { display: flex; flex-direction: column; gap: 6px; }
+.local-dev-server input { min-width: 0; width: 100%; box-sizing: border-box; }
+.local-dev-server input[readonly] { color: var(--text-secondary); }
+.local-dev-server-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.local-dev-server-status { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
+.local-dev-server-status code { overflow-wrap: anywhere; }
+.local-dev-server-status p { margin: 0; overflow-wrap: anywhere; }
+.local-dev-server-status small { color: var(--text-secondary); line-height: 1.5; }
+.local-dev-server-logs pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px; margin-bottom: 0; background: var(--bg-secondary); border-radius: 6px; font-size: 11px; }

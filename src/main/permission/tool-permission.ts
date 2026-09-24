@@ -93,7 +93,7 @@ const PERMISSION_RULE_FIELDS = new Set([
   'mcpArgumentPattern', 'capabilityScope', 'requirePostcondition',
   'riskLevel', 'riskOperator', 'expiresAt'
 ])
-const READ_TOOLS = new Set(['read_file', 'view', 'list_dir', 'search_symbol', 'search_code', 'find_file', 'get_dependencies', 'task_decompose'])
+const READ_TOOLS = new Set(['read_file', 'view', 'list_dir', 'search_symbol', 'search_code', 'find_file', 'get_dependencies', 'task_decompose', 'browser_debug_snapshot'])
 const EDIT_TOOLS = new Set([
   'artifact_register',
   'write_file',
@@ -105,6 +105,7 @@ const EDIT_TOOLS = new Set([
   'create_pdf'
 ])
 const FIXED_MUTATION_RISKS: Partial<Record<string, { level: ToolRiskLevel; reason: string }>> = {
+  browser_debug_evaluate: { level: 'high', reason: '在页面主框架执行任意脚本，可读写页面状态并触发网络操作；每次需要明确审批' },
   git_stage: { level: 'medium', reason: '暂存指定 Git 文件' },
   git_stage_all: { level: 'high', reason: '暂存当前范围全部 Git 变更' },
   mcp_discover: { level: 'high', reason: 'MCP 连接可能启动本机进程或访问外部服务' },
@@ -753,6 +754,7 @@ function requestCommand(request: ToolPermissionRequest): string | undefined {
 }
 
 function requestNetworkHost(request: ToolPermissionRequest): string | undefined {
+  if (request.toolName === 'web_search') return 'www.bing.com'
   const raw = optionalStringField(request.input.url)
   if (!raw) return undefined
   try {

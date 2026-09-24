@@ -1,6 +1,8 @@
 ﻿// Must run before imports that construct app-path-bound singletons.
 import './app-runtime-paths'
+import { temporaryTaskRuntime } from './app-runtime-paths'
 import './security/main-process-console-redaction'
+import { finishTemporaryTaskChildren } from './temporary-task/temporary-task-service'
 import {
   app,
   BrowserWindow,
@@ -13,6 +15,7 @@ import {
 import { existsSync } from 'node:fs'
 import { configureGpuCompatibility } from './gpu-compatibility'
 import { configureDesktopNotifications } from './desktopNotify'
+import { registerTaskWindows } from './task-window'
 import { join } from 'node:path'
 import { registerIpc } from './ipc'
 import { sessionManager } from './sessionManager'
@@ -24,14 +27,14 @@ import { configureProjectRefactorRecovery, reconcileProjectRefactorsAtStartup } 
 import { disposeOfficeVisualPreviews } from './previewVisual'
 import { startRoutineScheduler, stopRoutineScheduler } from './routineScheduler'
 import { executeRoutine } from './routines/routine-executor'
+import { routineHeartbeatService } from './routines/routine-heartbeat-runtime'
 import {
   disposeRoutineSessionLifecycle,
   initializeRoutineSessionLifecycle,
   reconcileRoutineRunsAtStartup
 } from './routines/routine-session-lifecycle'
-import { executePendingRemoteCommands, reconcileRemoteExecutions } from './remote/executor'
-import { startRemoteWebhookServer, stopRemoteWebhookServer } from './remote/webhook-server'
-import { startRemoteContinuationReconciler, stopRemoteContinuationReconciler } from './remote/reconciler'
+import { stopRemoteWebhookServer } from './remote/webhook-server'
+import { stopRemoteContinuationReconciler } from './remote/reconciler'
 import { initAutoUpdater } from './updater'
 import { configureQuickbar, disposeQuickbar, registerQuickbarGlobalShortcut } from './quickbar'
 import { listProjects } from './projects'
@@ -65,14 +68,21 @@ import {
   startProjectConnectorAutoRefreshScheduler,
   stopProjectConnectorAutoRefreshScheduler
 } from './project-workspace/project-connector-scheduler'
+import { registerDesktopCompanion, disposeDesktopCompanion } from './desktop-companion'
+import { registerGuiPreviewWindows, disposeGuiPreviewWindows } from './gui-preview/gui-preview-window'
+import { registerDesktopWindow, desktopWindowRole } from './desktop-window-registry'
+import { getSettings, subscribeSettingsChanges } from './settings'
+import { shortcutFor, type DesktopShortcutAction } from '../shared/desktop-shortcuts'
+import { registerDesktopShortcutCapture } from './desktop-shortcut-capture'
+import { initializeRemoteConnection } from './remote/connection-controller'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let quitting = false
 let quitCleanupStarted = false
-const REMOTE_CONTINUATION_ENABLED = process.env.CAOGEN_ENABLE_REMOTE_CONTINUATION === '1'
 let trayRunningCount: number | null = null
 let unsubscribeTraySessionEvents: (() => void) | null = null
+let unsubscribeDesktopSettings: (() => void) | null = null
 let shellInstalled = false
 
 registerMediaProtocolPrivileges()
@@ -91,6 +101,13 @@ configurePermissionAuditUserDataRoot(app.getPath('userData'))
 configurePluginRuntimeAuthorization(app.getPath('userData'))
 configureProjectRefactorRecovery(app.getPath('userData'))
 const singleInstanceOwner = app.requestSingleInstanceLock()
+if (temporaryTaskRuntime) {
+  const profileId = temporaryTaskRuntime.id
+  process.on('message', message => {
+    const command = message as { kind?: string; profileId?: string } | null
+    if (command?.kind === 'temporary-task:finish' && command.profileId === profileId) app.quit()
+  })
+}
 if (!singleInstanceOwner) {
   app.quit()
 } else {
@@ -124,7 +141,7 @@ function createWindow(): BrowserWindow {
     height: 860,
     minWidth: 360,
     minHeight: 520,
-    title: 'CaoGen',
+    title: temporaryTaskRuntime ? '临时工作空间 · EastGenesis' : 'EastGenesis',
     backgroundColor: '#1a1a2e',
     alwaysOnTop: process.env.CAOGEN_OFFICE_PERFORMANCE_TEST === '1',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
@@ -172,7 +189,7 @@ function createWindow(): BrowserWindow {
       console.error('[caogen] renderer load timeout (10s)')
       win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(
         '<html><body style="background:#1a1a2e;color:#e0e0e0;font-family:system-ui;padding:40px">' +
-        '<h2>CaoGen - Loading Timeout</h2>' +
+    '<h2>EastGenesis - Loading Timeout</h2>' +
         '<p>The renderer process did not finish loading within 10 seconds.</p>' +
         '<p>Try restarting with --disable-gpu flag.</p>' +
         '</body></html>'
@@ -182,7 +199,9 @@ function createWindow(): BrowserWindow {
   win.webContents.once('did-finish-load', () => clearTimeout(loadTimeout))
 
   mainWindow = win
+  registerDesktopWindow(win, 'main')
   win.on('close', (event) => {
+    if (temporaryTaskRuntime && !quitting) { event.preventDefault(); app.quit(); return }
     if (quitting || !hasRunningSessions()) return
     event.preventDefault()
     win.hide()
@@ -210,12 +229,12 @@ function updateTray(): void {
     .filter((meta) => meta.status === 'starting' || meta.status === 'running').length
   if (runningCount === trayRunningCount) return
   trayRunningCount = runningCount
-  tray.setToolTip(runningCount > 0 ? `CaoGen · ${runningCount} running` : 'CaoGen')
+  tray.setToolTip(runningCount > 0 ? `EastGenesis · ${runningCount} running` : 'EastGenesis')
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: runningCount > 0 ? `Running tasks: ${runningCount}` : 'No running tasks', enabled: false },
       { type: 'separator' },
-      { label: 'Show CaoGen', click: showMainWindow },
+      { label: 'Show EastGenesis', click: showMainWindow },
       {
         label: 'New Session',
         click: () => {
@@ -247,7 +266,8 @@ function installTray(): void {
 }
 
 function sendMenuCommand(channel: string, value?: unknown): void {
-  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  const focused = BrowserWindow.getFocusedWindow()
+  const win = focused && ['main', 'task'].includes(desktopWindowRole(focused) ?? '') ? focused : showMainWindow()
   if (!win || win.isDestroyed()) return
   win.webContents.send(channel, value)
 }
@@ -255,21 +275,38 @@ function sendMenuCommand(channel: string, value?: unknown): void {
 function ensureApplicationShell(): void {
   if (shellInstalled) return
   registerIpc()
+  registerDesktopShortcutCapture()
   configureDesktopNotifications({ getMainWindow: () => mainWindow, showMainWindow })
+  registerTaskWindows(() => mainWindow)
+  registerDesktopCompanion({ getMainWindow: () => mainWindow, showMainWindow, onVisibilityChange: updateTray })
+  registerGuiPreviewWindows(() => mainWindow)
   createWindow()
   installApplicationMenu()
+  let shortcutSnapshot = JSON.stringify(getSettings().desktopShortcuts)
+  unsubscribeDesktopSettings = subscribeSettingsChanges(() => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed() && ['main', 'task'].includes(desktopWindowRole(win) ?? '')) win.webContents.send('settings-domain:changed')
+    }
+    const next = JSON.stringify(getSettings().desktopShortcuts)
+    if (next !== shortcutSnapshot) {
+      shortcutSnapshot = next
+      installApplicationMenu()
+      registerQuickbarGlobalShortcut()
+    }
+  })
   shellInstalled = true
 }
 
 function installApplicationMenu(): void {
+  const accelerator = (action: DesktopShortcutAction): string | undefined => shortcutFor(action, getSettings().desktopShortcuts) ?? undefined
   const sessionItems: MenuItemConstructorOptions[] = Array.from({ length: 9 }, (_, index) => ({
     label: `切换到当前入口记录 ${index + 1}`,
-    accelerator: `CommandOrControl+${index + 1}`,
+    accelerator: accelerator(`session${index + 1}` as DesktopShortcutAction),
     click: () => sendMenuCommand('menu:select-session', index)
   }))
   const settingsItem: MenuItemConstructorOptions = {
     label: '设置',
-    accelerator: 'CommandOrControl+,',
+    accelerator: accelerator('settings'),
     click: () => sendMenuCommand('menu:settings')
   }
 
@@ -299,12 +336,13 @@ function installApplicationMenu(): void {
       submenu: [
         {
           label: '新建',
-          accelerator: 'CommandOrControl+N',
+          accelerator: accelerator('newTask'),
           click: () => sendMenuCommand('menu:new-session')
         },
+        { label: '新建临时任务…', enabled: !temporaryTaskRuntime, click: () => sendMenuCommand('temporary-task:entry') },
         ...(process.platform === 'darwin' ? [] : [{ type: 'separator' as const }, settingsItem]),
         { type: 'separator' },
-        { role: process.platform === 'darwin' ? 'close' : 'quit' }
+        { role: process.platform === 'darwin' ? 'close' : 'quit', ...(process.platform === 'darwin' ? { accelerator: 'CommandOrControl+Shift+W' } : {}) }
       ]
     },
     {
@@ -320,7 +358,7 @@ function installApplicationMenu(): void {
         { type: 'separator' },
         {
           label: '搜索当前入口',
-          accelerator: 'CommandOrControl+F',
+          accelerator: accelerator('findConversation'),
           click: () => sendMenuCommand('menu:open-search')
         }
       ]
@@ -330,7 +368,7 @@ function installApplicationMenu(): void {
       submenu: [
         {
           label: '命令面板',
-          accelerator: 'CommandOrControl+K',
+          accelerator: accelerator('commandPalette'),
           click: () => sendMenuCommand('menu:command-palette')
         },
         { type: 'separator' },
@@ -347,8 +385,8 @@ function installApplicationMenu(): void {
 }
 
 /** Routine 到点触发:统一走 executor,由 runner 写运行历史并推进 nextRunAt。 */
-function runRoutine(routine: Routine, nextRunAt: number | null): void {
-  void executeRoutine(join(app.getPath('userData'), 'routines'), routine, { nextRunAt }).catch((err) => {
+async function runRoutine(routine: Routine, nextRunAt: number | null): Promise<void> {
+  await executeRoutine(join(app.getPath('userData'), 'routines'), routine, { nextRunAt, scheduledAt: routine.nextRunAt }).catch((err) => {
     console.error('[caogen] routine execute failed:', err)
   })
 }
@@ -385,6 +423,10 @@ void app.whenReady().then(async () => {
   // current (possibly empty) session set until recovery completes.
   ensureApplicationShell()
   registerMediaProtocol()
+  if (temporaryTaskRuntime) {
+    await sessionManager.whenInitialized()
+    return
+  }
 
   try {
     reconcileProviderProfileOperations()
@@ -421,19 +463,7 @@ void app.whenReady().then(async () => {
   const routineRoot = join(app.getPath('userData'), 'routines')
   try { initializeRoutineSessionLifecycle(routineRoot, app.getPath('userData')) } catch (e) { console.error('[caogen] routine lifecycle init failed:', e) }
   try { await reconcileRoutineRunsAtStartup(routineRoot, app.getPath('userData')) } catch (e) { console.error('[caogen] routine reconciliation failed:', e) }
-  if (REMOTE_CONTINUATION_ENABLED) {
-    try {
-      await reconcileRemoteExecutions(app.getPath('userData'))
-      await executePendingRemoteCommands(app.getPath('userData'))
-    } catch (e) { console.error('[caogen] remote continuation reconciliation failed:', e) }
-    try {
-      await startRemoteWebhookServer({
-        rootDir: app.getPath('userData'),
-        onListening: (address) => console.info(`[caogen] remote webhook listening on ${address.host}:${address.port}`)
-      })
-    } catch (e) { console.error('[caogen] remote webhook server failed to start:', e) }
-    try { startRemoteContinuationReconciler(app.getPath('userData')) } catch (e) { console.error('[caogen] remote continuation reconciler failed to start:', e) }
-  }
+  await initializeRemoteConnection()
   try { startMediaReconciliationScheduler(app.getPath('userData')) } catch (e) { console.error('[caogen] media reconciliation scheduler failed to start:', e) }
   try { configureQuickbar({ getMainWindow: () => mainWindow, showMainWindow }) } catch (e) { console.error('[caogen] quickbar config failed:', e) }
   try {
@@ -447,13 +477,15 @@ void app.whenReady().then(async () => {
   try {
     startRoutineScheduler({
       rootDir: join(app.getPath('userData'), 'routines'),
-      onTrigger: runRoutine
+      onTrigger: runRoutine,
+      onTick: () => routineHeartbeatService(join(app.getPath('userData'), 'routines'), app.getPath('userData')).sweep()
     })
   } catch (e) { console.error('[caogen] routine scheduler start failed:', e) }
   // 自动更新(打包环境查更新只通知不静默下载;dev/未装依赖降级 no-op)
   try { initAutoUpdater() } catch (e) { console.error('[caogen] auto updater init failed:', e) }
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (!mainWindow || mainWindow.isDestroyed()) createWindow()
+    else showMainWindow()
   })
 }).catch((error) => {
   // Keep the shell alive when a newly added startup task rejects outside its
@@ -472,6 +504,8 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   disposeRoutineSessionLifecycle()
   disposeQuickbar()
+  disposeDesktopCompanion()
+  disposeGuiPreviewWindows()
   stopRemoteContinuationReconciler()
   stopMediaReconciliationScheduler()
   stopProjectConnectorAutoRefreshScheduler()
@@ -486,6 +520,8 @@ app.on('before-quit', (event) => {
   event.preventDefault()
   unsubscribeTraySessionEvents?.()
   unsubscribeTraySessionEvents = null
+  unsubscribeDesktopSettings?.()
+  unsubscribeDesktopSettings = null
   stopRoutineScheduler()
   stopRemoteContinuationReconciler()
   stopMediaReconciliationScheduler()
@@ -498,6 +534,7 @@ app.on('before-quit', (event) => {
   disposeProjectDebuggers()
   // 退出前等待任务快照落盘,再释放项目索引 watcher/SQLite 句柄。
   void (async () => {
+    await finishTemporaryTaskChildren()
     await stopRemoteWebhookServer()
     await sessionManager.disposeAll()
     await Promise.all([

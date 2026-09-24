@@ -13,7 +13,6 @@ const ASSISTANT_COMMAND_IDS = new Set([
   'rewind',
   'browser',
   'files',
-  'routine',
   'memory',
   'theme'
 ])

@@ -13,6 +13,8 @@ import {
 import { readAndVerifyEvents } from './workflow-ledger-query'
 import { projectWorkspaceAuthorityOwnsWorkItem } from '../project-workspace/ledger-import-authority'
 import { captureRunRequirements } from './run-requirement-snapshot'
+import { app } from 'electron'
+import { assertSideChatBinding } from '../side-chat/side-chat-policy'
 
 export function workflowContextForSnapshot(snapshot: TaskSnapshotRecord): WorkflowProjectionContext {
   const meta = snapshot.meta
@@ -25,9 +27,12 @@ export function workflowContextForSnapshot(snapshot: TaskSnapshotRecord): Workfl
     )
   }
   if (workspaceId && !explicitWorkItemId) {
-    throw new WorkflowLedgerCorruptionError(
-      `session ${snapshot.sessionId} workspace-bound Run is missing canonical workItemId`
-    )
+    const sideChat = assertSideChatBinding(meta, app.getPath('userData'), { checkSource: false, allowClosed: true })
+    if (!sideChat) {
+      throw new WorkflowLedgerCorruptionError(
+        `session ${snapshot.sessionId} workspace-bound Run is missing canonical workItemId`
+      )
+    }
   }
   const derivedWorkItemId = meta.orchestrationId && meta.childTaskId
     ? `work-item:dag:${meta.orchestrationId}:${meta.childTaskId}`

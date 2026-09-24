@@ -11,6 +11,8 @@
 .composer-pending-input p { margin: 7px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .composer-pending-actions { display: flex; gap: 8px; }
 .composer-pending-inputs select { margin: 6px; max-width: 100%; }
+.composer-follow-up-choice { display: flex; align-items: center; justify-content: flex-end; gap: 8px; font-size: 12px; color: var(--text-secondary); margin: 4px 0; }
+.composer-follow-up-choice select { max-width: 230px; font-size: 12px; padding: 3px 7px; }
 .session-routing-picker { max-height: min(420px, 50vh); flex-shrink: 0; }
 .session-routing-fields, .session-routing-target { border: 0; padding: 0; margin: 0; min-width: 0; }
 .session-routing-fields legend, .session-routing-target legend { font-weight: 600; margin: 6px 0; }

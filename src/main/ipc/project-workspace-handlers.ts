@@ -88,11 +88,11 @@ import type { ProjectInstitutionContextInput } from '../../shared/project-instit
 import type { ProjectDependencyInput, ProjectMilestoneInput, ProjectMilestonePatch } from '../../shared/project-portfolio-types'
 
 const WORKSPACE_KEYS = new Set([
-  'id', 'name', 'kind', 'ownerId', 'resources', 'rulesRef',
+  'id', 'name', 'kind', 'ownerId', 'resources', 'rulesRef', 'primaryResourceId',
   'budgetPolicy', 'permissionPolicy', 'retentionPolicy', 'institutionTemplate', 'createdAt', 'updatedAt'
 ])
 const WORKSPACE_PATCH_KEYS = new Set([
-  'name', 'kind', 'ownerId', 'resources', 'rulesRef',
+  'name', 'kind', 'ownerId', 'resources', 'rulesRef', 'primaryResourceId',
   'budgetPolicy', 'permissionPolicy', 'retentionPolicy', 'institutionTemplate'
 ])
 const GOAL_KEYS = new Set([
@@ -885,7 +885,7 @@ function safeDestination(value: unknown): string | undefined {
   const root = resolve(app.getPath('userData'))
   const target = resolve(candidate)
   const rel = relative(root, target)
-  if (isAbsolute(rel) || rel.startsWith('..')) throw new Error('destinationPath must remain inside CaoGen user data')
+  if (isAbsolute(rel) || rel.startsWith('..')) throw new Error('destinationPath must remain inside EastGenesis user data')
   return target
 }
 

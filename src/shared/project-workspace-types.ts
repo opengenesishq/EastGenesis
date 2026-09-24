@@ -366,6 +366,8 @@ export interface ProjectWorkspace {
   status: ProjectWorkspaceStatus
   ownerId?: string
   resources: ProjectResource[]
+  /** Default directory for new tasks only. Existing tasks keep their own cwd. */
+  primaryResourceId?: string
   rulesRef?: string
   budgetPolicy?: Record<string, unknown>
   permissionPolicy?: Record<string, unknown>
@@ -386,6 +388,7 @@ export interface ProjectWorkspaceInput {
   kind?: ProjectWorkspaceKind
   ownerId?: string
   resources?: ProjectResourceInput[]
+  primaryResourceId?: string
   rulesRef?: string
   budgetPolicy?: Record<string, unknown>
   permissionPolicy?: Record<string, unknown>
@@ -401,6 +404,8 @@ export interface ProjectWorkspacePatch {
   kind?: ProjectWorkspaceKind
   ownerId?: string
   resources?: ProjectResourceInput[]
+  /** null clears the explicit selection and restores legacy directory selection. */
+  primaryResourceId?: string | null
   rulesRef?: string
   budgetPolicy?: Record<string, unknown>
   permissionPolicy?: Record<string, unknown>

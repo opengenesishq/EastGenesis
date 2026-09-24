@@ -177,7 +177,8 @@ export function parseTaskExecutionAuthorityRecord(value: unknown, sessionId: str
 export function taskExecutionAuthorityBindingDigest(meta: SessionMeta): string {
   const directory = realpathSync(meta.cwd)
   return hash([meta.id, meta.createdAt, directory, directoryIdentity(directory), meta.projectId ?? null, meta.workspaceId ?? null,
-    meta.goalId ?? null, meta.workItemId ?? null, meta.businessLineId ?? null, meta.personalWorkspaceId ?? null, meta.parentSessionId ?? null])
+    meta.goalId ?? null, meta.workItemId ?? null, meta.businessLineId ?? null, meta.personalWorkspaceId ?? null, meta.parentSessionId ?? null,
+    ...(meta.executionEnvironment?.kind === 'wsl' ? [meta.executionEnvironment] : [])])
 }
 function directoryIdentity(directory: string): DirectoryIdentity {
   const info = lstatSync(directory, { bigint: true })

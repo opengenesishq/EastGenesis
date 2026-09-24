@@ -450,7 +450,7 @@ function parseManifest(bytes: Buffer): PackageManifest {
       !isRecord(raw.verification) || !Array.isArray(raw.includedArtifacts) ||
       !Array.isArray(raw.blockedArtifactIds) || !raw.blockedArtifactIds.every(isNonEmptyString) ||
       typeof raw.manifestDigest !== 'string') {
-    throw new PackageVerificationError('MANIFEST_INVALID', 'manifest.json 不符合 CaoGen 交付包 v1 契约')
+    throw new PackageVerificationError('MANIFEST_INVALID', 'manifest.json 不符合 EastGenesis 交付包 v1 契约')
   }
   const digestMatch = SHA256_PATTERN.exec(raw.manifestDigest)
   if (!digestMatch) throw new PackageVerificationError('MANIFEST_INVALID', 'manifestDigest 格式无效')

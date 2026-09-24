@@ -2,11 +2,11 @@
  * 斜杠命令后端(纯逻辑,不碰热点文件)。
  *
  * 两件事:
- *  1. builtinSlashCommands —— 供命令面板补全 CaoGen 内置命令。
+ *  1. builtinSlashCommands —— 供命令面板补全 EastGenesis 内置命令。
  *  2. expandSlashCommand —— 发送时判定一条输入是不是本地斜杠命令。
  *
  * 设计取舍:
- *  - 内置命令由 CaoGen 自己实现(清空/压缩/切模型/diff/回溯/帮助),不发给 Agent。
+ *  - 内置命令由 EastGenesis 自己实现(清空/压缩/切模型/diff/回溯/帮助),不发给 Agent。
  *  - 未识别的斜杠输入按普通 prompt 发给当前原生引擎。
  */
 
@@ -16,7 +16,7 @@ export interface SlashCommandInfo {
   description: string
   /** 参数提示,如 "<model>";无参命令为 undefined。 */
   argHint?: string
-  /** true=CaoGen 本地处理;false=转交 SDK 作为 prompt。 */
+  /** true=EastGenesis 本地处理;false=转交 SDK 作为 prompt。 */
   builtin: boolean
 }
 

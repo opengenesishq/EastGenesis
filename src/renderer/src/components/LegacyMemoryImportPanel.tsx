@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LegacyMemoryPreview, LegacyMemoryPreviewEntry } from '../../../shared/legacy-memory-import-types'
 
-export default function LegacyMemoryImportPanel({ sessionId, onImported }: {
+export default function LegacyMemoryImportPanel({ sessionId, onImported, contributionAllowed = true }: {
   sessionId: string
   onImported(): Promise<void>
+  contributionAllowed?: boolean
 }): React.JSX.Element {
   const [preview, setPreview] = useState<LegacyMemoryPreview | null>(null)
   const [loading, setLoading] = useState(false)
@@ -73,7 +74,7 @@ export default function LegacyMemoryImportPanel({ sessionId, onImported }: {
             {entry.reason && <div className="field-hint">原理由：{entry.reason}</div>}
           </div>
           <div className="provider-row-actions"><button className="btn btn-ghost btn-sm"
-            disabled={importing !== null || Boolean(entry.imported)} onClick={() => void importEntry(entry)}>
+            disabled={!contributionAllowed || importing !== null || Boolean(entry.imported)} onClick={() => void importEntry(entry)}>
             {entry.imported ? importedLabel(entry.imported.status) : importing === entry.entryKey ? '导入中…' : '导入为待确认草稿'}
           </button></div>
         </div>)}

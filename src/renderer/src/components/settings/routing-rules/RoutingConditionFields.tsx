@@ -12,7 +12,9 @@ export default function RoutingConditionFields(props: Props): React.JSX.Element 
       onChange={(event) => props.onChange(conditionWithMode(props.value, event.target.value as 'all' | 'conditions'))}>
       <option value="conditions">满足以下条件</option><option value="all">此范围内所有任务（明确无条件）</option>
     </select></label>
-    {all ? <p className="rr-hint">此范围内的所有任务均适用，仍遵守任务指定的模型、预算和权限。</p> : <>
+    {all && <p className="rr-hint">此范围内的所有任务均适用，仍遵守任务指定的模型、预算和权限。勾选用途可将规则限定到这些任务。</p>}
+    <TaskKindFields value={props.value} onChange={props.onChange} />
+    {!all && <>
       <KeywordFields {...props} />
       <AdvancedConditions value={props.value} onChange={props.onChange} />
     </>}
@@ -38,12 +40,7 @@ function KeywordFields({ value, maxKeywords, onChange }: Props): React.JSX.Eleme
 }
 function AdvancedConditions({ value, onChange }: Pick<Props, 'value' | 'onChange'>): React.JSX.Element {
   const id = useId()
-  return <details className="rr-advanced" data-routing-advanced-conditions><summary>更多条件：任务类型、风险与任务原有偏好</summary>
-    <fieldset><legend>任务类型（任一）</legend><div className="rr-checks">{options(TASK_LABELS).map((option) => <label key={option.value}>
-      <input type="checkbox" data-routing-task-kind={option.value} checked={value.taskKinds?.includes(option.value) ?? false}
-        onChange={(event) => { const kinds = toggleValue(value.taskKinds ?? [], option.value, event.target.checked)
-          onChange(kinds.length ? { ...value, taskKinds: kinds } : withoutConditionField(value, 'taskKinds')) }} />{option.label}
-    </label>)}</div></fieldset>
+  return <details className="rr-advanced" data-routing-advanced-conditions><summary>更多条件：风险与任务原有偏好</summary>
     <label htmlFor={`${id}-risk`}>最低风险<select id={`${id}-risk`} data-routing-min-risk value={value.minRiskLevel ?? ''}
       onChange={(event) => onChange(event.target.value ? { ...value, minRiskLevel: event.target.value as RoutingRuleCondition['minRiskLevel'] } : withoutConditionField(value, 'minRiskLevel'))}>
       <option value="">不限</option>{options(RISK_LABELS).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
@@ -54,4 +51,14 @@ function AdvancedConditions({ value, onChange }: Pick<Props, 'value' | 'onChange
     </select></label>
     <p className="rr-hint">这些条件决定何时使用规则；选择偏好决定多个模型可用时更看重什么。</p>
   </details>
+}
+function TaskKindFields({ value, onChange }: Pick<Props, 'value' | 'onChange'>): React.JSX.Element {
+  return <fieldset data-routing-task-kinds><legend>任务用途（匹配任一）</legend>
+    <div className="rr-checks">{options(TASK_LABELS).map((option) => <label key={option.value}>
+      <input type="checkbox" data-routing-task-kind={option.value} checked={value.taskKinds?.includes(option.value) ?? false}
+        onChange={(event) => { const kinds = toggleValue(value.taskKinds ?? [], option.value, event.target.checked)
+          onChange(kinds.length ? { ...value, taskKinds: kinds } : withoutConditionField(value, 'taskKinds')) }} />{option.label}
+    </label>)}</div>
+    <p className="rr-hint">用途由任务内容识别；同时设置关键词时，两类条件都需满足。</p>
+  </fieldset>
 }

@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { FileScan, RotateCcw, Trash2, X } from 'lucide-react'
 import { useT } from '../../i18n'
 import { useStore } from '../../store'
+import ProviderImportedModelRecovery from './ProviderImportedModelRecovery'
+import { AUTO_MODEL } from '../../../../shared/types'
 import type {
   ProviderProfileBackupView,
   ProviderProfileBackupPreview,
@@ -9,6 +11,7 @@ import type {
   ProviderProfileImportDecision,
   ProviderProfileImportPreview,
   ProviderNativeImportBackupView,
+  ProviderNativeClient,
   ProviderNativeImportPreview,
   ProviderView
 } from '../../../../shared/types'
@@ -18,19 +21,37 @@ type ProfileBusyState = 'import' | 'export' | 'apply' | 'backup-preview' | 'back
 interface Props {
   providers: ProviderView[]
   onAdd: () => void
+  onEdit?: (provider: ProviderView) => void
   children: ReactNode
 }
 
-export default function ProviderProfileManager({ providers, onAdd, children }: Props): React.JSX.Element {
+export default function ProviderProfileManager({ providers, onAdd, onEdit, children }: Props): React.JSX.Element {
   const t = useT()
   const profile = useProviderProfileManager(providers)
+  const context = useStore(state => state.settingsContext)
+  const zh = useStore(state => state.settings.language === 'zh')
+  const nativeClientRef = useRef<HTMLSelectElement>(null)
+  useEffect(() => { if (context === 'welcome-provider-import') nativeClientRef.current?.focus() }, [context])
+  const usable = providers.find(provider => provider.ready && provider.models.length > 0)
   return (
     <>
+      {context === 'welcome-provider-import' && <div className="provider-first-import" data-provider-first-import>
+        <p>{zh ? '选择本机客户端后扫描配置，再预览并确认导入。你的任务草稿已保留。' : 'Choose a local client, scan its configuration, then review and confirm the import. Your task draft is kept.'}</p>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
+          const state = useStore.getState()
+          if (usable) state.updateWelcomeDraft({ computeSelectionSource: 'user', providerId: usable.id, model: state.welcomeDraft.routingMode === 'fixed' ? usable.models[0] : AUTO_MODEL })
+          state.setShowSettings(false)
+        }}>{zh ? '返回任务草稿' : 'Back to task draft'}</button>
+      </div>}
       <div className="settings-section-head">
         <h3 className="settings-h3">{t('tabProviders')}</h3>
         <div className="provider-profile-actions">
-          <button className="btn btn-ghost btn-sm" data-provider-native-scan disabled={Boolean(profile.busy)} onClick={() => void profile.scanCodex()}>
-            <FileScan size={14} aria-hidden="true" /> {t('providerNativeCodexScan')}
+          <select ref={nativeClientRef} className="select" aria-label={t('providerNativeClient')} data-provider-native-client value={profile.nativeClient} disabled={Boolean(profile.busy)} onChange={(event) => profile.setNativeClient(event.target.value as ProviderNativeClient)}>
+            <option value="codex">Codex</option><option value="claude">Claude Code</option>
+            <option value="gemini">Gemini CLI</option><option value="opencode">OpenCode</option><option value="cc-switch">CC Switch</option>
+          </select>
+          <button className="btn btn-ghost btn-sm" data-provider-native-scan disabled={Boolean(profile.busy)} onClick={() => void profile.scanNative()}>
+            <FileScan size={14} aria-hidden="true" /> {t('providerNativeScan')}
           </button>
           <button className="btn btn-ghost btn-sm" disabled={Boolean(profile.busy)} onClick={() => void profile.chooseImport()}>
             {t('providerProfileImport')}
@@ -53,6 +74,7 @@ export default function ProviderProfileManager({ providers, onAdd, children }: P
       {profile.nativePreview && <ProviderNativeCodexPreview profile={profile} />}
       {profile.preview && <ProviderProfilePreviewPanel profile={profile} />}
       {profile.backupPreview && <ProviderProfileBackupPreviewPanel profile={profile} />}
+      <ProviderImportedModelRecovery providers={providers} busy={Boolean(profile.busy)} onEdit={onEdit} />
       {children}
       {profile.nativeBackups.length > 0 && <ProviderNativeBackups profile={profile} />}
       {profile.backups.length > 0 && <ProviderProfileBackups profile={profile} />}
@@ -205,6 +227,8 @@ type NativeProfileArgs = {
 }
 
 function useNativeProviderImports({ providers, refreshProviders, t, setBusy, setMessage, setError, clearProfilePreview }: NativeProfileArgs) {
+  const [nativeClient, setNativeClient] = useState<ProviderNativeClient>('codex')
+  const [nativeCandidates, setNativeCandidates] = useState<ProviderNativeImportPreview[]>([])
   const [nativePreview, setNativePreview] = useState<ProviderNativeImportPreview | null>(null)
   const [nativeAction, setNativeAction] = useState<ProviderProfileImportAction>('skip')
   const [nativeBackups, setNativeBackups] = useState<ProviderNativeImportBackupView[]>([])
@@ -213,11 +237,13 @@ function useNativeProviderImports({ providers, refreshProviders, t, setBusy, set
   }
   useEffect(() => { void refreshNativeBackups() }, [providers])
   const prepare = (nextBusy: ProfileBusyState): void => { setBusy(nextBusy); setError(''); setMessage('') }
-  async function scanCodex(): Promise<void> {
+  async function scanNative(): Promise<void> {
     prepare('native-scan')
     try {
-      const next = await window.agentDesk.previewCodexNativeProviderImport()
-      setNativePreview(next); setNativeAction(next.defaultAction)
+      setNativeCandidates([]); setNativePreview(null)
+      const candidates = await window.agentDesk.previewNativeProviderImports(nativeClient)
+      const next = candidates[0]
+      setNativeCandidates(candidates); setNativePreview(next ?? null); setNativeAction(next?.defaultAction ?? 'skip')
       clearProfilePreview()
     } catch (caught) {
       setError(errorMessage(caught))
@@ -229,8 +255,8 @@ function useNativeProviderImports({ providers, refreshProviders, t, setBusy, set
     if (!nativePreview || nativeAction === 'skip') return
     prepare('native-apply')
     try {
-      const result = await window.agentDesk.applyCodexNativeProviderImport(nativePreview.previewId, nativeAction)
-      setNativePreview(null); setNativeAction('skip')
+      const result = await window.agentDesk.applyNativeProviderImport(nativePreview.previewId, nativeAction)
+      setNativeCandidates([]); setNativePreview(null); setNativeAction('skip')
       await refreshProviders(); await refreshNativeBackups()
       setMessage(t('providerNativeCodexApplied', { name: result.provider.name }))
     } catch (caught) {
@@ -252,8 +278,12 @@ function useNativeProviderImports({ providers, refreshProviders, t, setBusy, set
       setBusy('')
     }
   }
-  const closeNativePreview = (): void => { setNativePreview(null); setNativeAction('skip') }
-  return { nativePreview, nativeAction, nativeBackups, setNativeAction, scanCodex, applyNativeImport, rollbackNativeImport, closeNativePreview }
+  const closeNativePreview = (): void => { setNativeCandidates([]); setNativePreview(null); setNativeAction('skip') }
+  const selectNativeCandidate = (id: string): void => {
+    const next = nativeCandidates.find((candidate) => candidate.previewId === id)
+    if (next) { setNativePreview(next); setNativeAction(next.defaultAction) }
+  }
+  return { nativePreview, nativeCandidates, nativeClient, setNativeClient, selectNativeCandidate, nativeAction, nativeBackups, setNativeAction, scanNative, applyNativeImport, rollbackNativeImport, closeNativePreview }
 }
 
 type ProfileController = ReturnType<typeof useProviderProfileManager>
@@ -263,16 +293,19 @@ function ProviderNativeCodexPreview({ profile }: { profile: ProfileController })
   const preview = profile.nativePreview
   if (!preview) throw new Error('Codex native import preview is required')
   return (
-    <section className="provider-native-preview" aria-label={t('providerNativeCodexPreviewTitle')} data-provider-native-preview>
+    <section className="provider-native-preview" aria-label={t('providerNativePreviewTitle', { client: nativeClientLabel(preview.client) })} data-provider-native-preview>
       <div className="provider-native-preview-head">
         <div>
-          <h4>{t('providerNativeCodexPreviewTitle')}</h4>
+          <h4>{t('providerNativePreviewTitle', { client: nativeClientLabel(preview.client) })}</h4>
+          {profile.nativeCandidates.length > 1 && <select className="select" aria-label={t('providerNativeSelectProvider')} value={preview.previewId} onChange={(event) => profile.selectNativeCandidate(event.target.value)}>
+            {profile.nativeCandidates.map((candidate) => <option key={candidate.previewId} value={candidate.previewId}>{candidate.providerName} · {candidate.sourceLabel}</option>)}
+          </select>}
           <p>{t('providerNativeCodexSource', {
             source: preview.source === 'environment-override'
               ? t('providerNativeEnvironmentOverride')
               : t('providerNativeCodexUserProfile'),
-            config: preview.configPresent ? 'config.toml' : '-',
-            auth: preview.authPresent ? 'auth.json' : '-'
+            config: preview.client === 'codex' ? preview.configPresent ? 'config.toml' : '-' : preview.sourceLabel ?? nativeClientLabel(preview.client),
+            auth: preview.client === 'codex' ? preview.authPresent ? 'auth.json' : '-' : nativeCredentialLabel(preview, t)
           })}</p>
         </div>
         <button type="button" className="btn btn-ghost btn-icon-sm" title={t('cancel')} aria-label={t('cancel')} onClick={profile.closeNativePreview}>
@@ -281,7 +314,7 @@ function ProviderNativeCodexPreview({ profile }: { profile: ProfileController })
       </div>
       <div className="provider-native-summary">
         <NativeFact label={t('providerNativeCodexTarget')} value={preview.targetProviderName || t('providerNativeCodexNewProvider')} />
-        <NativeFact label={t('providerNativeCodexProtocol')} value={preview.protocol === 'responses' ? 'OpenAI Responses' : 'Chat Completions'} />
+        <NativeFact label={t('providerNativeCodexProtocol')} value={({ responses: 'OpenAI Responses', chat: 'Chat Completions', anthropic: 'Anthropic Messages', gemini: 'Gemini' })[preview.protocol]} />
         <NativeFact label={t('providerNativeCodexCredential')} value={nativeCredentialLabel(preview, t)} />
         <NativeFact label={t('providerNativeCodexModels')} value={preview.models.join(', ') || '-'} />
       </div>
@@ -315,12 +348,16 @@ function ProviderNativeCodexPreview({ profile }: { profile: ProfileController })
             {preview.allowedActions.map((action) => <option key={action} value={action}>{t(`providerProfileAction_${action}`)}</option>)}
           </select>
           <button className="btn btn-primary btn-sm" disabled={profile.busy === 'native-apply' || profile.nativeAction === 'skip'} onClick={() => void profile.applyNativeImport()}>
-            {profile.busy === 'native-apply' ? t('providerProfileApplying') : t('providerNativeCodexApply')}
+            {profile.busy === 'native-apply' ? t('providerProfileApplying') : t('providerNativeApply')}
           </button>
         </div>
       </div>
     </section>
   )
+}
+
+function nativeClientLabel(client: ProviderNativeClient): string {
+  return ({ codex: 'Codex', claude: 'Claude Code', gemini: 'Gemini CLI', opencode: 'OpenCode', 'cc-switch': 'CC Switch' })[client]
 }
 
 function NativeFact({ label, value }: { label: string; value: string }): React.JSX.Element {

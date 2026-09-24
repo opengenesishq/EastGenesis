@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { parseWslHostPath } from '../wsl/binding'
 import { existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -581,6 +582,10 @@ function runConfiguredVerification(
   startedAt: number
 ): TaskDagAutoMergeVerification {
   if (!command) return { status: 'skipped', cwd: repoRoot, error: '未在 caogen.md 中找到验收命令' }
+  if (parseWslHostPath(repoRoot)) {
+    return { status: 'failed', command, cwd: repoRoot, durationMs: Date.now() - startedAt,
+      error: 'WSL 自动合并的旧式宿主 Shell 验证入口不可用；请先通过此任务已绑定的 Agent Bash 执行验收。' }
+  }
 
   const shell = process.platform === 'win32'
     ? {

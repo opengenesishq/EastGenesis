@@ -20,6 +20,9 @@ const REFRESH_INTERVAL_MS = 15_000
 const PAGE_SIZE = 500
 
 export default function WorkInbox({ active }: { active: boolean }): React.JSX.Element {
+  return <WorkInboxTasks active={active} />
+}
+function WorkInboxTasks({ active }: { active: boolean }): React.JSX.Element {
   const projects = useStore((state) => state.projectWorkspaces)
   const preferredProjectId = useStore((state) => state.preferredProjectWorkspaceId)
   const [intakeProjectId, setIntakeProjectId] = useState<string | null>(null)

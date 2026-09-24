@@ -7,6 +7,7 @@ import { ModelRouteError, isModelRouteError } from './model-route-error'
 import { takeSessionTurnRoute } from './session-turn-route'
 import { admitSessionTurnTarget, assertSessionTurnRouteAvailable } from './session-turn-admission'
 import { captureNativeSessionRecovery } from './native-recovery-session'
+import { withTaskReasoning } from '../../shared/task-reasoning'
 
 /** Resolve the whole Provider/model pair before building protocol-specific wire data. */
 export function resolveNativeSessionTarget(input: {
@@ -37,6 +38,7 @@ export function resolveNativeSessionTarget(input: {
     ? admitSessionTurnTarget({ route, fallback: { providerId: fallbackProviderId, model: fallbackModel } })
     : { providerId: fallbackProviderId, model: fallbackModel }
   const target = dependencies.resolveTarget(admitted)
+  target.credentialProvider = withTaskReasoning(target.credentialProvider, meta.reasoningEffort, dependencies.recoveryEngineKind)
   assertRoutingExpertTargetAllowed(target.providerId, target.baseUrl, settings.routingExpertPolicy)
   if (route && target.model !== route.model) {
     throw new ModelRouteError('ROUTING_MANUAL_TARGET_UNAVAILABLE', 'Provider 的模型映射与自动路由结果不一致，请修正模型配置后重试。')

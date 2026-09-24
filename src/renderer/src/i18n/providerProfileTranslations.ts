@@ -219,6 +219,24 @@ export const PROVIDER_PROFILE_TRANSLATIONS = {
     zh: '回滚到 {time} 的 Provider 配置？当前配置会先自动备份。',
     en: 'Roll back to the provider configuration from {time}? The current configuration will be backed up first.'
   },
+  providerNativeModelsTitle: { zh: '补齐导入配置的模型', en: 'Get models for imported providers' },
+  providerNativeModelsHint: { zh: '地址和密钥已经保存，点击即可读取此账号可用的模型。', en: 'The endpoint and credentials are saved. Fetch the models available to this account.' },
+  providerNativeModelsReady: { zh: '已导入连接，等待获取模型', en: 'Connection imported; ready to fetch models' },
+  providerNativeModelsFetch: { zh: '一键获取模型', en: 'Fetch models' },
+  providerNativeModelsFetchAll: { zh: '获取全部缺失模型', en: 'Fetch all missing model lists' },
+  providerNativeModelsFetching: { zh: '正在获取…', en: 'Fetching…' },
+  providerNativeModelsCredentialNeeded: { zh: '此来源没有可导入密钥，请在编辑中补充。', en: 'This source had no importable credential. Add one in Edit.' },
+  providerNativeModelsEdit: { zh: '编辑配置', en: 'Edit configuration' },
+  providerNativeModelsEditHint: { zh: '可重试，或编辑地址、密钥及模型。', en: 'Retry, or edit the endpoint, credentials and models.' },
+  providerNativeModelsUnavailable: { zh: '未获取到可用模型列表。', en: 'No available model list was returned.' },
+  providerNativeModelsChanged: { zh: '读取期间连接配置发生变化，请重新获取模型。', en: 'The connection changed during discovery. Fetch models again.' },
+  providerNativeModelsMissing: { zh: '此厂商配置已被删除，请刷新后重试。', en: 'This provider was removed. Refresh and try again.' },
+  providerNativeModelsSaved: { zh: '{name} 已保存 {n} 个模型，可直接在任务中选择。', en: '{name}: {n} models saved and available for task selection.' },
+  providerNativeClient: { zh: '已有配置来源', en: 'Existing configuration source' },
+  providerNativeScan: { zh: '从本机导入', en: 'Import from this computer' },
+  providerNativePreviewTitle: { zh: '导入 {client} 配置', en: 'Import {client} configuration' },
+  providerNativeSelectProvider: { zh: '选择要导入的厂商', en: 'Select a provider to import' },
+  providerNativeApply: { zh: '导入此配置', en: 'Import this configuration' },
   providerNativeCodexScan: { zh: '\u626b\u63cf Codex \u914d\u7f6e', en: 'Scan Codex config' },
   providerNativeCodexPreviewTitle: { zh: 'Codex \u539f\u751f\u914d\u7f6e\u5bfc\u5165', en: 'Import native Codex configuration' },
   providerNativeCodexUserProfile: { zh: '\u7528\u6237\u914d\u7f6e\u76ee\u5f55', en: 'User profile' },
@@ -236,16 +254,16 @@ export const PROVIDER_PROFILE_TRANSLATIONS = {
   providerNativeCodexField: { zh: '\u5b57\u6bb5', en: 'Field' },
   providerNativeCodexCurrent: { zh: '\u5f53\u524d', en: 'Current' },
   providerNativeCodexIncoming: { zh: '\u5bfc\u5165\u540e', en: 'Incoming' },
-  providerNativeCodexIgnored: { zh: '\u4ec5\u8bc6\u522b\u3001\u4e0d\u63a5\u7ba1\u7684 Codex \u914d\u7f6e', en: 'Detected Codex settings not managed by CaoGen' },
+  providerNativeCodexIgnored: { zh: '\u4ec5\u8bc6\u522b\u3001\u4e0d\u63a5\u7ba1\u7684 Codex \u914d\u7f6e', en: 'Detected Codex settings not managed by EastGenesis' },
   providerNativeCodexSafety: {
     zh: '\u5e94\u7528\u524d\u4f1a\u91cd\u65b0\u6821\u9a8c\u6e90\u6587\u4ef6\u548c Provider\uff1b\u5bc6\u94a5\u4e0d\u4f1a\u8fdb\u5165\u9884\u89c8\u6216\u5907\u4efd\u3002',
     en: 'Source files and the target provider are revalidated before apply. Secrets never enter the preview or backup.'
   },
   providerNativeCodexApply: { zh: '\u5e94\u7528 Codex \u914d\u7f6e', en: 'Apply Codex config' },
   providerNativeCodexApplied: { zh: '\u5df2\u5bfc\u5165\u5230 {name}\u3002', en: 'Imported into {name}.' },
-  providerNativeCodexBackups: { zh: 'Codex \u5bfc\u5165\u8bb0\u5f55', en: 'Codex import history' },
-  providerNativeCodexRollbackConfirm: { zh: '\u56de\u6eda {name} \u7684 Codex \u5bfc\u5165\uff1f', en: 'Roll back the Codex import for {name}?' },
-  providerNativeCodexRolledBack: { zh: '\u5df2\u56de\u6eda {name} \u7684 Codex \u5bfc\u5165\u3002', en: 'Rolled back the Codex import for {name}.' },
+  providerNativeCodexBackups: { zh: '本机配置导入记录', en: 'Native configuration import history' },
+  providerNativeCodexRollbackConfirm: { zh: '\u56de\u6eda {name} \u7684本机配置\u5bfc\u5165\uff1f', en: 'Roll back the native configuration import for {name}?' },
+  providerNativeCodexRolledBack: { zh: '\u5df2\u56de\u6eda {name} \u7684本机配置\u5bfc\u5165\u3002', en: 'Rolled back the native configuration import for {name}.' },
   'providerNativeCredential_api-key': { zh: 'API Key', en: 'API key' },
   providerNativeCredential_environment: { zh: '\u73af\u5883\u53d8\u91cf', en: 'Environment variable' },
   providerNativeCredential_none: { zh: '\u672a\u53d1\u73b0', en: 'Not found' },
@@ -261,11 +279,11 @@ export const PROVIDER_PROFILE_TRANSLATIONS = {
     en: 'No importable API key was found. Configure a key separately after import.'
   },
   providerNativeWarning_ignored_sections: {
-    zh: '\u5df2\u5217\u51fa\u975e Provider \u7684 Codex \u914d\u7f6e\uff0cCaoGen \u4e0d\u4f1a\u81ea\u52a8\u5e94\u7528\u5b83\u4eec\u3002',
-    en: 'Non-Provider Codex settings are listed but are not applied to CaoGen.'
+    zh: '\u5df2\u5217\u51fa\u975e Provider \u7684客户端\u914d\u7f6e\uff0cEastGenesis \u4e0d\u4f1a\u81ea\u52a8\u5e94\u7528\u5b83\u4eec\u3002',
+    en: 'Non-Provider client settings are listed but are not applied to EastGenesis.'
   },
   providerNativeWarning_existing_credential_preserved: {
-    zh: '\u5c06\u4fdd\u7559 CaoGen \u4e2d\u7684\u73b0\u6709\u51ed\u636e\uff0c\u4e0d\u4f1a\u7528 Codex \u51ed\u636e\u8986\u76d6\u3002',
-    en: 'Existing CaoGen credentials will be preserved and will not be replaced by the Codex credential.'
+    zh: '\u5c06\u4fdd\u7559 EastGenesis \u4e2d\u7684\u73b0\u6709\u51ed\u636e\uff0c\u4e0d\u4f1a\u7528导入\u51ed\u636e\u8986\u76d6\u3002',
+    en: 'Existing EastGenesis credentials will be preserved and will not be replaced by the imported credential.'
   }
 }

@@ -1,9 +1,9 @@
 import { setTimeout as delay } from 'node:timers/promises'
 import { dirname } from 'node:path'
 import { powerSaveBlocker } from 'electron'
-import { computeNextRun } from '../routineScheduler'
+import { calculateRoutineSchedule } from '../../shared/routine-schedule'
 import { showDesktopNotification } from '../desktopNotify'
-import { listRoutines, type Routine } from '../routineStore'
+import { listRoutines, updateRoutine, type Routine } from '../routineStore'
 import { sessionManager } from '../sessionManager'
 import { getSettings } from '../settings'
 import {
@@ -24,8 +24,10 @@ import {
   transitionRoutineWorkItem
 } from './routine-project-runtime'
 import { initializeRoutineSessionLifecycle } from './routine-session-lifecycle'
+import { routineHeartbeatService } from './routine-heartbeat-runtime'
 
 export interface RoutineExecutionOptions {
+  scheduledAt?: number
   nextRunAt?: number | null
   sendDelayMs?: number
   workspaceRoot?: string
@@ -57,9 +59,19 @@ export async function executeRoutine(
       onError: (error) => console.error('[caogen] routine prevent-display-sleep failed:', error)
     },
     async () => {
+      if (options.scheduledAt !== undefined) {
+        const current = (await listRoutines(rootDir)).find(item => item.id === routine.id)
+        if (!current?.enabled || current.scheduleState === 'exhausted' || current.scheduleState === 'invalid' ||
+            current.schedule !== routine.schedule || current.timeZone !== routine.timeZone || current.startAt !== routine.startAt || current.nextRunAt !== options.scheduledAt) {
+          throw new Error('计划时间或状态已变化，旧的定时触发已停止')
+        }
+      }
       const workspaceRoot = options.workspaceRoot ?? dirname(rootDir)
       initializeRoutineSessionLifecycle(rootDir, workspaceRoot)
-      const nextRunAt = options.nextRunAt === undefined ? computeNextRun(routine.schedule, Date.now()) : options.nextRunAt
+      const timing = calculateRoutineSchedule(routine, Date.now())
+      if (timing.state === 'invalid') throw new Error(timing.error)
+      const nextRunAt = options.nextRunAt === undefined ? timing.nextRunAt : options.nextRunAt
+      if (routine.executionTarget) return routineHeartbeatService(rootDir, workspaceRoot).trigger(routine, nextRunAt, options.scheduledAt)
       const sendDelayMs = options.sendDelayMs ?? 1200
       const promptTargets: RoutinePromptTarget[] = []
 
@@ -67,20 +79,32 @@ export async function executeRoutine(
         rootDir,
         routine,
         async (current, run) => {
-          const execution = await prepareRoutineProjectExecution(
-            workspaceRoot,
-            current,
-            run,
-            async (binding) => {
-              const persisted = await setRoutineRunExecutionBinding(rootDir, run.id, {
-                projectId: binding.projectId,
-                goalId: binding.goalId,
-                workItemId: binding.workItemId,
-                projectCwd: binding.cwd
-              })
-              if (!persisted) throw new Error(`Routine Run disappeared before execution binding:${run.id}`)
+          let execution
+          try {
+            execution = await prepareRoutineProjectExecution(
+              workspaceRoot,
+              current,
+              run,
+              async (binding) => {
+                const persisted = await setRoutineRunExecutionBinding(rootDir, run.id, {
+                  projectId: binding.projectId,
+                  goalId: binding.goalId,
+                  workItemId: binding.workItemId,
+                  projectCwd: binding.cwd
+                })
+                if (!persisted) throw new Error(`Routine Run disappeared before execution binding:${run.id}`)
+              }
+            )
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            if (/Routine Project (?:does not exist|is not active):/i.test(message)) {
+              await updateRoutine(rootDir, current.id, {
+                enabled: false,
+                lastError: '关联项目已失效，请重新绑定项目。'
+              }).catch(() => undefined)
             }
-          )
+            throw error
+          }
           let sessionId: string | undefined
           try {
             const meta = await sessionManager.createManaged(
@@ -89,7 +113,8 @@ export async function executeRoutine(
                 workspaceId: execution.projectId,
                 goalId: execution.goalId,
                 workItemId: execution.workItemId,
-                isolated: false,
+                isolated: current.executionLocation === 'worktree',
+                reasoningEffort: current.reasoningEffort,
                 model: current.model || undefined,
                 providerId: current.providerId || undefined,
                 budgetUsd: current.budgetUsd,

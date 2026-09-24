@@ -1,3 +1,5 @@
+import { reconcileWorkspaceHandoffTarget } from '../workspace-handoff'
+import { reconcileTaskHandoffEffectTarget } from '../task-handoff/effect'
 import type { EffectTarget } from '../../shared/effect-types'
 import { reconcileCodeForgePatchEffectTarget } from '../code-forge/patch-effect'
 import { reconcileGitIndexEffectTarget } from '../git/git-index-effect'
@@ -8,6 +10,10 @@ import { reconcileMigrationOperationEffectTarget } from '../migration-operation-
 
 export function reconcileLocalEffectTarget(target: EffectTarget): EffectReconciliationResult | undefined {
   switch (target.kind) {
+    case 'task_handoff':
+      return reconcileTaskHandoffEffectTarget(target)
+    case 'workspace_handoff':
+      return reconcileWorkspaceHandoffTarget(target)
     case 'git_index_update':
       return reconcileGitIndexEffectTarget(target)
     case 'code_forge_patch':

@@ -4,6 +4,7 @@ import type {
   RemoteApprovalInput,
   RemoteApprovalDecisionEnvelope,
   RemoteCommandEnvelope,
+  RemoteCommandPayload,
   RemoteWebhookEventEnvelope,
   RemoteConnectivity,
   RemoteDeviceCapability,
@@ -13,6 +14,7 @@ import { getRemoteContinuationStore } from '../remote/store'
 import { executePendingRemoteCommands, executeRemoteCommand, reconcileRemoteExecutions } from '../remote/executor'
 import { assertTrustedWorkflowLedgerSender } from './workflow-ledger-handlers'
 import { createRemotePairingSession } from '../remote/webhook-server'
+import { RemoteConsoleSessionStore } from '../remote/console-session-store'
 
 type RemoteAction =
   | 'get'
@@ -48,7 +50,12 @@ export async function handleRemoteContinuationIpc(
   if (action === 'update-device-capabilities') {
     return store.updateDeviceCapabilities(requiredString(args[0], 'deviceId'), normalizeCapabilities(args[1]))
   }
-  if (action === 'unbind-device') return store.unbindDevice(requiredString(args[0], 'deviceId'))
+  if (action === 'unbind-device') {
+    const id = requiredString(args[0], 'deviceId')
+    const device = await store.unbindDevice(id)
+    new RemoteConsoleSessionStore(app.getPath('userData')).revokeDevice(id)
+    return device
+  }
   if (action === 'connectivity') return store.setConnectivity(requiredConnectivity(args[0]))
   if (action === 'reconcile') {
     const result = await store.reconcile()
@@ -87,13 +94,15 @@ function requiredAction(value: unknown): RemoteAction {
   return value as RemoteAction
 }
 
-function normalizePairingInput(value: unknown): { ttlMs?: number; projectId?: string } {
+function normalizePairingInput(value: unknown): { ttlMs?: number; projectId?: string; workspaceRead?: boolean; taskHandoff?: boolean } {
   if (value === undefined || value === null) return {}
   const input = record(value, 'remote pairing')
-  assertKeys(input, new Set(['ttlMs', 'projectId']), 'remote pairing')
+  assertKeys(input, new Set(['ttlMs', 'projectId', 'workspaceRead', 'taskHandoff']), 'remote pairing')
   if (input.ttlMs !== undefined && (typeof input.ttlMs !== 'number' || !Number.isSafeInteger(input.ttlMs) || input.ttlMs < 30_000 || input.ttlMs > 15 * 60_000)) throw new Error('Remote pairing ttl is invalid')
   if (input.projectId !== undefined) requiredString(input.projectId, 'projectId')
-  return { ...(input.ttlMs === undefined ? {} : { ttlMs: input.ttlMs as number }), ...(input.projectId === undefined ? {} : { projectId: input.projectId as string }) }
+  if (input.workspaceRead !== undefined && typeof input.workspaceRead !== 'boolean') throw new Error('Workspace read permission must be explicit')
+  if (input.taskHandoff !== undefined && typeof input.taskHandoff !== 'boolean') throw new Error('Task handoff permission must be explicit')
+  return { ...(input.workspaceRead === true ? { workspaceRead: true } : {}), ...(input.taskHandoff === true ? { taskHandoff: true } : {}), ...(input.ttlMs === undefined ? {} : { ttlMs: input.ttlMs as number }), ...(input.projectId === undefined ? {} : { projectId: input.projectId as string }) }
 }
 function normalizeWebhook(value: unknown): RemoteWebhookEventEnvelope {
   const input = record(value, 'remote webhook event')
@@ -121,7 +130,7 @@ function normalizeRegisterInput(value: unknown): { label: string; userId: string
   return { label: requiredString(input.label, 'label'), userId: requiredString(input.userId, 'userId'), publicKey: requiredString(input.publicKey, 'publicKey'), ...(input.capabilities ? { capabilities: input.capabilities as RemoteDeviceCapability[] } : {}) }
 }
 function normalizeCapabilities(value: unknown): RemoteDeviceCapability[] {
-  const allowed: RemoteDeviceCapability[] = ['view_results', 'resume_work_item', 'approve_effect', 'trigger_routine', 'remote_runner']
+  const allowed: RemoteDeviceCapability[] = ['view_results', 'resume_work_item', 'create_task', 'control_work_item', 'approve_effect', 'trigger_routine', 'remote_runner', 'workspace_read', 'task_handoff']
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || !allowed.includes(item as RemoteDeviceCapability))) throw new Error('device capabilities are invalid')
   return [...new Set(value as RemoteDeviceCapability[])]
 }
@@ -138,11 +147,13 @@ function normalizeScopeInput(value: unknown): RemoteCommandEnvelope['scope'] {
 }
 function normalizeEnvelope(value: unknown): RemoteCommandEnvelope {
   const input = record(value, 'remote command envelope')
-  assertKeys(input, new Set(['schemaVersion', 'commandId', 'issuerDeviceId', 'kind', 'scope', 'revision', 'expiresAt', 'createdAt', 'payloadDigest', 'signature']), 'remote command envelope')
-  if (input.schemaVersion !== 1 || typeof input.commandId !== 'string' || typeof input.issuerDeviceId !== 'string' || typeof input.signature !== 'string' || typeof input.payloadDigest !== 'string' || typeof input.createdAt !== 'number' || typeof input.expiresAt !== 'number' || !Number.isSafeInteger(input.revision) || typeof input.kind !== 'string' || !['resume_work_item', 'approve_effect', 'view_result', 'trigger_routine'].includes(input.kind)) throw new Error('Remote command envelope is invalid')
+  assertKeys(input, new Set(['schemaVersion', 'commandId', 'issuerDeviceId', 'kind', 'scope', 'revision', 'expiresAt', 'createdAt', 'payloadDigest', 'payload', 'signature']), 'remote command envelope')
+  if (input.schemaVersion !== 1 || typeof input.commandId !== 'string' || typeof input.issuerDeviceId !== 'string' || typeof input.signature !== 'string' || typeof input.payloadDigest !== 'string' || typeof input.createdAt !== 'number' || typeof input.expiresAt !== 'number' || !Number.isSafeInteger(input.revision) || typeof input.kind !== 'string' || !['resume_work_item', 'approve_effect', 'view_result', 'trigger_routine', 'create_task', 'append_task', 'pause_work_item', 'cancel_work_item'].includes(input.kind)) throw new Error('Remote command envelope is invalid')
   if (input.kind === 'trigger_routine' && !(input.scope && typeof input.scope === 'object' && 'routineId' in (input.scope as object))) throw new Error('trigger_routine requires scope.routineId')
   if (input.kind !== 'trigger_routine' && input.scope && typeof input.scope === 'object' && 'routineId' in (input.scope as object)) throw new Error('routineId is only valid for trigger_routine')
-  return { schemaVersion: 1, commandId: input.commandId, issuerDeviceId: input.issuerDeviceId, kind: input.kind as RemoteCommandEnvelope['kind'], scope: normalizeScopeInput(input.scope), revision: input.revision as number, expiresAt: input.expiresAt as number, createdAt: input.createdAt as number, payloadDigest: input.payloadDigest, signature: input.signature }
+  // The store validates the signed payload without rewriting its bytes.
+  const payload = input.payload === undefined ? undefined : record(input.payload, 'remote command payload') as unknown as RemoteCommandPayload
+  return { schemaVersion: 1, commandId: input.commandId, issuerDeviceId: input.issuerDeviceId, kind: input.kind as RemoteCommandEnvelope['kind'], scope: normalizeScopeInput(input.scope), revision: input.revision as number, expiresAt: input.expiresAt as number, createdAt: input.createdAt as number, payloadDigest: input.payloadDigest, ...(payload ? { payload } : {}), signature: input.signature }
 }
 function normalizeApprovalInput(value: unknown): RemoteApprovalInput {
   const input = record(value, 'remote approval')

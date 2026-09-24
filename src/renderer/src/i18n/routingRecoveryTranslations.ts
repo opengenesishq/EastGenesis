@@ -21,7 +21,7 @@ export const ROUTING_RECOVERY_TRANSLATIONS = {
   },
   assistantProtocolFailoverStatus: {
     zh: '当前接口不支持 Responses，已自动改用 Chat Completions 重试。',
-    en: 'Responses is unavailable, so CaoGen is retrying with Chat Completions.'
+    en: 'Responses is unavailable, so EastGenesis is retrying with Chat Completions.'
   },
   recoveryExhaustedTitle: { zh: 'Provider 自动恢复已耗尽', en: 'Provider recovery exhausted' },
   recoveryExhaustedText: {

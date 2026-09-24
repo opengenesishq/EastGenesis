@@ -2,6 +2,8 @@
 .office-command-target { display: flex; align-items: center; gap: 9px; margin-bottom: 7px; font-size: 12px; }
 .office-command-target > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .office-command-target select { min-width: 0; max-width: 230px; border: 1px solid #d2c6b2; border-radius: 5px; padding: 3px 6px; background: #fffaf1; color: inherit; }
+.office-command-task-links { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin: 0 0 7px; font-size: 11px; }
+.office-command-task-links > span { flex: 1 1 150px; }
 .office-command-compose { display: flex; gap: 10px; align-items: stretch; }
 .office-command-compose textarea { flex: 1; min-width: 0; resize: vertical; max-height: 160px; border: 0; outline-offset: 2px; padding: 6px; background: #ffffffad; color: #332d27; font: inherit; font-size: 13px; line-height: 1.5; }
 .office-command-compose button { align-self: flex-end; white-space: nowrap; }

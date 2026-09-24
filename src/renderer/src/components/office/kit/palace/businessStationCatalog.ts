@@ -24,7 +24,7 @@ const ROLE_STATIONS: Record<BusinessHallRole, readonly [string, string, string, 
 }
 
 export const BUSINESS_STATIONS: readonly BusinessStationSpec[] = (Object.entries(ROLE_STATIONS) as [BusinessHallRole, typeof ROLE_STATIONS[BusinessHallRole]][]).flatMap(([role, entries]) => entries.map(([id, label, purpose, action], index) => ({
-  id: `${role}_${id}`, role, anchor: `${role.toUpperCase()}_${id.toUpperCase()}`, label, purpose, offset: STATION_OFFSETS[index], capabilities: [purpose, '真实业务线投影', '可返回 CaoGen 工作面'], action: action as BusinessStationAction
+  id: `${role}_${id}`, role, anchor: `${role.toUpperCase()}_${id.toUpperCase()}`, label, purpose, offset: STATION_OFFSETS[index], capabilities: [purpose, '真实业务线投影', '可返回 EastGenesis 工作面'], action: action as BusinessStationAction
 })))
 
 export function businessStationsForRole(role: BusinessHallRole): readonly BusinessStationSpec[] {

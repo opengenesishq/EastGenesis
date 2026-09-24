@@ -391,7 +391,7 @@ function requireWorkflowEvent(value: unknown): WorkflowEventRecord {
   return structuredClone(value) as unknown as WorkflowEventRecord
 }
 
-function workflowEvidenceInput(record: WorkflowEvidenceRecord): WorkflowEvidenceInput {
+export function workflowEvidenceInput(record: WorkflowEvidenceRecord): WorkflowEvidenceInput {
   return {
     evidenceId: record.evidenceId,
     projectId: record.projectId,
@@ -412,7 +412,7 @@ function workflowEvidenceInput(record: WorkflowEvidenceRecord): WorkflowEvidence
   }
 }
 
-function reboundEvidencePayload(
+export function reboundEvidencePayload(
   event: WorkflowEventRecord,
   taskEvidence: ReadonlyMap<string, TaskEvidenceRecord>,
   workflowEvidence: ReadonlyMap<string, WorkflowEvidenceRecord>
@@ -451,7 +451,7 @@ function taskEvidencePayload(record: TaskEvidenceRecord): Record<string, unknown
   }
 }
 
-function insertArtifactEdge(db: TaskSnapshotDatabase, edge: ProjectAggregateSnapshot['workflow']['artifactEdges'][number]): void {
+export function insertArtifactEdge(db: TaskSnapshotDatabase, edge: ProjectAggregateSnapshot['workflow']['artifactEdges'][number]): void {
   db.run(
     `INSERT INTO workflow_artifact_edges(
        id, from_artifact_id, to_artifact_id, relation, project_id, goal_id,
@@ -463,7 +463,7 @@ function insertArtifactEdge(db: TaskSnapshotDatabase, edge: ProjectAggregateSnap
   )
 }
 
-function insertArtifactLocation(
+export function insertArtifactLocation(
   db: TaskSnapshotDatabase,
   location: ProjectAggregateSnapshot['workflow']['artifactLocations'][number]
 ): void {

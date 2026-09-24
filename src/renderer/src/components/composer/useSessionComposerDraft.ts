@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
-import { COMPOSER_DRAFTS_DELETED_EVENT, isDeletedComposerDraft, readComposerDraft, writeComposerDraft } from '../../store/composer-draft-persistence'
+import { COMPOSER_DRAFT_DELIVERED_EVENT, COMPOSER_DRAFTS_DELETED_EVENT, isDeletedComposerDraft, readComposerDraft, writeComposerDraft } from '../../store/composer-draft-persistence'
 
 interface SessionDraftState {
   sessionId: string | null
@@ -26,6 +26,17 @@ export function useSessionComposerDraft(sessionId: string | null): [string, Disp
     window.addEventListener(COMPOSER_DRAFTS_DELETED_EVENT, clear)
     return () => window.removeEventListener(COMPOSER_DRAFTS_DELETED_EVENT, clear)
   }, [sessionId])
+
+  useEffect(() => {
+    const reload = (event: Event): void => {
+      const detail = (event as CustomEvent<{ sessionId?: string }>).detail
+      if (!sessionId || detail?.sessionId !== sessionId || isDeletedComposerDraft(sessionId)) return
+      const persisted = readComposerDraft(storage, sessionId)
+      setDraft(current => current.sessionId === sessionId && current.text === persisted ? current : { sessionId, text: persisted })
+    }
+    window.addEventListener(COMPOSER_DRAFT_DELIVERED_EVENT, reload)
+    return () => window.removeEventListener(COMPOSER_DRAFT_DELIVERED_EVENT, reload)
+  }, [sessionId, storage])
 
   const setText = useCallback<Dispatch<SetStateAction<string>>>((action) => {
     setDraft((current) => {

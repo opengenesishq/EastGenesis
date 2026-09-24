@@ -1,4 +1,5 @@
-import { spawnSync } from 'node:child_process'
+import { spawnSyncInExecutionEnvironment as spawnSync } from '../wsl/process'
+import { parseWslHostPath } from '../wsl/binding'
 import { randomUUID } from 'node:crypto'
 import {
   chmodSync,
@@ -20,7 +21,8 @@ import {
   withSafeLocalGitConfig,
   withSafeMergeGitConfig
 } from './safe-git'
-import type { FileSystemIdentity } from '../../shared/types'
+import { stableValueDigest } from '../task/tool-idempotency'
+import type { EffectTarget, FileSystemIdentity } from '../../shared/types'
 import { hasMeaningfulWorktreeChanges } from './git-worktree-state'
 import { buildMinimalSubprocessEnv } from '../security/subprocess-environment'
 
@@ -305,7 +307,7 @@ export function gitCommit(cwd: string, message: string): GitCommitOperationResul
   return { ok: true, repoRoot: repo.repoRoot, branch: readBranchInfo(repo.repoRoot).branch, sha: sha.text, checks }
 }
 
-export function gitPush(cwd: string, rawBranch?: string): GitPushOperationResult {
+export function gitPush(cwd: string, rawBranch?: string, approved?: Extract<EffectTarget, { kind: 'git_push' }>): GitPushOperationResult {
   const repo = resolveRepo(cwd)
   if (repo.ok === false) return repo
 
@@ -315,6 +317,15 @@ export function gitPush(cwd: string, rawBranch?: string): GitPushOperationResult
   const remote = preferredRemote(repo.repoRoot)
   if (!remote) return failure('未配置 Git remote，无法 push', repo.repoRoot)
 
+  let destination = remote, source = branch
+  if (approved) {
+    const urls = gitText(repo.repoRoot, ['remote', 'get-url', '--push', '--all', remote])
+    const head = gitText(repo.repoRoot, ['rev-parse', '--verify', `refs/heads/${branch}^{commit}`])
+    if (!urls.ok || !head.ok || urls.text.split(/\r?\n/).length !== 1 || approved.repoRoot !== repo.repoRoot ||
+        approved.remote !== remote || approved.branch !== branch || approved.ref !== `refs/heads/${branch}` ||
+        head.text !== approved.intendedSha || stableValueDigest(safePushUrl(urls.text)) !== approved.pushUrlDigest) return failure('推送目标偏离已确认的草稿或 Effect', repo.repoRoot)
+    destination = urls.text; source = approved.intendedSha
+  }
   const push = runGit(repo.repoRoot, [
     '-c',
     `core.hooksPath=${TRUSTED_EMPTY_HOOKS_DIR}`,
@@ -322,11 +333,12 @@ export function gitPush(cwd: string, rawBranch?: string): GitPushOperationResult
     'push.gpgSign=false',
     'push',
     '--no-verify',
-    '-u',
-    remote,
-    `${branch}:${branch}`
+    ...(approved ? [] : ['-u']),
+    '--', destination,
+    `${source}:refs/heads/${branch}`
   ])
-  if (!push.ok) return failure('git push 失败', repo.repoRoot, push.error)
+  const safeOutput = (value?: string) => approved ? (value ?? '').split(destination).join(safePushUrl(destination)) : (value ?? '')
+  if (!push.ok) return failure('git push 失败', repo.repoRoot, safeOutput(push.error))
 
   const upstream = `${remote}/${branch}`
   return {
@@ -335,8 +347,13 @@ export function gitPush(cwd: string, rawBranch?: string): GitPushOperationResult
     remote,
     branch,
     upstream,
-    output: clip([push.stdout, push.stderr].filter(Boolean).join('\n')).text
+    output: clip(safeOutput([push.stdout, push.stderr].filter(Boolean).join('\n'))).text
   }
+}
+
+function safePushUrl(value: string): string {
+  try { const url = new URL(value.trim()); url.username = ''; url.password = ''; url.search = ''; url.hash = ''; return url.toString() }
+  catch { return value.trim().replace(/^[^@\s]+@/, '') }
 }
 
 export function gitCreatePr(
@@ -365,9 +382,9 @@ export function gitCreatePr(
   }
 
   const tool = prToolForProvider(remote.provider)
-  if (!tool || !commandExists(tool)) {
+  if (!tool || !commandExists(tool, repo.repoRoot)) {
     return failure(
-      `已识别 ${remote.provider} remote，但本机未检测到 ${tool ?? '可用'} PR 工具`,
+      `已识别 ${remote.provider} remote，但当前执行环境未检测到 ${tool ?? '可用'} PR 工具`,
       repo.repoRoot,
       remote.url
     )
@@ -1411,7 +1428,12 @@ function prToolForProvider(provider: PullRequestProvider): PullRequestTool | nul
   return null
 }
 
-function commandExists(command: string): boolean {
+function commandExists(command: string, cwd: string): boolean {
+  if (parseWslHostPath(cwd)) {
+    try {
+      return spawnSync(command, ['--version'], { cwd, env: buildMinimalSubprocessEnv(), stdio: 'ignore', timeout: GIT_TIMEOUT_MS }).status === 0
+    } catch { return false }
+  }
   const probe = process.platform === 'win32' ? 'where' : 'which'
   const result = spawnSync(probe, [command], {
     env: buildMinimalSubprocessEnv(),

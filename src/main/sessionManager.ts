@@ -1,4 +1,12 @@
+import { assertScheduledMessageCurrent } from './routines/scheduled-input-gate'
+import { validateMemoryOverrides, type MemoryOverrides } from '../shared/memory-preferences-types'
+import { assertWorkspaceHandoffReady, restoreWorkspaceHandoff } from './workspace-handoff'
+import { executeWorkspaceHandoffOperation } from './workspace-handoff-operation'
+import { terminalManager } from './terminal'
 import { app, BrowserWindow, powerSaveBlocker } from 'electron'
+import { join } from 'node:path'
+import { desktopWindowRole } from './desktop-window-registry'
+import { DesktopCompanionOutbox } from './desktop-companion-outbox'
 import type { EffectResolution, TaskEffectRecoveryView } from '../shared/effect-recovery-types'
 import { buildTaskEffectRecoveryView } from './task/effect-recovery-view'
 import { isInteractiveOperationActive } from './task/operation-effect-gateway'
@@ -24,6 +32,7 @@ import { applySessionModelSwitch, applySessionRoutingControl } from './ipc/sessi
 import { assertSessionModelChangeReady, restoreModelChangeSourceRun, sealSessionModelChange } from './session-model-change'
 import { prepareSessionModelHandoffCheckpoint } from './agent/session-model-handoff'
 import { assertPersistedSessionExecutionAllowed } from './session-execution-ownership'
+import { getTaskHostExecutionGate, taskHostSubject } from './task-handoff/execution-gate'
 import {
   cleanupTranscripts, readTranscriptEntries, readTranscriptEntriesStrict, restoreTranscriptIfMissing,
   shouldPersistConversationLedgerEvent, transcriptForkSeedEntries
@@ -86,6 +95,7 @@ import { TaskSnapshotReplayCoordinator } from './task/task-snapshot-replay'
 import { SubagentOrchestrationCoordinator } from './task/subagent-orchestration-coordinator'
 import { DIRECT_SUBAGENT_LIMIT_MESSAGE, MAX_DIRECT_SUBAGENT_TASKS } from '../shared/agent-capacity-policy'
 import { AgentCapacityCoordinator } from './agent/agent-capacity-coordinator'
+import { assertSessionFollowUpMessageCurrent, pauseSessionFollowUps } from './task/session-follow-up-gate'
 import { provisionDagChildSession } from './agent/dag-child-provisioner'
 import { createTaskRun, createSessionTaskRun, isTaskRunTerminal, transitionTaskRun } from './task/task-run'
 import { bindFrozenRunRoutingPolicy } from './task/frozen-routing-binding'
@@ -133,6 +143,7 @@ import { CouncilService } from './council/council-service'
 import { assertCouncilSend, isCouncilSession } from './council/council-request-guard'
 import { mergeTaskExecutionAuthorityMarker, reconcileTaskExecutionAuthorityMarker } from './permission/task-execution-authority-marker'
 import { getSessionInputService } from './task/session-input-runtime'
+import { purgeSideChatRecords } from './side-chat/side-chat-store'
 import type {
   AgentEvent,
   AgentEventIdentity,
@@ -375,6 +386,8 @@ class SessionManager {
         ].filter((id): id is string => Boolean(id)).map((id) => ({ kind: 'project', id }))
       }
     )
+    purgeSideChatRecords(app.getPath('userData'), [history.id])
+    new DesktopCompanionOutbox(join(app.getPath('userData'), 'desktop-companion', 'draft-outbox.json')).purge([history.id])
     this.snapshotCounts.delete(history.id)
     this.recentEventIds.delete(history.id)
     this.effectRecoveryPreservedSessions.delete(history.id)
@@ -702,6 +715,121 @@ class SessionManager {
   getTaskRun(sessionId: string): TaskRunRecord | undefined {
     const run = this.taskRuns.get(sessionId)
     return run ? structuredClone(run) : undefined
+  }
+
+  async handoffWorkspace(sessionId: string): Promise<SessionMeta> {
+    await this.whenInitialized()
+    return withSessionOperationQueue(sessionId, async () => {
+      let session = this.sessions.get(sessionId)
+      if (!session) throw new Error('任务不存在或已关闭。')
+      await this.sessionStarts.ensure(sessionId, session)
+      if (session.meta.status === 'running' || session.meta.status === 'starting') await this.interrupt(sessionId)
+      session = this.sessions.get(sessionId)
+      if (!session || session.meta.status !== 'idle') throw new Error('任务尚未停止，或存在待核对的外部操作。')
+      const run = this.taskRuns.get(sessionId)
+      if (session.pendingPermissions().length || runHasUnresolvedEffects(run) || (run && !isTaskRunTerminal(run.status))) {
+        throw new Error('请先处理待审批或结果未知的操作，再交接工作目录。')
+      }
+      if (session.meta.parentSessionId || this.dagFinalizationCoordinator.hasIncomplete(sessionId) || this.council.snapshots(sessionId).length) {
+        throw new Error('协作编排尚未结束，请先完成子任务或议事后再交接。')
+      }
+      const terminal = terminalManager.getBySession(sessionId)
+      if (terminal && !terminal.exit) throw new Error('请先关闭当前任务终端，再交接工作目录。')
+      if ([...this.sessions.values()].some(other => other !== session && other.meta.status === 'running' &&
+        (other.meta.cwd === session!.meta.cwd || other.meta.cwd === session!.meta.sourceCwd))) {
+        throw new Error('另一个任务正在同一目录执行，请先暂停该任务。')
+      }
+      await this.modelAttemptRecoveryGate.refreshBeforeSend(sessionId)
+      const admission = this.modelAttemptRecoveryGate.decideSend(sessionId, run, false)
+      if (!admission.allowed) throw new Error(admission.error)
+      await this.workflow.flush(sessionId)
+      await executeWorkspaceHandoffOperation(session.meta)
+      Object.assign(session.meta, restoreWorkspaceHandoff(session.meta))
+      clearSessionTurnRoute(session.meta)
+      clearIdeDocumentContext(sessionId)
+      await this.writeTaskSnapshot(sessionId, 'important-event', 0, undefined, undefined, true)
+      this.persistActiveSessions(true)
+      this.persist(sessionId)
+      session.emitSyntheticEvent?.({ kind: 'meta', meta: { ...session.meta } })
+      session.emitSyntheticEvent?.({ kind: 'hook-event', event: 'workspace-handoff', detail: JSON.stringify(session.meta.workspaceHandoff) })
+      return { ...session.meta }
+    })
+  }
+
+  /** Called after the host gate enters preparing. Stops and verifies; never creates a Run or Engine. */
+  async prepareHostHandoff(sessionId: string): Promise<SessionMeta> {
+    await this.whenInitialized()
+    return withSessionOperationQueue(sessionId, async () => {
+      let session = this.sessions.get(sessionId)
+      const ownership = getTaskHostExecutionGate(app.getPath('userData')).status(sessionId)
+      if (!session) {
+        const saved = await getTaskSnapshot(sessionId, app.getPath('userData'))
+        if (!saved || ownership?.state !== 'preparing' || ownership.incoming || ownership.identity.sessionCreatedAt !== saved.meta.createdAt) throw new Error('交接恢复记录与原任务不一致。')
+        if (runHasUnresolvedEffects(saved.run) || (saved.run && !isTaskRunTerminal(saved.run.status)) ||
+            saved.meta.parentSessionId || saved.dagRuntimes?.length || this.dagFinalizationCoordinator.hasIncomplete(sessionId) || this.council.snapshots(sessionId).length) throw new Error('原任务仍有执行、协作或结果待核对，不能移交。')
+        const terminal = terminalManager.getBySession(sessionId)
+        if (terminal && !terminal.exit) throw new Error('请先关闭原任务终端。')
+        if ([...this.sessions.values()].some(other => ['running', 'starting'].includes(other.meta.status) &&
+            [saved.meta.cwd, saved.meta.sourceCwd].filter(Boolean).includes(other.meta.cwd))) throw new Error('另一个任务正在源目录执行。')
+        await this.modelAttemptRecoveryGate.refreshBeforeSend(sessionId)
+        const admission = this.modelAttemptRecoveryGate.decideSend(sessionId, saved.run, false)
+        if (!admission.allowed) throw new Error(admission.error)
+        await this.workflow.flush(sessionId)
+        return { ...saved.meta }
+      }
+      if (ownership?.state !== 'preparing' || ownership.incoming || ownership.identity.sessionCreatedAt !== session.meta.createdAt) throw new Error('跨主机交接尚未冻结原任务。')
+      pauseSessionFollowUps(app.getPath('userData'), sessionId)
+      if (session.meta.status === 'running' || session.meta.status === 'starting') await this.interrupt(sessionId)
+      session = this.sessions.get(sessionId)
+      if (!session || session.meta.status !== 'idle') throw new Error('任务尚未停止，或存在待核对的外部操作。')
+      const run = this.taskRuns.get(sessionId)
+      if (session.pendingPermissions().length || runHasUnresolvedEffects(run) || (run && !isTaskRunTerminal(run.status))) throw new Error('请先处理待审批或结果未知的操作，再移交主机。')
+      if (session.meta.parentSessionId || this.dagFinalizationCoordinator.hasIncomplete(sessionId) || this.council.snapshots(sessionId).length ||
+          [...this.sessions.values()].some(other => other.meta.parentSessionId === sessionId && other.meta.status !== 'closed')) throw new Error('协作编排尚未结束，请先完成子任务或议事。')
+      const terminal = terminalManager.getBySession(sessionId)
+      if (terminal && !terminal.exit) throw new Error('请先关闭当前任务终端，再移交主机。')
+      if ([...this.sessions.values()].some(other => other !== session && ['running', 'starting'].includes(other.meta.status) &&
+          [session!.meta.cwd, session!.meta.sourceCwd].filter(Boolean).includes(other.meta.cwd))) throw new Error('另一个任务正在同一目录执行，请先暂停该任务。')
+      await this.modelAttemptRecoveryGate.refreshBeforeSend(sessionId)
+      const admission = this.modelAttemptRecoveryGate.decideSend(sessionId, run, false)
+      if (!admission.allowed) throw new Error(admission.error)
+      await this.workflow.flush(sessionId)
+      // A frozen idle task may be checked again before commit. Rewriting its
+      // snapshot/history timestamps would invalidate the exact preview bundle.
+      if (!await getTaskSnapshot(sessionId, app.getPath('userData'))) {
+        await this.writeTaskSnapshot(sessionId, 'important-event', 0, undefined, undefined, true)
+        this.persistActiveSessions(true)
+        this.persist(sessionId)
+      }
+      return { ...session.meta }
+    })
+  }
+
+  /** Retire an old, stopped in-memory copy before an incoming import replaces its placement. */
+  async evictHostHandoffSession(sessionId: string): Promise<void> {
+    return withSessionOperationQueue(sessionId, async () => {
+      const ownership = getTaskHostExecutionGate(app.getPath('userData')).status(sessionId)
+      if (!ownership || (ownership.state !== 'released' && !(ownership.state === 'preparing' && ownership.incoming))) throw new Error('仅可卸载已移交或正在接收的任务副本。')
+      const session = this.sessions.get(sessionId)
+      if (!session) return
+      const run = this.taskRuns.get(sessionId)
+      if (session.meta.status !== 'idle' || session.pendingPermissions().length || runHasUnresolvedEffects(run) || (run && !isTaskRunTerminal(run.status))) throw new Error('旧任务执行器尚未安全停止，不能替换。')
+      if (!session.retireForContinuation) throw new Error('当前执行器不支持保留历史卸载，请关闭应用后继续接收。')
+      pauseSessionFollowUps(app.getPath('userData'), sessionId)
+      await session.retireForContinuation()
+      await this.workflow.flush(sessionId)
+      this.sessions.delete(sessionId)
+      this.sessionStarts.forget(sessionId)
+      this.taskRuns.delete(sessionId)
+      this.snapshotCounts.delete(sessionId)
+      this.recentEventIds.delete(sessionId)
+      this.taskSnapshotReplay.clearSession(sessionId)
+      this.modelAttemptRecoveryGate.clearSession(sessionId)
+      this.supervisor.releaseSession(sessionId, run?.id)
+      this.stopEnginePowerBlocker(sessionId)
+      clearIdeDocumentContext(sessionId)
+      this.persistActiveSessions(true)
+    })
   }
 
   setModel(sessionId: string, model: unknown): Promise<void> {
@@ -1113,7 +1241,21 @@ class SessionManager {
     input: string | SendMessagePayload,
     options: { modelAttemptRecoveryReplay?: boolean; supervisorControlReplay?: boolean; readOnlyGoalStart?: boolean } = {}
   ): Promise<boolean> {
-    return withSessionOperationQueue(id, () => this.performSend(id, input, options))
+    const meta = this.sessions.get(id)?.meta
+    if (!meta) return Promise.resolve(false)
+    const hostGate = getTaskHostExecutionGate(app.getPath('userData'))
+    const subject = taskHostSubject(meta)
+    let claim
+    try { claim = hostGate.claim(subject) }
+    catch (error) { const session = this.sessions.get(id); return Promise.resolve(session ? this.rejectBeforeRun(session, error instanceof Error ? error.message : String(error)) : false) }
+    return withSessionOperationQueue(id, async () => {
+      try { return await hostGate.withPermit(subject, () => this.performSend(id, input, options), claim) }
+      catch (error) {
+        if (options.supervisorControlReplay) throw error
+        const session = this.sessions.get(id)
+        return session ? this.rejectBeforeRun(session, error instanceof Error ? error.message : String(error)) : false
+      }
+    })
   }
 
   private async performSend(
@@ -1123,10 +1265,19 @@ class SessionManager {
   ): Promise<boolean> {
     let session = this.sessions.get(id)
     if (!session) return false
-    if (typeof input !== 'string' && input.requirementRevisionIntent) {
-      return this.rejectBeforeRun(session, '交付要求修订必须通过当前任务的确认入口保存')
+    const hostGate = getTaskHostExecutionGate(app.getPath('userData'))
+    let hostClaim
+    try { hostClaim = hostGate.claim(taskHostSubject(session.meta)) }
+    catch (error) { return this.rejectBeforeRun(session, error instanceof Error ? error.message : String(error)) }
+    if (typeof input !== 'string' && (input.requirementRevisionIntent || input.goalRevisionIntent)) {
+      return this.rejectBeforeRun(session, '目标和交付要求修订必须通过当前任务的确认入口保存')
     }
-    try { assertSessionModelChangeReady(session.meta) }
+    try {
+      assertSessionFollowUpMessageCurrent(app.getPath('userData'), id, typeof input === 'string' ? undefined : input.messageId, session.meta)
+      await assertScheduledMessageCurrent(app.getPath('userData'), id, typeof input === 'string' ? undefined : input.messageId)
+    }
+    catch (error) { return this.rejectBeforeRun(session, error instanceof Error ? error.message : String(error)) }
+    try { assertWorkspaceHandoffReady(session.meta); assertSessionModelChangeReady(session.meta) }
     catch (error) { return this.rejectBeforeRun(session, error instanceof Error ? error.message : String(error)) }
     await this.council.loadSnapshots()
     try {
@@ -1246,7 +1397,8 @@ class SessionManager {
         throw new Error(session.meta.lastError ?? 'Mission 执行来源已变化，已阻止 Provider 请求')
       }
       assertDirectStart()
-      session.send(payload)
+      assertSessionFollowUpMessageCurrent(app.getPath('userData'), id, payload.messageId, session.meta)
+      hostGate.withPermitSync(taskHostSubject(session.meta), () => session!.send(payload), hostClaim)
     } catch (error) {
       clearSessionTurnRoute(session.meta)
       const message = error instanceof Error ? error.message : String(error)
@@ -1280,6 +1432,11 @@ class SessionManager {
     store: SupervisorStateStore,
     request: SupervisorSessionControlRequest
   ): Promise<SupervisorSessionControlResult | null> {
+    if (request.action === 'pause' || request.action === 'cancel') {
+      for (const id of this.sessions.keys()) {
+        if (this.taskRuns.get(id)?.id === request.runId) pauseSessionFollowUps(app.getPath('userData'), id)
+      }
+    }
     return this.supervisor.control(store, request)
   }
 
@@ -1291,7 +1448,8 @@ class SessionManager {
     return this.supervisor.claimControlLease(store, runId, expectedRevision)
   }
 
-  async interrupt(id: string): Promise<void> {
+  async interrupt(id: string, options?: { preserveFollowUpMessageId?: string }): Promise<void> {
+    pauseSessionFollowUps(app.getPath('userData'), id, options?.preserveFollowUpMessageId)
     await this.council.stopForParent(id)
     const session = this.sessions.get(id)
     if (!session) return
@@ -1428,6 +1586,7 @@ class SessionManager {
     const activeStep = [...(run?.steps ?? [])].reverse().find((step) => !step.finishedAt)
     const attemptContext = run
       ? {
+          sessionId: parentSessionId,
           runId: run.id,
           requestId: `model-request:${run.id}:dag:${randomUUID()}`,
           stepId: activeStep?.id
@@ -1623,6 +1782,7 @@ class SessionManager {
   }
 
   close(id: string): Promise<void> {
+    pauseSessionFollowUps(app.getPath('userData'), id)
     const existing = this.closingSessions.get(id)
     if (existing) return existing
     const session = this.sessions.get(id)
@@ -1693,6 +1853,16 @@ class SessionManager {
     this.taskSnapshotReplay.clearSession(id)
     this.modelAttemptRecoveryGate.clearSession(id)
     this.acknowledgeSessionCreation(id)
+  }
+
+  async updateMemoryOverrides(id: string, input: MemoryOverrides): Promise<void> {
+    const session = this.sessions.get(id)
+    if (!session || session.meta.status === 'closed') throw new Error('当前任务不存在或已关闭')
+    session.meta.memoryOverrides = validateMemoryOverrides(input)
+    this.persistActiveSessions(true)
+    this.persist(id)
+    await this.writeTaskSnapshot(id, 'important-event', 0, undefined, undefined, true)
+    session.emitSyntheticEvent?.({ kind: 'meta', meta: { ...session.meta } })
   }
 
   updateWorktreeState(id: string, state: SessionMeta['worktreeState']): void {
@@ -1875,6 +2045,7 @@ class SessionManager {
   async recoverTaskSnapshot(id: string): Promise<SessionMeta> {
     const stored = await getTaskSnapshot(id)
     if (!stored) throw new Error('未找到可恢复的任务快照')
+    getTaskHostExecutionGate(app.getPath('userData')).assert(taskHostSubject(stored.meta))
     await this.supervisor.hydrateSendGate(stored.run)
     this.workflow.assertRecoveryResolved(stored.sessionId)
     assertAgentRecoverySnapshot(stored)
@@ -1920,6 +2091,7 @@ class SessionManager {
       lastEventId: snapshot.execution.cursor?.eventId ?? snapshot.execution.lastEventId
     })
     this.recentEventIds.set(meta.id, [...(recoveredRun.recentEventIds ?? [])].slice(-256))
+    getTaskHostExecutionGate(app.getPath('userData')).assert(taskHostSubject(meta))
     const session = createEngine(
       meta.engine,
       meta,
@@ -2167,7 +2339,7 @@ class SessionManager {
       .recoverableSessionCount(recoverable.map((snapshot) => snapshot.sessionId))
     if (recoverableCount > 0 && getSettings().notificationsEnabled) {
       showDesktopNotification({
-        title: 'CaoGen: 检测到未完成任务',
+      title: 'EastGenesis: 检测到未完成任务',
         body: `发现 ${recoverableCount} 个未完成任务或模型对账项，可从恢复入口继续。`,
         sessionId: 'task-snapshot'
       })
@@ -2563,7 +2735,7 @@ class SessionManager {
         transcript: session.getTranscript(),
         event
       },
-      { enabled: getSettings().autoSkillLearningEnabled }
+      { enabled: !process.env.CAOGEN_TEMPORARY_PROFILE_ID && getSettings().autoSkillLearningEnabled }
     )
   }
 
@@ -2855,7 +3027,7 @@ class SessionManager {
 
   private publishSessionEvent(payload: SessionEventPayload): void {
     for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send('session:event', payload)
+      if (!win.isDestroyed() && ['main', 'task'].includes(desktopWindowRole(win) ?? '')) win.webContents.send('session:event', payload)
     }
     this.emitToSubscribers(payload)
   }

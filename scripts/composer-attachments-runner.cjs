@@ -40,7 +40,7 @@ async function run() {
     const win = await waitForWindow(STARTUP_TIMEOUT_MS)
     win.setSize(1200, 800)
     win.webContents.reload()
-    await waitForRenderer(win, `document.body.innerText.includes('CaoGen')`, STARTUP_TIMEOUT_MS)
+    await waitForRenderer(win, `document.body.innerText.includes('EastGenesis')`, STARTUP_TIMEOUT_MS)
     await selectSession(win, alpha.id)
 
     const button = await rendererValue(win, `(() => { const el = document.querySelector('.composer-attach'); return { exists: !!el, label: el?.getAttribute('aria-label'), width: el?.getBoundingClientRect().width }; })()`)

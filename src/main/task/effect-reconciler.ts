@@ -1,8 +1,9 @@
+import { assertWslBinding } from '../wsl/binding'
 import { officeRevisionReplayDigest, type OfficeRevisionReplayTarget } from '../office-revision/replay'
 import { createHash } from 'node:crypto'
 import { constants, existsSync, mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { lstat, open } from 'node:fs/promises'
-import { execFile } from 'node:child_process'
+import { execFileInExecutionEnvironment as execFile, executionPathToHost } from '../wsl/process'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import type { EffectRecord, EffectTarget, FileSystemIdentity } from '../../shared/types'
@@ -83,7 +84,8 @@ export function effectReplayTargetDigest(target: EffectTarget | OfficeArtifactRe
     return stableValueDigest({
       kind: target.kind,
       rootIdentity: target.rootIdentity,
-      relativePath: target.relativePath
+      relativePath: target.relativePath,
+      ...('executionEnvironment' in target && target.executionEnvironment ? { executionEnvironment: target.executionEnvironment } : {})
     })
   }
   return stableValueDigest(target)
@@ -152,6 +154,7 @@ export async function reconcileEffect(
     if (!effectRecordIntegrityMatches(effect)) {
       return unresolved({ kind: 'integrity_error', reason: 'EffectRecord 摘要校验失败，禁止读取或重放目标' })
     }
+    if (effect.target.executionEnvironment) assertWslBinding(effect.target.executionEnvironment)
     if (effect.target.kind === 'file_content') return await reconcileFileContent(effect.target, observationOptions)
     if (effect.target.kind === 'gui_postcondition') return await reconcileGuiPostconditionEffectTarget(effect.target)
     if (effect.target.kind === 'git_commit') return await reconcileGitCommit(effect.target)
@@ -694,6 +697,7 @@ async function reconcileGitPush(
     })
   }
   const probe = await gitRemoteRun(
+    target.repoRoot,
     ['ls-remote', '--heads', probeUrl, target.ref],
     [0, 2],
     GIT_REMOTE_TIMEOUT_MS
@@ -980,6 +984,7 @@ function gitConfiguredRun(
 }
 
 function gitRemoteRun(
+  executionCwd: string,
   args: string[],
   allowStatuses: number[] = [0],
   timeoutMs = GIT_REMOTE_TIMEOUT_MS
@@ -999,8 +1004,8 @@ function gitRemoteRun(
     const env = isolatedRemoteGitEnv(process.env)
     env.GIT_CEILING_DIRECTORIES = isolatedCwd
     env.GIT_DISCOVERY_ACROSS_FILESYSTEM = '0'
-    execFile('git', withSafeRemoteGitConfig(args), {
-      cwd: isolatedCwd,
+    execFile('git', withSafeRemoteGitConfig(['-C', isolatedCwd, ...args]), {
+      cwd: executionCwd,
       encoding: 'utf8',
       timeout: timeoutMs,
       killSignal: 'SIGKILL',
@@ -1072,7 +1077,7 @@ function normalizeRemoteProbeUrl(repoRoot: string, value: string): string {
   if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(trimmed)) {
     throw new Error('Git push URL 使用未知协议，已停止自动对账')
   }
-  return resolve(repoRoot, trimmed)
+  return resolve(repoRoot, executionPathToHost(repoRoot, trimmed))
 }
 
 async function mapWithConcurrency<T, R>(

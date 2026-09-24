@@ -591,7 +591,7 @@ function validateSkillDefinition(skill: SkillDefinition): SkillTestResult {
 
 function formatSkillInvocationPrompt(skill: SkillDefinition, query: string | undefined): string {
   const lines = [
-    '## CaoGen Skill Invocation',
+    '## EastGenesis Skill Invocation',
     'This is a prompt-only Skill invocation. It provides reusable instructions; it does not execute shell commands or modify files by itself.',
     '',
     `### ${skill.name}`,

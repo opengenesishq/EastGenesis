@@ -296,6 +296,8 @@ function screenshotResult(value: Awaited<ReturnType<ReturnType<typeof createGuiC
       metadata: {
         sourceId: value.sourceId,
         sourceName: value.sourceName,
+        captureSha256: value.captureSha256,
+        capturedAt: value.capturedAt,
         width: value.width,
         height: value.height
       },

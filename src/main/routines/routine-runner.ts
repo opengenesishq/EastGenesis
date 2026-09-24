@@ -2,14 +2,18 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
-import { markRun, updateRoutine, type Routine } from '../routineStore'
+import { listRoutines, markRun, updateRoutine, type Routine } from '../routineStore'
 import { writeDurableFile } from '../durable-file'
+import { goalModeGeneration } from './goal-mode-generation'
+import type { RoutineHeartbeatRun } from '../../shared/routine-heartbeat-types'
+import { normalizeRoutineSessionTarget, sameRoutineSessionTarget } from './routine-heartbeat-target'
 
 export type RoutineRunStatus = 'queued' | 'running' | 'succeeded' | 'failed'
 export type RoutineDispatchState = 'preparing' | 'session_created' | 'prompt_accepted'
 export type RoutineReviewDecision = 'accepted' | 'rejected'
 
 export interface RoutineRunRecord {
+  heartbeat?: RoutineHeartbeatRun
   id: string
   routineId: string
   routineName: string
@@ -92,6 +96,65 @@ export async function listRoutineRuns(rootDir: string, routineId?: string): Prom
     .sort((a, b) => b.startedAt - a.startedAt)
 }
 
+/** Reserve one outstanding occurrence per plan. The original Session remains its execution owner. */
+export async function reserveRoutineHeartbeat(
+  rootDir: string, routine: Routine, id: string, scheduledAt: number, nextRunAt: number | null
+): Promise<RoutineRunRecord> {
+  const target = routine.executionTarget
+  if (!target) throw new Error('定时继续缺少原任务绑定。')
+  const result = await withRunStoreWriteLock(rootDir, async () => {
+    const file = await readRuns(rootDir)
+    const existing = file.runs.find((run) => run.id === id)
+    if (existing) {
+      if (existing.routineId !== routine.id || !sameRoutineSessionTarget(existing.heartbeat?.target, target)) {
+        throw new Error('定时继续发生编号或任务绑定冲突。')
+      }
+      return { record: existing, advance: false }
+    }
+    const pending = file.runs.find((run) => run.routineId === routine.id && run.heartbeat &&
+      !isTerminalRun(run) && sameRoutineSessionTarget(run.heartbeat.target, target))
+    if (pending) return { record: pending, advance: true }
+    const inputRequestId = `routine-${id}`
+    const record: RoutineRunRecord = { id, routineId: routine.id, routineName: routine.name,
+      projectId: target.workspaceId, goalId: target.goalId, workItemId: target.workItemId,
+      sessionId: target.sessionId, projectCwd: target.cwd, startedAt: Date.now(), nextRunAt,
+      status: 'queued', inboxStatus: 'running', dispatchState: 'preparing',
+      heartbeat: { target: structuredClone(target), scheduledAt, inputRequestId,
+        ...(routine.goalContinuation ? { goalModeGeneration: goalModeGeneration(routine) } : {}),
+        messageId: `session-input:${target.sessionId}:${inputRequestId}`, prompt: routine.prompt, phase: 'queued' } }
+    await writeRuns(rootDir, retainPendingRuns([record, ...file.runs]))
+    return { record, advance: true }
+  })
+  if (result.advance) {
+    await markRun(rootDir, routine.id, { ranAt: result.record.startedAt, nextRunAt, expectedSchedule: routine })
+    await updateRoutine(rootDir, routine.id, { runState: result.record.status, lastError: result.record.error ?? null })
+  }
+  return result.record
+}
+
+export async function patchRoutineHeartbeat(rootDir: string, id: string, patch: {
+  phase?: RoutineHeartbeatRun['phase']; status?: 'queued' | 'running'; workflowRunId?: string
+  inboxStatus?: RoutineRunRecord['inboxStatus']; error?: string | null
+}): Promise<RoutineRunRecord> {
+  return withRunStoreWriteLock(rootDir, async () => {
+    const file = await readRuns(rootDir)
+    const current = file.runs.find((run) => run.id === id)
+    if (!current?.heartbeat) throw new Error('定时继续记录不存在。')
+    if (isTerminalRun(current)) return current
+    if (current.workflowRunId && patch.workflowRunId && current.workflowRunId !== patch.workflowRunId) throw new Error('定时继续的运行身份冲突。')
+    const { phase, error, ...fields } = patch
+    const updated: RoutineRunRecord = { ...current, ...fields, error: error === null ? undefined : error ?? current.error,
+      heartbeat: { ...current.heartbeat, ...(phase ? { phase } : {}) } }
+    await writeRuns(rootDir, retainPendingRuns(file.runs.map((run) => run.id === id ? updated : run)))
+    return updated
+  })
+}
+
+function retainPendingRuns(runs: RoutineRunRecord[]): RoutineRunRecord[] {
+  let terminalCount = 0
+  return runs.filter((run) => !isTerminalRun(run) || terminalCount++ < MAX_RUNS)
+}
+
 export async function runRoutineWithHistory(
   rootDir: string,
   routine: Routine,
@@ -130,7 +193,7 @@ export async function runRoutineWithHistory(
     if (result && typeof result === 'object' && result.pending === true) {
       record = { ...record, ...metadata, status: 'running', inboxStatus: 'running' }
       await replaceRun(rootDir, record)
-      await markRun(rootDir, routine.id, { ranAt: startedAt, nextRunAt })
+      await markRun(rootDir, routine.id, { ranAt: startedAt, nextRunAt, expectedSchedule: routine })
       await updateRoutine(rootDir, routine.id, { lastError: null, runState: 'running' })
       return record
     }
@@ -143,7 +206,7 @@ export async function runRoutineWithHistory(
       inboxStatus: 'needs_review'
     }
     await replaceRun(rootDir, record)
-    await markRun(rootDir, routine.id, { ranAt: startedAt, nextRunAt })
+    await markRun(rootDir, routine.id, { ranAt: startedAt, nextRunAt, expectedSchedule: routine })
     await updateRoutine(rootDir, routine.id, { lastError: null, runState: 'succeeded' })
     return record
   } catch (error) {
@@ -151,7 +214,7 @@ export async function runRoutineWithHistory(
     const message = error instanceof Error ? error.message : String(error)
     record = { ...record, finishedAt, status: 'failed', inboxStatus: 'failed', error: message }
     await replaceRun(rootDir, record)
-    await markRun(rootDir, routine.id, { ranAt: startedAt, nextRunAt })
+    await markRun(rootDir, routine.id, { ranAt: startedAt, nextRunAt, expectedSchedule: routine })
     await updateRoutine(rootDir, routine.id, { lastError: message, runState: 'failed' })
     return record
   }
@@ -182,10 +245,14 @@ export async function settleRoutineRun(
       resultText: cleanOptionalText(input.resultText) ?? current.resultText,
       error: status === 'failed' ? cleanOptionalText(input.error) ?? 'Routine execution failed' : undefined
     }
-    await writeRuns(rootDir, [record, ...file.runs.filter((run) => run.id !== runId)].slice(0, MAX_RUNS))
+    await writeRuns(rootDir, retainPendingRuns([record, ...file.runs.filter((run) => run.id !== runId)]))
     return { record, changed: true }
   })
   if (result.record && result.changed) {
+    if (result.record.heartbeat) {
+      const routine = (await listRoutines(rootDir)).find((item) => item.id === result.record!.routineId)
+      if (!sameRoutineSessionTarget(routine?.executionTarget, result.record.heartbeat.target)) return result.record
+    }
     await updateRoutine(rootDir, result.record.routineId, {
       lastError: result.record.error ?? null,
       runState: result.record.status
@@ -210,7 +277,7 @@ export async function stageRoutineRunResult(
       resultText: cleanOptionalText(input.resultText) ?? current.resultText,
       resultObservedAt: current.resultObservedAt ?? input.resultObservedAt
     }
-    await writeRuns(rootDir, [record, ...file.runs.filter((run) => run.id !== runId)].slice(0, MAX_RUNS))
+    await writeRuns(rootDir, retainPendingRuns([record, ...file.runs.filter((run) => run.id !== runId)]))
     return record
   })
 }
@@ -230,7 +297,7 @@ export async function recordRoutineRunFinalizationError(
       inboxStatus: 'failed',
       error: cleanOptionalText(error) ?? 'Routine result finalization failed'
     }
-    await writeRuns(rootDir, [record, ...file.runs.filter((run) => run.id !== runId)].slice(0, MAX_RUNS))
+    await writeRuns(rootDir, retainPendingRuns([record, ...file.runs.filter((run) => run.id !== runId)]))
     return record
   })
 }
@@ -246,7 +313,7 @@ export async function setRoutineRunInboxStatus(
     if (!current) return null
     if (current.status !== 'running' || current.inboxStatus === inboxStatus) return current
     const record = { ...current, inboxStatus }
-    await writeRuns(rootDir, [record, ...file.runs.filter((run) => run.id !== runId)].slice(0, MAX_RUNS))
+    await writeRuns(rootDir, retainPendingRuns([record, ...file.runs.filter((run) => run.id !== runId)]))
     return record
   })
 }
@@ -269,7 +336,7 @@ export async function setRoutineRunDispatchState(
       workflowRunId: workflowRunId ?? current.workflowRunId,
       sessionId: sessionId ?? current.sessionId
     }
-    await writeRuns(rootDir, [record, ...file.runs.filter((run) => run.id !== runId)].slice(0, MAX_RUNS))
+    await writeRuns(rootDir, retainPendingRuns([record, ...file.runs.filter((run) => run.id !== runId)]))
     return record
   })
 }
@@ -287,7 +354,7 @@ export async function setRoutineRunExecutionBinding(
       throw new Error(`Routine Run ${runId} cannot change its execution binding`)
     }
     const record: RoutineRunRecord = { ...current, ...binding }
-    await writeRuns(rootDir, [record, ...file.runs.filter((run) => run.id !== runId)].slice(0, MAX_RUNS))
+    await writeRuns(rootDir, retainPendingRuns([record, ...file.runs.filter((run) => run.id !== runId)]))
     return record
   })
 }
@@ -318,7 +385,7 @@ export async function reviewRoutineRunRecord(
       ...(reviewNote ? { reviewNote } : {}),
       reviewedAt
     }
-    await writeRuns(rootDir, [record, ...file.runs.filter((run) => run.id !== runId)].slice(0, MAX_RUNS))
+    await writeRuns(rootDir, retainPendingRuns([record, ...file.runs.filter((run) => run.id !== runId)]))
     return record
   })
 }
@@ -387,7 +454,7 @@ async function reserveRun(rootDir: string, record: RoutineRunRecord): Promise<{ 
       }
       return { record: existing, created: false }
     }
-    await writeRuns(rootDir, [record, ...file.runs].slice(0, MAX_RUNS))
+    await writeRuns(rootDir, retainPendingRuns([record, ...file.runs]))
     return { record, created: true }
   })
 }
@@ -399,7 +466,7 @@ async function replaceRun(rootDir: string, record: RoutineRunRecord): Promise<vo
     const replacement = current && isTerminalRun(current) && !isTerminalRun(record)
       ? current
       : { ...current, ...record }
-    const next = [replacement, ...file.runs.filter((run) => run.id !== record.id)].slice(0, MAX_RUNS)
+    const next = retainPendingRuns([replacement, ...file.runs.filter((run) => run.id !== record.id)])
     await writeRuns(rootDir, next)
   })
 }
@@ -455,6 +522,16 @@ function runsPath(rootDir: string): string {
 function normalizeRunRecord(value: unknown): RoutineRunRecord | null {
   if (!value || typeof value !== 'object') return null
   const record = value as Record<string, unknown>
+  if (record.heartbeat) {
+    const heartbeat = record.heartbeat as RoutineHeartbeatRun
+    try {
+      const target = normalizeRoutineSessionTarget(heartbeat.target)
+      if (!target || record.sessionId !== target.sessionId || typeof heartbeat.scheduledAt !== 'number' ||
+          typeof heartbeat.inputRequestId !== 'string' || typeof heartbeat.prompt !== 'string' ||
+          heartbeat.messageId !== `session-input:${target.sessionId}:${heartbeat.inputRequestId}` ||
+          !['queued', 'dispatching', 'accepted', 'needs_reconciliation'].includes(heartbeat.phase)) return null
+    } catch { return null }
+  }
   if (!(
     typeof record.id === 'string' &&
     typeof record.routineId === 'string' &&

@@ -5,6 +5,7 @@ import { useStore } from '../../store'
 import RunDetailPanel from '../studio/RunDetailPanel'
 import { mergeWorkflowLedgerPages } from '../studio/workInboxNavigation'
 import SessionRawRecords from '../office/PalaceRawRecords'
+import GoalContinuationPanel from './GoalContinuationPanel'
 import './task-execution-panel.css'
 
 type Binding = Pick<SessionMeta, 'id' | 'workspaceId' | 'goalId' | 'workItemId'>
@@ -72,6 +73,7 @@ function BoundExecutionPanel({ binding }: { binding: Binding }): React.JSX.Eleme
       <button className="btn btn-ghost btn-sm" type="button" aria-pressed={tab === 'run'} onClick={() => setTab('run')}>{zh ? '进度、验收与恢复' : 'Progress, acceptance and recovery'}</button>
       <button className="btn btn-ghost btn-sm" type="button" aria-pressed={tab === 'records'} onClick={() => setTab('records')}>{zh ? '工具与原始记录' : 'Tools and source records'}</button>
     </nav>
+    {session && <GoalContinuationPanel key={binding.id} meta={session.meta} runId={runId} />}
     {tab === 'records' && session ? <SessionRawRecords session={session} zh={zh} /> : <>
       {loading && !ledger && <p role="status">{zh ? '正在读取执行记录…' : 'Reading execution records…'}</p>}
       {error && <p role="alert">{error}</p>}

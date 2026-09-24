@@ -184,7 +184,7 @@ async function startListener(port: number): Promise<void> {
     state = errorCode(error) === 'EADDRINUSE' ? 'blocked' : 'error'
     lastErrorCode = errorCode(error) === 'EADDRINUSE' ? 'port_in_use' : 'listener_error'
     lastError = errorCode(error) === 'EADDRINUSE'
-      ? `Port ${port} is already in use. CaoGen did not switch ports automatically.`
+      ? `Port ${port} is already in use. EastGenesis did not switch ports automatically.`
       : 'The local gateway listener could not start.'
   }
 }
@@ -210,7 +210,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
   }
   const hintedProtocol = requestProtocol(request.method, path)
   if (!authorizedGatewayRequest(request.headers)) {
-    response.setHeader('www-authenticate', 'Bearer realm="CaoGen local gateway"')
+    response.setHeader('www-authenticate', 'Bearer realm="EastGenesis local gateway"')
     sendJson(response, 401, gatewayErrorEnvelope('invalid_api_key', 'Invalid local gateway token', hintedProtocol, 401))
     return
   }
@@ -228,7 +228,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     const models = gatewayModelCatalog(listProviders(), 'gemini').map((item) => ({
       name: `models/${item.id}`,
       displayName: item.model,
-      description: `Routed by CaoGen through ${item.providerName}`,
+      description: `Routed by EastGenesis through ${item.providerName}`,
       supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
     }))
     sendJson(response, 200, { models })

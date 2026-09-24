@@ -16,6 +16,8 @@ import type { LegacyMemoryImportInput } from '../../shared/legacy-memory-import-
 import { withDataLifecycleMutation } from '../data-lifecycle/data-lifecycle-mutation-lock'
 import { previewMemoryRetention, readMemoryRetention, saveMemoryRetention } from '../memory/memory-retention'
 import type { MemoryRetentionInput, MemoryRetentionSaveInput } from '../../shared/memory-retention-types'
+import type { SessionMeta } from '../../shared/types'
+import { withTaskMemoryPreferences } from '../memory/memory-preferences'
 import {
   addMemory, archiveStaleMemories, deleteMemory, exportMemories, listMemories, searchMemories, updateMemory,
   type MemoryScope, type MemorySearchInput, type MemoryUpdateInput
@@ -25,6 +27,7 @@ export interface ProjectMemoryIpcOptions {
   memoryRoot: () => string
   targetForSession: (sessionId: string) => ProjectMemoryTarget | null
   taskScopeForSession: (sessionId: string) => Promise<MemoryScope>
+  metaForSession: (sessionId: string) => SessionMeta | undefined
 }
 
 export function registerProjectMemoryIpc(options: ProjectMemoryIpcOptions): void {
@@ -127,8 +130,9 @@ function withLayeredMemoryScope<T>(
   const root = options.memoryRoot()
   // Resolve the current writer after acquiring the deletion lock. Completed
   // deletion receipts may compact, but a closed/removed caller cannot survive this read.
-  return withDataLifecycleMutation(dirname(root), async () =>
-    operation(sessionId === undefined ? {} : await options.taskScopeForSession(sessionId), root))
+  return withTaskMemoryPreferences(() => sessionId === undefined ? {} : requiredMeta(options, sessionId), () =>
+    withDataLifecycleMutation(dirname(root), async () =>
+      operation(sessionId === undefined ? {} : await options.taskScopeForSession(sessionId), root)))
 }
 
 async function verifiedMemoryMutation<T>(
@@ -138,9 +142,15 @@ async function verifiedMemoryMutation<T>(
 ): Promise<T> {
   const target = requiredTarget(options, sessionId)
   const root = options.memoryRoot()
-  const result = await mutation(target, root)
+  const result = await withTaskMemoryPreferences(() => requiredMeta(options, sessionId), () => mutation(target, root))
   if (target.projectId) await verifyProductionProjectMutation(dirname(root), target.projectId)
   return result
+}
+
+function requiredMeta(options: ProjectMemoryIpcOptions, id: string): SessionMeta {
+  const meta = options.metaForSession(id)
+  if (!meta || meta.status === 'closed') throw new Error('当前任务不存在或已关闭')
+  return meta
 }
 
 function requiredTarget(options: ProjectMemoryIpcOptions, sessionId: string): ProjectMemoryTarget {

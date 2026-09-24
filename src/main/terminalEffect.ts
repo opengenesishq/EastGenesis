@@ -14,8 +14,13 @@ import { stableValueDigest } from './task/tool-idempotency'
 type OperationGateway = typeof executeInteractiveOperationEffect
 
 export interface TerminalEffectContext {
+  executionEnvironment?: import('../shared/wsl-types').ExecutionEnvironmentBinding
+  assertActive?: () => void
   sourceSessionId: string
   projectId?: string
+  workspaceId?: string
+  standalone?: boolean
+  ownerWebContentsId?: number
   cwd: string
 }
 
@@ -28,8 +33,12 @@ export interface TerminalEffectManager {
 }
 
 interface TerminalEffectStartOptions {
+  executionEnvironment?: import('../shared/wsl-types').ExecutionEnvironmentBinding
   cwd: string
   sessionId?: string
+  ownerWebContentsId?: number
+  workspaceId?: string
+  projectId?: string
   cols?: number
   rows?: number
   reuse?: boolean
@@ -63,25 +72,33 @@ export async function startTerminalWithEffect(
     title: '启动终端',
     sourceSessionId: context.sourceSessionId,
     projectId: context.projectId,
+    workspaceId: context.workspaceId,
     cwd: context.cwd,
     toolName,
     toolInput: {
+      sourceKind: context.standalone ? 'workspace_human' : 'task',
       sessionIdDigest: stableValueDigest(context.sourceSessionId),
       cwdDigest: stableValueDigest(context.cwd),
+      executionEnvironment: context.executionEnvironment,
       ...prepared
     },
     execute: (effect) => {
       assertOpaqueTerminalEffect(effect, toolName)
+      context.assertActive?.()
       return manager.start({
         cwd: context.cwd,
-        sessionId: context.sourceSessionId,
+        executionEnvironment: context.executionEnvironment,
+        sessionId: context.standalone ? undefined : context.sourceSessionId,
+        ownerWebContentsId: context.ownerWebContentsId,
+        workspaceId: context.workspaceId,
+        projectId: context.projectId,
         ...prepared
       })
     },
     isSuccess: isTerminalInfo,
     resultSummary: summarizeTerminalStart
   })
-  return terminalStartOutcome(outcome)
+  return { ...terminalStartOutcome(outcome), sourceKind: context.standalone ? 'workspace_human' : 'task' }
 }
 
 export async function writeTerminalWithEffect(
@@ -99,6 +116,7 @@ export async function writeTerminalWithEffect(
     title: '向终端写入输入',
     toolName,
     toolInput: {
+      sourceKind: terminalSourceKind(terminal),
       terminalIdDigest: stableValueDigest(id),
       dataSha256: createHash('sha256').update(data, 'utf8').digest('hex'),
       bytes: Buffer.byteLength(data, 'utf8')
@@ -111,7 +129,7 @@ export async function writeTerminalWithEffect(
     isSuccess: isTerminalMutationSuccess,
     resultSummary: summarizeTerminalMutation
   })
-  return terminalActionOutcome(outcome, '终端输入')
+  return { ...terminalActionOutcome(outcome, '终端输入'), sourceKind: terminalSourceKind(terminal) }
 }
 
 export async function resizeTerminalWithEffect(
@@ -133,7 +151,7 @@ export async function resizeTerminalWithEffect(
     kind: 'terminal_action',
     title: '调整终端尺寸',
     toolName,
-    toolInput: { terminalIdDigest: stableValueDigest(id), ...prepared },
+    toolInput: { sourceKind: terminalSourceKind(terminal), terminalIdDigest: stableValueDigest(id), ...prepared },
     execute: (effect) => {
       assertOpaqueTerminalEffect(effect, toolName)
       manager.resize(id, prepared.cols, prepared.rows)
@@ -142,7 +160,7 @@ export async function resizeTerminalWithEffect(
     isSuccess: isTerminalMutationSuccess,
     resultSummary: summarizeTerminalMutation
   })
-  return terminalActionOutcome(outcome, '终端尺寸调整')
+  return { ...terminalActionOutcome(outcome, '终端尺寸调整'), sourceKind: terminalSourceKind(terminal) }
 }
 
 export async function closeTerminalWithEffect(
@@ -158,7 +176,7 @@ export async function closeTerminalWithEffect(
     kind: 'terminal_action',
     title: '关闭终端',
     toolName,
-    toolInput: { terminalIdDigest: stableValueDigest(id) },
+    toolInput: { sourceKind: terminalSourceKind(terminal), terminalIdDigest: stableValueDigest(id) },
     execute: (effect) => {
       assertOpaqueTerminalEffect(effect, toolName)
       manager.close(id)
@@ -167,13 +185,19 @@ export async function closeTerminalWithEffect(
     isSuccess: isTerminalMutationSuccess,
     resultSummary: summarizeTerminalMutation
   })
-  return terminalActionOutcome(outcome, '终端关闭')
+  return { ...terminalActionOutcome(outcome, '终端关闭'), sourceKind: terminalSourceKind(terminal) }
+}
+
+function terminalSourceKind(terminal: TerminalInfo): 'task' | 'workspace_human' {
+  return terminal.sessionId ? 'task' : 'workspace_human'
 }
 
 function terminalOperationContext(terminal: TerminalInfo, id: string): TerminalEffectContext {
   return {
     sourceSessionId: terminal.sessionId ?? `terminal:unscoped:${stableValueDigest(id).slice(0, 16)}`,
-    cwd: terminal.cwd
+    cwd: terminal.cwd,
+    projectId: terminal.projectId,
+    workspaceId: terminal.workspaceId
   }
 }
 

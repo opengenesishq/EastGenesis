@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { isAbsolute } from 'node:path'
 import type {
   AcceptanceResult,
   AcceptanceSpec,
@@ -40,6 +41,17 @@ export function requiredId(value: unknown, label: string): string {
 export function optionalId(value: unknown, label: string): string | undefined {
   if (value === undefined || value === null || value === '') return undefined
   return requiredId(value, label)
+}
+
+export function normalizePrimaryResource(value: unknown, resources: ProjectResource[]): string | undefined {
+  if (value === undefined || value === null) return undefined
+  const id = requiredId(value, 'primary resource id')
+  const resource = resources.find(item => item.id === id)
+  if (!resource || !['directory', 'repository'].includes(resource.kind) ||
+      !resource.path || !isAbsolute(resource.path) || /[\0-\x1f\x7f]/.test(resource.path)) {
+    throw new ProjectWorkspaceError('invalid_input', '主文件夹必须是项目中已登记的本机文件夹或仓库。')
+  }
+  return id
 }
 
 export function requiredText(value: unknown, label: string): string {

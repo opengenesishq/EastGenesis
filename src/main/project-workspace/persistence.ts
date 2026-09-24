@@ -10,7 +10,7 @@ import type {
   ProjectWorkspaceState
 } from '../../shared/project-workspace-types'
 import { PROJECT_WORKSPACE_SCHEMA_VERSION } from '../../shared/project-workspace-types'
-import { canonicalJson, clone, digest, redact } from './codec'
+import { canonicalJson, clone, digest, redact, normalizePrimaryResource } from './codec'
 import { ProjectWorkspaceError } from './errors'
 import { isProjectInstitutionTemplateRef } from '../../shared/project-institution-template'
 import { assertInstitutionMigrationEvents } from './institution-migration'
@@ -77,6 +77,7 @@ function assertState(value: unknown): asserts value is ProjectWorkspaceState {
     }
   }
   for (const workspace of candidate.workspaces!) {
+    normalizePrimaryResource(workspace.primaryResourceId, workspace.resources)
     if (workspace.institutionTemplate !== undefined && !isProjectInstitutionTemplateRef(workspace.institutionTemplate)) {
       throw new ProjectWorkspaceError('unsupported_schema', `workspace ${workspace.id} institution template is unsupported`)
     }

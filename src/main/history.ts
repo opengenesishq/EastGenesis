@@ -111,6 +111,19 @@ export function setHistoryArchived(id: string, archived: boolean): void {
   persist(current.map((entry) => entry.id === id ? { ...entry, archived } : entry))
 }
 
+/** One atomic history-store write. Archiving never terminates a task or removes its files. */
+export function setHistoriesArchived(ids: readonly string[], archived: boolean): string[] {
+  const selected = new Set(ids)
+  const changedIds: string[] = []
+  const next = listHistory().map(entry => {
+    if (!selected.has(entry.id) || Boolean(entry.archived) === archived) return entry
+    changedIds.push(entry.id)
+    return { ...entry, archived }
+  })
+  if (changedIds.length) persist(next)
+  return changedIds
+}
+
 export function setHistoryPinned(id: string, pinned: boolean): void {
   const current = listHistory()
   if (!current.some((entry) => entry.id === id)) return

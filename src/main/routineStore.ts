@@ -2,13 +2,19 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
-import { nextAfter } from './cronParse'
+import { calculateRoutineSchedule, isRRuleSchedule, normalizeRoutineStartAt, normalizeRoutineTimeZone, type RoutineScheduleState, type RoutineScheduleDefinition } from '../shared/routine-schedule'
 import { writeDurableFile } from './durable-file'
-import type { EngineKind, PermissionModeId, RoutineNotificationOptions } from '../shared/types'
+import type { EngineKind, PermissionModeId, RoutineNotificationOptions, ProviderReasoningEffort } from '../shared/types'
+import { normalizeRoutineGoalContinuation, type RoutineSessionTarget, type RoutineGoalContinuation, type RoutineGoalContinuationState } from '../shared/routine-heartbeat-types'
+import { normalizeTaskReasoning } from '../shared/task-reasoning'
+import { normalizeRoutineSessionTarget } from './routines/routine-heartbeat-target'
 
 export type RoutinePermissionMode = PermissionModeId
 
 export interface Routine extends Record<string, unknown> {
+  executionTarget?: RoutineSessionTarget
+  goalContinuation?: RoutineGoalContinuation
+  goalContinuationState?: RoutineGoalContinuationState
   id: string
   name: string
   prompt: string
@@ -22,10 +28,16 @@ export interface Routine extends Record<string, unknown> {
   /** Optional execution resource root. Canonical Projects can resolve it automatically. */
   projectCwd?: string
   schedule: string
+  timeZone?: string
+  startAt?: number
+  scheduleState?: RoutineScheduleState
+  scheduleError?: string
   frequency?: string
   providerId: string
   model: string
   engine?: EngineKind
+  reasoningEffort?: ProviderReasoningEffort
+  executionLocation?: 'local' | 'worktree'
   permissionMode: RoutinePermissionMode
   budgetUsd: number
   notification: RoutineNotificationOptions
@@ -37,6 +49,8 @@ export interface Routine extends Record<string, unknown> {
 }
 
 export type CreateRoutineInput = {
+  goalContinuation?: RoutineGoalContinuation | null
+  executionTarget?: { kind: 'existing_session'; sessionId: string } | null
   id?: string
   name: string
   prompt?: string
@@ -46,10 +60,16 @@ export type CreateRoutineInput = {
   digitalWorkerId?: string
   projectCwd?: string
   schedule?: string
+  timeZone?: string
+  startAt?: number
+  scheduleState?: RoutineScheduleState
+  scheduleError?: string
   frequency?: string
   providerId?: string
   model?: string
   engine?: EngineKind
+  reasoningEffort?: ProviderReasoningEffort
+  executionLocation?: 'local' | 'worktree'
   permissionMode?: RoutinePermissionMode
   budgetUsd?: number
   notification?: RoutineNotificationOptions
@@ -61,6 +81,8 @@ export type CreateRoutineInput = {
 } & Record<string, unknown>
 
 export type UpdateRoutineInput = {
+  goalContinuation?: RoutineGoalContinuation | null
+  executionTarget?: { kind: 'existing_session'; sessionId: string } | null
   name?: string
   prompt?: string
   content?: string
@@ -69,10 +91,16 @@ export type UpdateRoutineInput = {
   digitalWorkerId?: string | null
   projectCwd?: string
   schedule?: string
+  timeZone?: string
+  startAt?: number
+  scheduleState?: RoutineScheduleState
+  scheduleError?: string
   frequency?: string
   providerId?: string
   model?: string
   engine?: EngineKind
+  reasoningEffort?: ProviderReasoningEffort
+  executionLocation?: 'local' | 'worktree'
   permissionMode?: RoutinePermissionMode
   budgetUsd?: number
   notification?: RoutineNotificationOptions
@@ -84,6 +112,7 @@ export type UpdateRoutineInput = {
 export interface MarkRunOptions {
   ranAt?: number
   nextRunAt?: number | null
+  expectedSchedule?: RoutineScheduleDefinition
 }
 
 interface RoutineFile {
@@ -100,7 +129,6 @@ export class RoutineStoreValidationError extends Error {
 
 const ROUTINES_FILE = 'routines.json'
 const STORE_VERSION = 1
-const MINUTE_MS = 60_000
 const routineStoreWriteQueues = new Map<string, Promise<void>>()
 const PERMISSION_MODES = new Set<RoutinePermissionMode>([
   'default',
@@ -115,6 +143,8 @@ const DEFAULT_NOTIFICATION: RoutineNotificationOptions = {
   onFailure: true
 }
 const SCHEMA_KEYS = new Set([
+  'goalContinuation',
+  'executionTarget',
   'id',
   'name',
   'prompt',
@@ -124,10 +154,16 @@ const SCHEMA_KEYS = new Set([
   'digitalWorkerId',
   'projectCwd',
   'schedule',
+  'timeZone',
+  'startAt',
+  'scheduleState',
+  'scheduleError',
   'frequency',
   'providerId',
   'model',
   'engine',
+  'reasoningEffort',
+  'executionLocation',
   'permissionMode',
   'budgetUsd',
   'notification',
@@ -168,6 +204,8 @@ export async function createRoutine(rootDir: string, input: CreateRoutineInput):
     }
     const routine: Routine = {
       ...copyUnknownFields(input),
+      executionTarget: normalizeRoutineSessionTarget(input.executionTarget),
+      goalContinuation: normalizeRoutineGoalContinuation(input.goalContinuation),
       id,
       name: normalizeRequiredString(input.name, 'name'),
       prompt,
@@ -177,10 +215,14 @@ export async function createRoutine(rootDir: string, input: CreateRoutineInput):
       digitalWorkerId: normalizeOptionalId(input.digitalWorkerId, 'digitalWorkerId'),
       projectCwd,
       schedule,
+      timeZone: normalizeRoutineTimeZone(input.timeZone),
+      startAt: normalizeRoutineStartAt(input.startAt),
       frequency: normalizeOptionalString(input.frequency, 'frequency') ?? schedule,
       providerId: normalizeOptionalString(input.providerId, 'providerId') ?? '',
       model: normalizeOptionalString(input.model, 'model') ?? '',
       engine: normalizeOptionalEngine(input.engine),
+      reasoningEffort: normalizeTaskReasoning(input.reasoningEffort),
+      executionLocation: executionLocation(input.executionLocation),
       permissionMode: normalizePermissionMode(input.permissionMode ?? 'default'),
       budgetUsd: normalizeBudget(input.budgetUsd ?? 0),
       notification: normalizeNotificationOptions(input.notification),
@@ -189,11 +231,14 @@ export async function createRoutine(rootDir: string, input: CreateRoutineInput):
       updatedAt,
       lastRunAt: normalizeNullableTimestamp(input.lastRunAt, 'lastRunAt') ?? null
     }
+    if (isRRuleSchedule(schedule) && routine.startAt === undefined) routine.startAt = normalizeRoutineStartAt(createdAt)
+    const timing = calculateRoutineSchedule(routine, now)
+    if (timing.state === 'invalid') throw new RoutineStoreValidationError(timing.error!)
+    routine.scheduleState = timing.state
     const nextRunAt = normalizeNullableTimestamp(input.nextRunAt, 'nextRunAt')
     if (nextRunAt !== null) routine.nextRunAt = nextRunAt
     else if (routine.enabled && !hasOwn(input, 'nextRunAt')) {
-      const seeded = computeInitialNextRun(routine.schedule, now)
-      if (seeded !== null) routine.nextRunAt = seeded
+      if (timing.nextRunAt !== null) routine.nextRunAt = timing.nextRunAt
     }
 
     file.routines.push(routine)
@@ -205,7 +250,8 @@ export async function createRoutine(rootDir: string, input: CreateRoutineInput):
 export async function updateRoutine(
   rootDir: string,
   id: string,
-  patch: UpdateRoutineInput
+  inputPatch: UpdateRoutineInput,
+  expectedSchedule?: RoutineScheduleDefinition
 ): Promise<Routine | null> {
   return withRoutineStoreWriteLock(rootDir, async () => {
     const file = await readStore(rootDir)
@@ -213,6 +259,13 @@ export async function updateRoutine(
     if (index === -1) return null
 
   const current = file.routines[index]
+  const patch = { ...inputPatch }
+  if (expectedSchedule && (expectedSchedule.schedule !== current.schedule || expectedSchedule.timeZone !== current.timeZone || expectedSchedule.startAt !== current.startAt)) {
+    // A finished old run cannot overwrite the next time chosen by a concurrent schedule edit.
+    delete patch.nextRunAt
+    delete patch.scheduleState
+    delete patch.scheduleError
+  }
   const prompt = hasOwn(patch, 'prompt')
     ? normalizeRequiredString(patch.prompt, 'prompt')
     : hasOwn(patch, 'content')
@@ -235,6 +288,8 @@ export async function updateRoutine(
   const routine: Routine = {
     ...copyUnknownFields(current),
     ...copyUnknownFields(patch),
+    executionTarget: hasOwn(patch, 'executionTarget') ? normalizeRoutineSessionTarget(patch.executionTarget) : current.executionTarget,
+    goalContinuation: hasOwn(patch, 'goalContinuation') ? normalizeRoutineGoalContinuation(patch.goalContinuation) : current.goalContinuation,
     id: current.id,
     name: hasOwn(patch, 'name') ? normalizeRequiredString(patch.name, 'name') : current.name,
     prompt,
@@ -252,6 +307,10 @@ export async function updateRoutine(
       : current.digitalWorkerId,
     projectCwd,
     schedule,
+    timeZone: hasOwn(patch, 'timeZone') ? normalizeRoutineTimeZone(patch.timeZone) : current.timeZone,
+    startAt: hasOwn(patch, 'startAt') ? normalizeRoutineStartAt(patch.startAt) : current.startAt,
+    scheduleState: current.scheduleState,
+    scheduleError: current.scheduleError,
     frequency: hasOwn(patch, 'frequency')
       ? normalizeOptionalString(patch.frequency, 'frequency')
       : hasOwn(patch, 'schedule')
@@ -262,6 +321,8 @@ export async function updateRoutine(
       : current.providerId,
     model: hasOwn(patch, 'model') ? (normalizeOptionalString(patch.model, 'model') ?? '') : current.model,
     engine: hasOwn(patch, 'engine') ? normalizeOptionalEngine(patch.engine) : current.engine,
+    reasoningEffort: hasOwn(patch, 'reasoningEffort') ? normalizeTaskReasoning(patch.reasoningEffort) : current.reasoningEffort,
+    executionLocation: hasOwn(patch, 'executionLocation') ? executionLocation(patch.executionLocation) : current.executionLocation,
     permissionMode: hasOwn(patch, 'permissionMode')
       ? normalizePermissionMode(patch.permissionMode)
       : current.permissionMode,
@@ -277,12 +338,28 @@ export async function updateRoutine(
       : current.lastRunAt
   }
 
-  if (hasOwn(patch, 'nextRunAt')) {
+  const timingChanged = routine.schedule !== current.schedule || routine.timeZone !== current.timeZone || routine.startAt !== current.startAt
+  if (timingChanged || (patch.enabled === true && !current.enabled)) {
+    if (isRRuleSchedule(routine.schedule) && routine.startAt === undefined) routine.startAt = normalizeRoutineStartAt(current.createdAt)
+    const timing = calculateRoutineSchedule(routine, Date.now())
+    if (timing.state === 'invalid') throw new RoutineStoreValidationError(timing.error!)
+    routine.scheduleState = timing.state
+    routine.scheduleError = undefined
+    if (timing.nextRunAt !== null) routine.nextRunAt = timing.nextRunAt
+  } else if (hasOwn(patch, 'nextRunAt')) {
     const nextRunAt = normalizeNullableTimestamp(patch.nextRunAt, 'nextRunAt')
-    if (nextRunAt !== null) routine.nextRunAt = nextRunAt
+    if (nextRunAt !== null) { routine.nextRunAt = nextRunAt; routine.scheduleState = 'active'; routine.scheduleError = undefined }
+    else if (isRRuleSchedule(routine.schedule)) {
+      const timing = calculateRoutineSchedule(routine, routine.lastRunAt ?? Date.now())
+      routine.scheduleState = timing.state
+      routine.scheduleError = timing.error
+    }
   } else if (current.nextRunAt !== undefined) {
     routine.nextRunAt = current.nextRunAt
   }
+
+  if (patch.scheduleState === 'invalid') { routine.scheduleState = 'invalid'; routine.scheduleError = typeof patch.scheduleError === 'string' ? patch.scheduleError.slice(0, 2000) : '计划时间需要修正'; delete routine.nextRunAt }
+  if (patch.scheduleState === 'exhausted' && isRRuleSchedule(routine.schedule) && !timingChanged) { routine.scheduleState = 'exhausted'; routine.scheduleError = undefined; delete routine.nextRunAt }
 
     file.routines[index] = routine
     await writeStore(rootDir, file.routines)
@@ -360,7 +437,7 @@ export async function markRun(
     lastRunAt: normalizeOptionalTimestamp(options.ranAt, 'ranAt') ?? Date.now()
   }
   if (hasOwn(options, 'nextRunAt')) patch.nextRunAt = options.nextRunAt ?? undefined
-  return updateRoutine(rootDir, id, patch)
+  return updateRoutine(rootDir, id, patch, options.expectedSchedule)
 }
 
 export {
@@ -426,8 +503,20 @@ function normalizeStoredRoutine(value: unknown): Routine | null {
     const projectId = normalizeOptionalId(value.projectId, 'projectId')
     const projectCwd = normalizeOptionalString(value.projectCwd, 'projectCwd')?.trim() || undefined
     if (!projectId && !projectCwd) return null
+    let timeZone: string | undefined
+    let startAt: number | undefined
+    let timingError: string | undefined
+    try {
+      timeZone = normalizeRoutineTimeZone(value.timeZone)
+      startAt = normalizeRoutineStartAt(value.startAt)
+    } catch (error) {
+      timeZone = typeof value.timeZone === 'string' ? value.timeZone.slice(0, 100) : undefined
+      timingError = error instanceof Error ? error.message : '计划时区或起始时间无效'
+    }
     const routine: Routine = {
       ...copyUnknownFields(value),
+      executionTarget: normalizeRoutineSessionTarget(value.executionTarget),
+      goalContinuation: normalizeRoutineGoalContinuation(value.goalContinuation),
       id,
       name: normalizeRequiredString(value.name, 'name'),
       prompt: normalizeRequiredString(value.prompt ?? value.content, 'prompt'),
@@ -437,10 +526,16 @@ function normalizeStoredRoutine(value: unknown): Routine | null {
       digitalWorkerId: normalizeOptionalId(value.digitalWorkerId, 'digitalWorkerId'),
       projectCwd,
       schedule: normalizeRequiredString(value.schedule ?? value.frequency, 'schedule'),
+      timeZone,
+      startAt,
+      scheduleState: timingError ? 'invalid' : value.scheduleState === 'exhausted' || value.scheduleState === 'invalid' ? value.scheduleState : 'active',
+      scheduleError: timingError ?? (typeof value.scheduleError === 'string' ? value.scheduleError.slice(0, 2000) : undefined),
       frequency: normalizeOptionalString(value.frequency, 'frequency') ?? normalizeRequiredString(value.schedule ?? value.frequency, 'schedule'),
       providerId: normalizeOptionalString(value.providerId, 'providerId') ?? '',
       model: normalizeOptionalString(value.model, 'model') ?? '',
       engine: normalizeOptionalEngine(value.engine),
+      reasoningEffort: normalizeTaskReasoning(value.reasoningEffort),
+      executionLocation: executionLocation(value.executionLocation),
       permissionMode: isPermissionMode(value.permissionMode) ? value.permissionMode : 'default',
       budgetUsd: isNonNegativeNumber(value.budgetUsd) ? value.budgetUsd : 0,
       notification: normalizeNotificationOptions(value.notification),
@@ -450,7 +545,7 @@ function normalizeStoredRoutine(value: unknown): Routine | null {
       lastRunAt: normalizeNullableTimestamp(value.lastRunAt, 'lastRunAt') ?? null
     }
     const nextRunAt = normalizeNullableTimestamp(value.nextRunAt, 'nextRunAt')
-    if (nextRunAt !== null) routine.nextRunAt = nextRunAt
+    if (nextRunAt !== null && !timingError) routine.nextRunAt = nextRunAt
     return routine
   } catch {
     return null
@@ -533,23 +628,6 @@ function normalizeNotificationOptions(
   }
 }
 
-function computeInitialNextRun(schedule: string, from: number): number | null {
-  const trimmed = schedule.trim()
-  const interval = parseIntervalSchedule(trimmed)
-  if (interval !== null) return interval > 0 ? from + interval : null
-  return nextAfter(trimmed, from)
-}
-
-function parseIntervalSchedule(input: string): number | null {
-  const match = /^(?:every\s+)?(\d+)\s*([smhd])$/i.exec(input)
-  if (!match) return null
-  const value = Number(match[1])
-  if (!Number.isFinite(value) || value <= 0) return 0
-  const unit = match[2].toLowerCase()
-  const unitMs = unit === 's' ? 1_000 : unit === 'm' ? MINUTE_MS : unit === 'h' ? 3_600_000 : 86_400_000
-  return value * unitMs
-}
-
 function normalizeBoolean(value: unknown, field: string): boolean {
   if (typeof value !== 'boolean') {
     throw new RoutineStoreValidationError(`${field} must be a boolean`)
@@ -600,4 +678,10 @@ function hasOwn(value: object, key: string): boolean {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error
+}
+
+function executionLocation(value: unknown): 'local' | 'worktree' {
+  if (value === undefined || value === null || value === 'local') return 'local'
+  if (value === 'worktree') return value
+  throw new RoutineStoreValidationError('执行位置须为本地或 Worktree。')
 }

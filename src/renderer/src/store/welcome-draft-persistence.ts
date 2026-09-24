@@ -1,11 +1,12 @@
 import { AUTO_MODEL } from '../../../shared/types'
+import { parseExecutionTarget, parseRemoteIntakes } from '../components/experience/welcome-remote-target'
 import type {
   WelcomeComputeSelectionSource,
   WelcomeDraftState
 } from './welcome-draft'
 
 export const WELCOME_DRAFT_STORAGE_KEY = 'caogen.welcome-draft.v1'
-export const WELCOME_DRAFT_SCHEMA_VERSION = 4
+export const WELCOME_DRAFT_SCHEMA_VERSION = 5
 
 const MAX_TEXT_LENGTH = 200_000
 const MAX_PATH_LENGTH = 32_768
@@ -25,8 +26,8 @@ export function loadWelcomeDraft(
     if (!raw) return fallback
     const payload = JSON.parse(raw) as { schemaVersion?: unknown; draft?: unknown }
     const draft = payload.schemaVersion === WELCOME_DRAFT_SCHEMA_VERSION
-      ? parseDraft(payload.draft, false)
-      : payload.schemaVersion === 3 || payload.schemaVersion === 2
+      ? parseDraft(payload.draft, false, true)
+      : payload.schemaVersion === 4 || payload.schemaVersion === 3 || payload.schemaVersion === 2
         ? parseDraft(payload.draft, false)
       : payload.schemaVersion === 1
         ? parseDraft(payload.draft, true)
@@ -58,18 +59,35 @@ export function persistWelcomeDraft(
   }
 }
 
+/** Remote submissions and acknowledged cross-window drafts must survive restart.
+ * Ordinary typing remains best-effort; these two boundaries fail before sending. */
+export function persistWelcomeDraftStrict(draft: WelcomeDraftState, storage: Storage | null = resolveStorage()): void {
+  if (!storage) throw new Error('草稿持久存储不可用，远端操作尚未发送。')
+  const serialized = JSON.stringify({ schemaVersion: WELCOME_DRAFT_SCHEMA_VERSION, draft })
+  try {
+    storage.setItem(WELCOME_DRAFT_STORAGE_KEY, serialized)
+    if (storage.getItem(WELCOME_DRAFT_STORAGE_KEY) !== serialized) throw new Error('Readback failed')
+  } catch { throw new Error('无法保存远端请求与草稿，操作尚未发送，请保留当前内容并恢复本机存储。') }
+}
+
 function resolveStorage(): Storage | null {
   if (typeof window === 'undefined') return null
   try { return window.localStorage } catch { return null }
 }
 
-function parseDraft(value: unknown, legacy: boolean): WelcomeDraftState | null {
+function parseDraft(value: unknown, legacy: boolean, remote = false): WelcomeDraftState | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const draft = value as Record<string, unknown>
   if (!validDraftFields(draft, legacy)) return null
-  const { experienceModeOverride: _legacyExperienceModeOverride, ...currentDraft } = draft
+  const executionTarget = remote ? parseExecutionTarget(draft.executionTarget ?? { kind: 'local' }) : { kind: 'local' as const }
+  if (!executionTarget) return null
   return {
-    ...currentDraft,
+    text: draft.text, projectChoice: draft.projectChoice, cwd: draft.cwd, driveMode: draft.driveMode,
+    routingMode: draft.routingMode, providerId: draft.providerId, model: draft.model, permissionMode: draft.permissionMode,
+    taskStrategy: draft.taskStrategy, forkFromSdkSessionId: draft.forkFromSdkSessionId,
+    forkCheckpointId: draft.forkCheckpointId, forkSourceTitle: draft.forkSourceTitle,
+    executionTarget, draftVersion: remote && Number.isSafeInteger(draft.draftVersion) ? draft.draftVersion : 0,
+    remoteIntakes: remote ? parseRemoteIntakes(draft.remoteIntakes) : [],
     computeSelectionSource: legacy
       ? inferLegacyComputeSelectionSource(draft)
       : draft.computeSelectionSource as WelcomeComputeSelectionSource
@@ -140,4 +158,5 @@ function isEmptyDraft(draft: WelcomeDraftState): boolean {
     && draft.permissionMode === null && draft.taskStrategy === undefined
     && draft.forkFromSdkSessionId === undefined && draft.forkCheckpointId === undefined
     && draft.forkSourceTitle === undefined
+    && draft.executionTarget?.kind !== 'remote' && !draft.remoteIntakes?.length
 }

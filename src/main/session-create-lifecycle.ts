@@ -1,3 +1,5 @@
+import { assertTaskExecutionEnvironment, createWslBinding, resolveTaskExecutionEnvironment } from './wsl/binding'
+import { restoreWorkspaceHandoff, workspaceHandoffAllowsLocal } from './workspace-handoff'
 import { statSync } from 'node:fs'
 import { app } from 'electron'
 import { resolve } from 'node:path'
@@ -40,6 +42,10 @@ import { reconcileTaskExecutionAuthorityMarker } from './permission/task-executi
 import { assertSessionModelChange } from './session-model-change'
 import { normalizeSessionRoutingControl } from '../shared/session-routing-control'
 import { assertSessionExecutorEngine, normalizeSessionExecutorEngine } from '../shared/session-executor-selection'
+import { getSideChatRecord } from './side-chat/side-chat-store'
+import { assertSideChatBinding } from './side-chat/side-chat-policy'
+import { normalizeMemoryOverrides } from '../shared/memory-preferences-types'
+import { normalizeTaskReasoning } from '../shared/task-reasoning'
 
 export interface SessionCreationDraft {
   opts: CreateSessionOptions
@@ -57,12 +63,35 @@ export function prepareSessionCreationDraft(
   parentMeta?: SessionMeta
 ): SessionCreationDraft {
   const historySource = sessionConversationHistory(input)
-  const resumeHistory = historySource?.history
+  const resumeHistory = historySource?.mode === 'resume' && historySource.history
+    ? restoreWorkspaceHandoff(historySource.history as unknown as SessionMeta) as unknown as HistoryEntry
+    : historySource?.history
   const forking = historySource?.mode === 'fork'
+  const savedSideChat = resumeHistory && /^[a-f0-9-]{36}$/.test(resumeHistory.id)
+    ? getSideChatRecord(app.getPath('userData'), resumeHistory.id)
+    : undefined
+  const historySideChat = savedSideChat?.binding ?? resumeHistory?.sideChat
+  if (historySideChat && forking) throw new Error('只读侧聊不能分叉为执行任务，请回到原任务创建分支。')
+  if (historySideChat && input.sideChat && JSON.stringify(historySideChat) !== JSON.stringify(input.sideChat)) {
+    throw new Error('恢复侧聊不能更改已保存的只读身份。')
+  }
+  if (historySource && input.sideChat && !historySideChat) throw new Error('普通任务历史不能恢复为侧聊。')
+  if (historySideChat && (input.taskStrategy && input.taskStrategy !== 'view' || input.isolated === true)) {
+    throw new Error('恢复侧聊必须保留只读策略和原工作目录。')
+  }
+  const opts = normalizedSessionCreationOptions(input, resumeHistory, historySource?.mode)
+  const executionEnvironment = resolveTaskExecutionEnvironment({ cwd: opts.cwd, selection: input.executionEnvironment,
+    saved: resumeHistory ? resumeHistory.executionEnvironment ?? { kind: 'host' } : parentMeta?.executionEnvironment,
+    preferences: getSettings().wsl })
+  if (executionEnvironment.kind === 'wsl') opts.cwd = executionEnvironment.hostCwd
   const resumeWorktreeRecord = historySource?.mode === 'resume'
     ? resumeHistoryWorktreeRecord(resumeHistory)
     : undefined
-  const opts = normalizedSessionCreationOptions(input, resumeHistory, historySource?.mode)
+  if (historySideChat) {
+    opts.sideChat = historySideChat
+    opts.taskStrategy = 'view'
+    opts.isolated = false
+  }
   // Resuming the same work cannot erase its executor boundary. Forks make
   // their own choice and never inherit an unrelated execution requirement.
   const savedExecutor = historySource?.mode === 'resume' ? resumeHistory?.executorEngine : undefined
@@ -101,6 +130,15 @@ export function prepareSessionCreationDraft(
     taskStrategy,
     defaultPermissionMode: drivePolicy.defaultPermissionMode
   })
+  baseMeta.executionEnvironment = executionEnvironment
+  baseMeta.reasoningEffort = normalizeTaskReasoning(historySource?.mode === 'resume' ? resumeHistory?.reasoningEffort : input.reasoningEffort)
+  baseMeta.memoryOverrides = historySource?.mode === 'resume' ? normalizeMemoryOverrides(resumeHistory?.memoryOverrides) : undefined
+  if (opts.sideChat) {
+    const sideRecord = getSideChatRecord(app.getPath('userData'), opts.sideChat.sideChatId)
+    if (sideRecord?.routingControl) {
+      baseMeta.routingControl = normalizeSessionRoutingControl(sideRecord.routingControl, baseMeta)
+    }
+  }
   // A resumed, forked or delegated task cannot silently regain legacy file
   // access when its source required an explicit local grant.
   if (resumeHistory?.taskExecutionAuthorityRequired || parentMeta?.taskExecutionAuthorityRequired) {
@@ -108,7 +146,7 @@ export function prepareSessionCreationDraft(
   }
   // A model-change receipt belongs to the original task. Reopening that
   // conversation must keep its identity, including an unfinished switch.
-  if (historySource?.mode === 'resume' && resumeHistory && (resumeWorktreeRecord || resumeHistory.modelChange || resumeHistory.routingControl || resumeHistory.executorEngine)) {
+  if (historySource?.mode === 'resume' && resumeHistory && (historySideChat || resumeHistory.workspaceHandoff || resumeHistory.workspaceHandoffPending || resumeWorktreeRecord || resumeHistory.modelChange || resumeHistory.routingControl || resumeHistory.executorEngine || resumeHistory.executionEnvironment)) {
     baseMeta.id = resumeHistory.id
     baseMeta.createdAt = resumeHistory.createdAt
   }
@@ -127,6 +165,12 @@ export function prepareSessionCreationDraft(
   }
   baseMeta.modelRoutingDecision = initialRoute?.decision ?? (historySource?.mode === 'resume' ? resumeHistory?.modelRoutingDecision : undefined)
   assertBusinessLineTaskStrategy(baseMeta, baseMeta.taskStrategy)
+  if (historySource?.mode === 'resume' && resumeHistory) {
+    baseMeta.workspaceHandoff = resumeHistory.workspaceHandoff
+    baseMeta.workspaceHandoffPending = resumeHistory.workspaceHandoffPending
+    Object.assign(baseMeta, restoreWorkspaceHandoff({ ...baseMeta, sdkSessionId: resumeHistory.sdkSessionId }))
+    if (historySideChat) assertSideChatBinding(baseMeta, app.getPath('userData'), { checkSource: false })
+  }
   return { opts, baseMeta }
 }
 
@@ -169,7 +213,8 @@ function createSessionDraftMeta(input: SessionDraftMetaInput): SessionMeta {
     engine: input.engine,
     taskStrategy: input.taskStrategy,
     permissionMode: derivedPermissionMode,
-    title: opts.title ?? resumeHistory?.title
+    title: opts.title ?? resumeHistory?.title,
+    sideChat: opts.sideChat
   })
   return {
     ...meta,
@@ -519,11 +564,11 @@ export function sessionMetaForPlacement(
   worktree: SessionWorktreePlacement
 ): SessionMeta {
   if (worktree.record) {
-    if (!worktree.isolated) throw new Error('managed worktree placement 必须标记为 isolated')
+    if (!worktree.isolated && !workspaceHandoffAllowsLocal(draft.baseMeta, worktree.record)) throw new Error('managed worktree placement 必须标记为 isolated')
     if (worktree.record.sessionId !== draft.baseMeta.id) {
       throw new Error('managed worktree placement sessionId 与会话不一致')
     }
-    if (worktree.cwd !== worktree.record.cwd) {
+    if (worktree.cwd !== (worktree.isolated ? worktree.record.cwd : worktree.record.sourceCwd)) {
       throw new Error('managed worktree placement cwd 与 registry 不一致')
     }
     const identity = inspectManagedWorktreeIdentity(worktree.record)
@@ -541,6 +586,8 @@ export function sessionMetaForPlacement(
 }
 
 export function sessionMetaForRecovery(meta: SessionMeta): SessionMeta {
+  meta = restoreWorkspaceHandoff(meta)
+  assertTaskExecutionEnvironment(meta)
   const ownership = assertSessionDomainOwnership(meta)
   const migratedMeta = migrateLegacyEngineRecord(meta as SessionMeta & { engine?: string }) as SessionMeta
   assertSessionExecutorEngine(migratedMeta.executorEngine, migratedMeta.engine)
@@ -597,6 +644,7 @@ function recoverySessionPlacement(meta: SessionMeta): SessionWorktreePlacement {
     if (claimsManaged) throw new Error('managed session registry record 已丢失，拒绝恢复')
     return { isolated: false, cwd: assertUsableSessionCwd(meta.cwd) }
   }
+  if (workspaceHandoffAllowsLocal(meta, lookup.record)) return { isolated: false, cwd: assertUsableSessionCwd(meta.cwd), record: lookup.record }
   if (!claimsManaged || !sessionMetaMatchesManagedWorktreeRecord(meta, lookup.record)) {
     throw new Error('managed session metadata 与 registry identity 不一致，拒绝恢复')
   }
@@ -614,6 +662,8 @@ function applySessionPlacement(
   return {
     ...meta,
     cwd: worktree.cwd,
+    executionEnvironment: meta.executionEnvironment?.kind === 'wsl'
+      ? createWslBinding(meta.executionEnvironment.distribution, worktree.cwd) : meta.executionEnvironment,
     isolated: worktree.isolated,
     sourceCwd: worktree.record?.sourceCwd,
     repoRoot: worktree.record?.repoRoot,
@@ -658,6 +708,7 @@ function managedWorktreeRecordForHistory(history: HistoryEntry): ManagedWorktree
     }
     return undefined
   }
+  if (workspaceHandoffAllowsLocal(history as unknown as SessionMeta, lookup.record)) return undefined
   if (!historyMatchesManagedWorktreeRecord(history, lookup.record)) {
     throw new Error('历史会话的 managed worktree identity 与 registry 不一致')
   }

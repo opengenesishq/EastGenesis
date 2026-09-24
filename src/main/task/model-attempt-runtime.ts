@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { app } from 'electron'
+import { currentTaskHostExecutionContext, getTaskHostExecutionGate } from '../task-handoff/execution-gate'
 import type { NativeRequestBudgetInput } from '../model/native-request-budget'
 import { releaseUnsentModelBudget, reserveModelAttemptBudget, settleModelAttemptBudget } from './model-attempt-budget'
 import { isModelRouteError } from '../model/model-route-error'
@@ -17,6 +19,7 @@ import {
 } from './model-attempt-api'
 
 export interface RuntimeModelAttemptInput {
+  sessionId?: string
   budgetScope?: NativeRequestBudgetInput
   runId: string
   requestId: string
@@ -27,7 +30,7 @@ export interface RuntimeModelAttemptInput {
   adapterVersion: string
   executorReceipt?: ModelExecutorReceipt
   context: unknown
-  /** Provider-neutral digest supplied by the CaoGen context boundary. */
+  /** Provider-neutral digest supplied by the EastGenesis context boundary. */
   contextDigest?: string
   routeReason: string
   keyIdentity?: RuntimeModelKeyIdentity
@@ -147,6 +150,21 @@ export async function beginPersistedModelAttempt(
   input: RuntimeModelAttemptInput,
   options: RuntimeModelAttemptBeginOptions = {}
 ): Promise<PersistedModelAttemptHandle> {
+  const inherited = currentTaskHostExecutionContext()
+  const sessionId = input.sessionId ?? input.budgetScope?.scope.sessionId ?? inherited?.claim.sessionId
+  const root = input.rootDir ?? input.budgetScope?.rootDir ?? inherited?.rootDir
+  const permit = sessionId && (root || !options.dependencies)
+    ? getTaskHostExecutionGate(root ?? app.getPath('userData')).acquire({ sessionId }) : undefined
+  try {
+    const handle = await beginPersistedModelAttemptWithHostPermit(input, options)
+    const finish = async (operation: () => Promise<ModelAttemptRecord>) => {
+      try { return await operation() } finally { permit?.release() }
+    }
+    return { attempt: handle.attempt, succeed: value => finish(() => handle.succeed(value)), fail: (failure, cause) => finish(() => handle.fail(failure, cause)), cancel: cause => finish(() => handle.cancel(cause)) }
+  } catch (error) { permit?.release(); throw error }
+}
+
+async function beginPersistedModelAttemptWithHostPermit(input: RuntimeModelAttemptInput, options: RuntimeModelAttemptBeginOptions): Promise<PersistedModelAttemptHandle> {
   const dependencies = { ...DEFAULT_DEPENDENCIES, ...options.dependencies }
   // Freeze caller-owned request identities before the first asynchronous recovery lookup.
   const effectiveInput = await resolveRetryAuthorizedInput({ ...input,

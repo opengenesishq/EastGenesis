@@ -1,3 +1,5 @@
+import { assertTaskExecutionEnvironment, assertWslBinding, parseWslHostPath } from './wsl/binding'
+import { createWslJob, type WslJob } from './wsl/job'
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { spawn as spawnProcess } from 'node:child_process'
@@ -12,9 +14,16 @@ type NodePtyModule = typeof import('node-pty')
 export type TerminalBackend = 'pty' | 'pipe'
 
 export interface TerminalStartOptions {
+  executionEnvironment?: import('../shared/wsl-types').ExecutionEnvironmentBinding
   cwd: string
   sessionId?: string
+  ownerWebContentsId?: number
+  workspaceId?: string
+  projectId?: string
   shell?: string
+  /** Main-process supplied executable arguments; never copied from renderer options. */
+  args?: string[]
+  requirePty?: boolean
   cols?: number
   rows?: number
   env?: Record<string, string | undefined>
@@ -29,8 +38,12 @@ export interface TerminalExitInfo {
 }
 
 export interface TerminalInfo {
+  executionEnvironment?: import('../shared/wsl-types').ExecutionEnvironmentBinding
   id: string
   sessionId?: string
+  ownerWebContentsId?: number
+  workspaceId?: string
+  projectId?: string
   cwd: string
   shell: string
   pid?: number
@@ -55,6 +68,7 @@ type TerminalProcess =
   | { backend: 'pipe'; child: ChildProcessWithoutNullStreams }
 
 interface TerminalRecord {
+  wslJob?: WslJob
   info: TerminalInfo
   process: TerminalProcess
   closed: boolean
@@ -154,11 +168,13 @@ function terminalEnv(cwd: string, extra: Record<string, string | undefined> | un
     ...extra,
     TERM: extra?.TERM ?? process.env.TERM ?? 'xterm-256color',
     COLORTERM: extra?.COLORTERM ?? process.env.COLORTERM ?? 'truecolor',
-    TERM_PROGRAM: 'CaoGen'
+    TERM_PROGRAM: 'EastGenesis'
   })
   if (process.platform !== 'win32') env.PWD = cwd
   return env
 }
+
+function cwdKey(cwd: string, owner?: number): string { return `${owner ?? 'shared'}\0${cwd}` }
 
 function snapshot(info: TerminalInfo): TerminalInfo {
   return {
@@ -194,11 +210,20 @@ export class TerminalManager {
 
   async start(opts: TerminalStartOptions): Promise<TerminalInfo> {
     const cwd = normalizeCwd(opts.cwd)
-    const existingId = opts.sessionId ? this.bySession.get(opts.sessionId) : this.byCwd.get(cwd)
+    if (opts.executionEnvironment?.kind === 'wsl') assertWslBinding(opts.executionEnvironment, cwd)
+    else if (parseWslHostPath(cwd)) throw new Error('WSL 终端必须绑定已核对的发行版与目录。')
+    const existingId = opts.sessionId ? this.bySession.get(opts.sessionId) : this.byCwd.get(cwdKey(cwd, opts.ownerWebContentsId))
     const existing = existingId ? this.terminals.get(existingId) : undefined
-    if (opts.reuse !== false && existing && !existing.closed) return snapshot(existing.info)
+    if (opts.reuse !== false && existing && !existing.closed && existing.info.sessionId === opts.sessionId && existing.info.ownerWebContentsId === opts.ownerWebContentsId) {
+      if (JSON.stringify(existing.info.executionEnvironment) !== JSON.stringify(opts.executionEnvironment)) throw new Error('现有终端的执行环境不同，请关闭后重新打开。')
+      return snapshot(existing.info)
+    }
+    const wslJob = opts.executionEnvironment?.kind === 'wsl' ? createWslJob(opts.executionEnvironment, { interactive: true }) : undefined
+    if (wslJob && (opts.shell || opts.args || opts.env)) throw new Error('WSL 终端的 Shell 与环境由已绑定的执行器管理。')
+    const launchCwd = wslJob?.cwd ?? cwd
+    const launchArgs = wslJob?.args ?? opts.args
 
-    const shell = opts.shell?.trim() || defaultShell()
+    const shell = wslJob?.file ?? (opts.shell?.trim() || defaultShell())
     const cols = clampDimension(opts.cols, 80, 1000)
     const rows = clampDimension(opts.rows, 24, 1000)
     const env = terminalEnv(cwd, opts.env)
@@ -208,16 +233,23 @@ export class TerminalManager {
     let ptyError: string | undefined
     let notifyPtyError = false
     try {
-      record = await this.startPty({ id, sessionId: opts.sessionId, cwd, shell, cols, rows, env })
+      record = await this.startPty({ id, sessionId: opts.sessionId, cwd: launchCwd, shell, args: launchArgs, cols, rows, env })
     } catch (err) {
+      if (opts.requirePty || wslJob) throw new Error(`交互终端不可用：${errText(err)}`)
       const rawPtyError = errText(err)
       if (!isBenignNodePtyDiagnostic(rawPtyError)) {
         ptyError = rawPtyError
         notifyPtyError = true
       }
-      record = this.startPipe({ id, sessionId: opts.sessionId, cwd, shell, cols, rows, env, ptyError })
+      record = this.startPipe({ id, sessionId: opts.sessionId, cwd, shell, args: opts.args, cols, rows, env, ptyError })
     }
 
+    record.wslJob = wslJob
+    record.info.cwd = cwd
+    record.info.executionEnvironment = opts.executionEnvironment
+    record.info.ownerWebContentsId = opts.ownerWebContentsId
+    record.info.workspaceId = opts.workspaceId
+    record.info.projectId = opts.projectId
     this.remember(record)
     this.emit({ kind: 'started', terminal: snapshot(record.info) })
     if (notifyPtyError && ptyError) {
@@ -235,6 +267,7 @@ export class TerminalManager {
 
   write(id: string, data: string): void {
     const record = this.requireTerminal(id)
+    if (record.info.executionEnvironment?.kind === 'wsl') assertTaskExecutionEnvironment(record.info)
     if (record.process.backend === 'pty') {
       record.process.pty.write(data)
       return
@@ -288,12 +321,13 @@ export class TerminalManager {
     sessionId?: string
     cwd: string
     shell: string
+    args?: string[]
     cols: number
     rows: number
     env: NodeJS.ProcessEnv
   }): Promise<TerminalRecord> {
     const nodePty = await loadNodePty()
-    const pty = nodePty.spawn(args.shell, [], {
+    const pty = nodePty.spawn(args.shell, args.args ?? [], {
       name: 'xterm-256color',
       cwd: args.cwd,
       cols: args.cols,
@@ -329,12 +363,13 @@ export class TerminalManager {
     sessionId?: string
     cwd: string
     shell: string
+    args?: string[]
     cols: number
     rows: number
     env: NodeJS.ProcessEnv
     ptyError?: string
   }): TerminalRecord {
-    const child = spawnProcess(args.shell, fallbackShellArgs(args.shell), {
+    const child = spawnProcess(args.shell, args.args ?? fallbackShellArgs(args.shell), {
       cwd: args.cwd,
       env: args.env,
       stdio: 'pipe'
@@ -370,7 +405,7 @@ export class TerminalManager {
   private remember(record: TerminalRecord): void {
     this.terminals.set(record.info.id, record)
     if (record.info.sessionId) this.bySession.set(record.info.sessionId, record.info.id)
-    this.byCwd.set(record.info.cwd, record.info.id)
+    this.byCwd.set(cwdKey(record.info.cwd, record.info.ownerWebContentsId), record.info.id)
   }
 
   private forget(record: TerminalRecord): void {
@@ -378,7 +413,7 @@ export class TerminalManager {
     if (record.info.sessionId && this.bySession.get(record.info.sessionId) === record.info.id) {
       this.bySession.delete(record.info.sessionId)
     }
-    if (this.byCwd.get(record.info.cwd) === record.info.id) this.byCwd.delete(record.info.cwd)
+    if (this.byCwd.get(cwdKey(record.info.cwd, record.info.ownerWebContentsId)) === record.info.id) this.byCwd.delete(cwdKey(record.info.cwd, record.info.ownerWebContentsId))
   }
 
   private requireTerminal(id: string): TerminalRecord {
@@ -405,11 +440,12 @@ export class TerminalManager {
       record.process.child.stderr.removeAllListeners()
       record.process.child.removeAllListeners()
     }
-    this.forget(record)
     this.emit({ kind: 'exit', id, exit: { ...exit } })
+    this.forget(record)
   }
 
   private kill(record: TerminalRecord, signal: NodeJS.Signals): void {
+    try { record.wslJob?.stop() } catch (error) { this.emit({ kind: 'error', id: record.info.id, message: `WSL 进程停止结果未确认：${errText(error)}`, fatal: false }) }
     try {
       if (record.process.backend === 'pty') {
         try {

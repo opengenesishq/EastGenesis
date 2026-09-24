@@ -40,6 +40,19 @@ fixtureWindow.runRecoveryHarness = async () => {
     assert(node, `missing click target: ${selector}`)
     await act(async () => node!.click())
   }
+  // RunDetailPanel and its embedded effect-recovery view read the language
+  // and recovery-center action even before the Work Inbox fixture is mounted.
+  // Keep a minimal store available for those first renders; the richer store
+  // below is installed immediately before the Work Inbox checks.
+  fixtureWindow.recoveryUiStore = {
+    settings: { language: 'en' },
+    setShowTaskRecovery: () => {},
+    onSessionEvent: () => () => {}
+  }
+  window.agentDesk = {
+    getTaskEffectRecovery: async (sessionId: string, runId?: string, taskId?: string) => ({ sessionId, runId, taskId, snapshots: [] }),
+    onSessionEvent: () => () => {}
+  } as typeof window.agentDesk
   const noResult = () => !query('[data-run-recovery-result]') && !query('[data-run-recovery-error]')
   const renderRun = async (run: WorkflowRunSummary, recover: () => Promise<void>, section = 'run') => {
     await act(async () => root.render(<RunDetailPanel input={{ runs: [run] }} route={`run/${run.id}/${section}`} onRecover={recover} />))
@@ -113,10 +126,14 @@ fixtureWindow.runRecoveryHarness = async () => {
         failRead = true
       },
       refreshProjectWorkspaces: async () => [],
+      onSessionEvent: () => () => {},
       selectSession: () => {}, setStudioSurface: () => {}, setExperienceMode: () => {},
       setShowNewSession: () => {}, openProjectWorkspace: () => {}, openNewProjectWorkspace: () => {}
     }
     window.agentDesk = {
+      getTaskEffectRecovery: async (sessionId: string, runId?: string, taskId?: string) => ({ sessionId, runId, taskId, snapshots: [] }),
+      onSessionEvent: () => () => {},
+      listTaskSnapshots: async () => [{ id: 'snapshot-inbox', sessionId: run.sessionId, taskId: run.taskId, run }],
       listWorkflowLedger: async () => {
         if (failRead) throw new Error('canonical Ledger refresh failed')
         return selection

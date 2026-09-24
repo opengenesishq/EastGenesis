@@ -1,4 +1,4 @@
-export const DEFAULT_BROWSER_URL = 'https://caobao.chat/official'
+export const DEFAULT_BROWSER_URL = 'about:blank'
 
 export function normalizeBrowserNavigationUrl(rawUrl: string): string {
   const text = rawUrl.trim()

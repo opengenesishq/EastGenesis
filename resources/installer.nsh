@@ -1,9 +1,9 @@
-; CaoGen's uninstaller must never delete application files from a direct
+; EastGenesis's uninstaller must never delete application files from a direct
 ; double-click without an explicit user decision. Silent invocations remain
 ; available for controlled update/recovery flows and are not interactive.
 !macro customUnInit
   ${IfNot} ${Silent}
-    MessageBox MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2 "CaoGen will be uninstalled. User data is preserved. Continue?" IDYES +2
+    MessageBox MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2 "EastGenesis will be uninstalled. User data is preserved. Continue?" IDYES +2
     Abort
   ${EndIf}
 !macroend
@@ -19,11 +19,11 @@
   Pop $R0
 
   ${If} $R0 != 0
-    DetailPrint "File is busy, restoring the existing CaoGen installation: $R0"
+    DetailPrint "File is busy, restoring the existing EastGenesis installation: $R0"
     Push ""
     Call un.restoreFiles
     Pop $R1
-    Abort "CaoGen uninstall was cancelled because an application file is still in use."
+    Abort "EastGenesis uninstall was cancelled because an application file is still in use."
   ${EndIf}
 
   ; The uninstaller is locked while this macro runs. Only schedule the

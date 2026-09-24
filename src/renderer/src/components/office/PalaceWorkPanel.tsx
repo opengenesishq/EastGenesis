@@ -15,11 +15,14 @@ import { ProjectDeliveryWorkbench } from '../studio/ProjectDeliveryWorkbench'
 import OfficeSessionActions from './OfficeSessionActions'
 import PalaceInstitutionWorkItem from './PalaceInstitutionWorkItem'
 import { preparePalaceTaskNavigation } from './palaceTaskNavigation'
+import { capturePalaceSessionBinding, isPalaceSessionBindingCurrent, type PalaceSessionBinding } from './palace-task-binding'
 import { palaceUrgentReports } from './palace-urgent-reports'
 import PalaceUrgentReports from './PalaceUrgentReports'
 import PalaceRawRecords from './PalaceRawRecords'
 import PalaceAudienceTasks from './PalaceAudienceTasks'
 import PalaceCourtOverview from './PalaceCourtOverview'
+import { ExperienceProjectionProvider } from '../experience/ExperienceProjection'
+import { sessionExperienceMode } from '../../store/session-experience'
 import './palace-work-panel.css'
 
 const ChatView = lazy(() => import('../ChatView'))
@@ -27,15 +30,15 @@ const FilePanel = lazy(() => import('../workbench/FilePanel'))
 const DiffPanel = lazy(() => import('../workbench/DiffPanel'))
 const StudioResultPanel = lazy(() => import('../workbench/StudioResultPanel'))
 type Surface = 'chat' | 'logs' | 'files' | 'diff' | 'results'
-type WorkSelection = { kind: 'session'; sessionId: string }
+type WorkSelection = { kind: 'session'; binding: PalaceSessionBinding }
   | { kind: 'delivery'; projectId: string; workItemId?: string }
 
-export default function PalaceWorkPanel({ action, initialContext, onClose, onAction, onEdict }: {
+export default function PalaceWorkPanel({ action, initialContext, onClose, onAction, onOpenWorkspace }: {
   action: Exclude<PalaceAction, 'edict'>
   initialContext?: PalaceActionContext
   onClose(): void
   onAction(action: PalaceAction, context?: PalaceActionContext): void
-  onEdict(): void
+  onOpenWorkspace(sessionId: string): void
 }): React.JSX.Element {
   const zh = useStore((state) => state.settings.language) === 'zh'
   const sessions = useStore((state) => state.sessions)
@@ -47,7 +50,8 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
   const [roleId, setRoleId] = useState(initialContext?.roleId ?? 'all')
   const [workSelection, setWorkSelection] = useState<WorkSelection>(() => {
     const sessionId = initialContext ? initialContext.sessionId : activeId
-    if (sessionId) return { kind: 'session', sessionId }
+    const meta = sessionId ? sessions[sessionId]?.meta : undefined
+    if (meta && meta.status !== 'closed') return { kind: 'session', binding: capturePalaceSessionBinding(meta) }
     return { kind: 'delivery', projectId: initialContext?.projectId ?? (initialContext ? '' : preferredProjectId ?? ''),
       workItemId: initialContext?.projectId ? initialContext.workItemId : undefined }
   })
@@ -62,7 +66,8 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
   // Embedded ChatView/FilePanel use activeId. Mount them only when it matches
   // this panel's explicit selection, so a global selection change cannot send
   // an approval, edit or instruction to another task under the old heading.
-  const selectedSession = workSelection.kind === 'session' && workSelection.sessionId === activeId ? sessions[workSelection.sessionId] : undefined
+  const selectedSession = workSelection.kind === 'session' && workSelection.binding.id === activeId &&
+    isPalaceSessionBindingCurrent(workSelection.binding, sessions[workSelection.binding.id]?.meta) ? sessions[workSelection.binding.id] : undefined
   const selected = action !== 'audience' || roleId === 'all' || institutionItems.some(item => item.id === selectedSession?.meta.workItemId &&
     item.projectId === selectedSession.meta.workspaceId && item.goalId === selectedSession.meta.goalId) ? selectedSession : undefined
   // A task's delivery and approvals share its live ownership. Project browsing
@@ -162,6 +167,8 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
       if (event.key === 'Escape' && event.target === event.currentTarget) onClose()
     }}>
     <header><h2>{zh ? definition.label : definition.labelEn}</h2><div>
+      {selected && <button type="button" className="btn btn-primary btn-sm" data-palace-open-workspace={selected.meta.id}
+        onClick={() => onOpenWorkspace(selected.meta.id)}>{zh ? '在工作台继续此任务' : 'Continue this task in workspace'}</button>}
       <button type="button" className="btn btn-ghost btn-sm" disabled={data.loading} onClick={() => void data.refresh()}>{zh ? '刷新记录' : 'Refresh'}</button>
       <button type="button" className="btn btn-ghost btn-sm" data-palace-work-close onClick={onClose}>{zh ? '回到故宫' : 'Back to palace'}</button>
     </div></header>
@@ -176,7 +183,7 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
       onClick={() => { taskNavigation.current++; useStore.getState().setShowTaskRecovery(true) }}>{zh ? '打开恢复中心' : 'Open Recovery'}</button></p>}
 
     {action === 'desk' && <div className="palace-work-shortcuts">
-      <button type="button" className="btn btn-primary" onClick={onEdict}>{zh ? '下旨 / 继续当前任务' : 'Give an instruction / continue work'}</button>
+      <button type="button" className="btn btn-primary" onClick={() => onAction('edict', currentContext)}>{zh ? '下旨 / 继续当前任务' : 'Give an instruction / continue work'}</button>
       <button type="button" className="btn" onClick={() => onAction('approve', currentContext)}>{zh ? '处理奏折' : 'Review approvals'}</button>
       <button type="button" className="btn" onClick={() => onAction('study', currentContext)}>{zh ? '继续御书房工作' : 'Continue in the study'}</button>
     </div>}
@@ -220,9 +227,9 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
           const next = sessions[event.target.value]
           if (!next) { selectWork({ kind: 'delivery', projectId }); return }
           selectSession(next.meta.id)
-          selectWork({ kind: 'session', sessionId: next.meta.id })
+          selectWork({ kind: 'session', binding: capturePalaceSessionBinding(next.meta) })
         }}>
-          <option value="">{zh ? '选择已有任务' : 'Choose an existing task'}</option>{sessionIds.map((id) => <option key={id} value={id}>{sessions[id].meta.title} · {sessions[id].meta.status}{sessions[id].pendingPermissions.length ? ` · ${sessions[id].pendingPermissions.length} ${zh ? '项授权' : 'permissions'}` : ''}</option>)}
+          <option value="">{zh ? '选择已有任务' : 'Choose an existing task'}</option>{sessionIds.filter(id => sessions[id].meta.status !== 'closed').map((id) => <option key={id} value={id}>{sessions[id].meta.title} · {sessions[id].meta.status}{sessions[id].pendingPermissions.length ? ` · ${sessions[id].pendingPermissions.length} ${zh ? '项授权' : 'permissions'}` : ''}</option>)}
         </select></label>}
       {selected ? <p className="palace-work-identity">{selected.meta.title} · {selected.meta.id}<br />{zh ? '沿用同一会话、文件和授权。' : 'Continues the same session, files and permissions.'}</p> : <p>{zh ? '选择已有任务后继续；当前没有绑定任务。' : 'Choose an existing task to continue.'}</p>}
     </>}
@@ -236,11 +243,11 @@ export default function PalaceWorkPanel({ action, initialContext, onClose, onAct
       <nav aria-label={zh ? '任务工作区' : 'Task workspace'}>{(['chat', 'logs', 'files', 'diff', 'results'] as const).map((tab) => <button key={tab} className="btn btn-ghost btn-sm" aria-pressed={surface === tab} data-palace-workspace-tab={tab} onClick={() => setSurface(tab)}>{surfaceLabel(tab, zh)}</button>)}</nav>
       <div className="palace-work-surface" data-palace-session-surface={surface} data-palace-session-id={selected.meta.id}>
         <Suspense fallback={<p>{zh ? '正在打开工作区…' : 'Opening workspace…'}</p>}>
-          {surface === 'chat' ? <ChatView /> : surface === 'files' ? <FilePanel /> : surface === 'diff' ? <DiffPanel />
+          {surface === 'chat' ? <ExperienceProjectionProvider mode={sessionExperienceMode(selected.meta)}><ChatView /></ExperienceProjectionProvider> : surface === 'files' ? <FilePanel /> : surface === 'diff' ? <DiffPanel />
             : surface === 'results' ? <StudioResultPanel sessionId={selected.meta.id} standalone onOpenSessionSurface={() => {
               // Tools use the modern workbench. Carry the same task there so
               // preview/browser/terminal controls never open behind this panel.
-              useStore.getState().setView('list')
+              onOpenWorkspace(selected.meta.id)
             }} /> : <PalaceRawRecords session={selected} zh={zh} />}
         </Suspense>
       </div>

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
 import { assertPersistedSessionExecutionAllowed } from './session-execution-ownership'
+import { boundedSideChatBody } from './side-chat/side-chat-policy'
 import { isUnroutedLocalPlan } from './session-local-plan'
 import { documentAttachmentsToPrompt, sessionImageAttachmentsRoot } from './attachmentOps'
 import { TranscriptWriter } from './transcript'
@@ -67,6 +68,7 @@ import { taskRuntimeRegistry } from './task/task-runtime-registry'
 import { effectReplayTargetDigest } from './task/effect-reconciler'
 import { taskStrategySystemPrompt, updateTaskStrategyMeta } from './task/task-strategy'
 import { buildWorkflowStageHandoffPrompt } from './task/workflow-stage-handoff'
+import { INLINE_VISUALIZATION_PROMPT } from '../shared/inline-visualization'
 import { buildSessionRequirementContext } from './task/session-requirement-context'
 import { nativeRecoveryHandoffPrompt } from './task/native-recovery-handoff'
 import { sessionModelHandoffPrompt } from './agent/session-model-handoff'
@@ -89,6 +91,7 @@ import {
   redactProviderErrorText
 } from './provider/openai-provider-utils'
 import { applyProviderRequestOverrides } from './provider/providerRequestOverrides'
+import { withTaskReasoning } from '../shared/task-reasoning'
 import { estimateModelAttemptCostUsd } from './provider/modelAttemptCost'
 import { resolveOpenAIProtocol, resolveProviderRuntimeTarget } from './provider/providerRuntimeTarget'
 import {
@@ -235,7 +238,7 @@ export class OpenAIEngine implements Engine {
       entry.event.kind === 'meta' ||
       (entry.event.kind === 'hook-event' && entry.event.event === 'context-compressed'))
     if (persisted && entries.at(-1)?.seq !== undefined && trailingRuntimeOnly) {
-      this.chatHistory = [{ role: 'system', content: `[早期对话摘要 · 由 CaoGen 自动压缩]\n${persisted.summary}` }, ...persisted.recent]
+      this.chatHistory = [{ role: 'system', content: `[早期对话摘要 · 由 EastGenesis 自动压缩]\n${persisted.summary}` }, ...persisted.recent]
       return
     }
     this.chatHistory = rebuildOpenAiTextHistory(entries)
@@ -282,8 +285,7 @@ export class OpenAIEngine implements Engine {
     this.turnRevisionEligible = normalizedPayload.images.length === 0 && normalizedPayload.documents.length === 0
     this.turnHadToolEvents = false
     this.modelAttempts.startTurn(messageId)
-    emitNativeUserMessage({ meta: this.meta, payload, messageId, emit: (event) => this.emit(event),
-      attachments: payload.images?.map((image) => ({ id: image.id, mime: image.mime, bytes: image.bytes })) })
+    emitNativeUserMessage({ meta: this.meta, payload, messageId, emit: (event) => this.emit(event) })
 
     this.turnStartedAt = Date.now()
     this.assistantText = ''
@@ -398,7 +400,7 @@ export class OpenAIEngine implements Engine {
       detail: `Reused confirmed target result ${confirmed.toolUseId} for failover call ${toolUseId}`
     })
     return [
-      '[CaoGen confirmed side-effect replay]',
+      '[EastGenesis confirmed side-effect replay]',
       `A ${name} operation for the same external target already completed successfully in this user turn.`,
       `Local result digest: sha256:${confirmed.resultDigest}`,
       'Do not execute this operation again. Continue from the confirmed success.'
@@ -1157,7 +1159,7 @@ export class OpenAIEngine implements Engine {
    * user 消息入历史 → 模型流式回复;若回工具调用(bash/read/write/edit/list),
    * 按 permissionMode 审批后真实执行,结果作为 tool 消息回给模型,循环直到
    * 模型给出最终文本或达 MAX_TOOL_ITERATIONS。这让任何 Chat 协议模型
-   * (DeepSeek/Qwen/Grok/网关/本地)在 CaoGen 里都是真编码 Agent。
+   * (DeepSeek/Qwen/Grok/网关/本地)在 EastGenesis 里都是真编码 Agent。
    */
   private async runChatCompletion(
     payload: SendMessagePayload,
@@ -1349,7 +1351,7 @@ export class OpenAIEngine implements Engine {
     })
 
     this.chatHistory = [
-      { role: 'system', content: `[早期对话摘要 · 由 CaoGen 自动压缩]\n${summary}` },
+      { role: 'system', content: `[早期对话摘要 · 由 EastGenesis 自动压缩]\n${summary}` },
       ...recent
     ]
     const after = this.currentContextUsage(systemMessage)
@@ -1452,10 +1454,11 @@ export class OpenAIEngine implements Engine {
     const lines = [
       projectContext,
       providerPrompt,
+      INLINE_VISUALIZATION_PROMPT,
       taskStrategySystemPrompt(this.meta.taskStrategy),
       preparationPermissionSystemPrompt(this.meta, app.getPath('userData')),
       taskExecutionAuthoritySystemPrompt(this.meta, app.getPath('userData')),
-      '你是 CaoGen 桌面工作室里的编码 Agent。',
+      '你是 EastGenesis 桌面工作室里的编码 Agent。',
       `当前工作目录: ${this.meta.cwd}`,
       '你可以使用工具(bash/view/read_file/write_file/search_replace/edit_file/artifact_register/create_document/create_spreadsheet/create_presentation/create_pdf/list_dir/search_symbol/search_code/find_file/get_dependencies/task_decompose/genesis_orchestrate/task_dispatch_dag/task_decompose_and_dispatch_dag/git_status/git_diff/git_stage/git_stage_all/git_commit/git_push/git_create_pr/git_create_issue/git_merge/code_forge_delivery/send_notification)读写项目文件、生成 Word/Excel/PowerPoint/PDF 办公成品、执行命令、规划编排、发送已配置通知并完成 Git 流程。',
       '凡是通过 bash、外部工具或已有工作区文件形成的最终报告、需求、设计、代码包、测试报告、截图、回退包或安装包,必须调用 artifact_register 登记真实文件;只有 canonical Artifact/Evidence/Acceptance 返回成功后才可宣称已交付。',
@@ -1482,7 +1485,7 @@ export class OpenAIEngine implements Engine {
     })
   }
 
-  /** Chat Completions 的 usage 命名(prompt/completion_tokens)转 CaoGen UsageTotals */
+  /** Chat Completions 的 usage 命名(prompt/completion_tokens)转 EastGenesis UsageTotals */
   private applyChatUsage(value: unknown): void {
     if (!value || typeof value !== 'object') return
     const usage = (value as Record<string, unknown>).usage as Record<string, unknown> | undefined
@@ -1542,6 +1545,7 @@ export class OpenAIEngine implements Engine {
     const protocol = this.protocol() === 'chat' ? 'openai.chat-completions' : 'openai.responses'
     init = { ...init, body: boundedOpenAiRequestBody(init.body, protocol, auth.baseUrl) }
     init = { ...init, body: boundedCouncilBody(this.meta, init.body, providerId, model, protocol) as RequestInit['body'] }
+    init = { ...init, body: boundedSideChatBody(this.meta, init.body, app.getPath('userData')) as RequestInit['body'] }
     const deadlines = new WeakMap<Response, ProviderRequestDeadline>()
     return this.modelAttempts.fetch({
       run: taskRuntimeRegistry.get(this.meta.id),
@@ -1689,7 +1693,8 @@ export class OpenAIEngine implements Engine {
   }
 
   private authConfig(): OpenAIAuthConfig {
-    const provider = this.meta.providerId ? getProvider(this.meta.providerId) : undefined
+    const savedProvider = this.meta.providerId ? getProvider(this.meta.providerId) : undefined
+    const provider = savedProvider ? withTaskReasoning(savedProvider, this.meta.reasoningEffort, 'openai') : undefined
     return resolveOpenAiAuthConfig({
       provider,
       providerId: this.meta.providerId,

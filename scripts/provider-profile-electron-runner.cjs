@@ -512,7 +512,7 @@ function writeUnsafeUiProfileImport() {
 
 async function openProviderProfileSettings(requireBackup = true) {
   const win = await waitForWindow()
-  await waitForRenderer(win, `document.body.innerText.includes('CaoGen')`)
+  await waitForRenderer(win, `document.body.innerText.includes('EastGenesis')`)
   await clickRendererText(win, '设置')
   await waitForRenderer(win, `Boolean(document.querySelector('.settings-page'))`)
   await rendererValue(win, `document.querySelector('[data-settings-tab="providers"]')?.click()`)

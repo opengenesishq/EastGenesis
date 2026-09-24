@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { app } from 'electron'
+import { currentTaskHostExecutionContext, getTaskHostExecutionGate } from '../task-handoff/execution-gate'
 import type { EffectRecord, TaskRunRecord, TaskSnapshotRecord } from '../../shared/types'
 import type { EffectResolution } from '../../shared/effect-recovery-types'
 import { projectConfirmedManagedWorktreeTarget } from '../managed-worktree-lifecycle'
@@ -115,6 +117,12 @@ export async function markEffectExecutionStarted(
 ): Promise<void> {
   if (!handle) return
   await withSessionQueueByHandle(handle, async (run) => {
+    const hostGate = getTaskHostExecutionGate(input.rootDir ?? handle.rootDir ?? app.getPath('userData'))
+    const assertHost = () => {
+      if (currentTaskHostExecutionContext()?.control && input.toolName === 'task_handoff' && run.operation) hostGate.assertHandoffControl(run.operation.sourceSessionId, run.operation.operationId)
+      else hostGate.assert({ sessionId: run.operation?.sourceSessionId ?? input.sessionId })
+    }
+    assertHost()
     const effect = requireEffect(run, handle.effectId)
     let descriptor
     try {
@@ -143,6 +151,7 @@ export async function markEffectExecutionStarted(
       if (abandoned !== run) await persistRun(abandoned, handle.effectId, input.rootDir ?? handle.rootDir)
       throw new Error(reason)
     }
+    assertHost()
     const next = markEffectExecuting(run, handle)
     if (next !== run) await persistRun(next, handle.effectId, input.rootDir ?? handle.rootDir)
   })

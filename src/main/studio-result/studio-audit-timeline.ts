@@ -485,7 +485,7 @@ function acceptanceItems(
     status: acceptance.status,
     actor: acceptance.verifier || acceptance.waivedBy
       ? humanActor(acceptance.verifier ?? acceptance.waivedBy ?? 'Local user')
-      : systemActor('CaoGen'),
+      : systemActor('EastGenesis'),
     projectId: aggregate.projectId,
     ...(acceptance.goalId ? { goalId: acceptance.goalId } : {}),
     ...(acceptance.workItemId ? { workItemId: acceptance.workItemId } : {}),
@@ -560,7 +560,7 @@ function missingItem(
     category: 'integrity',
     action: 'reference.missing',
     status: 'missing_reference',
-    actor: systemActor('CaoGen integrity verifier'),
+    actor: systemActor('EastGenesis integrity verifier'),
     projectId,
     ...(goalId ? { goalId } : {}),
     ...(workItemId ? { workItemId } : {}),
@@ -576,7 +576,7 @@ function missingItem(
 
 function actorForRun(run: AggregateRun | undefined, aggregate: ProjectAggregateSnapshot): StudioAuditActor {
   const binding = run?.taskRun.digitalWorkerBinding
-  if (binding?.kind !== 'assigned') return systemActor('CaoGen')
+  if (binding?.kind !== 'assigned') return systemActor('EastGenesis')
   const worker = aggregate.digitalWorkers.find((candidate) => candidate.id === binding.workerId)
   const assignment = aggregate.assignments.find((candidate) => candidate.id === binding.assignmentId)
   const role = worker
@@ -595,7 +595,7 @@ function actorForRun(run: AggregateRun | undefined, aggregate: ProjectAggregateS
 }
 
 function systemActor(label: string): StudioAuditActor {
-  return { kind: 'system', label: compact(label, 120) || 'CaoGen' }
+  return { kind: 'system', label: compact(label, 120) || 'EastGenesis' }
 }
 
 function humanActor(label: string): StudioAuditActor {

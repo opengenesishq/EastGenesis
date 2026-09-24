@@ -12,8 +12,10 @@ export function selectionWithKind(current: RoutingSelection, kind: RoutingSelect
   switch (kind) {
     case 'global_auto': return { kind }
     case 'provider_auto': return { kind, providerId: target.providerId }
-    case 'candidate_set': return { kind, targets: hasTarget(target) ? [target] : [] }
-    case 'preferred': return { kind, primary: target, alternatives: [] }
+    case 'candidate_set': return { kind, targets: current.kind === 'preferred'
+      ? [current.primary, ...current.alternatives].filter(hasTarget) : hasTarget(target) ? [target] : [] }
+    case 'preferred': return { kind, primary: target,
+      alternatives: current.kind === 'candidate_set' ? current.targets.slice(1) : [], alternativesOrder: 'configured' }
     case 'fixed': return { kind, target }
   }
 }
@@ -21,6 +23,7 @@ function explicitTarget(selection: RoutingSelection): RoutingTargetRef {
   if (selection.kind === 'fixed') return { ...selection.target }
   if (selection.kind === 'preferred') return { ...selection.primary }
   if (selection.kind === 'provider_auto') return { providerId: selection.providerId, model: '' }
+  if (selection.kind === 'candidate_set') return { ...(selection.targets[0] ?? emptyTarget()) }
   return emptyTarget()
 }
 function hasTarget(target: RoutingTargetRef): boolean { return Boolean(target.providerId && target.model) }
@@ -49,6 +52,12 @@ export function withoutConditionField<K extends keyof RoutingRuleCondition>(cond
 }
 export function replaceTarget(targets: readonly RoutingTargetRef[], index: number, target: RoutingTargetRef): RoutingTargetRef[] {
   return targets.map((item, at) => at === index ? target : item)
+}
+export function moveTarget(targets: readonly RoutingTargetRef[], index: number, offset: -1 | 1): RoutingTargetRef[] {
+  const next = [...targets], destination = index + offset
+  if (index < 0 || index >= next.length || destination < 0 || destination >= next.length) return next
+  ;[next[index], next[destination]] = [next[destination], next[index]]
+  return next
 }
 export function toggleValue<T>(values: readonly T[], value: T, enabled: boolean): T[] {
   return enabled ? values.includes(value) ? [...values] : [...values, value] : values.filter((item) => item !== value)

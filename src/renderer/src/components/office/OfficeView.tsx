@@ -39,6 +39,9 @@ import { COMMAND_HALL_STATIONS, commandHallStationById, type CommandHallStationI
 import BusinessStationHotspots from './kit/palace/BusinessStationHotspots'
 import { BUSINESS_STATIONS, type BusinessStationSpec } from './kit/palace/businessStationCatalog'
 import SystemRoleHotspots from './kit/palace/SystemRoleHotspots'
+import ImperialCityScene from './kit/palace/ImperialCityScene'
+import ImperialCityNavigation from './ImperialCityNavigation'
+import { imperialCityCamera, imperialCityNodeForRole, imperialCityNodes, type ImperialCityNode, type ImperialCityZone } from './kit/palace/imperialCityCatalog'
 import { systemRoleById, type SystemRoleActionId, type SystemRoleId } from './kit/palace/systemRoleCatalog'
 import OfficeScene from './kit/MingAcademyScene'
 import OfficePerformanceProbe from './kit/OfficePerformanceProbe'
@@ -52,8 +55,15 @@ import { summarizeOfficeBusiness, summarizeOfficeCosts, summarizeOfficeExecution
 import { useOfficeOperations } from './useOfficeOperations'
 import OfficeCommandStrip from './OfficeCommandStrip'
 import OfficeCommandPanel from './OfficeCommandPanel'
+import type { OfficeCommandSelectionRequest } from './OfficeCommandInput'
 import PalaceActionMenu from './PalaceActionMenu'
 import PalaceWorkPanel from './PalaceWorkPanel'
+import PalaceTreasury from './PalaceTreasury'
+import PalaceCourtControls from './PalaceCourtControls'
+import { getCourtFrame } from './court-ceremony'
+import { capturePalaceSessionBinding, isPalaceSessionBindingCurrent, type PalaceSessionBinding } from './palace-task-binding'
+import CourtCeremonyScene, { type CourtPlayback } from './kit/palace/CourtCeremonyScene'
+import { MingHistoricalContext } from './MingHistoricalContext'
 import { PALACE_ACTIONS, type PalaceAction, type PalaceActionContext } from './palaceActions'
 import OfficeArchivePanel from './OfficeArchivePanel'
 import OfficeRoleWorkItems from './OfficeRoleWorkItems'
@@ -165,6 +175,7 @@ export default function OfficeView(): React.JSX.Element {
   const reducedMotion = useOfficeReducedMotion()
   const themePref = useStore((s) => s.settings?.theme ?? 'dark')
   const activeId = useStore((s) => s.activeId)
+  const showNewSession = useStore((s) => s.showNewSession)
   const preferredProjectId = useStore((s) => s.preferredProjectWorkspaceId)
   const selectSession = useStore((s) => s.selectSession)
   const setView = useStore((s) => s.setView)
@@ -182,6 +193,9 @@ export default function OfficeView(): React.JSX.Element {
   const [selectedCommandStation, setSelectedCommandStation] = useState<CommandHallStationId | null>(null)
   const [selectedBusinessStation, setSelectedBusinessStation] = useState<BusinessStationSpec | null>(null)
   const [selectedSystemRole, setSelectedSystemRole] = useState<SystemRoleId | null>(null)
+  const [cityZone, setCityZone] = useState<ImperialCityZone>('palace')
+  const [cityNodeId, setCityNodeId] = useState<string>()
+  const [cityTaskBinding, setCityTaskBinding] = useState<(PalaceSessionBinding & { title: string })>()
   // Ephemeral governance projection state; it never creates a canonical task.
   const [councilSummoned, setCouncilSummoned] = useState(false)
   const [authoredRoleFigureCount, setAuthoredRoleFigureCount] = useState(0)
@@ -189,9 +203,34 @@ export default function OfficeView(): React.JSX.Element {
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [palaceAction, setPalaceAction] = useState<Exclude<PalaceAction, 'edict'> | null>(null)
   const [palaceActionContext, setPalaceActionContext] = useState<PalaceActionContext>()
+  const [commandSelectionRequest, setCommandSelectionRequest] = useState<OfficeCommandSelectionRequest>()
   const [archiveLedger, setArchiveLedger] = useState<WorkflowLedgerRendererSelection | null>(null)
   const [archiveEvidence, setArchiveEvidence] = useState<WorkflowEvidenceRecord[]>([])
   const [archiveLedgerError, setArchiveLedgerError] = useState('')
+  const [treasuryOpen, setTreasuryOpen] = useState(false)
+  const [courtActive, setCourtActive] = useState(false)
+  const [courtElapsed, setCourtElapsed] = useState(0)
+  const [courtPaused, setCourtPaused] = useState(false)
+  const [courtSpeed, setCourtSpeed] = useState(1)
+  const [courtGeneration, setCourtGeneration] = useState(0)
+  const [courtReports, setCourtReports] = useState<Array<PalaceSessionBinding & { title: string }>>([])
+  const courtPlayback = useRef<CourtPlayback>({ elapsed: 0, paused: false, speed: 1 })
+  const courtParticipantCount = courtReports.length || 3
+  const courtFrame = getCourtFrame(courtElapsed, courtParticipantCount)
+  const courtReport = courtReports[courtFrame.reportIndex]
+  useEffect(() => {
+    if (courtActive) setCameraRequestId(value => value + 1)
+  }, [courtActive, courtFrame.stage, courtFrame.reportIndex])
+  const courtTick = useCallback((elapsed: number) => setCourtElapsed(elapsed), [])
+  const closeCourt = (): void => { setCourtActive(false); setCameraRequestId(value => value + 1) }
+  const replayCourt = (): void => {
+    courtPlayback.current.elapsed = 0; courtPlayback.current.paused = false
+    setCourtGeneration(value => value + 1)
+    setCourtElapsed(0); setCourtPaused(false); setCameraRequestId(value => value + 1)
+  }
+  const showCourtRecords = (): void => {
+    closeCourt(); setPalaceAction('court')
+  }
   // Keep the HTML command shell paintable before R3F synchronously creates a
   // WebGL context.  Canvas creation can block the renderer for >100ms on a
   // cold Intel GPU; mounting it on the next frame preserves the shell's first
@@ -207,6 +246,9 @@ export default function OfficeView(): React.JSX.Element {
   const institutions = useOfficeInstitutions(institutionProjectId, activeId ? sessions[activeId]?.meta : undefined,
     Object.values(sessions).map(session => session.meta), selectedSystemRole !== null)
   const systemRoles = institutions.roles
+  const cityNodes = useMemo(() => imperialCityNodes(cityZone, systemRoles), [cityZone, systemRoles])
+  const cityNode = cityNodes.find(node => node.id === cityNodeId)
+  const cityTaskAvailable = Boolean(cityTaskBinding && isPalaceSessionBindingCurrent(cityTaskBinding, sessions[cityTaskBinding.id]?.meta))
   const institutionWorkItems = projectSnapshot.workItems.filter(item => (!institutionProjectId || item.projectId === institutionProjectId) &&
     (!institutions.goalId || item.goalId === institutions.goalId))
   useEffect(() => {
@@ -454,6 +496,10 @@ export default function OfficeView(): React.JSX.Element {
   const selectedFacilitySpec = selectedFacility ? facilitySpecs.find((spec) => spec.key === selectedFacility) : undefined
   const activeOfficePosition = officeSelectionPosition(positions, activeOfficeIndex, visibleIds.length, visibleActors.map((actor) => actor.id), selectedActor?.id)
   const cameraPose = useMemo(() => {
+    if (courtActive) return courtFrame.stage === 'report'
+      ? { position: [8.7, 5.2, 18] as [number, number, number], target: [0, 1.35, 7.7] as [number, number, number] }
+      : { position: [13, 11, 20] as [number, number, number], target: [0, 1.3, 12] as [number, number, number] }
+    if (cityZone !== 'palace') return imperialCityCamera(cityZone, Boolean(cityNode))
     if (cameraPreset === 'facilities') {
       const tower = selectedTower ? CORNER_TOWERS.find((item) => item.id === selectedTower) : undefined
       if (tower) return { position: tower.cameraPosition, target: tower.cameraTarget }
@@ -481,7 +527,7 @@ export default function OfficeView(): React.JSX.Element {
     }
     if (cameraPreset === 'incidents') return incidentCamera
     return { position: OFFICE_CAMERA_POSITION, target: OFFICE_CAMERA_TARGET }
-  }, [activeOfficePosition, cameraPreset, incidentCamera, selectedFacilitySpec, selectedSystemRole, selectedTower, systemRoles])
+  }, [activeOfficePosition, cameraPreset, incidentCamera, selectedFacilitySpec, selectedSystemRole, selectedTower, systemRoles, courtActive, courtFrame.stage, cityZone, cityNode])
   const initialCanvasCamera = useRef({ position: cameraPose.position, fov: OFFICE_CAMERA_FOV, near: 0.1, far: PALACE_WORLD_LAYOUT.cameraFar })
   const initialCanvasTarget = useRef(cameraPose.target)
   const cameraMinDistance = 1
@@ -514,6 +560,7 @@ export default function OfficeView(): React.JSX.Element {
     activitySummary.error === faultHitTargets.length
 
   const selectOfficeSession = (id: string, kind: 'workstation' | 'walker' = 'workstation'): void => {
+    setCityZone('palace')
     setCameraRequestId((value) => value + 1)
     officeHitRef.current = { seq: officeHitRef.current.seq + 1, kind, id }
     setSelectedOperationalId(null)
@@ -526,6 +573,7 @@ export default function OfficeView(): React.JSX.Element {
     setCameraPreset('agent')
   }
   const selectCameraPreset = (preset: CameraPreset): void => {
+    setCityZone('palace')
     setCameraRequestId((value) => value + 1)
     if (preset !== 'facilities') { setSelectedFacility(null); setSelectedTower(null); setSelectedCommandStation(null); setSelectedBusinessStation(null); setSelectedSystemRole(null) }
     else setSelectedOperationalId(null)
@@ -560,6 +608,7 @@ export default function OfficeView(): React.JSX.Element {
     setCameraPreset('facilities')
   }
   const selectCommandHall = (): void => {
+    setCityZone('palace')
     setCameraRequestId((value) => value + 1)
     setSelectedOperationalId(null)
     setSelectedFacility(null)
@@ -586,8 +635,13 @@ export default function OfficeView(): React.JSX.Element {
     selectSession(id)
     setView('list')
   }
-  const returnToWorkspace = (): void => { saveOfficeReturnContext({ businessView, selectedFacility }); setView('list') }
+  const returnToWorkspace = (): void => {
+    saveOfficeReturnContext({ businessView, selectedFacility })
+    if (!showNewSession && activeId && sessions[activeId]) selectSession(activeId)
+    setView('list')
+  }
   const selectOperationalActor = (id: string): void => {
+    setCityZone('palace')
     setCameraRequestId((value) => value + 1)
     setSelectedOperationalId(id)
     setSelectedFacility(null)
@@ -627,19 +681,70 @@ export default function OfficeView(): React.JSX.Element {
     })
   }
   const openPalaceAction = (action: PalaceAction, context?: PalaceActionContext): void => {
+    if (context?.sessionId) {
+      const target = useStore.getState().sessions[context.sessionId]?.meta
+      if (!target || target.status === 'closed' || (context.projectId && context.projectId !== target.workspaceId) ||
+        (context.workItemId && context.workItemId !== target.workItemId)) {
+        setOperationalNavigationError(settings.language === 'zh'
+          ? '原任务已关闭或归属已变化，请重新选择任务。'
+          : 'The original task closed or changed ownership. Select the task again.')
+        return
+      }
+    }
+    setCourtActive(false)
+    setTreasuryOpen(false)
     setArchiveOpen(false)
     setOperationalNavigationError('')
     setPalaceActionContext(context)
     if (context?.sessionId && sessions[context.sessionId]) selectSession(context.sessionId)
+    if (action === 'court') {
+      setCityZone('palace')
+      const current = Object.values(sessions).filter(session => session.meta.status !== 'closed')
+        .sort((a, b) => Number(b.meta.id === activeId) - Number(a.meta.id === activeId))
+        .slice(0, 6).map(session => ({ ...capturePalaceSessionBinding(session.meta), title: session.meta.title }))
+      setCourtReports(current); setPalaceAction(null); setCourtActive(true)
+      setSelectedOperationalId(null); setSelectedSystemRole(null); setSelectedFacility(null)
+      setSelectedCommandStation(null); setSelectedTower(null); setCameraPreset('overview')
+      replayCourt()
+      return
+    }
     if (action === 'edict') {
+      setCityZone('palace')
       setPalaceAction(null)
+      // An explicit panel selection takes precedence over an older scene actor.
+      // With no bound task, leave the desk in its new-task state.
+      if (context) {
+        setSelectedOperationalId(null)
+        setCommandSelectionRequest(previous => ({ sequence: (previous?.sequence ?? 0) + 1,
+          scope: context.sessionId ? 'selection' : 'new' }))
+      }
       focusOfficeCommandInput()
       return
     }
     setPalaceAction(action)
   }
+  const openCourtReport = (report: PalaceSessionBinding): void => {
+    const current = useStore.getState().sessions[report.id]?.meta
+    if (!isPalaceSessionBindingCurrent(report, current)) {
+      setOperationalNavigationError(settings.language === 'zh'
+        ? '这位官员原先关联的任务已关闭或归属已变化，请在朝会事项中重新选择。'
+        : 'This representative’s original task closed or changed ownership. Select it again in court business.')
+      return
+    }
+    openPalaceAction('study', { sessionId: report.id, projectId: report.workspaceId, workItemId: report.workItemId })
+  }
+  const openTreasury = (): void => {
+    closeCourt()
+    setPalaceAction(null)
+    setArchiveOpen(false)
+    setOperationalNavigationError('')
+    setTreasuryOpen(true)
+  }
   /** Results are session-scoped; never open an unbound result panel. */
   const openBoundResult = (lineId?: string): void => {
+    closeCourt()
+    setTreasuryOpen(false)
+    setPalaceAction(null)
     if (lineId?.startsWith('business-line:')) {
       saveOfficeReturnContext({ businessView, selectedFacility })
       void useStore.getState().selectBusinessLine(lineId).then(() => { requestBusinessLineSurfaceNavigation(lineId, 'results'); setView('list') }).catch((cause) =>
@@ -687,10 +792,45 @@ export default function OfficeView(): React.JSX.Element {
     setSelectedSystemRole(id)
     setCameraPreset('facilities')
   }
+  const navigateCity = (zone: ImperialCityZone, node?: ImperialCityNode): void => {
+    if (node && (node.zone !== zone || !imperialCityNodes(zone, systemRoles).some(item => item.id === node.id))) return
+    const current = useStore.getState()
+    const task = !current.showNewSession && current.activeId ? current.sessions[current.activeId]?.meta : undefined
+    // Navigation only snapshots context. It never selects, creates or dispatches a task.
+    setCityTaskBinding(node && task && task.status !== 'closed' ? { ...capturePalaceSessionBinding(task), title: task.title } : undefined)
+    setCityZone(zone); setCityNodeId(node?.id)
+    setCourtActive(false); setPalaceAction(null); setTreasuryOpen(false); setArchiveOpen(false)
+    setSelectedOperationalId(null); setSelectedSystemRole(null); setSelectedFacility(null)
+    setSelectedTower(null); setSelectedCommandStation(null); setSelectedBusinessStation(null)
+    setOperationalNavigationError('')
+    setCameraPreset('overview'); setCameraRequestId(value => value + 1)
+  }
+  const continueCityTask = (): void => {
+    if (!cityTaskBinding) return
+    const task = useStore.getState().sessions[cityTaskBinding.id]?.meta
+    if (!isPalaceSessionBindingCurrent(cityTaskBinding, task)) {
+      setOperationalNavigationError(settings.language === 'zh' ? '原任务已关闭或归属变化，请重新选择任务。' : 'The original task closed or changed ownership. Select it again.')
+      return
+    }
+    openPalaceAction('study', { sessionId: cityTaskBinding.id, projectId: cityTaskBinding.workspaceId, workItemId: cityTaskBinding.workItemId })
+  }
+  const openInstitutionWork = (roleId: string, action: PalaceAction): void => {
+    if (cityZone !== 'palace' && cityTaskBinding) {
+      const task = useStore.getState().sessions[cityTaskBinding.id]?.meta
+      if (!isPalaceSessionBindingCurrent(cityTaskBinding, task)) {
+        setOperationalNavigationError(settings.language === 'zh' ? '原任务已关闭或归属变化，请重新进入院落。' : 'The original task changed. Re-enter the courtyard.')
+        return
+      }
+      openPalaceAction(action, { roleId, sessionId: cityTaskBinding.id, projectId: cityTaskBinding.workspaceId, workItemId: cityTaskBinding.workItemId })
+      return
+    }
+    openPalaceAction(action, { roleId, sessionId: institutionSessionId, projectId: institutionProjectId })
+  }
   const activateSystemRole = (id: SystemRoleId, actionId: SystemRoleActionId): void => {
     const role = systemRoleById(id, systemRoles)
     const action = role?.actions.find((item) => item.id === actionId)
     if (!action) return
+    if (action.target === 'treasury') { openTreasury(); return }
     if (action.target === 'new_task') { openPalaceAction('edict'); return }
     if (action.target === 'summon_council') { summonCouncil(); return }
     if (action.target === 'incident_watch') { selectCameraPreset('incidents'); return }
@@ -857,11 +997,12 @@ export default function OfficeView(): React.JSX.Element {
   }
 
   return (
-    <div className="office">
+    <div className="office" data-court-playing={courtActive ? 'true' : 'false'} data-city-zone={cityZone}>
       {operationalNavigationError && <p role="alert" data-office-navigation-error>{operationalNavigationError}</p>}
       <OfficeOperationNotice statuses={operationStatus} zh={settings.language === 'zh'} />
+      {treasuryOpen && <PalaceTreasury onClose={() => setTreasuryOpen(false)} />}
       {palaceAction && <PalaceWorkPanel key={`${palaceAction}:${palaceActionContext?.sessionId ?? ''}:${palaceActionContext?.projectId ?? ''}:${palaceActionContext?.workItemId ?? ''}:${palaceActionContext?.roleId ?? ''}`} action={palaceAction} initialContext={palaceActionContext}
-        onClose={() => setPalaceAction(null)} onAction={openPalaceAction} onEdict={() => openPalaceAction('edict')} />}
+        onClose={() => setPalaceAction(null)} onAction={openPalaceAction} onOpenWorkspace={focus} />}
       {archiveOpen && <OfficeArchivePanel
         sessions={ids.map((id) => ({
           id,
@@ -878,10 +1019,16 @@ export default function OfficeView(): React.JSX.Element {
         onClose={() => { setArchiveOpen(false); setOperationalNavigationError('') }}
       />}
       <div className="office-topbar drag-region">
-        <div className="office-title no-drag">{t('officeTitle')}</div>
+        <div className="office-title no-drag">{cityZone === 'palace' ? t('officeTitle') : settings.language === 'zh' ? '明代京师' : 'Ming capital'}</div>
         <div className="office-actions no-drag">
+          <button type="button" className="btn btn-primary" data-palace-start-court onClick={() => openPalaceAction('court')}>{settings.language === 'zh' ? '上朝' : 'Attend court'}</button>
+          <button type="button" className="btn btn-ghost" data-palace-open-treasury onClick={openTreasury}>{settings.language === 'zh' ? '国库 · 户部' : 'Treasury'}</button>
           <span className="office-hint">{t('officeHint')}</span>
           <OfficeTaskPicker labels={taskLabels} zh={settings.language === 'zh'} onSelect={selectTaskLabel} />
+          {activeId && sessions[activeId] && <button className="btn btn-primary" data-palace-continue-task={activeId}
+            title={sessions[activeId].meta.title} onClick={() => openPalaceAction('study', { sessionId: activeId })}>
+            {settings.language === 'zh' ? '继续当前任务' : 'Continue current task'}
+          </button>}
           <button className="btn btn-ghost" data-office-new-work onClick={() => void createInCurrentBusinessLine()}>
             {t('newShort')}
           </button>
@@ -890,12 +1037,15 @@ export default function OfficeView(): React.JSX.Element {
           </button>
         </div>
       </div>
-
+      <ImperialCityNavigation zone={cityZone} node={cityNode} nodes={cityNodes} zh={settings.language === 'zh'}
+        taskTitle={cityTaskBinding?.title} taskAvailable={cityTaskAvailable} onZone={zone => navigateCity(zone)}
+        onNode={node => navigateCity(cityZone, node)} onContinue={continueCityTask} />
         <div
           className="office-canvas-wrap"
+          data-imperial-zone={cityZone} data-imperial-node={cityNode?.id ?? ''} data-imperial-bound-task={cityTaskBinding?.id ?? ''}
           data-office-business-view={businessView} data-office-data-ready={hydrated && operationalDataReady ? 'true' : 'false'}
           data-office-interior-placements={JSON.stringify(visiblePlacements)}
-          data-office-opened-room={openedRoom ?? ''}
+          data-office-opened-room={cityZone === 'palace' ? openedRoom ?? '' : cityNode?.id ?? ''}
           data-office-art-direction="ming-original-palace-v1" data-office-architecture-reference="forbidden-city-reference-palace-v2" data-office-shared-command-hall="true" data-office-courtyard-template="peer-court-v1"
           data-office-art-finish="authored-whitebox-v2" data-office-space-brand="CaoTaiHub"
           data-office-palace-cutaway={palaceCutaway ? '1' : '0'}
@@ -1076,7 +1226,21 @@ export default function OfficeView(): React.JSX.Element {
           data-office-scene-detail-ready={sceneDetailEnabled ? 1 : 0}
           data-office-scene-assets-ready={sceneAssetsEnabled ? 1 : 0}
         >
-          <OfficeBusinessSwitcher value={businessView} lines={businessLines} onChange={selectBusinessView} />
+          {courtActive && <>
+            <PalaceCourtControls zh={settings.language === 'zh'} elapsed={courtElapsed} participants={courtParticipantCount}
+              paused={courtPaused} speed={courtSpeed} reducedMotion={reducedMotion}
+              onPause={() => { courtPlayback.current.paused = !courtPaused; setCourtPaused(!courtPaused) }}
+              onReplay={replayCourt} onSpeed={speed => { courtPlayback.current.speed = speed; setCourtSpeed(speed) }}
+              onSkip={showCourtRecords} onClose={closeCourt} />
+            <aside className="court-report-caption no-drag" data-court-report>
+              <strong>{settings.language === 'zh' ? '明代常朝 · 门朝场景' : 'Ming court · gate audience'}</strong>
+              <span>{courtReport ? courtReport.title : settings.language === 'zh'
+                ? courtReports.length ? '人物可打开其关联任务，朝会不会重新派发。' : '典仪演示 · 当前没有任务。人物出入、行礼与奏事均为实时动画。'
+                : courtReports.length ? 'Select a representative to continue the same task.' : 'Ceremony demonstration · No active tasks.'}</span>
+              {courtReport && <button type="button" className="btn btn-primary btn-sm" data-court-open-report onClick={() => openCourtReport(courtReport)}>{settings.language === 'zh' ? '继续这项任务' : 'Continue this task'}</button>}
+            </aside>
+          </>}
+          {cityZone === 'palace' && <><OfficeBusinessSwitcher value={businessView} lines={businessLines} onChange={selectBusinessView} />
           <OfficeCommandStrip
             businessView={businessView}
             activity={executionActivitySummary}
@@ -1084,13 +1248,15 @@ export default function OfficeView(): React.JSX.Element {
             realtime={realtime}
             projects={scopedOperations.projects}
             media={scopedOperations.media} cost={scopedCosts}
-          />
-          <OfficeCommandPanel lines={businessLines} settings={settings} businessView={businessView} facilityLineId={selectedFacilitySpec?.businessLineId}
-            agentSelected={cameraPreset === 'agent'} session={activeOfficeSession} actor={selectedActor}
-            onOpenSession={focus} onOpenActor={openOperationalActor} />
+          /></>}
+          {cityZone === 'palace' && !palaceAction && !treasuryOpen && !courtActive && <OfficeCommandPanel lines={businessLines} settings={settings} businessView={businessView} facilityLineId={selectedFacilitySpec?.businessLineId}
+            selectionRequest={commandSelectionRequest} onSelectionApplied={() => setCommandSelectionRequest(undefined)}
+            agentSelected={(!showNewSession && Boolean(activeId)) || cameraPreset === 'agent'} session={selectedActor || showNewSession ? undefined : activeId ? sessions[activeId] : undefined} actor={selectedActor}
+            onOpenSession={id => openPalaceAction('study', { sessionId: id })} onOpenWorkspace={focus} onOpenActor={openOperationalActor} />}
           <div className="office-camera-strip no-drag" data-office-camera-preset-controls={CAMERA_PRESETS.length}>
             <PalaceActionMenu zh={settings.language === 'zh'} onAction={openPalaceAction} />
-            {CAMERA_PRESETS.map((preset) => (
+            <MingHistoricalContext zh={settings.language === 'zh'} />
+            {cityZone === 'palace' && CAMERA_PRESETS.map((preset) => (
               <button
                 key={preset}
                 className={`office-camera-button ${cameraPreset === preset ? 'active' : ''}`}
@@ -1104,7 +1270,7 @@ export default function OfficeView(): React.JSX.Element {
               </button>
             ))}
             <button className="office-camera-button" data-office-command-hall onClick={selectCommandHall}>
-              {settings.language === 'zh' ? '议政殿' : 'Council hall'}
+              {settings.language === 'zh' ? '议事区' : 'Council workspace'}
             </button>
             <button className="office-camera-button" data-office-institution-overview onClick={summonCouncil}>
               {settings.language === 'zh' ? '机构职责' : 'Institutions'}
@@ -1113,16 +1279,16 @@ export default function OfficeView(): React.JSX.Element {
               aria-pressed={palaceAction === 'court'} onClick={() => openPalaceAction('court')}>
               {settings.language === 'zh' ? '协调事项' : 'Coordination'}
             </button>
-            <button className={`office-camera-button ${palaceCutaway ? 'active' : ''}`}
+            {cityZone === 'palace' && <button className={`office-camera-button ${palaceCutaway ? 'active' : ''}`}
               data-office-palace-roof-toggle aria-pressed={palaceCutaway}
               onClick={() => setPalaceCutaway((value) => !value)}>
               {settings.language === 'zh' ? (palaceCutaway ? '恢复屋顶' : '查看剖面') : (palaceCutaway ? 'Show roofs' : 'Cutaway')}
-            </button>
+            </button>}
           </div>
           {(institutions.error || institutions.loading) && <p className="office-idle-notice no-drag" role="status" data-office-institution-status>
             {institutions.error ? `${settings.language === 'zh' ? '机构记录读取失败：' : 'Institution records unavailable: '}${institutions.error}` : (settings.language === 'zh' ? '正在读取当前任务机构…' : 'Loading task institutions…')}
           </p>}
-          {cameraPreset !== 'facilities' && activeOfficeSession && activeOfficeId && activeOfficeActivity && (
+          {cityZone === 'palace' && cameraPreset !== 'facilities' && activeOfficeSession && activeOfficeId && activeOfficeActivity && (
               <OfficeAgentSelectionPanel activity={activeOfficeActivity} model={activeOfficeModel} session={activeOfficeSession} signal={activeOfficeSignal}
               onOpenResults={() => { focus(activeOfficeId); useStore.getState().openPanel('result') }}
               role={activeOfficeRole}
@@ -1177,7 +1343,7 @@ export default function OfficeView(): React.JSX.Element {
               ? station.action === 'command' ? '回到总控案' : station.action === 'new_task' ? '复核任务方案' : station.action === 'approval' ? '批阅奏折与交付' : station.action === 'results' ? '打开成果档案' : station.action === 'recovery' ? '打开恢复中心' : '进入异常巡核'
               : station.action === 'command' ? 'Focus command desk' : station.action === 'new_task' ? 'Review task plan' : station.action === 'approval' ? 'Review approvals and delivery' : station.action === 'results' ? 'Open results' : station.action === 'recovery' ? 'Open recovery' : 'Open incident watch'
             return <div className="office-facility-panel no-drag" data-office-command-station-panel={station.id}>
-              <div className="office-selection-kicker">{settings.language === 'zh' ? '中央议政殿工位' : 'Council station'}</div>
+              <div className="office-selection-kicker">{settings.language === 'zh' ? '议事工作区' : 'Council workspace'}</div>
               <div className="office-selection-title" data-office-command-station-id={station.id}>{station.label}</div>
               <div className="office-selection-meta"><span>{station.purpose}</span><span data-office-command-station-anchor={station.anchor}>{station.anchor}</span></div>
               <div className="office-signal-list">{station.capabilities.map((capability) => <div key={capability}><span>{settings.language === 'zh' ? '能力' : 'Capability'}</span><strong>{capability}</strong></div>)}</div>
@@ -1201,31 +1367,36 @@ export default function OfficeView(): React.JSX.Element {
               duty: '查看当前范围内的任务', dutyEn: 'Inspect tasks in the current scope', anchor: 'HALL_main', actions: [], workAction: 'patrol' as const } : systemRoleById(selectedSystemRole, systemRoles)
             return role ? <div className="office-facility-panel no-drag" data-office-system-role-panel={role.id}
               data-office-system-role-projection="true">
-              <div className="office-selection-kicker">{settings.language === 'zh' ? '议政殿角色' : 'Council role'}</div>
+              <div className="office-selection-kicker">{settings.language === 'zh' ? '机构与职责' : 'Institutions and responsibilities'}</div>
               <div className="office-selection-title" data-office-system-role-id={role.id}>{settings.language === 'zh' ? role.label : role.labelEn}</div>
-              <div className="office-selection-meta"><span>{settings.language === 'zh' ? role.duty : role.dutyEn}</span><span data-office-system-role-anchor={role.anchor}>{role.anchor}</span></div>
+              <div className="office-selection-meta"><span>{settings.language === 'zh' ? role.duty : role.dutyEn}</span><span data-office-system-role-anchor={role.anchor}>{cityNode ? settings.language === 'zh' ? cityNode.label : cityNode.labelEn : role.anchor}</span></div>
+              {role.id !== 'all' && <MingHistoricalContext zh={settings.language === 'zh'} roleId={role.id} />}
+              {imperialCityNodeForRole(role.id) && imperialCityNodeForRole(role.id)?.id !== cityNode?.id && <button type="button" className="btn btn-ghost btn-sm"
+                data-imperial-visit-role={role.id} onClick={() => { const node = imperialCityNodeForRole(role.id); if (node) navigateCity(node.zone, node) }}>
+                {settings.language === 'zh' ? '进入工作院落' : 'Enter work courtyard'}</button>}
               <button className="btn btn-ghost btn-sm" type="button" data-palace-institution-patrol={role.id}
                 onClick={() => openPalaceAction('patrol', { roleId: role.id })}>{settings.language === 'zh' ? '巡视机构任务' : 'Inspect institution work'}</button>
-              <button className="btn btn-primary btn-sm" type="button" data-palace-institution-audience={role.id}
-                onClick={() => openPalaceAction(role.workAction ?? 'audience', { roleId: role.id, sessionId: institutionSessionId, projectId: institutionProjectId })}>
-                  {settings.language === 'zh' ? PALACE_ACTIONS.find(action => action.id === (role.workAction ?? 'audience'))?.label : PALACE_ACTIONS.find(action => action.id === (role.workAction ?? 'audience'))?.labelEn}</button>
+              {role.actions.some(action => action.target === 'treasury') ? <button className="btn btn-primary btn-sm" type="button"
+                data-palace-institution-treasury={role.id} onClick={openTreasury}>{settings.language === 'zh' ? '查看国库账目' : 'Open treasury'}</button> : <button className="btn btn-primary btn-sm" type="button" data-palace-institution-audience={role.id}
+                onClick={() => openInstitutionWork(role.id, role.workAction ?? 'audience')}>
+                  {settings.language === 'zh' ? PALACE_ACTIONS.find(action => action.id === (role.workAction ?? 'audience'))?.label : PALACE_ACTIONS.find(action => action.id === (role.workAction ?? 'audience'))?.labelEn}</button>}
               <OfficeRoleWorkItems roleId={role.id} workItems={institutionWorkItems} projects={projectSnapshot.projects} roles={systemRoles} plans={institutions.plans}
                 status={institutions.plansLoading ? { state: 'loading' } : institutions.unavailablePlans ? { state: 'stale' } : operationStatus.workItems} zh={settings.language === 'zh'} onSelectRole={id => id === 'all' ? setSelectedSystemRole('all') : selectSystemRole(id)} onOpen={(item) => {
                   saveOfficeReturnContext({ businessView, selectedFacility })
                   try { openOfficeWorkItem(item, useStore.getState()) }
                   catch (cause) { setOperationalNavigationError(cause instanceof Error ? cause.message : String(cause)) }
                 }} />
-              {role.actions.map((action) => <button key={action.id} className="btn btn-primary btn-sm" type="button"
+              {role.actions.filter(action => action.target !== 'treasury').map((action) => <button key={action.id} className="btn btn-primary btn-sm" type="button"
                 data-office-system-role-action={action.id} data-office-system-role-target={action.target}
                 onClick={() => activateSystemRole(role.id, action.id)}>{settings.language === 'zh' ? action.label : action.labelEn}</button>)}
             </div> : null
           })()}
           {selectedActor && <OfficeOperationalPanel key={selectedActor.id} actor={selectedActor} onOpen={openOperationalActor}
             onClose={() => setSelectedOperationalId(null)} onJobChanged={onJobChanged} />}
-          {hydrated && operationalDataReady && !hasAnyOperations && (
+          {cityZone === 'palace' && hydrated && operationalDataReady && !hasAnyOperations && (
             <div className="office-idle-notice no-drag" data-office-empty="true">{t('officeEmpty')}</div>
           )}
-          <OfficeTaskLabelLayer ref={taskLabelLayer} labels={sceneDetailEnabled ? taskLabels : []} zh={settings.language === 'zh'} onSelect={selectTaskLabel} />
+          <OfficeTaskLabelLayer ref={taskLabelLayer} labels={cityZone === 'palace' && sceneDetailEnabled && !courtActive ? taskLabels : []} zh={settings.language === 'zh'} onSelect={selectTaskLabel} />
           <OfficeSceneRecovery zh={settings.language === 'zh'} contextLost onRetry={() => setCanvasRevision(value => value + 1)} />
           {canvasMounted && <OfficeSceneBoundary key={canvasRevision}
             fallback={<OfficeSceneRecovery zh={settings.language === 'zh'} onRetry={() => setCanvasRevision(value => value + 1)} />}><Canvas
@@ -1255,7 +1426,7 @@ export default function OfficeView(): React.JSX.Element {
           <color attach="background" args={[scene.bg]} />
           <OfficePerformanceProbe />
           <OfficeWebglLifecycle />
-          <OfficeTaskLabelProjector labels={sceneDetailEnabled ? taskLabels : []} layer={taskLabelLayer} />
+          <OfficeTaskLabelProjector labels={cityZone === 'palace' && sceneDetailEnabled && !courtActive ? taskLabels : []} layer={taskLabelLayer} />
           <OfficeFrameDriver active={renderQuality.renderActive} onFrame={handleOfficeFrame} />
           <fog attach="fog" args={[scene.bg, ...PALACE_WORLD_LAYOUT.fog]} />
           <ambientLight intensity={isLight ? 0.98 : 1.16} />
@@ -1286,7 +1457,7 @@ export default function OfficeView(): React.JSX.Element {
             intensity={openedRoom ? (isLight ? 0.46 : 1.1) : 0} distance={20} color="#f5e8cb" />
 
           {/* 共享业务控制室:建筑外壳、中央总控、三类业务设备、审批、资产与算力设施。 */}
-          {!sceneDetailEnabled && (
+          {cityZone === 'palace' && !sceneDetailEnabled && !courtActive && (
             <OfficeBootScene
               ids={visibleIds}
               positions={positions}
@@ -1298,14 +1469,14 @@ export default function OfficeView(): React.JSX.Element {
               onOpen={focus}
             />
           )}
-          {sceneAssetsEnabled && (
+          {cityZone === 'palace' && sceneAssetsEnabled && (
             <Suspense fallback={null}>
               <OfficeScene
                 cutaway={palaceCutaway} openedRoom={openedRoom}
                 qualityTier={renderQuality.resolvedTier}
                 lightMode={isLight} facilities={facilitySpecs} counts={facilitySignals.counts}
                 onSelectCommand={selectCommandHall}
-                labels={settings.language === 'zh' ? { academy: 'CaoTaiHub', command: '议政殿', assistant: '书斋', project: '营造工坊', video: '绘事院' } : { academy: 'CaoTaiHub', command: 'Council hall', assistant: 'Study', project: 'Workshop', video: 'Atelier' }}
+                labels={settings.language === 'zh' ? { academy: 'CaoTaiHub', command: '议事区', assistant: '书斋', project: '营造工坊', video: '绘事院' } : { academy: 'CaoTaiHub', command: 'Council workspace', assistant: 'Study', project: 'Workshop', video: 'Atelier' }}
                 signals={{
                   assistant: assistantSessionCount,
                   project: projectSummary.workItems + projectSessionCount,
@@ -1315,7 +1486,7 @@ export default function OfficeView(): React.JSX.Element {
               />
             </Suspense>
           )}
-          {sceneDetailEnabled && (
+          {cityZone === 'palace' && sceneDetailEnabled && !courtActive && (
             <>
               <OfficeOperationalStations actors={visibleActors} positions={positions.slice(visibleIds.length)}
                 selectedId={selectedOperationalId} onSelect={selectOperationalActor} onOpen={openOperationalActor} reducedMotion={reducedMotion} interactiveIds={interactiveIds} />
@@ -1390,13 +1561,21 @@ export default function OfficeView(): React.JSX.Element {
               )}
             </>
           )}
+          {cityZone !== 'palace' && <ImperialCityScene zone={cityZone} node={cityNode} nodes={cityNodes} roles={systemRoles}
+            zh={settings.language === 'zh'} reducedMotion={reducedMotion} onEnter={node => navigateCity(node.zone, node)}
+            onRole={selectSystemRole} onTreasury={openTreasury} />}
+          {courtActive && <CourtCeremonyScene key={courtGeneration} playback={courtPlayback} participants={courtParticipantCount}
+            reducedMotion={reducedMotion} onTick={courtTick} onSelect={index => {
+              const task = courtReports[index]
+              if (task) openCourtReport(task)
+            }} />}
           <CameraRig
             requestId={cameraRequestId}
             position={cameraPose.position}
             target={cameraPose.target}
             // Low/Balanced prioritize a single settled render after a preset
             // click; High retains the authored eased camera move.
-            auto={false} reducedMotion={reducedMotion || renderQuality.resolvedTier !== 'high'}
+            auto={false} reducedMotion={reducedMotion || (!courtActive && renderQuality.resolvedTier !== 'high')}
             minDistance={cameraMinDistance} maxDistance={PALACE_WORLD_LAYOUT.maximumOrbitDistance}
             onSettledChange={(settled) => document.querySelector('.office-canvas-wrap')?.setAttribute('data-office-camera-settled', settled ? '1' : '0')}
           />

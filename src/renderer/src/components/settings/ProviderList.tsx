@@ -47,12 +47,9 @@ export default function ProviderList({
   onRemove
 }: Props): React.JSX.Element {
   const t = useT()
+  const zh = useStore(state => state.settings.language === 'zh')
   return (
-    <ProviderProfileManager providers={providers} onAdd={onAdd}>
-      <ProviderProfileSyncPanel />
-      <ProviderProfileWebDavPanel />
-      <ProviderProfileS3Panel />
-      <ProviderAccountOverview providers={providers} onEdit={onEdit} />
+    <ProviderProfileManager providers={providers} onAdd={onAdd} onEdit={onEdit}>
       <div className="provider-list">
         {providers.length === 0 && <div className="provider-empty">{t('providerEmpty')}</div>}
         {providers.map((provider) => (
@@ -68,6 +65,14 @@ export default function ProviderList({
           />
         ))}
       </div>
+      {providers.length > 0 && <details className="settings-section"><summary>{zh ? '账户、模型能力与余额概览' : 'Accounts, capabilities & balances'}</summary>
+        <ProviderAccountOverview providers={providers} onEdit={onEdit} />
+      </details>}
+      <details className="settings-section"><summary>{zh ? '配置同步与远程备份' : 'Configuration sync & remote backup'}</summary>
+        <ProviderProfileSyncPanel />
+        <ProviderProfileWebDavPanel />
+        <ProviderProfileS3Panel />
+      </details>
     </ProviderProfileManager>
   )
 }

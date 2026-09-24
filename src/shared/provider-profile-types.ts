@@ -225,6 +225,8 @@ export interface ProviderProfileApi extends ProviderManagementApi, ProviderProfi
     previewId: string,
     decisions: ProviderProfileImportDecision[]
   ): Promise<ProviderProfileSyncApplyResult>
+  previewNativeProviderImports(client: import('./provider-native-import-types').ProviderNativeClient): Promise<import('./provider-native-import-types').ProviderNativeImportPreview[]>
+  applyNativeProviderImport(previewId: string, action: ProviderProfileImportAction): Promise<import('./provider-native-import-types').ProviderNativeImportApplyResult>
   previewCodexNativeProviderImport(): Promise<import('./provider-native-import-types').ProviderNativeImportPreview>
   applyCodexNativeProviderImport(
     previewId: string,

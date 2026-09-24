@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Braces, CircleAlert, FolderTree, Info, Search, X } from 'lucide-react'
 import { useT } from '../../i18n'
 import { useStore } from '../../store'
+import { isShortcutCapture, matchesDesktopShortcut } from '../../desktop-keyboard'
 import type { ProjectDiagnostic, ProjectSymbolLocation, ProjectTextSearchMatch } from '../../../../shared/types'
 import {
   buildProjectFileTree,
@@ -18,6 +19,8 @@ import {
   type FileBrowserMode
 } from './file-panel-tree'
 import type { MonacoFileEditorHandle } from './MonacoFileEditor'
+import HtmlFileWorkspace from './HtmlFileWorkspace'
+import { normalizeWorkspaceBehavior } from '../../../../shared/workspace-behavior-types'
 
 const MonacoFileEditor = lazy(() => import('./MonacoFileEditor'))
 
@@ -221,6 +224,9 @@ export default function FilePanel(): React.JSX.Element {
   const closeFileTab = useStore((s) => s.closeFileTab)
   const cycleFileTab = useStore((s) => s.cycleFileTab)
   const activePanelId = useStore((s) => s.workbench.activePanelId)
+  const workspacePreferences = normalizeWorkspaceBehavior(useStore(s => s.settings.workspaceBehavior))
+  const zh = useStore(s => s.settings.language === 'zh')
+  const [externalEditorError, setExternalEditorError] = useState(''), [externalEditorBusy, setExternalEditorBusy] = useState(false)
   const [mode, setMode] = useState<'tree' | 'search' | 'problems'>('tree')
   const [nameQuery, setNameQuery] = useState('')
   const [searchDraft, setSearchDraft] = useState('')
@@ -244,6 +250,8 @@ export default function FilePanel(): React.JSX.Element {
   const hoverRequestRef = useRef(0)
   const diagnosticsRequestRef = useRef(0)
   const editorRef = useRef<MonacoFileEditorHandle>(null)
+
+  useEffect(() => { setExternalEditorError('') }, [activeId, currentFilePath])
 
   useEffect(() => {
     setMode('tree')
@@ -277,14 +285,15 @@ export default function FilePanel(): React.JSX.Element {
   useEffect(() => {
     if (activePanelId !== 'files') return
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (!(event.ctrlKey || event.metaKey)) return
-      if (event.key === 'Tab') {
+      if (event.defaultPrevented || isShortcutCapture(event.target)) return
+      const shortcuts = useStore.getState().settings.desktopShortcuts
+      if (matchesDesktopShortcut(event, 'nextFile', shortcuts) || matchesDesktopShortcut(event, 'previousFile', shortcuts)) {
         event.preventDefault()
-        cycleFileTab(event.shiftKey ? -1 : 1)
-      } else if (event.key.toLowerCase() === 's' && currentFilePath && dirty) {
+        cycleFileTab(matchesDesktopShortcut(event, 'previousFile', shortcuts) ? -1 : 1)
+      } else if (matchesDesktopShortcut(event, 'saveFile', shortcuts) && currentFilePath) {
         event.preventDefault()
-        void saveOpenFile()
-      } else if (event.key.toLowerCase() === 'w' && currentFilePath) {
+        if (dirty) void saveOpenFile()
+      } else if (matchesDesktopShortcut(event, 'closeFile', shortcuts) && currentFilePath) {
         event.preventDefault()
         requestCloseTab(currentFilePath)
       }
@@ -629,7 +638,7 @@ export default function FilePanel(): React.JSX.Element {
           </div>
         </aside>
 
-        <section className="file-editor">
+        <section className="file-editor" data-file-tabs-position={workspacePreferences.fileTabsPosition}>
           {sessionTabs.length > 0 && (
             <div className="file-editor-tabs" role="tablist" aria-label={t('fileOpenTabs')}>
               {sessionTabs.map((tab) => {
@@ -680,6 +689,16 @@ export default function FilePanel(): React.JSX.Element {
                 ? `${formatFileBytes(currentFileBytes)}${currentFileMtimeMs ? ` · ${new Date(currentFileMtimeMs).toLocaleString()}` : ''}`
                 : ''}
             </div>
+            <button type="button" className="btn btn-ghost btn-sm" disabled={!currentFilePath || externalEditorBusy || fileLoading}
+              title={dirty ? (zh ? '打开磁盘上的已保存版本；当前草稿仍保留在工作台' : 'Open the saved version on disk; keep the draft in this workspace') : undefined}
+              onClick={() => {
+                if (!activeId || !currentFilePath || externalEditorBusy) return
+                const originalId = activeId, originalPath = currentFilePath
+                setExternalEditorBusy(true); setExternalEditorError('')
+                void window.agentDesk.openWorkspaceFileInEditor({ sessionId: activeId, path: currentFilePath })
+                  .catch(cause => { const current = useStore.getState(); if (current.activeId === originalId && current.workbench.currentFilePath === originalPath) setExternalEditorError(String(cause)) })
+                  .finally(() => setExternalEditorBusy(false))
+              }}>{zh ? '外部编辑器' : 'External editor'}</button>
             <button
               type="button"
               className="btn btn-ghost btn-icon-sm file-editor-hover"
@@ -700,7 +719,7 @@ export default function FilePanel(): React.JSX.Element {
             >
               <Braces size={14} aria-hidden="true" />
             </button>
-            <button
+            {!currentFilePath || !/\.html?$/i.test(currentFilePath) ? <button
               className="btn btn-ghost btn-sm"
               disabled={!currentFilePath}
               onClick={() => {
@@ -708,7 +727,7 @@ export default function FilePanel(): React.JSX.Element {
               }}
             >
               {t('preview')}
-            </button>
+            </button> : null}
             <button
               className="btn btn-primary btn-sm"
               disabled={!currentFilePath || !dirty || fileSaving || fileLoading}
@@ -717,6 +736,7 @@ export default function FilePanel(): React.JSX.Element {
               {fileSaving ? t('saving') : t('save')}
             </button>
           </div>
+          {externalEditorError && <p className="notice notice-error" role="alert">{externalEditorError}</p>}
           {hoverOpen && (
             <div className="file-hover-popover" data-file-hover-popover aria-busy={hoverLoading || undefined}>
               <div className="file-symbol-menu-head">
@@ -769,6 +789,7 @@ export default function FilePanel(): React.JSX.Element {
           {fileLoading ? (
             <div className="workspace-diff-empty">{t('fileLoading')}</div>
           ) : currentFilePath ? (
+            <HtmlFileBoundary sessionId={activeId} path={currentFilePath} content={currentFileContent} savedContent={savedFileContent} saving={fileSaving} onSave={saveOpenFile}>
             <Suspense fallback={<div className="workspace-diff-empty">{t('fileLoading')}</div>}>
               <MonacoFileEditor
                 ref={editorRef}
@@ -785,6 +806,7 @@ export default function FilePanel(): React.JSX.Element {
                 }}
               />
             </Suspense>
+            </HtmlFileBoundary>
           ) : (
             <div className="workspace-diff-empty">{t('filePickHint')}</div>
           )}
@@ -792,4 +814,9 @@ export default function FilePanel(): React.JSX.Element {
       </div>
     </div>
   )
+}
+
+function HtmlFileBoundary(props: { sessionId: string | null; path: string; content: string; savedContent: string; saving: boolean; onSave(): Promise<{ ok: boolean; error?: string } | undefined>; children: React.ReactNode }): React.JSX.Element {
+  if (!props.sessionId || !/\.html?$/i.test(props.path)) return <>{props.children}</>
+  return <HtmlFileWorkspace key={`${props.sessionId}:${props.path}`} {...props} sessionId={props.sessionId} />
 }

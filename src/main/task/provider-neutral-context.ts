@@ -41,7 +41,7 @@ export interface ProviderNeutralContextInput {
 }
 
 /**
- * Hash the CaoGen-owned semantic context rather than a Provider wire body. The
+ * Hash the EastGenesis-owned semantic context rather than a Provider wire body. The
  * projection deliberately excludes endpoint, model, key, adapter and Session
  * runtime identity so a cross-protocol successor can prove equivalent input.
  */

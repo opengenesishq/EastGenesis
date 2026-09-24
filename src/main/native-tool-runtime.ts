@@ -1,8 +1,12 @@
+import { assertTaskExecutionEnvironment } from './wsl/binding'
+import { getTaskHostExecutionGate, taskHostSubject } from './task-handoff/execution-gate'
 import { describeOfficeRevisionReplay } from './office-revision/replay'
 import { officeRevisionToolGate } from './office-revision/intent'
 import { finalizeOfficeRevisionToolResult } from './office-revision/producer'
 import { randomUUID } from 'node:crypto'
+import { beginGuiPreviewTool, finishGuiPreviewTool, guiPreviewBinding, type GuiPreviewInvocation } from './gui-preview/gui-preview-events'
 import { app } from 'electron'
+import { assertSideChatBinding } from './side-chat/side-chat-policy'
 import { assertPreparationToolScope, isPreparationWriteTool, resolvePreparationToolScope, type PreparationToolScope } from './permission/preparation-tool-scope'
 import { settingsForCaoGenDrive } from './model/drive'
 import { getSettings } from './settings'
@@ -23,7 +27,8 @@ import {
 import { writeSessionAuditLog } from './permission/audit-log'
 import { evaluateToolPermission, type ToolPermissionDecision } from './permission/tool-permission'
 import { limitedFileExecutionError } from './permission/limited-file-execution'
-import { TaskExecutionAuthorityStore } from './permission/task-execution-authority-store'
+import { TaskExecutionAuthorityStore, taskExecutionAuthorityBindingDigest } from './permission/task-execution-authority-store'
+import { externalBrowserRegistry } from './external-browser-registry'
 import { classifyToolCapabilities } from './permission/tool-capabilities'
 import { taskRuntimeRegistry, type ToolIdempotencyDecision } from './task/task-runtime-registry'
 import { registerSessionProducedArtifacts } from './task/session-artifact-producer'
@@ -50,7 +55,7 @@ import type {
 } from '../shared/types'
 
 export type NativeToolExecutionResult = ToolExecResult & { effectStatus?: EffectStatus }
-export type NativeToolPermissionDecision = { allow: boolean; message?: string }
+export type NativeToolPermissionDecision = { allow: boolean; message?: string; authorizationSource?: 'policy' | 'capability' | 'permission-mode' }
 
 type EffectExecutionHandle = Awaited<ReturnType<typeof prepareEffectExecution>>
 
@@ -79,7 +84,7 @@ interface PendingPermission {
 const LOCAL_EXECUTION_DISABLED_MESSAGE =
   'Agent 本地执行能力已禁用:旧严格 Docker 设置不会自动降级为宿主机执行。当前仅保留最小项目检查能力，请先在设置 > 权限中确认启用。'
 
-/** Shared permission, durable Effect, execution, and audit runtime for CaoGen native tools. */
+/** Shared permission, durable Effect, execution, and audit runtime for EastGenesis native tools. */
 export class NativeToolRuntime {
   private readonly pendingPerms = new Map<string, PendingPermission>()
 
@@ -179,6 +184,13 @@ export class NativeToolRuntime {
     if (!preflight.allow) return preflight
     const { policy, readOnlyCall, guiDecision, toolCapabilityDecision, idempotency } = preflight
 
+    if (name === 'browser_debug_evaluate') {
+      const reason = '高级调试脚本可访问页面主框架状态并产生副作用。请核对完整脚本；本次审批只绑定当前文档和调试授权。'
+      this.auditGateDecision('ask', 'policy', name, input, reason, policy.risk.level, policy.risk.reasons)
+      return this.requestToolPermission(name, input, toolUseId, reason,
+        idempotency.kind === 'ask' ? idempotency.duplicateExecutionId : undefined, false, policy.risk.level, effectScope)
+    }
+
     if (idempotency.kind === 'ask') {
       this.auditGateDecision(
         'ask',
@@ -223,7 +235,7 @@ export class NativeToolRuntime {
         policy.risk.level,
         policy.risk.reasons
       )
-      return { allow: true, message: toolCapabilityDecision.reason }
+      return { allow: true, message: toolCapabilityDecision.reason, authorizationSource: 'capability' }
     }
     if (policy.kind === 'allow') {
       writeSessionAuditLog(this.meta, {
@@ -236,7 +248,7 @@ export class NativeToolRuntime {
         riskReasons: policy.risk.reasons,
         capabilities: policy.risk.capabilities
       })
-      return { allow: true, message: policy.reason }
+      return { allow: true, message: policy.reason, authorizationSource: 'policy' }
     }
 
     const mode = this.meta.permissionMode
@@ -263,7 +275,7 @@ export class NativeToolRuntime {
         policy.risk.level,
         policy.risk.reasons
       )
-      return { allow: true }
+      return { allow: true, authorizationSource: 'permission-mode' }
     }
     if (readOnlyCall) {
       this.auditGateDecision(
@@ -309,9 +321,15 @@ export class NativeToolRuntime {
     capturedScope?: PreparationToolScope
   ): NativeToolPreflightDecision {
     if (isCouncilSession(this.meta)) return { allow: false, message: '议事参与者仅可形成一轮意见，禁止调用工具或递归委派' }
+    try {
+      if (assertSideChatBinding(this.meta, app.getPath('userData'))) {
+        return { allow: false, message: '侧聊是只读上下文讨论，不能调用工具；请回到原任务执行操作。' }
+      }
+    } catch (error) { return { allow: false, message: error instanceof Error ? error.message : String(error) } }
     let executionScope: PreparationToolScope
     let taskExecutionAuthorityRevision: number
     try {
+      assertTaskExecutionEnvironment(this.meta)
       executionScope = capturedScope ?? resolvePreparationToolScope(this.meta, name, input, app.getPath('userData'))
       assertPreparationToolScope(this.meta, executionScope, app.getPath('userData'), name)
       taskExecutionAuthorityRevision = executionScope.preparation ? 0 : new TaskExecutionAuthorityStore(app.getPath('userData')).get(this.meta).revision
@@ -413,12 +431,24 @@ export class NativeToolRuntime {
     toolUseId: string,
     signal?: AbortSignal
   ): Promise<NativeToolExecutionResult> {
+    const hostGate = getTaskHostExecutionGate(app.getPath('userData'))
+    let hostClaim
+    try { hostClaim = hostGate.claim(taskHostSubject(this.meta)) }
+    catch (error) { return { ok: false, output: error instanceof Error ? error.message : String(error) } }
     if (signal?.aborted) return { ok: false, output: '操作已中断，未进入权限判断' }
     const preflight = this.preflightToolGate(name, input, toolUseId)
     if (preflight.allow === false) {
       return { ok: false, output: `操作已被权限策略拒绝${preflight.message ? `:${preflight.message}` : ''}` }
     }
+    const environmentDigest = stableValueDigest(this.meta.executionEnvironment ?? { kind: 'host' })
     const commandInputDigest = name === 'bash' ? stableValueDigest(input) : undefined
+    // Freeze query, task and external-tab identity before awaiting any approval.
+    const searchBinding = name === 'web_search' ? {
+      inputDigest: stableValueDigest(input), taskDigest: taskExecutionAuthorityBindingDigest(this.meta),
+      runId: taskRuntimeRegistry.get(this.meta.id)?.id,
+      browserDigest: stableValueDigest(externalBrowserRegistry.taskStatus(this.meta.id) ?? null),
+      permissionMode: this.meta.permissionMode, driveMode: this.meta.driveMode
+    } : undefined
     const effectInput: PrepareEffectExecutionInput = {
       sessionId: this.meta.id,
       cwd: preflight.executionScope.cwd,
@@ -441,13 +471,35 @@ export class NativeToolRuntime {
     if (!gate.allow) {
       return this.settlePermissionDenial(effectHandle, gate)
     }
+    if (environmentDigest !== stableValueDigest(this.meta.executionEnvironment ?? { kind: 'host' })) return this.settlePermissionDenial(effectHandle, { allow: false, message: '执行环境在审批期间变化，原审批失效。' })
     const interruptedAfterGate = await this.cancelIfAborted(
       signal,
       effectHandle,
       '操作在审批后、外部执行前已中断'
     )
     if (interruptedAfterGate) return interruptedAfterGate
-    return this.executeAllowedTool(name, input, effectHandle, effectInput, preflight.executionScope, preflight.taskExecutionAuthorityRevision, signal, commandInputDigest)
+    const assertSearchAuthorized = searchBinding ? (query: string) => {
+      if (signal?.aborted || typeof input.query !== 'string' || query !== input.query.trim() ||
+        stableValueDigest(input) !== searchBinding.inputDigest || this.meta.status === 'closed' ||
+        !searchBinding.runId || taskRuntimeRegistry.get(this.meta.id)?.id !== searchBinding.runId ||
+        taskExecutionAuthorityBindingDigest(this.meta) !== searchBinding.taskDigest ||
+        stableValueDigest(externalBrowserRegistry.taskStatus(this.meta.id) ?? null) !== searchBinding.browserDigest ||
+        this.meta.permissionMode !== searchBinding.permissionMode || this.meta.driveMode !== searchBinding.driveMode) {
+        throw new Error('搜索内容、任务、浏览器目标或权限已变化，旧搜索审批失效。')
+      }
+      const live = this.preflightToolGate(name, input, toolUseId, undefined, preflight.executionScope)
+      if (!live.allow) throw new Error(live.message)
+      if (live.taskExecutionAuthorityRevision !== preflight.taskExecutionAuthorityRevision ||
+        (gate.authorizationSource === 'policy' && live.policy.kind !== 'allow') ||
+        (gate.authorizationSource === 'capability' && live.toolCapabilityDecision.kind !== 'allow')) {
+        throw new Error('搜索授权已撤销或变更，旧搜索审批失效。')
+      }
+    } : undefined
+    try {
+      return await hostGate.withPermit(taskHostSubject(this.meta), () => this.executeAllowedTool(name, input, effectHandle, effectInput, preflight.executionScope, preflight.taskExecutionAuthorityRevision, signal, commandInputDigest, assertSearchAuthorized), hostClaim)
+    } catch (error) {
+      return this.settlePermissionDenial(effectHandle, { allow: false, message: error instanceof Error ? error.message : String(error) })
+    }
   }
 
   private async prepareToolEffect(effectInput: PrepareEffectExecutionInput): Promise<PreparedEffect> {
@@ -576,7 +628,8 @@ export class NativeToolRuntime {
     executionScope: PreparationToolScope,
     taskExecutionAuthorityRevision: number,
     signal?: AbortSignal,
-    commandInputDigest?: string
+    commandInputDigest?: string,
+    assertSearchAuthorized?: (query: string) => void
   ): Promise<NativeToolExecutionResult> {
     const settings = settingsForCaoGenDrive(getSettings(), this.meta.driveMode)
     const interruptedBeforeStart = await this.cancelIfAborted(
@@ -606,11 +659,20 @@ export class NativeToolRuntime {
       return this.settlePermissionDenial(effectHandle, { allow: false, message: '执行前命令输入已变化，旧审批失效；请重新审批。' })
     }
     let exec: ToolExecResult
+    let guiPreviewInvocation: GuiPreviewInvocation | undefined
+    // This observer sees only the final, already-approved execution. It cannot approve or capture.
     try {
+      if (name.startsWith('gui_')) guiPreviewInvocation = beginGuiPreviewTool(
+        guiPreviewBinding(this.meta, taskExecutionAuthorityBindingDigest(this.meta), taskRuntimeRegistry.get(this.meta.id)?.id, taskExecutionAuthorityRevision),
+        executionScope.cwd, name, input)
+    } catch { /* a preview failure must not change native execution */ }
+    try {
+      assertTaskExecutionEnvironment(this.meta)
       exec = await executeCodingTool(name, input, executionScope.cwd, {
         preparationPermission: executionScope.preparation,
         taskExecutionAuthorityRevision,
         commandInputDigest,
+        assertSearchAuthorized,
         signal,
         sandboxMode: settings.sandboxMode,
         chinaMirrorEnabled: settings.chinaEcosystemMirrorEnabled,
@@ -632,6 +694,7 @@ export class NativeToolRuntime {
         effectTarget: effectHandle?.target
       })
     } catch (error) {
+      finishGuiPreviewTool(guiPreviewInvocation, { ok: false, output: '' })
       const message = error instanceof Error ? error.message : String(error)
       return {
         ok: false,
@@ -639,6 +702,7 @@ export class NativeToolRuntime {
         effectStatus: effectHandle ? 'waiting_reconciliation' : undefined
       }
     }
+    finishGuiPreviewTool(guiPreviewInvocation, exec)
     const executionPolicy = evaluateToolPermission(settings, {
       toolName: name,
       input,

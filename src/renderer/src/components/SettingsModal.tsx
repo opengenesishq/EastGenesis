@@ -4,9 +4,14 @@ import {
   Bell,
   Blocks,
   Clock3,
+  Coins,
   Database,
   FolderCog,
   LayoutDashboard,
+  Mic,
+  Monitor,
+  Ghost,
+  Cpu,
   Palette,
   Plug,
   Search,
@@ -20,9 +25,9 @@ import { DRIVE_MODE_OPTIONS, modelOptionsForProvider, PERMISSION_OPTIONS, STRATE
 import type { SettingsTab } from '../store/settings-navigation'
 import { useT } from '../i18n'
 import { AUTO_MODEL } from '../../../shared/types'
+import { validateDesktopShortcuts } from '../../../shared/desktop-shortcuts'
+import GitPreferences from './settings/GitPreferences'
 import type {
-  AppLanguage,
-  AppTheme,
   CaoGenDriveMode,
   EngineInfo,
   GuiAutomationGrantView,
@@ -37,7 +42,6 @@ import type {
   ProviderView,
   SchedulerStrategy,
   SessionMeta,
-  TaskStrategy,
   ToolCapabilityGrantView,
   ToolRiskLevel,
   ToolSemanticCapability
@@ -46,15 +50,31 @@ import ProviderEditor from './ProviderEditor'
 import ControlCenter from './ControlCenterWithWorkflow'
 import ProviderList from './settings/ProviderList'
 import { useProviderRecoverySettings } from './settings/useProviderRecoverySettings'
-import ProjectSettings from '../pages/ProjectSettings'
 import MigrationManager from './settings/MigrationManager'
 import { requireMcpProbeResults } from '../store/task-recovery-actions'
 import NotificationConnectorManager from './settings/NotificationConnectorManager'
-import ProviderUsageDashboard from './settings/ProviderUsageDashboard'
+import UsageAndCosts from './settings/UsageAndCosts'
 import ProviderGatewayPanel from './settings/ProviderGatewayPanel'
-import OfficeAppearanceSettings, { DEFAULT_OFFICE_SETTINGS } from './settings/OfficeAppearanceSettings'
 import DataRetentionSettings from './settings/DataRetentionSettings'
 import RoutingRulesPanel from './settings/RoutingRulesPanel'
+import DesktopPreferences from './settings/DesktopPreferences'
+import VoiceInputSettings from './settings/VoiceInputSettings'
+import QuickbarSettings from './settings/QuickbarSettings'
+import RemoteConnectionSettings from './settings/RemoteConnectionSettings'
+import SshSettings from './settings/SshSettings'
+import NotificationPreferences from './settings/NotificationPreferences'
+import TerminalPreferences from './settings/TerminalPreferences'
+import WorkspaceBehaviorPreferences from './settings/WorkspaceBehaviorPreferences'
+import ArchivedTaskSettings from './settings/ArchivedTaskSettings'
+import LocalProfileSettings from './settings/LocalProfileSettings'
+import RemoteHostsSettings from './settings/RemoteHostsSettings'
+import ComputerHistoryPanel from './settings/ComputerHistoryPanel'
+import LocalRuntimeSettings from './settings/LocalRuntimeSettings'
+import WslSettings from './settings/WslSettings'
+import FeedbackSettings from './settings/FeedbackSettings'
+import DesktopStatus from './settings/DesktopStatus'
+import BrowserPreferences from './settings/BrowserPreferences'
+import './settings/desktop-settings.css'
 type ProviderSettingsSurface = 'configuration' | 'gateway' | 'usage'
 type ProviderProbeState = {
   providerId: string
@@ -62,6 +82,13 @@ type ProviderProbeState = {
   message: string
   error?: ProviderModelFetchError
 } | null
+
+/** Keep old deep links usable after retiring the project/persona/companion tabs. */
+function normalizeSettingsTab(value: SettingsTab | string): SettingsTab {
+  if (value === 'office') return 'appearance'
+  if (value === 'project' || value === 'persona' || value === 'companion') return 'general'
+  return value as SettingsTab
+}
 const PERMISSION_CAPABILITY_OPTIONS: Array<{ value: ToolSemanticCapability; labelKey: string }> = [
   { value: 'workspaceRead', labelKey: 'permissionCapabilityWorkspaceRead' },
   { value: 'workspaceWrite', labelKey: 'permissionCapabilityWorkspaceWrite' },
@@ -124,7 +151,7 @@ function ProviderSettingsSection({ surface, providers, health, providerProbe, ch
       {surfaces.map(([value, label]) => <button type="button" key={value} className={surface === value ? 'active' : ''} aria-current={surface === value ? 'page' : undefined} data-provider-surface={value} onClick={() => onSurfaceChange(value)}>{label}</button>)}
     </nav>
     {surface === 'configuration' && <ProviderList providers={providers} health={health} providerProbe={providerProbe} checkingProviderId={checkingProviderId} onAdd={onAdd} onProbe={onProbe} onEdit={onEdit} onRemove={onRemove} />}
-    {surface === 'usage' && <ProviderUsageDashboard providers={providers} />}
+    {surface === 'usage' && <UsageAndCosts providers={providers} />}
     {surface === 'gateway' && <ProviderGatewayPanel />}
   </>
 }
@@ -143,12 +170,20 @@ export default function SettingsPage(): React.JSX.Element {
   const setShowSettings = useStore((s) => s.setShowSettings)
   const { closeEditor, editing, setEditing } = useProviderRecoverySettings(providers)
   const settingsTab = useStore((s) => s.settingsTab)
-  const [tab, setTab] = useState<SettingsTab>(() => settingsTab)
+  // The experimental palace surface is paused. Keep old deep links readable,
+  // but send them to the normal appearance settings instead of exposing a
+  // dormant 3D entry point in the product shell.
+  const [tab, setTab] = useState<SettingsTab>(() => normalizeSettingsTab(settingsTab))
   const [settingsSearch, setSettingsSearch] = useState('')
   const [providerSurface, setProviderSurface] = useState<ProviderSettingsSurface>('configuration')
   const tabsRef = useRef<HTMLElement>(null)
   // 本地草稿,保存时统一提交
   const [draft, setDraft] = useState(settings)
+  const draftBaseline = useRef(settings)
+  const draftChanges = Object.fromEntries(Object.entries(draft).filter(([key, value]) =>
+    key !== 'modelRoutingRules' && JSON.stringify(value) !== JSON.stringify(draftBaseline.current[key as keyof typeof draft])
+  )) as Partial<typeof draft>
+  const hasDraftChanges = Object.keys(draftChanges).length > 0
   const [health, setHealth] = useState<ProviderHealthView[]>([])
   const [guiGrants, setGuiGrants] = useState<GuiAutomationGrantView[]>([])
   const [toolGrants, setToolGrants] = useState<ToolCapabilityGrantView[]>([])
@@ -166,7 +201,6 @@ export default function SettingsPage(): React.JSX.Element {
   const activeId = useStore((s) => s.activeId)
   const projects = useStore((s) => s.projects)
   const selectedDrive = DRIVE_MODE_OPTIONS.find((option) => option.value === draft.driveMode) ?? DRIVE_MODE_OPTIONS[1]
-  const draftOffice = draft.office ?? DEFAULT_OFFICE_SETTINGS
   const activeSessions = useMemo<SessionMeta[]>(
     () => sessionOrder.flatMap((sessionId) => {
       const session = sessions[sessionId]
@@ -184,7 +218,7 @@ export default function SettingsPage(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    if (settingsTab) setTab(settingsTab)
+    if (settingsTab) setTab(normalizeSettingsTab(settingsTab))
   }, [settingsTab])
 
   useEffect(() => {
@@ -221,10 +255,6 @@ export default function SettingsPage(): React.JSX.Element {
     const budget = Number(value)
     set('budgetUsdPerMonth', Number.isFinite(budget) && budget > 0 ? budget : 0)
   }
-  const setOffice = (patch: Partial<typeof draftOffice>): void =>
-    setDraft((d) => ({ ...d, office: { ...(d.office ?? DEFAULT_OFFICE_SETTINGS), ...patch } }))
-  const setLayout = (patch: Partial<typeof draft.layout>): void =>
-    setDraft((d) => ({ ...d, layout: { ...d.layout, ...patch } }))
   const setProviderCircuitBreaker = (patch: Partial<typeof draft.providerCircuitBreaker>): void =>
     setDraft((d) => ({
       ...d,
@@ -271,6 +301,8 @@ export default function SettingsPage(): React.JSX.Element {
   }
 
   const save = async (): Promise<void> => {
+    try { if (draft.desktopShortcuts) validateDesktopShortcuts(draft.desktopShortcuts) }
+    catch (error) { setSaveError(error instanceof Error ? error.message : String(error)); return }
     if (draft.permissionRules.some((rule) =>
       !rule.toolPattern.trim() && !rule.pathPattern.trim() && !rule.commandPattern.trim() &&
       !rule.networkHostPattern.trim() && !rule.guiApplicationPattern.trim() &&
@@ -287,8 +319,7 @@ export default function SettingsPage(): React.JSX.Element {
       // Routing rules have their own versioned CAS editor. Do not include the
       // legacy field in ordinary settings writes: once V1 is active, the main
       // process intentionally rejects that domain on this path.
-      const { modelRoutingRules: _legacyRoutingRules, ...ordinaryDraft } = draft
-      await updateSettings(ordinaryDraft)
+      await updateSettings(draftChanges)
       await refreshProviders()
       setShowSettings(false)
     } catch (error) {
@@ -391,59 +422,78 @@ export default function SettingsPage(): React.JSX.Element {
 
   const TABS: Array<{ id: SettingsTab; label: string; icon: LucideIcon }> = [
     { id: 'control', label: t('tabControlCenter'), icon: LayoutDashboard },
-    { id: 'routing', label: '智能路由', icon: Sparkles },
+    { id: 'routing', label: settings.language === 'zh' ? '智能路由' : 'Smart routing', icon: Sparkles },
+    { id: 'usage', label: settings.language === 'zh' ? '用量与费用' : 'Usage & costs', icon: Coins },
     { id: 'general', label: t('tabGeneral'), icon: Settings2 },
+    { id: 'profile', label: settings.language === 'zh' ? '个人资料' : 'Local profile', icon: Ghost },
+    { id: 'appearance', label: settings.language === 'zh' ? '外观' : 'Appearance', icon: Palette },
+    { id: 'voice', label: settings.language === 'zh' ? '语音' : 'Voice', icon: Mic },
+    { id: 'remote', label: settings.language === 'zh' ? '手机与远程连接' : 'Mobile & remote', icon: Monitor },
+    { id: 'ssh', label: 'SSH', icon: Monitor },
+    { id: 'terminal', label: settings.language === 'zh' ? '文件与终端' : 'Files & terminal', icon: Monitor },
+    { id: 'git', label: 'Git', icon: FolderCog },
+    { id: 'status', label: settings.language === 'zh' ? '状态' : 'Status', icon: Monitor },
+    { id: 'browser', label: settings.language === 'zh' ? '浏览器' : 'Browser', icon: Monitor },
+    { id: 'archived', label: settings.language === 'zh' ? '已归档任务' : 'Archived tasks', icon: Clock3 },
+    { id: 'remote-hosts', label: settings.language === 'zh' ? '控制其他主机' : 'Control other hosts', icon: Monitor },
+    { id: 'computer-history', label: settings.language === 'zh' ? '电脑历史' : 'Computer history', icon: Clock3 },
+    { id: 'appshots', label: settings.language === 'zh' ? '快捷输入与截图' : 'Quick input & screenshots', icon: Monitor },
+    { id: 'models', label: settings.language === 'zh' ? '模型偏好' : 'Model preferences', icon: Cpu },
+    { id: 'environment', label: settings.language === 'zh' ? '环境' : 'Environment', icon: Monitor },
     { id: 'permissions', label: t('tabPermissions'), icon: ShieldCheck },
-    { id: 'project', label: t('tabProject'), icon: FolderCog },
-    { id: 'persona', label: t('tabPersona'), icon: Sparkles },
-    { id: 'office', label: t('tabOffice'), icon: Palette },
-    { id: 'providers', label: t('tabProviders'), icon: Plug },
-    { id: 'notifications', label: t('tabNotifications'), icon: Bell },
+    { id: 'providers', label: settings.language === 'zh' ? '厂商与模型' : 'Providers & models', icon: Plug },
+    { id: 'notifications', label: settings.language === 'zh' ? '通知' : 'Notifications', icon: Bell },
     { id: 'plugins', label: t('tabPlugins'), icon: Blocks },
     { id: 'data', label: t('tabDataRetention'), icon: Clock3 },
-    { id: 'migrate', label: t('tabMigrate'), icon: Database }
+    { id: 'migrate', label: t('tabMigrate'), icon: Database },
+    { id: 'feedback', label: settings.language === 'zh' ? '反馈与诊断' : 'Feedback & diagnostics', icon: Monitor }
   ]
   const TAB_GROUPS: Array<{ label: string; ids: SettingsTab[] }> = [
-    { label: t('settingsGroupWorkspace'), ids: ['control', 'routing', 'general', 'permissions', 'project'] },
-    { label: t('settingsGroupPersonalization'), ids: ['persona', 'office'] },
-    { label: t('settingsGroupIntegrations'), ids: ['providers', 'notifications', 'plugins'] },
-    { label: t('settingsGroupData'), ids: ['data', 'migrate'] }
+    { label: settings.language === 'zh' ? '个人' : 'Personal', ids: ['general', 'profile', 'migrate', 'appearance', 'voice', 'appshots', 'usage'] },
+    { label: settings.language === 'zh' ? '模型与集成' : 'Models & integrations', ids: ['providers', 'routing', 'models', 'permissions', 'plugins', 'notifications'] },
+    { label: settings.language === 'zh' ? '工作空间' : 'Workspace', ids: ['browser', 'environment', 'git', 'terminal', 'remote', 'remote-hosts', 'ssh', 'control'] },
+    { label: t('settingsGroupData'), ids: ['archived', 'computer-history', 'data', 'status', 'feedback'] }
   ]
   const searchTerm = settingsSearch.trim().toLocaleLowerCase()
   const searchTerms: Partial<Record<SettingsTab, string>> = {
     control: 'model routing provider health usage control center',
     routing: 'versioned routing rules provider model preview fallback budget business line',
-    general: 'language theme startup layout',
+    usage: 'usage costs tokens billing balance quota 用量 费用 国库 户部 余额 额度',
+    general: 'language startup notifications permissions 常规 语言 休眠 权限 通知',
+    profile: 'profile name avatar emoji 个人资料 显示名 头像 首字 图标',
+    appearance: 'theme font layout keyboard shortcuts 外观 主题 字体 布局 缩放 快捷键',
+    voice: 'voice microphone audio transcription 语音 麦克风 转写',
+    remote: 'phone remote pairing device HTTPS 手机 远程 配对 连接 设备 撤销',
+    ssh: 'ssh terminal server host key 终端 服务器 主机 公钥 指纹 远程',
+    terminal: 'terminal scrollback cursor font size external editor file tabs 终端 回看 光标 字号 外部 编辑器 文件 标签 位置',
+    git: 'git branch prefix commit pull request template 分支 前缀 提交 模板',
+    archived: 'archive history restore 已归档 历史 恢复 任务',
+    'remote-hosts': 'hosts remote pairing control other computer 主机 远程 控制其他电脑 配对 信任 撤销',
+    'computer-history': 'computer history apps privacy delete 电脑 历史 应用 来源 暂停 删除',
+    appshots: 'appshots screenshot quickbar shortcuts 快捷键 截图 快捷输入 屏幕录制',
+    models: 'model preferences defaults fallback 模型 偏好 默认 调度 回退',
+    environment: 'environment npm pip mirrors 环境 镜像',
     permissions: 'permission access terminal browser workspace',
-    project: 'project rules workspace',
-    persona: 'instructions prompt persona',
-    office: 'appearance control room animation',
     providers: 'provider model api key oauth pricing billing usage balance',
     notifications: 'notification message webhook',
     plugins: 'plugin skill mcp',
     data: 'retention legal hold purge delete privacy data lifecycle',
-    migrate: 'migration import export data'
+    migrate: 'migration import export data',
+    feedback: 'feedback issue diagnostic report export 反馈 问题 诊断 导出',
+    status: 'status task health runtime version 状态 任务 运行环境 版本',
+    browser: 'browser history download site rules 浏览器 历史 下载 站点 允许 阻止'
   }
   const tabMatches = (item: { id: SettingsTab; label: string }): boolean =>
     !searchTerm || `${item.label} ${searchTerms[item.id] ?? ''}`.toLocaleLowerCase().includes(searchTerm)
 
   return (
-    <section className="settings-page" aria-label={t('settingsTitle')}>
-      <header className="settings-page-header drag-region">
-        <button
-          type="button"
-          className="settings-page-back no-drag"
-          aria-label={t('backToWorkspace')}
-          title={t('backToWorkspace')}
-          onClick={closeSettings}
-        >
-          <ArrowLeft size={16} aria-hidden="true" />
-        </button>
-        <h1 className="settings-page-title">{t('settingsTitle')}</h1>
-      </header>
-
+    <section className="settings-page desktop-settings" aria-label={t('settingsTitle')}>
       <div className="settings-body">
           <nav ref={tabsRef} className="settings-tabs" aria-label={t('settingsNavigation')}>
+            <div className="desktop-settings-titlebar drag-region" />
+            <button type="button" className="settings-page-back no-drag" disabled={saving} onClick={closeSettings}>
+              <ArrowLeft size={16} aria-hidden="true" /><span>{settings.language === 'zh' ? '返回应用' : 'Back to app'}</span>
+            </button>
             <div className="settings-search">
               <Search size={14} aria-hidden="true" />
               <input
@@ -466,7 +516,7 @@ export default function SettingsPage(): React.JSX.Element {
               )}
             </div>
             {TAB_GROUPS.map((group) => {
-              const items = TABS.filter((item) => group.ids.includes(item.id) && tabMatches(item))
+              const items = group.ids.flatMap(id => TABS.filter(item => item.id === id && tabMatches(item)))
               if (items.length === 0) return null
               return (
                 <div className="settings-tab-group" key={group.label}>
@@ -495,6 +545,7 @@ export default function SettingsPage(): React.JSX.Element {
 
           <main className="settings-pane">
             <div className="settings-pane-content">
+            <h1 className="desktop-settings-page-title">{editing ? (settings.language === 'zh' ? '厂商与模型' : 'Providers & models') : TABS.find(item => item.id === tab)?.label}</h1>
             {editing ? (
               <ProviderEditor
                 provider={editing === 'new' ? null : editing}
@@ -528,34 +579,23 @@ export default function SettingsPage(): React.JSX.Element {
 
             {tab === 'routing' && <RoutingRulesPanel />}
 
-            {tab === 'general' && (
+            {tab === 'general' && <DesktopPreferences draft={draft} onChange={patchDraft} />}
+            {tab === 'profile' && <LocalProfileSettings value={draft.desktopPersonalization} language={draft.language} onChange={value => set('desktopPersonalization', value)} />}
+            {tab === 'appearance' && <DesktopPreferences draft={draft} onChange={patchDraft} appearance />}
+            {tab === 'voice' && <VoiceInputSettings value={draft.voiceInput} providers={providers} zh={settings.language === 'zh'} onChange={value => set('voiceInput', value)} onAddProvider={() => openProviderEditor('new')} />}
+            {tab === 'appshots' && <QuickbarSettings value={draft.quickbar} zh={settings.language === 'zh'} onChange={value => set('quickbar', value)} />}
+            {tab === 'remote' && <RemoteConnectionSettings />}
+            {tab === 'ssh' && <SshSettings />}
+            {tab === 'terminal' && <><WorkspaceBehaviorPreferences draft={draft} onChange={patchDraft} /><TerminalPreferences draft={draft} onChange={patchDraft} /></>}
+            {tab === 'git' && <GitPreferences draft={draft} onChange={value => set('gitPreferences', value)} />}
+            {tab === 'archived' && <ArchivedTaskSettings />}
+            {tab === 'remote-hosts' && <RemoteHostsSettings />}
+            {tab === 'computer-history' && <ComputerHistoryPanel />}
+            {tab === 'feedback' && <FeedbackSettings />}
+            {tab === 'status' && <DesktopStatus />}
+            {tab === 'browser' && <BrowserPreferences />}
+            {tab === 'models' && (
               <>
-                <label className="field-label">{t('language')}</label>
-                <select
-                  className="select select-block"
-                  value={draft.language}
-                  onChange={(e) => set('language', e.target.value as AppLanguage)}
-                >
-                  <option value="zh">简体中文</option>
-                  <option value="en">English</option>
-                </select>
-
-                <label className="field-label">{t('theme')}</label>
-                <select
-                  className="select select-block"
-                  value={draft.theme}
-                  onChange={(e) => {
-                    const v = e.target.value as AppTheme
-                    set('theme', v)
-                    setSaveError('')
-                    void updateSettings({ theme: v }).catch(() => setSaveError(t('settingsSaveFailed')))
-                  }}
-                >
-                  <option value="light">{t('themeLight')}</option>
-                  <option value="dark">{t('themeDark')}</option>
-                  <option value="system">{t('themeSystem')}</option>
-                </select>
-
                 <label className="field-label">{t('driveMode')}</label>
                 <select
                   className="select select-block"
@@ -572,18 +612,6 @@ export default function SettingsPage(): React.JSX.Element {
                   {selectedDrive.summary} · ${selectedDrive.budgetUsd}/session · {selectedDrive.toolPolicySummary}
                 </p>
                 <p className="settings-hint">{t('driveModeOrthogonalHint')}</p>
-
-                <label className="field-label">{t('defaultTaskStrategy')}</label>
-                <select
-                  className="select select-block"
-                  value={draft.defaultTaskStrategy}
-                  onChange={(event) => set('defaultTaskStrategy', event.target.value as TaskStrategy)}
-                >
-                  <option value="view">{t('taskStrategyView')}</option>
-                  <option value="plan">{t('taskStrategyPlan')}</option>
-                  <option value="execute">{t('taskStrategyExecute')}</option>
-                </select>
-                <p className="settings-hint">{t('defaultTaskStrategyHint')}</p>
 
                 <label className="field-label">{t('defaultProvider')}</label>
                 <select
@@ -873,7 +901,7 @@ export default function SettingsPage(): React.JSX.Element {
                     checked={draft.smartModelRoutingEnabled}
                     onChange={(e) => set('smartModelRoutingEnabled', e.target.checked)}
                   />
-                  P2-003 多模型智能混合调度
+                  多模型智能调度
                 </label>
                 <p className="settings-hint">默认关闭。开启后仅 auto 会话会按任务类型、预算和手动覆盖选择 Provider/Model，并为关键代码任务生成复核计划。</p>
 
@@ -884,7 +912,7 @@ export default function SettingsPage(): React.JSX.Element {
                     disabled={!draft.smartModelRoutingEnabled}
                     onChange={(e) => set('modelCrossValidationAutoRunEnabled', e.target.checked)}
                   />
-                  P2-003 自动第二模型 Code Review
+                  自动使用第二模型复核代码
                 </label>
                 <p className="settings-hint">
                   默认关闭。仅在智能调度生成复核计划后启动 plan 权限子会话，不直接修改文件。
@@ -967,16 +995,12 @@ export default function SettingsPage(): React.JSX.Element {
                   </label>
                 </details>
 
-                <label className="settings-check">
-                  <input
-                    type="checkbox"
-                    checked={draft.notificationsEnabled}
-                    onChange={(e) => set('notificationsEnabled', e.target.checked)}
-                  />
-                  {t('notificationsEnabled')}
-                </label>
-                <p className="settings-hint">{t('notificationsHint')}</p>
-
+              </>
+            )}
+            {tab === 'environment' && (
+              <>
+                <LocalRuntimeSettings />
+                <WslSettings draft={draft} onChange={patchDraft} />
                 <label className="settings-check">
                   <input
                     type="checkbox"
@@ -1008,52 +1032,6 @@ export default function SettingsPage(): React.JSX.Element {
                     />
                   </label>
                 </div>
-                <label className="settings-check">
-                  <input
-                    type="checkbox"
-                    checked={draft.preventDisplaySleep}
-                    onChange={(e) => set('preventDisplaySleep', e.target.checked)}
-                  />
-                  {t('preventDisplaySleep')}
-                </label>
-                <p className="settings-hint">{t('preventDisplaySleepHint')}</p>
-
-                <label className="settings-check">
-                  <input
-                    type="checkbox"
-                    checked={draft.autoSkillLearningEnabled}
-                    onChange={(e) => set('autoSkillLearningEnabled', e.target.checked)}
-                  />
-                  P2-002 自动 Skill 沉淀与调用
-                </label>
-                <p className="settings-hint">
-                  默认关闭。开启后成功任务会后台复盘并验证 Skill，下次同类任务会注入匹配 Skill。
-                </p>
-
-                <label className="field-label">单会话预算上限 ($)</label>
-                <input
-                  className="input input-block"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={draft.budgetUsdPerSession || ''}
-                  placeholder="0 = 不限制"
-                  onChange={(e) => setBudget(e.target.value)}
-                />
-                <p className="settings-hint">达到预算后会拦截下一轮发送；0 表示不限制。</p>
-
-                <label className="field-label">月度预算上限($)</label>
-                <input
-                  className="input input-block"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={draft.budgetUsdPerMonth || ''}
-                  placeholder="0 = 不限制"
-                  onChange={(e) => setMonthlyBudget(e.target.value)}
-                />
-                <p className="settings-hint">按当前自然月统计历史会话费用；达到上限后会拦截下一轮发送，auto 调度会优先降级到低成本模型。</p>
-
               </>
             )}
 
@@ -1100,7 +1078,7 @@ export default function SettingsPage(): React.JSX.Element {
                     <input type="checkbox" checked={draft.limitedFileExecutionEnabled} onChange={(event) => set('limitedFileExecutionEnabled', event.target.checked)} data-limited-file-execution />
                     限定文件执行
                   </label>
-                  <p className="settings-hint">开启后，正式目录仅允许下面同时指定工具和路径的有效允许规则，支持文本编辑及 Office 文件生成和修订。保存后，停用、删除或到期的规则会阻止后续写入。准备区继续使用单独授权；命令、桌面、连接器和委派操作不可用。此设置适用于所有任务；相对路径以各任务目录为准，限定项目请填写绝对路径。</p>
+                  <p className="settings-hint">开启后，正式目录仅允许下面同时指定工具和路径的有效允许规则，支持文本编辑及 Office 文件生成和修订。保存后，停用、删除或到期的规则会阻止后续写入。准备区继续使用单独授权；命令、桌面、连接器和委派操作不可用。此设置适用于所有任务；相对路径以各任务目录为准，需要限定工作目录时请填写绝对路径。</p>
                   <p className="settings-hint">例如：允许工具 write_file，路径 reports/**，能力勾选“工作区写入”。Office 修订输出位于 artifacts/**，需同时勾选工作区读取与写入。关闭时沿用原执行权限，不代表授予新的动作审批。</p>
                   {draft.permissionRules.length === 0 ? (
                     <div className="permission-rule-empty">{t('permissionRulesEmpty')}</div>
@@ -1425,41 +1403,56 @@ export default function SettingsPage(): React.JSX.Element {
               </>
             )}
 
-            {tab === 'project' && <ProjectSettings />}
 
-            {tab === 'persona' && (
-              <>
-                <label className="field-label">{t('personaLabel')}</label>
-                <p className="settings-hint">{t('personaHint')}</p>
-                <textarea
-                  className="input input-block textarea"
-                  rows={8}
-                  value={draft.persona}
-                  placeholder={t('personaPlaceholder')}
-                  onChange={(e) => set('persona', e.target.value)}
+            {tab === 'usage' && <>
+              <UsageAndCosts providers={providers} />
+              <details className="settings-section"><summary>{settings.language === 'zh' ? '预算上限' : 'Budget limits'}</summary>
+                <label className="field-label">单会话预算上限 ($)</label>
+                <input
+                  className="input input-block"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={draft.budgetUsdPerSession || ''}
+                  placeholder="0 = 不限制"
+                  onChange={(e) => setBudget(e.target.value)}
                 />
-              </>
-            )}
+                <p className="settings-hint">达到预算后会拦截下一轮发送；0 表示不限制。</p>
 
-            {tab === 'office' && (
-              <OfficeAppearanceSettings layout={draft.layout} office={draftOffice} onLayoutChange={setLayout} onOfficeChange={setOffice} />
-            )}
+                <label className="field-label">月度预算上限($)</label>
+                <input
+                  className="input input-block"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={draft.budgetUsdPerMonth || ''}
+                  placeholder="0 = 不限制"
+                  onChange={(e) => setMonthlyBudget(e.target.value)}
+                />
+                <p className="settings-hint">按当前自然月统计历史会话费用；达到上限后会拦截下一轮发送，auto 调度会优先降级到低成本模型。</p>
 
+              </details>
+            </>}
             {tab === 'providers' && (
               <ProviderSettingsSection surface={providerSurface} providers={providers} health={health} providerProbe={providerProbe} checkingProviderId={checkingProviderId} onSurfaceChange={setProviderSurface} onAdd={() => openProviderEditor('new')} onProbe={(provider) => void probeProvider(provider)} onEdit={openProviderEditor} onRemove={(provider) => void remove(provider)} />
             )}
 
-            {tab === 'notifications' && <NotificationConnectorManager />}
+            {tab === 'notifications' && <><NotificationPreferences draft={draft} onChange={patchDraft} /><details className="settings-section"><summary>{settings.language === 'zh' ? '消息连接器' : 'Message connectors'}</summary><NotificationConnectorManager /></details></>}
 
             {tab === 'plugins' && (
               <>
-                <h3 className="settings-h3">{t('tabPlugins')}</h3>
                 <p className="settings-hint">{t('pluginsInfo')}</p>
-                <div className="plugins-paths">
+                <button type="button" className="btn btn-primary" onClick={() => {
+                  const state = useStore.getState()
+                  state.setShowSettings(false)
+                  state.setView('list')
+                  void state.openPluginRegistryPanel()
+                }}>{settings.language === 'zh' ? '管理插件、技能与 MCP' : 'Manage plugins, skills & MCP'}</button>
+                <details className="settings-section"><summary>{settings.language === 'zh' ? '本机安装位置' : 'Local installation paths'}</summary><div className="plugins-paths">
                   <code>~/.caogen/skills/</code>
                   <code>~/.caogen/plugins/</code>
                   <code>.caogen/mcp/mcp.json</code>
-                </div>
+                </div></details>
               </>
             )}
 
@@ -1474,7 +1467,7 @@ export default function SettingsPage(): React.JSX.Element {
           </main>
       </div>
 
-        {!editing && <footer className="settings-page-actions">
+        {!editing && (saveError || hasDraftChanges) && <footer className="settings-page-actions">
           {saveError && (
             <div className="settings-save-error" role="alert" data-settings-save-error>
               {saveError}

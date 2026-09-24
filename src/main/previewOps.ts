@@ -256,12 +256,12 @@ function resolveProjectPath(root: string, relativePath: string): { fullPath: str
   return { fullPath, relativePath: toProjectRelative(root, fullPath) }
 }
 
-function detectPreviewKind(relativePath: string): PreviewKind {
+export function detectPreviewKind(relativePath: string): PreviewKind {
   const extension = path.extname(relativePath).toLowerCase()
   return PREVIEW_BY_EXTENSION[extension] ?? UNKNOWN_PREVIEW
 }
 
-function prepareOfficeText(buffer: Buffer, relativePath: string): string {
+export function prepareOfficeText(buffer: Buffer, relativePath: string): string {
   const zip = readZip(buffer)
   const extension = path.extname(relativePath).toLowerCase()
   if (extension === '.docx') return extractDocxText(zip)
@@ -270,7 +270,7 @@ function prepareOfficeText(buffer: Buffer, relativePath: string): string {
   throw new Error('暂不支持该 Office 格式')
 }
 
-function preparePdfText(buffer: Buffer): string | undefined {
+export function preparePdfText(buffer: Buffer): string | undefined {
   const text = extractPdfText(buffer, DEFAULT_MAX_PDF_TEXT_CHARS)
   if (!text) return undefined
   return ['# PDF Document', '', text].join('\n')

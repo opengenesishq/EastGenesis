@@ -67,7 +67,7 @@ export function buildPreviewAgentPrompt(
     .join('\n')
 
   return [
-    '请基于这个 CaoGen 产物预览继续工作。',
+    '请基于这个 EastGenesis 产物预览继续工作。',
     '',
     `文件: ${p.path ?? previewPath ?? '(unknown)'}`,
     `类型: ${p.type ?? '(unknown)'}`,

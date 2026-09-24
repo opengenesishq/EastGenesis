@@ -1,0 +1,11 @@
+.feedback-settings { max-width: 800px; }
+.feedback-settings h3 { margin: 0 0 14px; }
+.feedback-app-info { font-size: 12px; line-height: 1.8; color: var(--text-dim); }
+.feedback-description { resize: vertical; min-height: 130px; }
+.feedback-options { border: 1px solid var(--border-soft); border-radius: 8px; margin: 18px 0 10px; padding: 12px; }
+.feedback-options legend { color: var(--text-dim); font-size: 12px; }
+.feedback-options label { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; font-size: 13px; }
+.feedback-options input { margin: 2px 0 0; }
+.feedback-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.feedback-preview pre { padding: 14px; max-height: 330px; overflow: auto; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--bg-input); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
+.feedback-notice { overflow-wrap: anywhere; font-size: 13px; }

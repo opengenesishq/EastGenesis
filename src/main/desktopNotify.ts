@@ -1,4 +1,7 @@
-import { app, ipcMain, Notification, type BrowserWindow, type WebContents } from 'electron'
+import { app, BrowserWindow, ipcMain, Notification, type WebContents } from 'electron'
+import { desktopWindowRole } from './desktop-window-registry'
+import { getSettings } from './settings'
+import { normalizeNotificationPreferences, shouldShowDesktopNotification, type DesktopNotificationKind } from '../shared/desktop-behavior-preferences'
 
 interface DesktopNotificationHost {
   getMainWindow(): BrowserWindow | null
@@ -45,7 +48,7 @@ function truncate(text: string, max = 180): string {
   return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean
 }
 
-function activateNotification(sessionId: string): void {
+export function activateDesktopTask(sessionId: string): void {
   // Keep only the latest explicit click while the main window is being rebuilt.
   pendingSessionId = sessionId
   host?.showMainWindow()
@@ -61,7 +64,11 @@ export function showDesktopNotification(input: {
   title: string
   body: string
   sessionId: string
+  kind?: DesktopNotificationKind
 }): void {
+  const settings = getSettings(), focused = BrowserWindow.getFocusedWindow()
+  const workbenchFocused = Boolean(focused && ['main', 'task'].includes(desktopWindowRole(focused) ?? ''))
+  if (!shouldShowDesktopNotification(settings.notificationsEnabled, settings.notificationPreferences, input.kind ?? 'update', workbenchFocused)) return
   console.info('[caogen] desktop notification requested:', JSON.stringify({
     sessionId: input.sessionId,
     title: input.title
@@ -70,10 +77,10 @@ export function showDesktopNotification(input: {
   const notification = new Notification({
     title: input.title,
     body: truncate(input.body),
-    silent: false
+    silent: !normalizeNotificationPreferences(settings.notificationPreferences).sound
   })
   notification.once('click', () => {
-    activateNotification(input.sessionId)
+    activateDesktopTask(input.sessionId)
   })
   notification.show()
 }

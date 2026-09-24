@@ -25,6 +25,7 @@ import {
   clone,
   digest,
   normalizeResources,
+  normalizePrimaryResource,
   normalizeInstitutionTemplate,
   optionalId,
   optionalText,
@@ -262,6 +263,7 @@ function buildWorkspace(input: ProjectWorkspaceInput, id: string, now: number): 
   const kind: ProjectWorkspaceKind = input.kind ?? 'personal'
   if (!isProjectWorkspaceKind(kind)) throw new ProjectWorkspaceError('invalid_input', 'workspace kind is invalid')
   const createdAt = timestamp(input.createdAt, 'workspace createdAt', now)
+  const resources = normalizeResources(input.resources)
   return {
     schemaVersion: PROJECT_WORKSPACE_SCHEMA_VERSION,
     id,
@@ -269,7 +271,8 @@ function buildWorkspace(input: ProjectWorkspaceInput, id: string, now: number): 
     kind,
     status: 'active',
     ownerId: optionalId(input.ownerId, 'workspace ownerId'),
-    resources: normalizeResources(input.resources),
+    resources,
+    primaryResourceId: normalizePrimaryResource(input.primaryResourceId, resources),
     rulesRef: optionalText(input.rulesRef, 'workspace rulesRef'),
     budgetPolicy: sanitizePolicy(input.budgetPolicy),
     permissionPolicy: sanitizePolicy(input.permissionPolicy),
@@ -293,6 +296,12 @@ function applyWorkspacePatch(workspace: ProjectWorkspace, patch: ProjectWorkspac
   }
   if (patch.ownerId !== undefined) workspace.ownerId = optionalId(patch.ownerId, 'workspace ownerId')
   if (patch.resources !== undefined) workspace.resources = normalizeResources(patch.resources)
+  if (patch.primaryResourceId !== undefined || patch.resources !== undefined) {
+    workspace.primaryResourceId = normalizePrimaryResource(
+      patch.primaryResourceId === undefined ? workspace.primaryResourceId : patch.primaryResourceId,
+      workspace.resources
+    )
+  }
   if (patch.rulesRef !== undefined) workspace.rulesRef = optionalText(patch.rulesRef, 'workspace rulesRef')
   if (patch.budgetPolicy !== undefined) workspace.budgetPolicy = sanitizePolicy(patch.budgetPolicy)
   if (patch.permissionPolicy !== undefined) workspace.permissionPolicy = sanitizePolicy(patch.permissionPolicy)

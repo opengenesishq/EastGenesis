@@ -372,7 +372,7 @@ function PurgeDecisionView({ decision, t }: {
 
 function retentionSubjectOptions(projects: ProjectWorkspace[], history: HistoryEntry[]) {
   return [
-    { value: 'application', subject: { kind: 'application' as const }, label: 'CaoGen' },
+    { value: 'application', subject: { kind: 'application' as const }, label: 'EastGenesis' },
     ...projects.map((project) => ({ value: subjectKey({ kind: 'project', id: project.id }), subject: { kind: 'project' as const, id: project.id }, label: `Project · ${project.name}` })),
     ...history.map((entry) => ({ value: subjectKey({ kind: 'session', id: entry.id }), subject: { kind: 'session' as const, id: entry.id }, label: `Session · ${entry.title}` }))
   ]

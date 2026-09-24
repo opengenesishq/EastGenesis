@@ -1,4 +1,4 @@
-import { execFile, spawnSync } from 'node:child_process'
+import { execFileInExecutionEnvironment as execFile, spawnSyncInExecutionEnvironment as spawnSync, executionPathToHost } from '../wsl/process'
 import { mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -225,8 +225,8 @@ export async function queryIssueEffectTarget(
   target: IssueEffectTarget
 ): Promise<IssueEffectObservation> {
   const tool = gitCliForProvider(target.provider)
-  if (!gitCliAvailable(tool, LOCAL_TIMEOUT_MS)) {
-    return { complete: false, records: [], error: `本机未检测到 ${tool}，无法对账 Issue` }
+  if (!gitCliAvailable(tool, LOCAL_TIMEOUT_MS, target.repoRoot)) {
+    return { complete: false, records: [], error: `当前执行环境未检测到 ${tool}，无法对账 Issue` }
   }
   const command: PullRequestCliCommand = target.provider === 'github'
     ? {
@@ -413,12 +413,12 @@ export function inspectPullRequestCapability(cwd: string): PullRequestCapability
       return { available: false, message: '当前 remote 不是受支持的 GitHub/GitLab 仓库' }
     }
     const tool = gitCliForProvider(parsed.provider)
-    if (!gitCliAvailable(tool, LOCAL_TIMEOUT_MS)) {
+    if (!gitCliAvailable(tool, LOCAL_TIMEOUT_MS, repoRoot)) {
       return {
         available: false,
         provider: parsed.provider,
         tool,
-        message: `已识别 ${parsed.provider} remote，但本机未检测到 ${tool}`
+        message: `已识别 ${parsed.provider} remote，但当前执行环境未检测到 ${tool}`
       }
     }
     return { available: true, provider: parsed.provider, tool }
@@ -431,8 +431,8 @@ export async function queryPullRequestEffectTarget(
   target: PullRequestEffectTarget
 ): Promise<PullRequestEffectObservation> {
   const tool = gitCliForProvider(target.provider)
-  if (!gitCliAvailable(tool, LOCAL_TIMEOUT_MS)) {
-    return { complete: false, records: [], error: `本机未检测到 ${tool}，无法对账 PR/MR` }
+  if (!gitCliAvailable(tool, LOCAL_TIMEOUT_MS, target.repoRoot)) {
+    return { complete: false, records: [], error: `当前执行环境未检测到 ${tool}，无法对账 PR/MR` }
   }
   const command: { args: string[]; env: Record<string, string> } = target.provider === 'github'
     ? {
@@ -664,7 +664,7 @@ async function inspectRepository(cwd: string): Promise<InspectedRepository> {
     throw new Error('当前 remote 不是受支持的 GitHub/GitLab 仓库')
   }
   const tool = gitCliForProvider(parsed.provider)
-  if (!gitCliAvailable(tool, LOCAL_TIMEOUT_MS)) throw new Error(`已识别 ${parsed.provider} remote，但本机未检测到 ${tool}`)
+  if (!gitCliAvailable(tool, LOCAL_TIMEOUT_MS, repoRoot)) throw new Error(`已识别 ${parsed.provider} remote，但当前执行环境未检测到 ${tool}`)
   return {
     repoRoot,
     remote,
@@ -696,7 +696,7 @@ async function defaultBaseBranch(repo: InspectedRepository): Promise<string> {
 async function remoteBranchSha(repo: InspectedRepository, branch: string): Promise<string | undefined> {
   const url = normalizeRemoteProbeUrl(repo.repoRoot, repo.remoteUrl)
   const ref = `refs/heads/${branch}`
-  const result = await remoteGitRun(['ls-remote', '--heads', url, ref], [0, 2])
+  const result = await remoteGitRun(repo.repoRoot, ['ls-remote', '--heads', url, ref], [0, 2])
   if (!result.ok && result.status !== 2) throw new Error(result.error)
   for (const line of result.stdout.split(/\r?\n/)) {
     const [sha, observedRef] = line.trim().split(/\s+/)
@@ -829,15 +829,15 @@ function gitRun(
   )
 }
 
-function remoteGitRun(args: string[], allowedStatuses: number[]): Promise<CommandResult> {
+function remoteGitRun(executionCwd: string, args: string[], allowedStatuses: number[]): Promise<CommandResult> {
   const isolatedCwd = mkdtempSync(join(tmpdir(), 'caogen-pr-probe-'))
   const env = isolatedRemoteGitEnv(process.env)
   env.GIT_CEILING_DIRECTORIES = isolatedCwd
   env.GIT_DISCOVERY_ACROSS_FILESYSTEM = '0'
   return commandRun(
     'git',
-    withSafeRemoteGitConfig(args),
-    isolatedCwd,
+    withSafeRemoteGitConfig(['-C', isolatedCwd, ...args]),
+    executionCwd,
     env,
     REMOTE_TIMEOUT_MS,
     allowedStatuses
@@ -851,7 +851,7 @@ function cliRun(
   envPatch: Record<string, string>,
   timeoutMs = REMOTE_TIMEOUT_MS
 ): Promise<CommandResult> {
-  const override = command === 'gh' || command === 'glab' ? gitCliOverride(command) : undefined
+  const override = command === 'gh' || command === 'glab' ? gitCliOverride(command, cwd) : undefined
   return commandRun(
     override?.executable ?? command,
     override ? [...override.argsPrefix, ...args] : args,
@@ -914,7 +914,7 @@ function normalizeRemoteProbeUrl(repoRoot: string, value: string): string {
   }
   if (/^(?:[^@\s/:]+@)?[^:\s/]+:.+$/.test(trimmed)) return trimmed
   if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(trimmed)) throw new Error('Git remote URL 使用未知协议')
-  return resolve(repoRoot, trimmed)
+  return resolve(repoRoot, executionPathToHost(repoRoot, trimmed))
 }
 
 function sanitizeRemoteUrl(value: string): string {

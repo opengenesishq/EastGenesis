@@ -1,7 +1,7 @@
 import type { ProviderProfileImportAction } from './provider-profile-types'
 import type { ProviderRuntimeConfig, ProviderView } from './types'
 
-export type ProviderNativeClient = 'codex'
+export type ProviderNativeClient = 'codex' | 'claude' | 'gemini' | 'opencode' | 'cc-switch'
 export type ProviderNativeCredentialKind = 'api-key' | 'environment' | 'none'
 export type ProviderNativeImportWarning =
   | 'credential_missing'
@@ -23,7 +23,8 @@ export interface ProviderNativeImportPreview {
   providerName: string
   baseUrl: string
   models: string[]
-  protocol: 'responses' | 'chat'
+  protocol: 'responses' | 'chat' | 'anthropic' | 'gemini'
+  sourceLabel?: string
   runtime?: ProviderRuntimeConfig
   credentialKind: ProviderNativeCredentialKind
   credentialImportable: boolean

@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSyncInExecutionEnvironment as execFileSync } from './wsl/process'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   closeSync,
@@ -20,8 +20,11 @@ import type {
   WorktreeRemoveResult
 } from '../shared/types'
 import { isolatedLocalGitEnv, withSafeLocalGitConfig } from './git/safe-git'
+import { normalizeDesktopGitPreferences } from '../shared/desktop-git-preferences'
+import { getSettings } from './settings'
+import { parseWslHostPath } from './wsl/binding'
+import { assertManagedWorktreeExecutionPath, wslManagedWorktreePath } from './git/wsl-worktree-path'
 
-const WORKTREE_BRANCH_PREFIX = 'caogen'
 const GIT_TIMEOUT_MS = 120_000
 const MANAGED_WORKTREE_REGISTRY_SCHEMA_VERSION = 1
 
@@ -317,11 +320,12 @@ function createPlanForRepository(
   const previous = records.find((record) => record.sessionId === sessionId)
   const existing = previous?.state === 'active' ? previous : undefined
   if (existing && existsSync(existing.worktreePath)) {
+    assertManagedWorktreeExecutionPath(repoRoot, canonicalGitPath(repoRoot, '--git-common-dir'), existing.worktreePath, sessionId)
     return { ok: true, isolated: true, cwd: existing.cwd, record: { ...existing }, existing: true }
   }
-  const branch = `${WORKTREE_BRANCH_PREFIX}/${sessionId}`
+  const branch = `${normalizeDesktopGitPreferences(getSettings().gitPreferences).branchPrefix}/${sessionId}`
   git(repoRoot, ['check-ref-format', '--branch', branch])
-  const worktreePath = worktreePathFor(sessionId)
+  const worktreePath = worktreePathFor(sessionId, repoRoot)
   if (existsSync(worktreePath)) {
     return { ok: false, isolated: true, cwd: sourceCwd, error: `目标 worktree 路径已存在: ${worktreePath}` }
   }
@@ -668,7 +672,10 @@ function registryFile(userDataRoot?: string): string {
   return join(worktreesRoot(userDataRoot), 'index.json')
 }
 
-function worktreePathFor(sessionId: string): string {
+function worktreePathFor(sessionId: string, repoRoot: string): string {
+  if (parseWslHostPath(repoRoot)) {
+    return canonicalPlannedPath(wslManagedWorktreePath(repoRoot, canonicalGitPath(repoRoot, '--git-common-dir'), safePathSegment(sessionId))!)
+  }
   return canonicalPlannedPath(join(worktreesRoot(), safePathSegment(sessionId)))
 }
 

@@ -1,7 +1,7 @@
 export const ASSISTANT_PROJECTION_TRANSLATIONS = {
   assistantComputeReady: { zh: '已自动准备执行资源', en: 'Ready to start automatically' },
   assistantComputeCheckingLocal: { zh: '正在查找本机模型', en: 'Checking for local models' },
-  assistantComputeUnavailableShort: { zh: '当前无法开始任务', en: 'Unable to start right now' },
+  assistantComputeUnavailableShort: { zh: '未连接模型', en: 'No model connected' },
   assistantComputeUnavailable: {
     zh: '当前没有可用的执行资源。完成设置后可以从这里继续。',
     en: 'No execution service is available. Finish setup, then continue here.'

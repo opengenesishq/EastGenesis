@@ -21,7 +21,7 @@ export const CONTROL_CENTER_TRANSLATIONS = {
     en: '{ready}/{total} Agent engines ready'
   },
   controlCenterDriveAndRouting: { zh: 'Drive 与路由', en: 'Drive and routing' },
-  controlCenterDrive: { zh: 'CaoGen Drive', en: 'CaoGen Drive' },
+  controlCenterDrive: { zh: 'EastGenesis Drive', en: 'EastGenesis Drive' },
   controlCenterProviderPreference: { zh: 'Provider 偏好', en: 'Provider preference' },
   controlCenterNoProviderPreference: { zh: '不设置 Provider 偏好', en: 'No provider preference' },
   controlCenterModelPreference: { zh: '模型偏好', en: 'Model preference' },

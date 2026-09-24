@@ -115,8 +115,7 @@ export function welcomeValidationKey(
 ): string | null {
   const workspaceValidationKey = welcomeWorkspaceValidationKey(draft)
   if (workspaceValidationKey) return workspaceValidationKey
-  if (projection === 'assistant') return computeAvailable ? null : 'assistantComputeUnavailable'
-  if (draft.routingMode === 'global' && !computeAvailable) return 'explicitProviderRequired'
+  if (!computeAvailable) return projection === 'assistant' ? 'assistantComputeUnavailable' : 'explicitProviderRequired'
   if (draft.routingMode !== 'global' && !draft.providerId) return 'explicitProviderRequired'
   if (draft.routingMode === 'fixed' && (!draft.model || draft.model === AUTO_MODEL)) {
     return 'explicitModelRequired'
@@ -135,11 +134,13 @@ export function welcomeSessionOptions(
   draft: WelcomeSessionDraft,
   prompt: string
 ): CreateSessionOptions {
-  const sessionProjection = draft.unassigned ? projection : 'studio'
+  // The first screen is a conversation workspace. A selected work folder is
+  // execution context only; it must never switch the user into a second
+  // project/studio product surface.
+  const sessionProjection = projection
   const placement = {
     cwd: draft.cwd.trim(),
-    projectId: draft.projectId,
-    unassigned: draft.unassigned,
+    unassigned: true,
     experienceModeOverride: sessionProjection,
     initialPrompt: prompt,
     forkFromSdkSessionId: draft.forkFromSdkSessionId,

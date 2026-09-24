@@ -4,6 +4,7 @@ import { basename, join, resolve } from 'node:path'
 import type { PluginRegistryItem } from '../../shared/types'
 import type { SkillDefinition, SkillLoadDiagnostic, SkillLoadResult } from '../skill/skill-loader'
 import { normalizeMcpServerConfig, type McpServerConfig } from '../mcp/mcp-client'
+import { bindMcpOAuthRuntime } from '../mcp/mcp-oauth-runtime'
 import {
   approvePluginRegistryItem,
   pluginRegistryItemKey,
@@ -149,7 +150,7 @@ export function authorizeMcpRuntimeBinding(input: AuthorizeMcpBindingInput): Aut
     throw new Error('MCP runtime binding does not identify the approved server')
   }
   if (!isCaogenExtensionRegistryRoot(parsedKey.sourceRoot)) {
-    throw new Error('MCP runtime binding points outside CaoGen-owned extension roots; import and approve it again')
+    throw new Error('MCP runtime binding points outside EastGenesis-owned extension roots; import and approve it again')
   }
   const state = readPluginRegistryState(pluginRegistryStateFile())
   const view = scanPluginRegistry([parsedKey.sourceRoot], RUNTIME_SCAN_OPTIONS, state)
@@ -211,16 +212,18 @@ function authorizedMcpFromMatches(
 
   const { item, config, publicConfig } = resolved[0]
   if (!item.contentDigest) throw new Error(`MCP server ${serverId} has no content digest`)
+  const binding = {
+    registryItemKey: pluginRegistryItemKey(item),
+    contentDigest: item.contentDigest,
+    capabilityDigest: item.capabilityManifest.digest,
+    serverId
+  }
+  bindMcpOAuthRuntime(config, binding)
   return {
     serverId,
     config,
     publicConfig,
-    binding: {
-      registryItemKey: pluginRegistryItemKey(item),
-      contentDigest: item.contentDigest,
-      capabilityDigest: item.capabilityManifest.digest,
-      serverId
-    }
+    binding
   }
 }
 

@@ -7,7 +7,7 @@ import { pickFailoverTarget, pickProviderModelFailoverTarget, type FailureClass 
 import type { OpenAIProtocol } from '../../shared/types'
 import { synchronizeProviderReliabilityPolicies } from '../providerHealth'
 import { evaluateNativeRecoveryTarget } from '../model/native-recovery-eligibility'
-import { frozenRetryAllows, type NativeSessionRecoveryContext } from '../model/native-recovery-session'
+import { configuredNextRetry, frozenRetryAllows, type NativeSessionRecoveryContext } from '../model/native-recovery-session'
 import type { RoutingRetryReason } from '../../shared/routing-policy-types'
 
 export interface OpenAiProviderModelRecoveryPlan {
@@ -98,6 +98,8 @@ export function planOpenAiProviderModelRecovery(input: {
   nativeRetryReason?: RoutingRetryReason
   attempt?: number
 }): OpenAiProviderModelRecoveryPlan | null {
+  const ordered = configuredNextRetry(input.recovery, { providerId: input.providerId, model: input.fromModel })
+  if (ordered && (!ordered.target || ordered.target.providerId !== input.providerId)) return null
   const provider = getProvider(input.providerId)
   const providerView = listProviders().find((candidate) => candidate.id === input.providerId)
   if (!provider || providerView?.engine !== 'openai' || !providerIsReady(provider)) return null
@@ -105,6 +107,7 @@ export function planOpenAiProviderModelRecovery(input: {
   const models = [...new Set(provider.models.map((model) =>
     resolveProviderRuntimeTarget(provider, { appId: 'openai', model }).model
   ))].filter((model) => {
+    if (ordered && ordered.target?.model !== model) return false
     const target = resolveProviderRuntimeTarget(provider, { appId: 'openai', model })
     return (!input.routingExpertPolicy || providerAllowedByRoutingExpertPolicy(providerView, input.routingExpertPolicy, target))
       && providerAllowedByRoutingExpertPolicy(providerView, input.recovery.initialExpertPolicy, target)
@@ -150,17 +153,21 @@ export function planOpenAiProviderFailover(input: {
   nativeRetryReason?: RoutingRetryReason
   attempt?: number
 }): OpenAiProviderFailoverPlan | null {
+  const ordered = configuredNextRetry(input.recovery, { providerId: input.currentProviderId, model: input.currentModel })
+  if (ordered && (!ordered.target || ordered.target.providerId === input.currentProviderId)) return null
   if (!input.failure.switchable) return null
   if (input.recovery.frozenRetry && !input.nativeRetryReason) return null
   const providers = listProviders()
   synchronizeProviderReliabilityPolicies(providers)
   const candidates = providers
+    .filter((provider) => !ordered || ordered.target?.providerId === provider.id)
     .filter((provider) => provider.engine === 'openai' && provider.baseUrl.trim() && providerIsReady(provider))
     .map((provider) => {
       const sourceModels = provider.models.length > 0 ? provider.models : [input.currentModel]
       const models = [...new Set(sourceModels.flatMap((model) => {
         try {
           const target = resolveProviderRuntimeTarget(provider, { appId: 'openai', model })
+          if (ordered && ordered.target?.model !== target.model) return []
           if (resolveOpenAIProtocol(target) !== input.currentProtocol) return []
           if (input.routingExpertPolicy && !providerAllowedByRoutingExpertPolicy(provider, input.routingExpertPolicy, target)) return []
           if (!providerAllowedByRoutingExpertPolicy(provider, input.recovery.initialExpertPolicy, target)) return []
@@ -179,7 +186,7 @@ export function planOpenAiProviderFailover(input: {
     .filter((provider) => provider.models.length > 0)
   const target = pickFailoverTarget({
     candidates,
-    exclude: input.exclude,
+    exclude: ordered ? new Set([input.currentProviderId]) : input.exclude,
     desiredModel: input.currentModel,
     fallbackProviderId: input.recovery.frozenRetry?.effectivePolicy.selection.kind === 'preferred' ? undefined : input.fallbackProviderId,
     fallbackModel: input.recovery.frozenRetry?.effectivePolicy.selection.kind === 'preferred' ? undefined : input.fallbackModel

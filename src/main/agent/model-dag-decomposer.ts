@@ -30,6 +30,7 @@ interface ProviderModelConfig {
 }
 
 export interface ModelDagAttemptContext {
+  sessionId?: string
   runId: string
   requestId: string
   stepId?: string
@@ -115,7 +116,7 @@ function configFromInput(input: TaskDecomposeInput): ProviderModelConfig {
 
 function systemPrompt(): string {
   return [
-    '你是 CaoGen 的任务拆解器,只输出 JSON,不要输出 Markdown。',
+    '你是 EastGenesis 的任务拆解器,只输出 JSON,不要输出 Markdown。',
     '请把复杂软件开发需求拆成 DAG 子任务。',
     '输出格式:{"title":"...","tasks":[{"id":"kebab-id","title":"...","description":"...","dependencies":["id"],"role":"frontend|backend|qa|docs|devops|review|general"}]}。',
     '约束:任务数 1-33;id 必须唯一;dependencies 只能引用已存在任务 id;避免循环依赖;QA/验证任务通常依赖实现任务。'

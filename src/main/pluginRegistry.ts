@@ -14,7 +14,6 @@ import {
   type Dirent
 } from 'node:fs'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
-import { homedir } from 'node:os'
 import type {
   PluginRegistryDiagnostic,
   PluginRegistryItem,
@@ -24,6 +23,7 @@ import type {
   PluginRegistryView
 } from '../shared/types'
 import { projectPluginRegistryItemTrust } from './plugin/plugin-trust'
+import { caogenExtensionHome, caogenUserExtensionRoot, isAllowedCaogenExtensionRoot } from './plugin/caogen-extension-roots'
 
 export type {
   PluginRegistryDiagnostic,
@@ -89,7 +89,7 @@ export function scanPluginRegistry(
     limits,
     truncated: false
   }
-  const sourceRoots = normalizeRoots(roots)
+  const sourceRoots = normalizeRoots(roots).filter(isAllowedCaogenExtensionRoot)
   const items: DiscoveredPluginRegistryItem[] = []
 
   for (const sourceRoot of sourceRoots) {
@@ -107,7 +107,7 @@ export function scanPluginRegistry(
   }
 
   const discoveredItems = dedupeItems(items)
-  // 托管标记:位于 managedRoot 下的条目可被 CaoGen 卸载(回收站式)
+  // 托管标记:位于 managedRoot 下的条目可被 EastGenesis 卸载(回收站式)
   if (options.managedRoot) {
     const root = resolve(options.managedRoot)
     for (const item of discoveredItems) {
@@ -251,8 +251,7 @@ function applyPluginRegistryState(
 
 function sourceKindForRoot(sourceRoot: string): PluginRegistrySourceKind {
   const root = resolve(sourceRoot)
-  const home = resolve(homedir())
-  const userRoot = resolve(join(home, '.caogen'))
+  const userRoot = caogenUserExtensionRoot()
 
   if (root === userRoot || isInsidePath(userRoot, root)) return 'user'
   if (root.split(/[\\/]+/).includes('.caogen')) return 'project'
@@ -433,6 +432,7 @@ function scanManagedPluginPackages(
     if (!entry.isDirectory() || IGNORED_DIRS.has(entry.name)) continue
     const pluginRoot = join(pluginsRoot, entry.name)
     scanPluginManifest(pluginRoot, items, ctx)
+    scanStandaloneSkillRoot(pluginRoot, items, ctx)
     scanSkills(pluginRoot, items, ctx)
     scanAgents(pluginRoot, items, ctx)
   }
@@ -751,8 +751,8 @@ function normalizeRoots(roots: string[]): string[] {
 }
 
 function expandHome(path: string): string {
-  if (path === '~') return homedir()
-  if (path.startsWith('~/') || path.startsWith('~\\')) return join(homedir(), path.slice(2))
+  if (path === '~') return caogenExtensionHome()
+  if (path.startsWith('~/') || path.startsWith('~\\')) return join(caogenExtensionHome(), path.slice(2))
   return path
 }
 

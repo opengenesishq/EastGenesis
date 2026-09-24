@@ -194,7 +194,7 @@ function receiptResult(r: RerunReservation, phase: string, reason?: string, star
   return reconciliation(r, reason ?? '重跑要求已经提交或撤回，请核对原任务记录；不会自动重发。')
 }
 export function buildStudioResultRerunPrompt(p: StudioResultRerunPreview): string {
-  return ['【CaoGen 局部重跑】', `原工作项：${p.sourceWorkItemId}`, `目标：${p.objective}`,
+  return ['【EastGenesis 局部重跑】', `原工作项：${p.sourceWorkItemId}`, `目标：${p.objective}`,
     '按当前资料更新受影响成果，只能写入下列已授权的新版本路径。不得覆盖原成果或人工修改文件。',
     `约束：\n${p.constraints.join('\n')}`, `验收标准：\n${p.criteria.join('\n')}`,
     `原成果与新输出：\n${p.outputs.map(file => `${file.path} (${file.digest}) -> ${file.outputPath}`).join('\n')}`,

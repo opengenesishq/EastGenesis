@@ -1,0 +1,50 @@
+import assert from 'node:assert/strict'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { HandoffFileStore, HandoffDestinationStore, captureHandoffFiles, restoreHandoffFiles, verifyRestoredHandoffFiles, handoffFileChunks, handoffRelativePath, validateHandoffFileManifest } from '../src/main/task-handoff/files'
+const root = realpathSync(mkdtempSync(join(tmpdir(), 'caogen-handoff-files-')))
+const blocks = new HandoffFileStore(join(root, 'blocks'))
+const source = join(root, 'source'), target = join(root, 'target'); mkdirSync(source); mkdirSync(target)
+writeFileSync(join(source, 'empty.txt'), ''); writeFileSync(join(source, 'hello.txt'), 'hello'); mkdirSync(join(source, 'empty'))
+writeFileSync(join(source, 'binary.bin'), Buffer.alloc(250_000, 18)); writeFileSync(join(source, '.env'), 'SECRET=fixture-only')
+mkdirSync(join(source, 'node_modules')); writeFileSync(join(source, 'node_modules', 'ignored'), 'dependency')
+const manifest = captureHandoffFiles(source, blocks); validateHandoffFileManifest(manifest)
+assert.deepEqual(manifest.excluded, ['.env', 'node_modules'])
+const receiver = new HandoffFileStore(join(root, 'receiver'))
+for (const hash of handoffFileChunks(manifest)) { receiver.receive(hash, blocks.read(hash).toString('base64')); receiver.receive(hash, blocks.read(hash).toString('base64')) }
+restoreHandoffFiles(target, manifest, receiver); verifyRestoredHandoffFiles(target, manifest)
+assert.equal(readFileSync(join(target, 'empty.txt')).length, 0); assert.equal(readFileSync(join(target, 'binary.bin')).length, 250_000)
+assert.throws(() => restoreHandoffFiles(target, manifest, receiver), /必须为空/)
+writeFileSync(join(target, 'hello.txt'), 'drift'); assert.throws(() => verifyRestoredHandoffFiles(target, manifest), /不一致/)
+console.log('PASS normal/empty/binary trees, chunk retry, exclusions and target drift')
+assert.throws(() => handoffRelativePath('../escape')); assert.throws(() => handoffRelativePath('a\\b')); assert.throws(() => handoffRelativePath('C:/x')); assert.throws(() => handoffRelativePath('con'))
+assert.throws(() => validateHandoffFileManifest({ ...manifest, entries: [...manifest.entries, { ...manifest.entries[0], path: manifest.entries[0].path.toUpperCase() }] }))
+symlinkSync(join(source, 'hello.txt'), join(source, 'link')); assert.throws(() => captureHandoffFiles(source, blocks), /符号链接/)
+assert.throws(() => receiver.receive('a'.repeat(64), Buffer.from('wrong').toString('base64')), /摘要/)
+console.log('PASS traversal, case collision, symlink and corrupted block rejection')
+const receiveRoot = join(root, 'destinations'); mkdirSync(receiveRoot)
+const grants = new HandoffDestinationStore(join(root, 'grant-store')), grant = grants.add(receiveRoot)
+const reserved = grants.reserve(grant.id, 'original-operation'); assert.ok(reserved.startsWith(receiveRoot)); assert.throws(() => grants.reserve(grant.id, 'original-operation'), /已存在/)
+const restart = new HandoffDestinationStore(join(root, 'grant-store')); assert.equal(restart.require(grant.id).root, receiveRoot); restart.revoke(grant.id); assert.throws(() => grants.require(grant.id), /撤销/)
+console.log('PASS persistent grants, reserved destination and revocation')
+const repo = join(root, 'git-source'), destination = join(root, 'git-target'); mkdirSync(repo); mkdirSync(destination)
+const git = (cwd: string, args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } })
+git(repo, ['init', '-q']); git(repo, ['config', 'user.name', 'Handoff Fixture']); git(repo, ['config', 'user.email', 'fixture@example.invalid']); git(repo, ['config', 'core.hooksPath', '/dev/null'])
+writeFileSync(join(repo, 'note.txt'), 'original\n'); writeFileSync(join(repo, 'delete.txt'), 'remove\n'); git(repo, ['add', '.']); git(repo, ['commit', '-qm', 'fixture'])
+writeFileSync(join(repo, 'note.txt'), 'staged\n'); git(repo, ['add', 'note.txt']); writeFileSync(join(repo, 'note.txt'), 'unstaged\n'); git(repo, ['rm', '-q', 'delete.txt']); writeFileSync(join(repo, 'untracked.txt'), 'new\n')
+const gitManifest = captureHandoffFiles(repo, blocks); restoreHandoffFiles(destination, gitManifest, blocks)
+assert.equal(git(destination, ['rev-parse', 'HEAD']), git(repo, ['rev-parse', 'HEAD']))
+assert.equal(git(destination, ['ls-files', '--stage']), git(repo, ['ls-files', '--stage']))
+assert.equal(git(destination, ['status', '--porcelain']), git(repo, ['status', '--porcelain']))
+assert.equal(git(destination, ['diff']), git(repo, ['diff']))
+console.log('PASS Git HEAD/index/staged/unstaged/deleted/untracked round trip')
+for (const name of ['.env', '.npmrc', 'credentials.json']) {
+  writeFileSync(join(repo, name), 'synthetic fixture only')
+  git(repo, ['add', name])
+  assert.throws(() => captureHandoffFiles(repo, blocks), /暂存区包含凭据配置/)
+  git(repo, ['rm', '--cached', name])
+}
+console.log('PASS newly staged private files cannot leak through Git patch')
+console.log(JSON.stringify({ passed: 5, root }))

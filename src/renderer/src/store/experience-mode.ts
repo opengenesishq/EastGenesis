@@ -20,7 +20,7 @@ export function createExperienceModeSlice(
 ): ExperienceModeSlice {
   return {
     experienceMode: 'assistant',
-    studioSurface: 'workspace',
+    studioSurface: 'session',
     setExperienceMode: (experienceMode) => {
       if (experienceMode === 'studio') {
         set({

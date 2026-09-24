@@ -1,0 +1,19 @@
+.browser-tabs-container { flex: 0 0 auto; min-width: 0; border-bottom: 1px solid var(--border); }
+.browser-tabs-strip { display: flex; align-items: center; gap: 4px; padding: 5px 8px 0; min-height: 35px; }
+.browser-tabs-list { display: flex; gap: 3px; flex: 1; min-width: 0; overflow-x: auto; }
+.browser-tab { display: flex; align-items: center; min-width: 115px; max-width: 220px; flex: 1 0 115px; border-radius: 7px 7px 0 0; border: 1px solid transparent; border-bottom: 0; color: var(--text-secondary); }
+.browser-tab.is-active { background: var(--bg-secondary); border-color: var(--border); color: var(--text); }
+.browser-tab > button { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 7px 6px; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 11px; flex: 1; }
+.browser-tab > button span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.browser-tab > button svg { flex-shrink: 0; }
+.browser-tab > .browser-tab-close { flex: 0 0 23px; padding: 5px; border-radius: 4px; margin-right: 3px; }
+.browser-tab-close:hover { background: var(--bg-hover); }
+.browser-tab-add { flex: 0 0 26px; }
+.browser-tabs-error { margin: 4px 8px; }
+.browser-tab-loading { animation: browser-tab-spin 1s linear infinite; }
+@keyframes browser-tab-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .browser-tab-loading { animation: none; } }
+
+.browser-body.browser-page-full-width { grid-template-columns: minmax(0, 1fr); }
+.browser-body .browser-annotations[hidden] { display: none; }
+.browser-assistant-toggle { display: flex; justify-content: flex-end; padding: 0 8px; flex: 0 0 auto; }

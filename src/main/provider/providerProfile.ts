@@ -90,7 +90,7 @@ export function parseProviderProfile(raw: string): ParsedProviderProfile {
     entries,
     credentialFieldsIgnored,
     warnings: credentialFieldsIgnored > 0
-      ? [`检测到 ${credentialFieldsIgnored} 个凭据字段；已忽略，Key 必须在 CaoGen 中单独录入。`]
+      ? [`检测到 ${credentialFieldsIgnored} 个凭据字段；已忽略，Key 必须在 EastGenesis 中单独录入。`]
       : []
   }
 }

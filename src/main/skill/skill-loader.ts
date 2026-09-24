@@ -1,8 +1,8 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { basename, dirname, extname, join, resolve } from 'node:path'
-import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { ensureProjectSkillReadinessSync } from '../learning/learning-lifecycle'
+import { caogenUserExtensionRoot, isAllowedCaogenExtensionRoot } from '../plugin/caogen-extension-roots'
 
 export type SkillScope = 'builtin' | 'global' | 'project'
 
@@ -61,10 +61,10 @@ const BUILTIN_UPDATED_AT = Date.parse('2026-07-06T00:00:00.000Z')
 
 export function defaultSkillRoots(projectRoot?: string): Array<{ root: string; scope: Exclude<SkillScope, 'builtin'> }> {
   const roots: Array<{ root: string; scope: Exclude<SkillScope, 'builtin'> }> = [
-    { root: join(homedir(), '.caogen', 'skills'), scope: 'global' }
+    { root: join(caogenUserExtensionRoot(), 'skills'), scope: 'global' }
   ]
   if (projectRoot?.trim()) roots.unshift({ root: join(projectRoot, '.caogen', 'skills'), scope: 'project' })
-  return roots
+  return roots.filter(item => isAllowedCaogenExtensionRoot(item.root))
 }
 
 export function loadSkills(projectRoot?: string): SkillLoadResult {
@@ -73,7 +73,7 @@ export function loadSkills(projectRoot?: string): SkillLoadResult {
   const roots = defaultSkillRoots(projectRoot)
   let projectMaterializationError: string | undefined
 
-  if (projectRoot?.trim()) {
+  if (projectRoot?.trim() && roots.some(item => item.scope === 'project')) {
     try {
       ensureProjectSkillReadinessSync(projectRoot)
     } catch (error) {
@@ -123,7 +123,7 @@ export function parseSkillMarkdown(
 ): SkillDefinition {
   const { frontmatter, body } = splitFrontmatter(raw)
   const name = cleanText(frontmatter.name) || cleanText(firstHeading(body)) || basename(dirname(sourcePath))
-  const description = cleanText(frontmatter.description) || cleanText(firstParagraph(body)) || 'CaoGen Skill'
+    const description = cleanText(frontmatter.description) || cleanText(firstParagraph(body)) || 'EastGenesis Skill'
   const tags = frontmatter.tags ?? []
   return {
     id: skillId(scope, sourcePath, name),

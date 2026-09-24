@@ -360,26 +360,26 @@ async function loadExistingWorkflowDeliveryIdentity(
     info = await lstat(filePath)
   } catch (error) {
     if (isMissingFile(error)) return undefined
-    throw new Error('CaoGen delivery identity cannot be inspected')
+    throw new Error('EastGenesis delivery identity cannot be inspected')
   }
   if (!info.isFile() || info.isSymbolicLink() || info.size < 1 || info.size > MAX_IDENTITY_BYTES) {
-    throw new Error('CaoGen delivery identity store is invalid')
+    throw new Error('EastGenesis delivery identity store is invalid')
   }
   let raw: unknown
   try {
     raw = JSON.parse(await readFile(filePath, 'utf8')) as unknown
   } catch {
-    throw new Error('CaoGen delivery identity store is unreadable')
+    throw new Error('EastGenesis delivery identity store is unreadable')
   }
   const stored = parseStoredIdentity(raw)
   const privateKey = decryptPrivateKey(stored.encryptedPrivateKey)
   if (privateKey.asymmetricKeyType !== 'ed25519') {
-    throw new Error('CaoGen delivery identity private key is not Ed25519')
+    throw new Error('EastGenesis delivery identity private key is not Ed25519')
   }
   const derivedPublicKey = createPublicKey(privateKey).export({ type: 'spki', format: 'der' })
   const expectedPublicKey = Buffer.from(stored.publicKey, 'base64')
   if (!derivedPublicKey.equals(expectedPublicKey)) {
-    throw new Error('CaoGen delivery identity key pair does not match')
+    throw new Error('EastGenesis delivery identity key pair does not match')
   }
   return {
       identity: publicIdentity(stored.publicKey, stored.publicKeyFingerprint),
@@ -437,32 +437,32 @@ function parseStoredIdentity(raw: unknown): StoredWorkflowDeliveryIdentity {
       !isBoundedBase64(raw.publicKey, 256) || !isFingerprint(raw.publicKeyFingerprint) ||
       typeof raw.encryptedPrivateKey !== 'string' || !raw.encryptedPrivateKey.startsWith('enc:') ||
       !isBoundedBase64(raw.encryptedPrivateKey.slice(4), 2048) || !isFingerprint(raw.payloadDigest)) {
-    throw new Error('CaoGen delivery identity store has an invalid schema')
+      throw new Error('EastGenesis delivery identity store has an invalid schema')
   }
   const stored = raw as unknown as StoredWorkflowDeliveryIdentity
   if (stored.retiredIdentities !== undefined) {
     if (!Array.isArray(stored.retiredIdentities) || stored.retiredIdentities.length > MAX_RETIRED_IDENTITIES) {
-      throw new Error('CaoGen delivery identity history is invalid')
+      throw new Error('EastGenesis delivery identity history is invalid')
     }
     const parsed = stored.retiredIdentities.map(parseRetiredIdentity)
     if (new Set(parsed.map((item) => item.fingerprint)).size !== parsed.length ||
         parsed.some((item) => item.fingerprint === stored.publicKeyFingerprint)) {
-      throw new Error('CaoGen delivery identity history is invalid')
+      throw new Error('EastGenesis delivery identity history is invalid')
     }
   }
   const { payloadDigest, ...body } = stored
   if (`sha256:${digest(body)}` !== payloadDigest) {
-    throw new Error('CaoGen delivery identity store integrity check failed')
+    throw new Error('EastGenesis delivery identity store integrity check failed')
   }
   const publicDer = Buffer.from(stored.publicKey, 'base64')
   if (publicKeyDigest(publicDer) !== stored.publicKeyFingerprint) {
-    throw new Error('CaoGen delivery identity fingerprint does not match')
+    throw new Error('EastGenesis delivery identity fingerprint does not match')
   }
   try {
     const publicKey = createPublicKey({ key: publicDer, type: 'spki', format: 'der' })
     if (publicKey.asymmetricKeyType !== 'ed25519') throw new Error('wrong key type')
   } catch {
-    throw new Error('CaoGen delivery identity public key is invalid')
+    throw new Error('EastGenesis delivery identity public key is invalid')
   }
   return stored
 }
@@ -476,7 +476,7 @@ function decryptPrivateKey(value: string): ReturnType<typeof createPrivateKey> {
     if (key.asymmetricKeyType !== 'ed25519') throw new Error('wrong key type')
     return key
   } catch {
-    throw new Error('CaoGen delivery identity private key cannot be decrypted')
+    throw new Error('EastGenesis delivery identity private key cannot be decrypted')
   }
 }
 
@@ -498,7 +498,7 @@ async function persistIdentity(rootDir: string, stored: StoredWorkflowDeliveryId
   const bytes = Buffer.from(`${canonicalJson(stored)}\n`, 'utf8')
   await writeDurableFile(identityPath(rootDir), bytes, { mode: 0o600, replace: true })
   const observed = await readFile(identityPath(rootDir))
-  if (!observed.equals(bytes)) throw new Error('CaoGen delivery identity changed after write')
+  if (!observed.equals(bytes)) throw new Error('EastGenesis delivery identity changed after write')
 }
 
 function parseBackupEnvelope(raw: unknown): WorkflowDeliveryIdentityBackupEnvelope {

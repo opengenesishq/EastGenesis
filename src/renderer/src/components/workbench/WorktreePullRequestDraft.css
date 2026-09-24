@@ -1,0 +1,21 @@
+.worktree-pr-draft { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-raised); min-width: 0; }
+.worktree-pr-draft-header { display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+.worktree-pr-draft h3, .worktree-pr-draft p { margin: 0; }
+.worktree-pr-draft-header h3 { font-size: 15px; margin-bottom: 5px; }
+.worktree-pr-draft-header p, .worktree-pr-draft-hint { font-size: 12px; color: var(--text-dim); line-height: 1.6; overflow-wrap: anywhere; }
+.worktree-pr-draft-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.worktree-pr-draft-context { margin: 0; display: grid; gap: 6px; font-size: 12px; }
+.worktree-pr-draft-context > div { display: flex; gap: 12px; }
+.worktree-pr-draft-context dt { color: var(--text-dim); flex: 0 0 60px; }
+.worktree-pr-draft-context dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.worktree-pr-draft-field { display: grid; gap: 7px; font-size: 12px; }
+.worktree-pr-draft-field input, .worktree-pr-draft-field textarea { width: 100%; min-width: 0; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; padding: 9px 10px; font: inherit; line-height: 1.5; }
+.worktree-pr-draft-field textarea { resize: vertical; }
+.worktree-pr-draft-field :disabled { opacity: .65; }
+.worktree-pr-draft-detail { border-top: 1px solid var(--border-soft); padding-top: 10px; font-size: 12px; min-width: 0; }
+.worktree-pr-draft-detail summary { cursor: pointer; }
+.worktree-pr-draft-detail ul { margin: 10px 0; padding-left: 20px; display: grid; gap: 6px; overflow-wrap: anywhere; }
+.worktree-pr-draft-detail li span, .worktree-pr-draft-detail li > code:first-child { color: var(--text-dim); }
+.worktree-pr-draft-diff { max-height: 380px; overflow: auto; background: var(--bg-input); padding: 12px; border-radius: 6px; font: 11px/1.65 var(--mono); }
+.worktree-pr-draft-receipt { display: grid; gap: 7px; padding: 10px; background: var(--bg-card); border-radius: 6px; font-size: 12px; overflow-wrap: anywhere; }
+.worktree-pr-draft-receipt .btn { justify-self: start; }

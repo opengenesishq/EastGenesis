@@ -1,5 +1,6 @@
 import type { LayoutSettings, OfficeQualityMode, OfficeSettings } from '../../../../shared/types'
 import { useT } from '../../i18n'
+import CompanionPreference from '../companion/CompanionPreference'
 
 export const DEFAULT_OFFICE_SETTINGS: OfficeSettings = {
   qualityMode: 'auto',
@@ -28,6 +29,7 @@ export default function OfficeAppearanceSettings({ layout, office, onLayoutChang
 }): React.JSX.Element {
   const t = useT()
   return <>
+    <CompanionPreference />
     <div className="settings-section">
       <div className="settings-section-head"><h3 className="settings-h3">{t('layoutSection')}</h3></div>
       <label className="settings-check">

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import type { ProviderGenerationProbeResult, ProviderModelProfile, ProviderView } from '../../../shared/types'
 import { useT } from '../i18n'
 import { useStore } from '../store'
@@ -6,11 +6,8 @@ import { initialProviderRoutingPatch } from '../store/provider-onboarding-policy
 import ProviderGenerationProbe from './ProviderGenerationProbe'
 import ProviderModelCapabilitySummary from './ProviderModelCapabilitySummary'
 import ProviderSetupModelCapabilities from './ProviderSetupModelCapabilities'
-import { getBusinessLines, getBusinessLineWorkSurfaces, type BusinessLineDefinition } from '../../../shared/business-line-types'
-import { hasDeclaredProviderModelCapability } from '../../../shared/provider-model-capability-summary'
 
 export type ProviderModelSource = 'discovered' | 'manual' | 'account' | 'local'
-type ReceiptMediaEntry = { providerId?: string; model?: string; operations: string[]; enabled: boolean }
 
 export default function ProviderSetupReceipt({ provider, source, onDone, onEdit }: {
   provider: ProviderView
@@ -20,9 +17,7 @@ export default function ProviderSetupReceipt({ provider, source, onDone, onEdit 
 }): React.JSX.Element {
   const t = useT()
   const refreshProviders = useStore((state) => state.refreshProviders)
-  const settings = useStore((state) => state.settings)
   const [currentProvider, setCurrentProvider] = useState(provider)
-  const [mediaCatalog, setMediaCatalog] = useState<ReceiptMediaEntry[]>([])
   const profiles = receiptModelProfiles(currentProvider)
   const verified = profiles.filter((profile) => profile.verification?.generation === 'passed' && profile.verification.responseValidation === 'protocol-json-v1').length
   const failed = profiles.filter((profile) => profile.verification?.generation === 'failed').length
@@ -33,18 +28,6 @@ export default function ProviderSetupReceipt({ provider, source, onDone, onEdit 
   const [error, setError] = useState('')
   const [draft, setDraft] = useState<{ base: ProviderModelProfile; patch: Partial<ProviderModelProfile> } | null>(null)
   const [notice, setNotice] = useState('')
-  const businessLines = getBusinessLines(settings).filter((line) => line.enabled)
-
-  // The catalog is the single source of truth for media availability. A
-  // provider being reachable does not imply that it can generate images,
-  // video or audio, so the receipt keeps that distinction visible.
-  useEffect(() => {
-    let cancelled = false
-    void window.agentDesk.listMediaProviders().then((entries) => {
-      if (!cancelled) setMediaCatalog(entries.map((entry) => ({ providerId: entry.providerId, model: entry.model, operations: entry.operations, enabled: entry.enabled })))
-    }).catch(() => { if (!cancelled) setMediaCatalog([]) })
-    return () => { cancelled = true }
-  }, [currentProvider.id, currentProvider.advancedConfig?.modelProfiles])
   const selectedProfile = profiles.find((profile) => matchesModel(profile, model)) ?? { model }
   const saveCapabilities = async (): Promise<void> => {
     if (!draft) return
@@ -91,8 +74,13 @@ export default function ProviderSetupReceipt({ provider, source, onDone, onEdit 
   return <section className="provider-editor" data-provider-setup-receipt={provider.id}>
     <header className="provider-editor-header"><h2 className="provider-editor-title">{t('providerSetupSavedTitle', { name: provider.name })}</h2></header>
       <div className="provider-quick-setup">
+      <p className="provider-simple-intro">{t('providerSimpleReceiptHint', { n: currentProvider.models.length })}</p>
+      <div className="provider-simple-receipt-models" aria-label={t('providerSimpleReceiptModels')}>
+        {currentProvider.models.map(value => <code key={value}>{value}</code>)}
+      </div>
+      <details className="provider-simple-receipt-details">
+      <summary>{t('providerSimpleReceiptDetails')}</summary>
       <ProviderModelCapabilitySummary profiles={profiles} />
-      <ProviderBusinessLineAvailability provider={currentProvider} lines={businessLines} mediaCatalog={mediaCatalog} />
       <ol className="provider-diagnostic-attempts" data-provider-setup-stages>
         <li data-provider-setup-stage="saved" data-state="complete"><strong>{t('providerSetupStageSaved')}</strong><span>{t('providerSetupSavedHint')}</span></li>
         <li data-provider-setup-stage="models" data-state={source}><strong>{t('providerSetupStageModels')}</strong><span>{t(`providerSetupModelSource_${source}`, { n: provider.models.length })}</span></li>
@@ -114,6 +102,7 @@ export default function ProviderSetupReceipt({ provider, source, onDone, onEdit 
       <button className="btn btn-ghost" data-provider-setup-action="probe" disabled={busy || !!draft || !model} onClick={() => void runProbe()}>{t(busy ? 'providerGenerationProbeRunning' : 'providerGenerationProbeButton')}</button>
       {probe && <ProviderGenerationProbe result={probe} />}
       {error && <p className="notice notice-error" role="alert">{error}</p>}
+      </details>
     </div>
     <div className="provider-editor-actions">
       <button className="btn btn-ghost" data-provider-setup-action="edit" disabled={busy || !!draft} onClick={() => onEdit(currentProvider)}>{t('providerSetupEditSaved')}</button>
@@ -130,34 +119,6 @@ function receiptModelProfiles(provider: ProviderView): ProviderModelProfile[] {
   const profiles = provider.advancedConfig?.modelProfiles ?? []
   const known = new Set(profiles.flatMap((profile) => [profile.model, ...(profile.aliases ?? [])]).map((model) => model.toLowerCase()))
   return [...profiles, ...provider.models.filter((model) => !known.has(model.toLowerCase())).map((model) => ({ model }))]
-}
-
-function ProviderBusinessLineAvailability({ provider, lines, mediaCatalog }: {
-  provider: ProviderView
-  lines: BusinessLineDefinition[]
-  mediaCatalog: ReceiptMediaEntry[]
-}): React.JSX.Element {
-  const t = useT()
-  const profiles = receiptModelProfiles(provider)
-  return <section className="provider-business-line-availability" data-provider-business-line-availability>
-    <strong>{t('providerSetupBusinessLineAvailabilityTitle')}</strong>
-    <p className="field-hint">{t('providerSetupBusinessLineAvailabilityHint')}</p>
-    <ul>
-      {lines.map((line) => {
-        const required = line.requiredCapabilities ?? []
-        const needsMedia = getBusinessLineWorkSurfaces(line).includes('video')
-        const capabilityReady = profiles.some((profile) => provider.models.some((model) => matchesModel(profile, model)) && profile.verification?.generation !== 'failed'
-          && required.every((capability) => hasDeclaredProviderModelCapability(profile, capability))
-          && (!needsMedia || mediaCatalog.some((entry) => entry.providerId === provider.id && entry.enabled && entry.operations.length > 0
-            && !!entry.model && matchesModel(profile, entry.model))))
-        const state = provider.ready && capabilityReady ? 'declared' : 'needs-setup'
-        return <li key={line.id} data-provider-business-line={line.id} data-state={state}>
-          <span>{line.name}</span>
-          <span>{state === 'declared' ? t('providerSetupBusinessLineDeclared') : t('providerSetupBusinessLineNeedsSetup')}</span>
-        </li>
-      })}
-    </ul>
-  </section>
 }
 
 export function useProviderSetupCompletion(): {

@@ -468,7 +468,7 @@ function upsertRuleBlock(existing: string, asset: MigrationAsset, body: string, 
     if (action !== 'replace') throw new Error('migration_replace_confirmation_required')
     return ensureTrailingNewline(existing.replace(pattern, block))
   }
-  const prefix = existing.trim() ? ensureTrailingNewline(existing.trimEnd()) : '# 项目指引(CaoGen 迁移导入)\n'
+    const prefix = existing.trim() ? ensureTrailingNewline(existing.trimEnd()) : '# 项目指引(EastGenesis 迁移导入)\n'
   return `${prefix}\n${block}\n`
 }
 

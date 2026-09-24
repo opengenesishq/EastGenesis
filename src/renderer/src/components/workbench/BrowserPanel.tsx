@@ -1,9 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BrowserViewState } from '../../../../shared/types'
 import { useT } from '../../i18n'
 import { useStore } from '../../store'
 import { canSendToSession, isSessionBusy } from './session-send-availability'
 import ResearchSearchPanel from './ResearchSearchPanel'
+import ExternalBrowserPanel from './ExternalBrowserPanel'
+import BrowserTabStrip from './BrowserTabStrip'
+import BrowserSiteControls from './BrowserSiteControls'
+import BrowserStylePanel from './BrowserStylePanel'
+import BrowserDebugPanel from './BrowserDebugPanel'
+import { activeBrowserState, targetForBrowserState } from '../../store/browser-tab-state'
+import type { BrowserTabsSnapshot } from '../../../../shared/browser-tab-types'
 
 function annotationLabel(note: string): string {
   const clean = note.replace(/\s+/g, ' ').trim()
@@ -20,7 +27,7 @@ function annotationPrompt(item: {
   consoleErrors?: string[]
 }): string {
   return [
-    '请基于这个 CaoGen 网页批注定位并修复问题。',
+    '请基于这个 EastGenesis 网页批注定位并修复问题。',
     '',
     `URL: ${item.url}`,
     item.title ? `标题: ${item.title}` : '',
@@ -108,7 +115,7 @@ function BrowserPanelHeader(props: {
         <button className="btn btn-ghost btn-sm" disabled={!props.browserState?.canGoForward} onClick={() => void goForward()}>
           →
         </button>
-        <button className="btn btn-ghost btn-sm" onClick={() => void reload()}>{t('refresh')}</button>
+        <button className="btn btn-ghost btn-sm" disabled={!props.browserState?.tabId} onClick={() => void reload()}>{t('refresh')}</button>
         <button
           className={`btn ${props.manualTakeover ? 'btn-primary' : 'btn-ghost'} btn-sm`}
           onClick={props.onToggleManualTakeover}
@@ -121,7 +128,21 @@ function BrowserPanelHeader(props: {
   )
 }
 
-export default function BrowserPanel(): React.JSX.Element {
+export default function BrowserPanel({ active = true }: { active?: boolean }): React.JSX.Element {
+  const sessionId = useStore(state => state.activeId)
+  const [externalMode, setExternalMode] = useState(false)
+  const bounds = useStore(state => state.setBrowserBounds)
+  useEffect(() => {
+    if (externalMode || !active) void bounds({ x: 0, y: 0, width: 0, height: 0 })
+  }, [externalMode, active, bounds])
+  return <div className={`browser-panel-with-connections ${externalMode ? 'is-external' : ''}`}>
+    {sessionId && <ExternalBrowserPanel key={sessionId} sessionId={sessionId} active={active} externalMode={externalMode} onModeChange={setExternalMode} />}
+    {externalMode && <p className="settings-hint">高级调试当前仅支持内置浏览器；外部 CDP 和浏览器扩展暂不支持。</p>}
+    {!externalMode && <EmbeddedBrowserPanel active={active} />}
+  </div>
+}
+
+function EmbeddedBrowserPanel({ active = true }: { active?: boolean }): React.JSX.Element {
   const t = useT()
   const activeId = useStore((s) => s.activeId)
   const {
@@ -141,9 +162,20 @@ export default function BrowserPanel(): React.JSX.Element {
   const observeForAgent = useStore((s) => s.observeBrowserForAgent)
   const browserPicking = useStore((s) => s.workbench.browserPicking)
   const sendMessage = useStore((s) => s.sendMessage)
-  const [urlDraft, setUrlDraft] = useState(browserUrlDraft || 'https://caobao.chat/official')
+  const [urlDraft, setUrlDraft] = useState(browserUrlDraft || 'about:blank')
+  const addressFocused = useRef(false)
+  const addressDirty = useRef(false)
+  const addressRevision = useRef(0)
   const [note, setNote] = useState('')
+  const [showAnnotations, setShowAnnotations] = useState(false)
+  const [showStyles, setShowStyles] = useState(false)
+  const [showDebug, setShowDebug] = useState(false)
+  const styleTarget = targetForBrowserState(browserState)
+  const styleVisible = showStyles && active && activePanelId === 'browser' && !!styleTarget
+  const debugVisible = showDebug && active && activePanelId === 'browser' && !!styleTarget
+  const zh = useStore(state => state.settings.language === 'zh')
   const [manualTakeover, setManualTakeover] = useState(false)
+  const noteRevision = useRef(0)
   const submission = useBrowserAnnotationSubmission({
     activeId,
     browserUrl: browserState?.url,
@@ -152,16 +184,26 @@ export default function BrowserPanel(): React.JSX.Element {
   })
   const viewportRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (browserUrlDraft) setUrlDraft(browserUrlDraft)
+    if (browserUrlDraft && !addressFocused.current && !addressDirty.current) setUrlDraft(browserUrlDraft)
   }, [browserUrlDraft])
   useEffect(() => {
-    if (activePanelId === 'browser' && activeId && !browserState) void openBrowser()
-  }, [activeId, activePanelId, browserState, openBrowser])
+    addressDirty.current = false
+    addressFocused.current = false
+    setUrlDraft(useStore.getState().workbench.browserUrlDraft || 'about:blank')
+    addressRevision.current++
+    noteRevision.current++
+    setNote('')
+  }, [activeId, browserState?.tabId, browserState?.contextEpoch])
+  useEffect(() => {
+    if (active && activePanelId === 'browser' && activeId && !browserState) void openBrowser()
+  }, [active, activeId, activePanelId, browserState, openBrowser])
   useEffect(() => {
     const el = viewportRef.current
-    if (!el || !activeId || activePanelId !== 'browser') return
+    if (!active || !el || !activeId || activePanelId !== 'browser') return
 
+    let mounted = true
     const update = (): void => {
+      if (!mounted) return
       const rect = el.getBoundingClientRect()
       void setBounds({
         x: rect.x,
@@ -170,23 +212,44 @@ export default function BrowserPanel(): React.JSX.Element {
         height: rect.height
       })
     }
+    void window.agentDesk.setBrowserContextVisible(activeId, true).catch(() => undefined)
     update()
     const observer = new ResizeObserver(update)
     observer.observe(el)
     window.addEventListener('resize', update)
     return () => {
+      mounted = false
       observer.disconnect()
       window.removeEventListener('resize', update)
+      void window.agentDesk.setBrowserContextVisible(activeId, false).catch(() => undefined)
     }
-  }, [activeId, activePanelId, setBounds])
+  }, [active, activeId, activePanelId, setBounds])
+
+  const updateTabs = useCallback((snapshot: BrowserTabsSnapshot): void => {
+    const current = useStore.getState()
+    if (current.activeId !== snapshot.contextId || current.showNewSession) return
+    const next = activeBrowserState(snapshot)
+    const changed = current.workbench.browserState?.tabId !== next.tabId || current.workbench.browserState?.selectionRevision !== next.selectionRevision
+    useStore.setState({ workbench: { ...current.workbench, browserState: next, browserUrlDraft: next.url, browserLoading: next.loading,
+      ...(changed ? { browserPicking: false, browserError: undefined, browserMessage: undefined } : {}) } })
+  }, [])
 
   const submitUrl = (): void => {
-    void navigate(urlDraft)
+    const target = urlDraft.trim()
+    if (!target) return
+    const revision = addressRevision.current
+    void navigate(target).then(() => {
+      if (useStore.getState().activeId !== activeId) return
+      if (addressRevision.current !== revision) return
+      if (useStore.getState().workbench.browserError) return
+      addressDirty.current = false
+    })
   }
 
   const captureSelection = async (): Promise<void> => {
+    const revision = noteRevision.current
     await capture(note.trim())
-    setNote('')
+    if (noteRevision.current === revision) setNote('')
   }
 
   return (
@@ -202,12 +265,15 @@ export default function BrowserPanel(): React.JSX.Element {
         onToggleManualTakeover={() => setManualTakeover((value) => !value)}
       />
 
+      <BrowserTabStrip contextId={browserState ? activeId ?? undefined : undefined} onSnapshot={updateTabs} />
       <div className="browser-toolbar">
         <input
           className="input browser-url"
           value={urlDraft}
           placeholder={t('browserUrlPlaceholder')}
-          onChange={(e) => setUrlDraft(e.target.value)}
+          onFocus={() => { addressFocused.current = true }}
+          onBlur={() => { addressFocused.current = false }}
+          onChange={(e) => { addressRevision.current++; addressDirty.current = true; setUrlDraft(e.target.value) }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault()
@@ -215,10 +281,17 @@ export default function BrowserPanel(): React.JSX.Element {
             }
           }}
         />
-        <button className="btn btn-primary btn-sm" disabled={!urlDraft.trim()} onClick={submitUrl}>
+        <button className="btn btn-primary btn-sm" disabled={!urlDraft.trim() || !browserState?.tabId} onClick={submitUrl}>
           {browserLoading ? t('loadingDiff') : t('browserGo')}
         </button>
       </div>
+
+      <div className="browser-assistant-toggle no-drag">
+        <button className="btn btn-ghost btn-sm" disabled={!styleTarget || browserPicking || browserLoading} aria-expanded={showDebug} aria-controls="browser-debug-panel" onClick={() => { setShowDebug(value => !value); setShowStyles(false); setShowAnnotations(false) }}>{zh ? '高级调试' : 'Advanced debugging'}</button>
+        <button className="btn btn-ghost btn-sm" disabled={!styleTarget || browserPicking || browserLoading} aria-expanded={showStyles} aria-controls="browser-style-adjuster" onClick={() => { setShowStyles(value => !value); setShowAnnotations(false); setShowDebug(false) }}>{zh ? '样式调整' : 'Style adjustment'}</button>
+        <button className="btn btn-ghost btn-sm" aria-expanded={showAnnotations} aria-controls="browser-research-annotations" onClick={() => { setShowAnnotations(value => !value); setShowStyles(false); setShowDebug(false) }}>{showAnnotations ? (zh ? '收起研究与批注' : 'Hide research & notes') : (zh ? '研究与批注' : 'Research & notes')}{browserAnnotations.length ? ` (${browserAnnotations.length})` : ''}</button>
+      </div>
+      <BrowserSiteControls state={browserState} />
 
       {(browserError || browserMessage) && (
         <div className={`notice ${browserError ? 'notice-error' : 'notice-info'} workspace-diff-notice`}>
@@ -232,29 +305,33 @@ export default function BrowserPanel(): React.JSX.Element {
         </div>
       )}
 
-      <div className="browser-body">
+      <div className={`browser-body ${debugVisible ? 'has-debug-sidebar' : styleVisible ? 'has-style-sidebar' : showAnnotations ? 'has-assistant-sidebar' : 'browser-page-full-width'}`}>
         <div className="browser-viewport" ref={viewportRef}>
           {!browserState && <div className="browser-placeholder">{t('browserStarting')}</div>}
+          {browserState && !browserState.tabId && <div className="browser-placeholder">点击 + 新建标签页</div>}
         </div>
-        <aside className="browser-annotations">
+        {styleVisible && styleTarget && <BrowserStylePanel key={`${styleTarget.contextId}:${styleTarget.contextEpoch}:${styleTarget.tabId}:${styleTarget.selectionRevision}:${styleTarget.navigationRevision}`} target={styleTarget} />}
+        {debugVisible && styleTarget && <BrowserDebugPanel key={`debug:${styleTarget.contextId}:${styleTarget.contextEpoch}:${styleTarget.tabId}:${styleTarget.selectionRevision}:${styleTarget.navigationRevision}`} target={styleTarget} />}
+        <aside id="browser-research-annotations" className="browser-annotations" hidden={!showAnnotations}>
           {activeId && <ResearchSearchPanel key={activeId} sessionId={activeId} />}
           <div className="browser-annotation-editor">
             <textarea
               className="input browser-note"
               value={note}
               placeholder={t('browserNotePlaceholder')}
-              onChange={(e) => setNote(e.target.value)}
+              onChange={(e) => { noteRevision.current++; setNote(e.target.value) }}
             />
             <div className="browser-annotation-actions">
-              <button className="btn btn-primary btn-sm" onClick={() => void captureSelection()}>
+              <button className="btn btn-primary btn-sm" disabled={!browserState?.tabId} onClick={() => void captureSelection()}>
                 {t('browserCapture')}
               </button>
               <button
                 className="btn btn-ghost btn-sm"
-                disabled={browserPicking}
+                disabled={browserPicking || !browserState?.tabId}
                 title={t('browserPickHint')}
                 onClick={() => {
-                  void pickElement(note.trim()).then(() => setNote(''))
+                  const revision = noteRevision.current
+                  void pickElement(note.trim()).then(() => { if (noteRevision.current === revision) setNote('') })
                 }}
               >
                 {browserPicking ? t('browserPicking') : t('browserPickElement')}
@@ -262,6 +339,7 @@ export default function BrowserPanel(): React.JSX.Element {
               <button
                 className="btn btn-ghost btn-sm"
                 title={t('browserObserveHint')}
+                disabled={!browserState?.tabId}
                 onClick={() => void observeForAgent()}
               >
                 {t('browserObserve')}

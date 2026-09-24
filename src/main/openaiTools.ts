@@ -1,3 +1,7 @@
+import { assertTaskExecutionEnvironment } from './wsl/binding'
+import { app } from 'electron'
+import { getTaskHostExecutionGate } from './task-handoff/execution-gate'
+import { currentTaskMemoryPreferences, isTaskOwnedMemory, withTaskMemoryPreferences } from './memory/memory-preferences'
 import { createHash } from 'node:crypto'
 import { beginCodeForgeVerification, finishCodeForgeVerification, type CodeForgeVerificationCapture } from './code-forge/verification-evidence'
 import { taskRuntimeRegistry } from './task/task-runtime-registry'
@@ -85,7 +89,7 @@ import type {
 } from '../shared/types'
 
 /**
- * OpenAI 引擎的原生工具集(让任何 Chat Completions 模型在 CaoGen 里
+ * OpenAI 引擎的原生工具集(让任何 Chat Completions 模型在 EastGenesis 里
  * 成为真编码 Agent,而非聊天窗)。核心工具覆盖 bash / view / read_file /
  * write_file / search_replace / edit_file / list_dir。
  *
@@ -107,6 +111,8 @@ export interface ToolExecResult {
   producedArtifacts?: ToolProducedArtifactDescriptor[]
 }
 export interface ToolExecutionOptions {
+  /** Native tool approval guard; never accepted from model or IPC input. */
+  assertSearchAuthorized?: (query: string) => void
   /** Main-owned live rule check; propagated into the final file/Office writer. */
   assertFormalWriteAuthorized?: () => void
   /** Main-owned version captured before approval; never supplied by model tool input. */
@@ -658,7 +664,7 @@ export const OPENAI_CODING_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'memory_search',
-      description: '检索 CaoGen 三层记忆(working/project/user)，用于恢复约定、偏好和项目事实。',
+      description: '检索 EastGenesis 三层记忆(working/project/user)，用于恢复约定、偏好和项目事实。',
       parameters: {
         type: 'object',
         properties: {
@@ -747,7 +753,7 @@ export const OPENAI_CODING_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'mcp_builtin_servers',
-      description: '列出 CaoGen 内置的常用 MCP server 配置模板，供用户确认后启用。',
+      description: '列出 EastGenesis 内置的常用 MCP server 配置模板，供用户确认后启用。',
       parameters: {
         type: 'object',
         properties: {}
@@ -966,6 +972,16 @@ export async function executeCodingTool(
   cwd: string,
   options: ToolExecutionOptions = {}
 ): Promise<ToolExecResult> {
+  const sessionId = options.sessionId ?? options.sessionMeta?.id
+  if (sessionId) {
+    try {
+      return await getTaskHostExecutionGate(options.userDataRoot ?? app.getPath('userData')).withPermit({ sessionId, sessionCreatedAt: options.sessionMeta?.createdAt }, () => executeCodingToolWithHostPermit(name, args, cwd, options))
+    } catch (error) { return { ok: false, output: error instanceof Error ? error.message : String(error) } }
+  }
+  return executeCodingToolWithHostPermit(name, args, cwd, options)
+}
+
+async function executeCodingToolWithHostPermit(name: string, args: Record<string, unknown>, cwd: string, options: ToolExecutionOptions): Promise<ToolExecResult> {
   if (options.preparationPermission) {
     if (!isPreparationTool(name) || !options.sessionMeta || !options.userDataRoot) {
       return { ok: false, output: '此工具未适配独立准备区权限。' }
@@ -975,6 +991,7 @@ export async function executeCodingTool(
   }
   try {
     if (options.signal?.aborted) return { ok: false, output: '操作已中断' }
+    if (options.sessionMeta) assertTaskExecutionEnvironment(options.sessionMeta)
     if (name === 'bash' && options.commandInputDigest !== undefined && options.commandInputDigest !== stableValueDigest(args)) {
       return { ok: false, output: '执行前命令输入已变化，旧审批失效；请重新审批。', commandTermination: 'not_started' }
     }
@@ -1205,19 +1222,22 @@ export async function executeCodingTool(
         return { ok: true, output: clip(JSON.stringify({ status: 'confirmed', executionPlan, body: skill.body }, null, 2)) }
       }
       case 'memory_search': {
+        const sharedMemoryAllowed = (): boolean => currentTaskMemoryPreferences(options.sessionMeta).effective.useSharedMemory
         const hits = await searchMemories(resolveMemoryRoot(options.userDataRoot), {
           query: stringArg(args, 'query'),
           ...(options.sessionMeta
             ? await taskMemoryScope(options.sessionMeta, options.userDataRoot ?? '')
             : { projectRoot: cwd, sessionId: options.sessionId }),
           layers: memoryLayersArg(args.layers),
-          limit: numberArg(args.limit)
+          limit: numberArg(args.limit),
+          sharedMemoryAllowed
         })
-        return { ok: true, output: clip(JSON.stringify({ hits }, null, 2)) }
+        return { ok: true, output: clip(JSON.stringify({ hits: hits.filter(hit => sharedMemoryAllowed() || isTaskOwnedMemory(hit.entry)) }, null, 2)) }
       }
       case 'memory_add': {
-        const entry = await proposeModelMemoryDraft(options.sessionMeta?.sourceCwd ?? options.sessionMeta?.cwd ?? cwd, args,
-          { projectId: options.sessionMeta?.workspaceId, userDataRoot: options.userDataRoot })
+        const entry = await withTaskMemoryPreferences(options.sessionMeta ?? {}, () =>
+          proposeModelMemoryDraft(options.sessionMeta?.sourceCwd ?? options.sessionMeta?.cwd ?? cwd, args,
+            { projectId: options.sessionMeta?.workspaceId, userDataRoot: options.userDataRoot }))
         return { ok: true, output: clip(JSON.stringify(entry, null, 2)) }
       }
       case 'mcp_discover': {
