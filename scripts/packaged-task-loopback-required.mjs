@@ -11,7 +11,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, realpathSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, realpathSync, readdirSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -124,23 +124,37 @@ function readRequestBody(request) {
 async function startLoopbackServer() {
   const server = createServer(async (request, response) => {
     const body = request.method === 'POST' ? await readRequestBody(request) : ''
-    requests.push({ method: request.method, path: request.url, hasBody: Boolean(body) })
+    // Keep the request payload in memory only.  It is needed to distinguish the
+    // initial model turn from the tool-result continuation; it is never written
+    // to the report, so this gate cannot become a credential/config capture.
+    requests.push({ method: request.method, path: request.url, hasBody: Boolean(body), body })
     if (request.method === 'GET' && request.url === '/v1/models') {
       response.writeHead(200, { 'content-type': 'application/json' })
       response.end(JSON.stringify({ object: 'list', data: [{ id: 'eastgenesis-loopback-model', object: 'model', owned_by: 'eastgenesis-test' }] }))
       return
     }
     if (request.method === 'POST' && request.url === '/v1/chat/completions') {
-      let prompt = ''
-      try {
-        const parsed = JSON.parse(body)
-        const last = Array.isArray(parsed.messages) ? parsed.messages.at(-1) : null
-        prompt = typeof last?.content === 'string' ? last.content : ''
-      } catch {}
-      const content = `已完成：${prompt || 'EastGenesis 本地闭环测试'}`
+      let parsed = {}
+      try { parsed = JSON.parse(body) } catch {}
+      const messages = Array.isArray(parsed.messages) ? parsed.messages : []
+      const hasToolResult = messages.some((message) => message?.role === 'tool')
       response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', connection: 'keep-alive' })
-      response.write(`data: ${JSON.stringify({ id: 'chatcmpl-eastgenesis-loopback', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] })}\n\n`)
-      response.write(`data: ${JSON.stringify({ id: 'chatcmpl-eastgenesis-loopback', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 } })}\n\n`)
+      if (!hasToolResult) {
+        const args = JSON.stringify({
+          title: 'EastGenesis 办公闭环摘要',
+          path: 'eastgenesis-office-loopback.docx',
+          headings: ['今日工作'],
+          paragraphs: ['synthetic Provider 生成的可打开 Word 交付物。', '由一句话任务闭环验证。']
+        })
+        response.write(`data: ${JSON.stringify({ id: 'chatcmpl-eastgenesis-office-tool', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call_office_loopback', type: 'function', function: { name: 'create_document', arguments: args } }] }, finish_reason: null }] })}\n\n`)
+        response.write(`data: ${JSON.stringify({ id: 'chatcmpl-eastgenesis-office-tool', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 20, completion_tokens: 12, total_tokens: 32 } })}\n\n`)
+      } else {
+        const tool = messages.at(-1)
+        const output = typeof tool?.content === 'string' ? tool.content : ''
+        const content = `已完成办公交付：${output}`
+        response.write(`data: ${JSON.stringify({ id: 'chatcmpl-eastgenesis-office-final', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] })}\n\n`)
+        response.write(`data: ${JSON.stringify({ id: 'chatcmpl-eastgenesis-office-final', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 30, completion_tokens: 20, total_tokens: 50 } })}\n\n`)
+      }
       response.end('data: [DONE]\n\n')
       return
     }
@@ -247,10 +261,44 @@ async function main() {
         const diagnostics = rendererDiagnostics.length ? `; renderer=${rendererDiagnostics.join(' | ')}` : ''
         throw new Error(`${error instanceof Error ? error.message : String(error)}; ui=${JSON.stringify(state)}${diagnostics}`)
       }
-      await page.waitForFunction(() => [...document.querySelectorAll('.msg-assistant .assistant-text')].some(node => node.textContent?.includes('已完成：请把今天的工作整理成三条要点')), { timeout: 30_000 })
+      await page.waitForFunction(() => [...document.querySelectorAll('.msg-assistant .assistant-text')].some(node => node.textContent?.includes('已完成办公交付')), { timeout: 45_000 })
       check(requests.some(item => item.method === 'POST' && item.path === '/v1/chat/completions'), 'task request did not reach the loopback Provider')
       const assistantText = await page.$$eval('.msg-assistant .assistant-text', nodes => nodes.map(node => node.textContent || '').join('\n'))
-      check(assistantText.includes('已完成：请把今天的工作整理成三条要点'), 'assistant result was not rendered')
+      check(assistantText.includes('已完成办公交付'), 'assistant result was not rendered')
+
+      // Verify the physical Office output before the temporary profile is torn
+      // down.  The artifact must be a non-empty OOXML ZIP and must be created
+      // exactly once by the approved tool call.
+      const artifactCandidates = []
+      const walk = (dir) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name)
+          if (entry.isDirectory()) walk(full)
+          else if (entry.name === 'eastgenesis-office-loopback.docx') artifactCandidates.push(full)
+        }
+      }
+      walk(userData)
+      check(artifactCandidates.length === 1, `Office artifact was not written exactly once: ${artifactCandidates.length}`)
+      const artifactBytes = readFileSync(artifactCandidates[0])
+      check(artifactBytes.subarray(0, 2).toString() === 'PK', 'generated DOCX is not an OOXML ZIP')
+      check(artifactBytes.byteLength > 1_000, 'generated DOCX is unexpectedly empty')
+
+      // Open the actual Result/Artifacts surface and assert that the canonical
+      // delivery is visible and openable from the workbench, rather than only
+      // trusting the assistant transcript.
+      await page.click('.header-more > button')
+      await page.click('[data-header-action="result"]')
+      await page.waitForSelector('[data-studio-result-panel]', { visible: true, timeout: 20_000 })
+      await page.waitForSelector('[data-studio-result-tab="artifacts"]', { visible: true, timeout: 20_000 })
+      await page.click('[data-studio-result-tab="artifacts"]')
+      await page.waitForSelector('[data-studio-result-current-artifacts]', { visible: true, timeout: 20_000 })
+      const artifactPanelText = await page.$eval('[data-studio-result-current-artifacts]', node => node.textContent || '')
+      check(/办公闭环摘要|eastgenesis-office-loopback\.docx/i.test(artifactPanelText), 'result panel did not show the generated Office artifact')
+      report.officeArtifact = {
+        path: artifactCandidates[0],
+        bytes: artifactBytes.byteLength,
+        sha256: require('node:crypto').createHash('sha256').update(artifactBytes).digest('hex')
+      }
     })
     report.status = 'passed'
     report.requestPaths = requests.map(item => `${item.method} ${item.path}`)
