@@ -7,6 +7,7 @@ import { inspectPresentationPackage } from '../office-revision/presentation'
 import { inspectDocumentPackage } from '../office-revision/document'
 import { inspectSpreadsheetPackage } from '../office-revision/spreadsheet'
 import type { OfficeArtifactKind } from '../agent/tools/office-self-check'
+import { inspectPdfDelivery } from './pdf-delivery-inspection'
 
 export interface OfficeDeliveryRequirementCheck {
   id: string
@@ -51,8 +52,9 @@ export async function checkOfficeDeliveryRequirements(input: {
       throw new Error('成果字节已改变，不能把检查归于原版本')
     }
     if (input.kind === 'pdf') {
-      // A PDF header or cached metadata is not a reliable page-tree parser.
-      inspectionError = '尚无 PDF 页面树与正文解析证据'
+      const pdf = inspectPdfDelivery(bytes)
+      pageCount = pdf.pageCount
+      text = pdf.text
     } else {
       const parts = readOfficePackage(bytes)
       assertOfficePackageIdentity(parts, input.kind)
@@ -88,7 +90,7 @@ export async function checkOfficeDeliveryRequirements(input: {
         const { value, operator } = requirement.pageCount
         check.actualPageCount = pageCount
         check.status = (operator === 'eq' ? pageCount === value : operator === 'lte' ? pageCount <= value : pageCount >= value) ? 'passed' : 'failed'
-        check.reason = `实际演示文稿关系树包含 ${pageCount} 页；要求 ${operator === 'eq' ? '等于' : operator === 'lte' ? '不超过' : '不少于'} ${value} 页`
+        check.reason = `实际 ${actualFormat} 页面树包含 ${pageCount} 页；要求 ${operator === 'eq' ? '等于' : operator === 'lte' ? '不超过' : '不少于'} ${value} 页`
       }
     } else if (requirement.kind === 'sources') {
       const references = text?.match(/https?:\/\/[^\s<>"']+|doi:\s*\S+|(?:来源|参考文献|出处|source|references?)\s*[:：]\s*\S+/gi) ?? []

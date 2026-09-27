@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import PptxGenJS from 'pptxgenjs'
 import { Document, Packer, Paragraph } from 'docx'
 import ExcelJS from 'exceljs'
+import PDFDocument from 'pdfkit'
 import { checkOfficeDeliveryRequirements } from '../src/main/task/office-delivery-requirements'
 import { readOfficePackage, writeOfficePackage } from '../src/main/office-revision/package'
 
@@ -12,6 +13,20 @@ async function deck(count: number, text = 'Verified product details'): Promise<B
   const file = new PptxGenJS()
   for (let i = 0; i < count; i++) file.addSlide().addText(text, { x: 1, y: 1, w: 8, h: 1 })
   return Buffer.from(await file.write({ outputType: 'nodebuffer' }) as Buffer)
+}
+async function pdf(count: number, text = 'Verified product details', font?: string): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const document = new PDFDocument({ autoFirstPage: false })
+    const chunks: Buffer[] = []
+    document.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)))
+    document.on('end', () => resolve(Buffer.concat(chunks)))
+    document.on('error', reject)
+    for (let index = 0; index < count; index += 1) {
+      if (font) document.font(font)
+      document.addPage().fontSize(16).text(`${text} · page ${index + 1}`)
+    }
+    document.end()
+  })
 }
 const inspect = (bytes: Buffer, kind: 'presentation' | 'document' | 'spreadsheet' | 'pdf', criteria: string[]) =>
   checkOfficeDeliveryRequirements({ workspacePath: '/unused', bytes, kind, expectedDigest: digest(bytes), sourceRefs: [], criteria, binding })
@@ -55,9 +70,29 @@ async function main() {
   assert.equal(report.checks.find(check => check.requirement.kind === 'page_count')?.status, 'unverified')
   pass('DOCX structure is checked but cached page metadata cannot certify rendered page count')
 
+  const sixPdf = await pdf(6, '来源：https://example.org/report', 'node_modules/@fontsource/noto-sans-sc/files/noto-sans-sc-chinese-simplified-400-normal.woff')
+  report = await inspect(sixPdf, 'pdf', ['输出 PDF，控制在六页', '输出 PDF，注明来源'])
+  assert.equal(report.checks.find(check => check.requirement.kind === 'format')?.status, 'passed')
+  assert.equal(report.checks.find(check => check.requirement.kind === 'page_count')?.status, 'passed')
+  assert.equal(report.checks.find(check => check.requirement.kind === 'page_count')?.actualPageCount, 6)
+  assert.ok((report.checks.find(check => check.requirement.kind === 'sources')?.referenceCount ?? 0) > 0)
+  pass('PDF page tree and decoded body provide real format, page-count, and source-marker evidence')
+
+  const sevenPdf = await pdf(7)
+  report = await inspect(sevenPdf, 'pdf', ['输出 PDF，控制在六页'])
+  assert.equal(report.checks.find(check => check.requirement.kind === 'page_count')?.status, 'failed')
+  assert.equal(report.checks.find(check => check.requirement.kind === 'page_count')?.actualPageCount, 7)
+  pass('PDF page tree over the requested limit fails the explicit page requirement')
+
+  const corruptedTree = Buffer.from(sixPdf.toString('latin1').replace('/Count 6', '/Count 9'), 'latin1')
+  report = await inspect(corruptedTree, 'pdf', ['输出 PDF，控制在六页'])
+  assert.equal(report.checks.find(check => check.requirement.kind === 'format')?.status, 'unverified')
+  assert.equal(report.checks.find(check => check.requirement.kind === 'page_count')?.status, 'unverified')
+  pass('inconsistent PDF page-tree Count fails closed instead of trusting cached metadata')
+
   report = await inspect(Buffer.from('%PDF-1.7\n%%EOF'), 'pdf', ['输出 PDF，控制在六页'])
   assert.ok(report.checks.every(check => check.status === 'unverified'))
-  pass('PDF headers cannot substitute for a parsed page tree')
+  pass('truncated PDF headers cannot substitute for a parsed page tree')
 
   report = await inspect(six, 'presentation', ['输出 PPTX，注明来源'])
   assert.equal(report.checks.find(check => check.requirement.kind === 'sources')?.status, 'unverified')
