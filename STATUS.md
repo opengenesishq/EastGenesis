@@ -7,7 +7,7 @@
 ## 基线
 
 - 当前源码 checkout（历史目录名：`CaoGen-source`）。
-- 当前功能提交：`3c59b0c docs: record PDF and Office delivery evidence`（工作树 clean）。
+- 当前功能提交：`74c054a fix: make macOS preview builds explicitly unsigned`（工作树 clean）。
 - 产品版本：`0.1.9`。
 - 运行时：Electron `44.4.5`，TypeScript `5.9.3`。
 - `npm test` 已统一为基线（类型检查/生产构建）、Product Launch Fixture、Context Pack（含 Electron 重启运行时）、Provider 身份/onboarding/首启快速配置、Capability Card/health contract、integration harness 与本地 mock runtime、Recovery Route 与本地 Recovery runtime、空验收 fail-closed、计划确认、Mission Compiler、Mission→TaskPlan 适配、Work Inbox、变更影响事务与 source recall、Golden evidence harness/session runner、Office 交付与 PDF 需求证据、packaged UI/task/failover loopback；各门禁均写入对应 `test-results/*/latest.json` 报告，未把这些报告当作 Provider、真人或签名发布证据。3D/宫苑不在当前产品路径。
@@ -29,7 +29,7 @@
 - 3D 故宫/宫苑入口已从当前产品路径移除；相关实现只作为隔离兼容资产保留，普通用户不会在导航、首屏、任务创建或发布验收中遇到它。后续 3D 方向另行设计为仿古明朝风格游戏化空间。
 - 正式 macOS 发布入口已补齐签名/公证/干净工作树 preflight；当前机器已发现 Developer ID 身份，工作树 clean，但缺少 App Store Connect 公证变量，且 `opengenesishq/EastGenesis` 公开仓库尚未建立，`node scripts/release-preflight.mjs --platform mac --arch x64` 正确阻断正式发布。未把 unsigned preview 当作正式版本。
 - 正式发布配置已切换到 GitHub `opengenesishq/EastGenesis` 发布目标；preflight 会 fail-closed 校验 provider、owner、repo 和公开仓库可达性。当前账号只有推送权限，无法把现有 `opengenesishq/CaoGen` 仓库改名或建立别名，公开仓库不存在时会阻断，内部兼容标识不受影响。
-- 最新 x64 unsigned macOS 预览产物：[`EastGenesis-0.1.9-mac.zip`](dist/EastGenesis-0.1.9-mac.zip) SHA-256 `e830a51ce3eacc5933193a5e279c3ffae2e901111ac8cc5b59838212cd863ba8`；[`EastGenesis-0.1.9.dmg`](dist/EastGenesis-0.1.9.dmg) SHA-256 `beeca347bc875917c717f0ae543e730498db1a043ae9e7fb112547bc7413499d`。当前产物明确未签名，不能作为正式发布包。
+- 最新 x64 unsigned macOS 预览产物：[`EastGenesis-0.1.9-mac-x64-unsigned-preview.zip`](dist/EastGenesis-0.1.9-mac-x64-unsigned-preview.zip) SHA-256 `6edf55731a3f5c5282f27ea7441da37e415db8e54e64487fd7ebb25df01c5319`；[`EastGenesis-0.1.9-mac-x64-unsigned-preview.dmg`](dist/EastGenesis-0.1.9-mac-x64-unsigned-preview.dmg) SHA-256 `a0b413c053567ae83dc0319be6e587c24dc95fda4e18bf83657b5455a7c5e336`。预览配置强制关闭证书发现、公证、发布，当前产物明确未签名，不能作为正式发布包。
 - 自动更新链路已接入主进程、IPC、preload 和“状态”页：正式包可检查、下载并由用户确认重启安装；未签名预览或未配置更新通道会明确显示不可用，绝不静默下载。更新失败分类现在只有明确的 release feed 404 才标记为通道不可用，401/403/网络错误保留为脱敏错误；契约门禁 `test-results/updater-bridge/latest.json` 通过 10/10，行为门禁 `test-results/updater-failure/latest.json` 通过 8/8。
 - Windows/macOS 发布入口已清理失效脚本引用：正式 Windows 保留强制签名和 `--publish never`，Windows 预览使用显式 unsigned 配置与启动 smoke，macOS Office diagnostics 使用现有 Office 交付和需求审计门禁；`test-results/release-workflow-contract/latest.json` 通过 246 项静态引用与发布边界检查。该合同只证明入口完整，不证明 Windows 签名或正式发布。
 
