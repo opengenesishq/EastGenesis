@@ -67,7 +67,9 @@ export function serializeDesktopThemeJson(colors: DesktopThemeColors): string {
 export function desktopProfileAvatar(profile: DesktopLocalProfile, language: 'zh' | 'en'): string {
   if (profile.avatarStyle === 'emoji') return LOCAL_PROFILE_EMOJIS.some(item => item === profile.emoji) ? profile.emoji : '🌱'
   const name = profile.displayName.trim()
-  if (!name) return language === 'zh' ? '曹' : 'C'
+  // Keep the empty-profile fallback aligned with the current EastGenesis
+  // identity. The historical CaoGen initial must not leak into UI surfaces.
+  if (!name) return 'E'
   const segment = new Intl.Segmenter(language, { granularity: 'grapheme' }).segment(name)[Symbol.iterator]().next().value
   return String(segment?.segment ?? Array.from(name)[0]).toLocaleUpperCase().slice(0, 20)
 }
