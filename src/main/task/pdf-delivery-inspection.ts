@@ -93,9 +93,17 @@ function parseObjects(source: string, bytes: Buffer): Map<number, PdfObject> {
     if (end < start) throw new Error('PDF stream 边界无效')
     const streamDataStart = match.index + match[0].indexOf(body) + start
     const streamDataEnd = match.index + match[0].indexOf(body) + end
-    let stream = bytes.subarray(streamDataStart, streamDataEnd)
-    while (stream.length > 0 && (stream[stream.length - 1] === 0x0a || stream[stream.length - 1] === 0x0d)) {
-      stream = stream.subarray(0, stream.length - 1)
+    const declaredLength = Number(/\/Length\s+(\d+)\b/.exec(dictionary)?.[1])
+    if (Number.isSafeInteger(declaredLength) && declaredLength >= 0 && streamDataStart + declaredLength > streamDataEnd) {
+      throw new Error('PDF stream Length 超出 endstream 边界')
+    }
+    let stream = Number.isSafeInteger(declaredLength) && declaredLength >= 0
+      ? bytes.subarray(streamDataStart, streamDataStart + declaredLength)
+      : bytes.subarray(streamDataStart, streamDataEnd)
+    if (!Number.isSafeInteger(declaredLength) || declaredLength < 0) {
+      while (stream.length > 0 && (stream[stream.length - 1] === 0x0a || stream[stream.length - 1] === 0x0d)) {
+        stream = stream.subarray(0, stream.length - 1)
+      }
     }
     const filter = /\/Filter\s+\/([A-Za-z0-9]+)\b/.exec(dictionary)?.[1]
     if (filter && filter !== 'FlateDecode') throw new Error(`PDF 使用不支持的流过滤器：${filter}`)
