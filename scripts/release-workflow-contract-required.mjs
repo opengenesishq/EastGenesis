@@ -46,6 +46,7 @@ function referencedScripts(text, owner) {
 check('product metadata is EastGenesis', packageJson.productName === 'EastGenesis')
 const releaseConfig = source('electron-builder.release.cjs')
 const previewConfig = source('electron-builder.windows-preview.cjs')
+const macPreviewConfig = source('electron-builder.macos-preview.cjs')
 const releaseWorkflow = source('.github/workflows/windows-unsigned-build.yml')
 const officeWorkflow = source('.github/workflows/macos-x64-office-diagnostics.yml')
 
@@ -55,6 +56,10 @@ check('formal Windows build does not publish implicitly', /--publish\s+never/.te
 check('Windows preview disables signing', /forceCodeSigning:\s*false/.test(previewConfig))
 check('Windows preview disables publication', /publish:\s*null/.test(previewConfig))
 check('Windows preview artifact is explicitly unsigned', /unsigned-preview/.test(previewConfig))
+check('macOS preview disables signing', /identity:\s*null/.test(macPreviewConfig) && /forceCodeSigning:\s*false/.test(macPreviewConfig) && /notarize:\s*false/.test(macPreviewConfig))
+check('macOS preview disables publication', /publish:\s*null/.test(macPreviewConfig))
+check('macOS preview artifact is explicitly unsigned', /unsigned-preview/.test(macPreviewConfig))
+check('macOS unsigned script uses preview config and never publishes', /electron-builder\.macos-preview\.cjs/.test(packageJson.scripts?.['dist:mac:unsigned:x64'] || '') && /--publish\s+never/.test(packageJson.scripts?.['dist:mac:unsigned:x64'] || ''))
 check('Windows preview workflow uses preview config', /electron-builder\.windows-preview\.cjs/.test(releaseWorkflow))
 check('Windows preview workflow never publishes', /--publish\s+never/.test(releaseWorkflow))
 check('Windows preview workflow does not create a GitHub release', !/gh\s+(release|api).*releases|--publish\s+(always|onTag)/i.test(releaseWorkflow))

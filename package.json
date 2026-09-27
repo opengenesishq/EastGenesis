@@ -64,7 +64,7 @@
     "dist": "npm run build && npm run prepare:native-build && electron-builder",
     "dist:mac": "npm run build && npm run prepare:native-build && electron-builder --mac",
     "dist:mac:x64": "npm run build && npm run prepare:native-build -- --arch x64 && electron-builder --mac --x64",
-    "dist:mac:unsigned:x64": "npm run dist:mac:x64",
+    "dist:mac:unsigned:x64": "npm run build && npm run prepare:native-build -- --arch x64 && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config electron-builder.macos-preview.cjs --mac --x64 --publish never",
     "release:mac:preflight:x64": "node scripts/release-preflight.mjs --platform mac --arch x64",
     "release:mac:preflight:arm64": "node scripts/release-preflight.mjs --platform mac --arch arm64",
     "dist:mac:release:x64": "npm run release:mac:preflight:x64 && npm run build && npm run prepare:native-build -- --arch x64 && electron-builder --config electron-builder.release.cjs --mac --x64 --publish never && npm run test:packaged-ui-click:required -- --artifact dist/mac/EastGenesis.app",
