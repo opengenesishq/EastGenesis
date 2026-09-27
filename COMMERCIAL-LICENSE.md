@@ -14,7 +14,7 @@ EastGenesis 版权由 Chaoyu Zhang 持有。当前源码以 [GNU Affero General 
 ## 如何申请
 
 1. 发送邮件至 [2900814034@qq.com](mailto:2900814034@qq.com)，说明组织名称、联系人、使用场景、部署方式和是否会分发 EastGenesis 或衍生作品。
-2. 也可通过 [GitHub Issues](https://github.com/opengenesishq/CaoGen/issues/new) 发起不含商业机密的初步咨询。不要在公开 Issue 中提交密钥、合同、报价或其他敏感信息。
+2. 也可通过 [EastGenesis GitHub Issues](https://github.com/opengenesishq/EastGenesis/issues/new) 发起不含商业机密的初步咨询。不要在公开 Issue 中提交密钥、合同、报价或其他敏感信息。
 3. 商业许可的范围、期限、费用、支持和责任边界以双方最终签署的书面协议为准。
 
 ## 重要说明

@@ -1,17 +1,17 @@
 blank_issues_enabled: false
 contact_links:
   - name: Usage help / 使用帮助
-    url: https://github.com/opengenesishq/CaoGen/discussions/categories/q-a
+    url: https://github.com/opengenesishq/EastGenesis/discussions/categories/q-a
     about: Ask installation, Provider, and workflow questions in Q&A / 在 Q&A 中询问安装、Provider 和工作流问题
   - name: Product feedback / 产品反馈
-    url: https://github.com/opengenesishq/CaoGen/discussions/categories/general
+    url: https://github.com/opengenesishq/EastGenesis/discussions/categories/general
     about: Share real usage experience before opening an implementation issue / 提交实现 Issue 前先分享真实使用体验
   - name: Improvement ideas / 改进建议
-    url: https://github.com/opengenesishq/CaoGen/discussions/categories/ideas
+    url: https://github.com/opengenesishq/EastGenesis/discussions/categories/ideas
     about: Propose a focused improvement grounded in a real user problem / 从真实用户问题出发提出聚焦改进
   - name: Security report / 安全报告
-    url: https://github.com/opengenesishq/CaoGen/blob/main/SECURITY.md
+    url: https://github.com/opengenesishq/EastGenesis/blob/main/SECURITY.md
     about: Report vulnerabilities and credential exposure privately / 私下报告漏洞与凭据泄露
   - name: Good first issue drafts / 入门任务草稿
-    url: https://github.com/opengenesishq/CaoGen/blob/main/docs/good-first-issues.md
+    url: https://github.com/opengenesishq/EastGenesis/blob/main/docs/good-first-issues.md
     about: Review scoped draft issues before proposing a new one / 提议新任务前先查看已核对的草稿

@@ -91,6 +91,8 @@ pass('packaged notices, adapters and default copy use EastGenesis')
 // Their internal environment variable names remain compatibility identifiers, but
 // anything a contributor or downloader sees must use the current product name.
 const publicReleaseSurfaces = [
+  ['.github/ISSUE_TEMPLATE/config.yml', /github\.com\/opengenesishq\/EastGenesis/, /github\.com\/opengenesishq\/CaoGen/],
+  ['COMMERCIAL-LICENSE.md', /EastGenesis GitHub Issues/, /github\.com\/opengenesishq\/CaoGen/],
   ['.github/ISSUE_TEMPLATE/bug_report.yml', /EastGenesis/, /CaoGen/],
   ['.github/ISSUE_TEMPLATE/feature_request.yml', /EastGenesis/, /CaoGen/],
   ['.github/DISCUSSION_TEMPLATE/general.yml', /EastGenesis/, /CaoGen/],
