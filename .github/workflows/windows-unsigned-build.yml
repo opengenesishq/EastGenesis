@@ -17,9 +17,10 @@ on:
       - .github/workflows/windows-unsigned-build.yml
       - package.json
       - package-lock.json
-      - scripts/packaged-app-smoke.mjs
+      - scripts/packaged-preview-smoke-required.mjs
+      - scripts/packaged-ui-click-required.mjs
       - scripts/prepare-native-build.cjs
-      - scripts/windows-unsigned-workflow-contract-smoke.mjs
+      - scripts/release-workflow-contract-required.mjs
 
 permissions:
   contents: read
@@ -60,9 +61,9 @@ jobs:
       - name: Build unsigned Windows installer
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npx electron-builder --win --x64 --publish never
+        run: npx electron-builder --config electron-builder.windows-preview.cjs --win --x64 --publish never
       - name: Verify unsigned installer in a custom directory
-        run: npm run test:packaged-app:win:x64:unsigned
+        run: node scripts/packaged-preview-smoke-required.mjs --artifact dist/win-unpacked --launch
       - name: Read package version
         id: package
         shell: pwsh
@@ -73,8 +74,8 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path preview-artifacts | Out-Null
-          Copy-Item -LiteralPath "dist/EastGenesis Setup ${{ steps.package.outputs.version }}.exe" -Destination "preview-artifacts/EastGenesis-${{ steps.package.outputs.version }}-windows-x64-unsigned-preview.exe"
-          Copy-Item -LiteralPath "dist/EastGenesis Setup ${{ steps.package.outputs.version }}.exe.blockmap" -Destination "preview-artifacts/EastGenesis-${{ steps.package.outputs.version }}-windows-x64-unsigned-preview.exe.blockmap"
+          Copy-Item -LiteralPath "dist/EastGenesis-${{ steps.package.outputs.version }}-windows-x64-unsigned-preview.exe" -Destination "preview-artifacts/EastGenesis-${{ steps.package.outputs.version }}-windows-x64-unsigned-preview.exe"
+          Copy-Item -LiteralPath "dist/EastGenesis-${{ steps.package.outputs.version }}-windows-x64-unsigned-preview.exe.blockmap" -Destination "preview-artifacts/EastGenesis-${{ steps.package.outputs.version }}-windows-x64-unsigned-preview.exe.blockmap"
           "Unsigned preview for Actions-only testing. Do not upload these files or latest.yml to a formal GitHub Release." | Set-Content -Encoding utf8 preview-artifacts/UNSIGNED-PREVIEW-NOT-FOR-FORMAL-RELEASE.txt
       - name: Upload unsigned preview and evidence as an Actions artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -87,4 +88,4 @@ jobs:
             preview-artifacts/EastGenesis-${{ steps.package.outputs.version }}-windows-x64-unsigned-preview.exe
             preview-artifacts/EastGenesis-${{ steps.package.outputs.version }}-windows-x64-unsigned-preview.exe.blockmap
             preview-artifacts/UNSIGNED-PREVIEW-NOT-FOR-FORMAL-RELEASE.txt
-            test-results/packaged-app-smoke/latest-windows-unsigned-x64.json
+            test-results/packaged-preview-smoke/latest.json

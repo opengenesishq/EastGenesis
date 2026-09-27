@@ -35,10 +35,12 @@ jobs:
         run: npm ci
       - name: Build EastGenesis
         run: npm run build
-      - name: Run Office orchestration E2E
+      - name: Run Office delivery gate
         env:
           CAOGEN_CI_SOFTWARE_WEBGL: '1'
-        run: npm run test:orchestration
+        run: npm run test:office-delivery:required
+      - name: Run Office requirement audit
+        run: npm run test:office-requirements-audit:required
       - name: Upload Office diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -46,4 +48,6 @@ jobs:
           name: eastgenesis-macos-x64-office-${{ inputs.commit }}
           if-no-files-found: warn
           retention-days: 7
-          path: test-results/orchestration-mock-e2e/**
+          path: |
+            test-results/office-delivery/**
+            test-results/office-requirements-audit/**

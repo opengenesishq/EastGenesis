@@ -2,8 +2,8 @@ import type { StudioResultSnapshot } from '../../../shared/types'
 
 /**
  * 交付判定:仅两种取值,口径统一为 acceptances 状态集合。
- * - 'verifiable':全部 acceptance ∈ {passed, waived}
- * - 'not_done'  :存在任意 {pending, verifying, failed}
+ * - 'verifiable':至少存在一条当前验收记录,且全部 acceptance ∈ {passed, waived}
+ * - 'not_done'  :没有当前验收记录,或存在任意 {pending, verifying, failed}
  */
 export type DeliveryVerdict = 'verifiable' | 'not_done'
 
@@ -27,7 +27,8 @@ export interface DeliveryVerdictDetail {
  * 纯函数:从 snapshot.acceptances 推导交付判定。
  *
  * 判定口径(来自 PRD P0-1 / AC-1,且采纳架构 §8.1 默认决议):
- *  - 全部 acceptance ∈ {passed, waived} → verifiable(空集合按字面也为 verifiable)
+ *  - 至少一条当前 acceptance 且全部 ∈ {passed, waived} → verifiable
+ *  - 没有当前 acceptance → not_done（fail-closed,不能把没有验收记录当作已交付）
  *  - 存在任意 {pending, verifying, failed} → not_done
  *
  * 不读取 goal.status / TaskRun.status / WorkItem.status 作为判定依据;
@@ -61,7 +62,10 @@ export function deriveDeliveryVerdict(snapshot: StudioResultSnapshot): DeliveryV
     }
   }
   const total = acceptances.length
-  const notDone = failed > 0 || pending > 0 || verifying > 0
+  // A result without a current Acceptance has no evidence that the requested
+  // deliverable was reviewed. Treat it as incomplete rather than allowing a
+  // vacuous "all checks passed" result to unlock Goal completion.
+  const notDone = total === 0 || failed > 0 || pending > 0 || verifying > 0
   const modelReportedDone =
     snapshot.goal?.status === 'completed' ||
     snapshot.runs.some((run) => run.status === 'completed')
