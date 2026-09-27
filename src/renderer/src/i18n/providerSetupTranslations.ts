@@ -35,7 +35,7 @@ export const PROVIDER_SETUP_TRANSLATIONS = {
   providerSetupBusinessLineDeclared: { zh: '配置可复用 · 待任务验证', en: 'Configuration reusable · task unverified' },
   providerSetupBusinessLineNeedsSetup: { zh: '检查凭据、能力声明或探测结果', en: 'Check credentials, declarations or probes' },
   providerModelCapabilitySummary: { zh: '统一模型能力摘要', en: 'Unified model capability summary' },
-  providerModelCapabilityDeclaredHint: { zh: '来自模型档案声明，供助手、项目、视频和自定义业务线共用；未声明不等于不支持。', en: 'Declared model profile data is shared by assistant, project, video, and custom business lines; missing data does not prove unsupported.' },
+  providerModelCapabilityDeclaredHint: { zh: '来自模型档案声明，供 EastGenesis 工作台任务共用；未声明不等于不支持。', en: 'Declared model profile data is shared by EastGenesis workbench tasks; missing data does not prove unsupported.' },
   providerCapability_text: { zh: '文本', en: 'Text' },
   providerCapability_tools: { zh: '工具', en: 'Tools' },
   providerCapability_vision: { zh: '视觉', en: 'Vision' },
