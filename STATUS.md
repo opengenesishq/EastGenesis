@@ -7,7 +7,7 @@
 ## 基线
 
 - 当前源码 checkout（历史目录名：`CaoGen-source`）。
-- 当前验证 SHA：`671d526 feat: ship EastGenesis direct assistant beta`（工作树 clean）。
+- 当前功能提交：`039b451 chore: close delivery and release gate gaps`（工作树 clean）。
 - 产品版本：`0.1.9`。
 - 运行时：Electron `44.4.5`，TypeScript `5.9.3`。
 - `npm test` 已统一为基线（类型检查/生产构建）、Product Launch Fixture、Context Pack（含 Electron 重启运行时）、Provider 身份/onboarding/首启快速配置、Capability Card/health contract、integration harness 与本地 mock runtime、Recovery Route 与本地 Recovery runtime（3/3）、空验收 fail-closed、计划确认、Mission Compiler、Mission→TaskPlan 适配、Work Inbox（含跨项目导航、首屏入口和 Delivery/Acceptance 入口）、统一 Run/Acceptance/Recovery 详情、宫苑投影、PalaceScene manifest/Builder/UI/受控 IPC/runtime、PalaceScene packaged runtime（47/47）、变更影响事务与 source recall、Golden evidence harness/session runner、Runs/Review fixture UI 和 packaged source contract；各门禁均写入对应 `test-results/*/latest.json` 报告，未把这些报告当作 Provider、真人或签名发布证据。
