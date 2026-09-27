@@ -7,10 +7,10 @@
 ## 基线
 
 - 当前源码 checkout（历史目录名：`CaoGen-source`）。
-- 当前功能提交：`039b451 chore: close delivery and release gate gaps`（工作树 clean）。
+- 当前功能提交：`1cad71a test: include PDF delivery requirements gate`（工作树 clean）。
 - 产品版本：`0.1.9`。
 - 运行时：Electron `44.4.5`，TypeScript `5.9.3`。
-- `npm test` 已统一为基线（类型检查/生产构建）、Product Launch Fixture、Context Pack（含 Electron 重启运行时）、Provider 身份/onboarding/首启快速配置、Capability Card/health contract、integration harness 与本地 mock runtime、Recovery Route 与本地 Recovery runtime（3/3）、空验收 fail-closed、计划确认、Mission Compiler、Mission→TaskPlan 适配、Work Inbox（含跨项目导航、首屏入口和 Delivery/Acceptance 入口）、统一 Run/Acceptance/Recovery 详情、宫苑投影、PalaceScene manifest/Builder/UI/受控 IPC/runtime、PalaceScene packaged runtime（47/47）、变更影响事务与 source recall、Golden evidence harness/session runner、Runs/Review fixture UI 和 packaged source contract；各门禁均写入对应 `test-results/*/latest.json` 报告，未把这些报告当作 Provider、真人或签名发布证据。
+- `npm test` 已统一为基线（类型检查/生产构建）、Product Launch Fixture、Context Pack（含 Electron 重启运行时）、Provider 身份/onboarding/首启快速配置、Capability Card/health contract、integration harness 与本地 mock runtime、Recovery Route 与本地 Recovery runtime、空验收 fail-closed、计划确认、Mission Compiler、Mission→TaskPlan 适配、Work Inbox、变更影响事务与 source recall、Golden evidence harness/session runner、Office 交付与 PDF 需求证据、packaged UI/task/failover loopback；各门禁均写入对应 `test-results/*/latest.json` 报告，未把这些报告当作 Provider、真人或签名发布证据。3D/宫苑不在当前产品路径。
 
 ## 0915 本轮代码进展与验证边界
 
@@ -21,12 +21,15 @@
 - Recovery 详情按 Run 身份隔离异步结果，旧 Promise 不回写新 Run；Ledger refresh 错误继续向恢复按钮回调传播，失败不显示“已刷新完成”；canonical 状态变化后仍可见回调结果，缺 Acceptance 仍保留正确 WorkItem 的 Delivery 导航。`test-results/recovery-ui-state/latest.json` 本轮真实 React/Electron 组件 harness 9/9；其 store/IPC 为本地 fixture，不是生产主进程恢复证据。
 - 三个派生 UI wrapper 现在在启动 child 前替换旧状态；child 失败、缺报告、旧 runId/时间和错误 fixture 均不能沿用旧 passed。每次子报告保存在 wrapper 目录的独立 `nested-<id>.json`，避免共享 `packaged-ui-click/latest.json` 被后续运行覆盖。`test-results/ui-evidence-report/latest.json` 本轮 Node 子进程回归 36/36。
 - 2026-09-27 已完成本轮重验：`npm test` 全量通过；`npm run dist:mac:x64` 重新生成 `dist/mac/EastGenesis.app`、DMG 和 ZIP；源码工作台与目录包点击 smoke 均通过，覆盖首启模型引导、EastGenesis 图标、隐藏旧入口、一句话输入和缺模型回填；独立 Office 交付门禁 44 项通过。上述门禁均不调用真实 Provider，也不替代真人或签名发布证据。
+- PDF 交付需求现在解析普通 PDF 的 Catalog→Pages→Kids→Page 页面树、Count、FlateDecode 正文和 ToUnicode 映射；异常树、加密/对象流或截断内容 fail-closed。`test:office-delivery-requirements:required` 12/12、`test:office-delivery:required` 44/44 通过；解析范围限定为当前 PDFKit/普通 PDF，不宣称覆盖任意 PDF 方言。
 - 新增本地合成 Provider 的 packaged task loopback：目录包实际完成首启配置、`/v1/models` 模型发现、保存 Provider、发送一句话和 `/v1/chat/completions` 流式结果渲染；源码与 `dist/mac/EastGenesis.app` 均通过，报告位于 `test-results/packaged-task-loopback/latest.json`。该证据只证明主流程闭环，不冒充外部 Provider 或生产可用性。
+- packaged task loopback 现在还验证唯一非空 OOXML DOCX 已写入，并在成果→Artifacts 面板可见；本次报告记录 `8671` bytes，SHA-256 `806c6b1625b8dbdbb17dda76d63e9641ad829a36af1681458181fbe591408bbc`。
 - 新增本地双 Provider 的 packaged failover loopback：源码与 `dist/mac/EastGenesis.app` 均通过，主端点返回明确 429 限流后，EastGenesis 在全局自动路由范围内切换到配置的备用 Provider，备用请求保留原始一句话上下文并渲染完成结果。报告位于 `test-results/packaged-failover-loopback/latest.json`；这是本地合成的限流恢复证据，不替代真实 Provider、5xx 暂停策略或生产可用性验收。
 - 应用壳层头像已固定使用 EastGenesis 图标；旧本地个人资料仍可在设置中保留，但不会再覆盖产品标识。重建后的 x64 目录包点击 smoke 重新通过 10/10，截图位于 `test-results/packaged-ui-click/packaged-ui-click.png`。
 - 3D 故宫/宫苑入口已从当前产品路径移除；相关实现只作为隔离兼容资产保留，普通用户不会在导航、首屏、任务创建或发布验收中遇到它。后续 3D 方向另行设计为仿古明朝风格游戏化空间。
 - 正式 macOS 发布入口已补齐签名/公证/干净工作树 preflight；当前机器已发现 Developer ID 身份，工作树 clean，但缺少 App Store Connect 公证变量，且 `opengenesishq/EastGenesis` 公开仓库尚未建立，`node scripts/release-preflight.mjs --platform mac --arch x64` 正确阻断正式发布。未把 unsigned preview 当作正式版本。
 - 正式发布配置已切换到 GitHub `opengenesishq/EastGenesis` 发布目标；preflight 会 fail-closed 校验 provider、owner、repo 和公开仓库可达性。当前账号只有推送权限，无法把现有 `opengenesishq/CaoGen` 仓库改名或建立别名，公开仓库不存在时会阻断，内部兼容标识不受影响。
+- 最新 x64 unsigned macOS 预览产物：[`EastGenesis-0.1.9-mac.zip`](dist/EastGenesis-0.1.9-mac.zip) SHA-256 `e830a51ce3eacc5933193a5e279c3ffae2e901111ac8cc5b59838212cd863ba8`；[`EastGenesis-0.1.9.dmg`](dist/EastGenesis-0.1.9.dmg) SHA-256 `beeca347bc875917c717f0ae543e730498db1a043ae9e7fb112547bc7413499d`。当前产物明确未签名，不能作为正式发布包。
 - 自动更新链路已接入主进程、IPC、preload 和“状态”页：正式包可检查、下载并由用户确认重启安装；未签名预览或未配置更新通道会明确显示不可用，绝不静默下载。更新失败分类现在只有明确的 release feed 404 才标记为通道不可用，401/403/网络错误保留为脱敏错误；契约门禁 `test-results/updater-bridge/latest.json` 通过 10/10，行为门禁 `test-results/updater-failure/latest.json` 通过 8/8。
 - Windows/macOS 发布入口已清理失效脚本引用：正式 Windows 保留强制签名和 `--publish never`，Windows 预览使用显式 unsigned 配置与启动 smoke，macOS Office diagnostics 使用现有 Office 交付和需求审计门禁；`test-results/release-workflow-contract/latest.json` 通过 246 项静态引用与发布边界检查。该合同只证明入口完整，不证明 Windows 签名或正式发布。
 
