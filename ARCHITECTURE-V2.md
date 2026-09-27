@@ -1,4 +1,4 @@
-# CaoGen V2 架构基线
+# EastGenesis V2 架构基线
 
 ## 设计主线
 

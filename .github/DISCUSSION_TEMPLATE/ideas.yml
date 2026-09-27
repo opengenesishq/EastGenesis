@@ -4,9 +4,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Start with a real user problem and the smallest useful outcome. CaoGen's Agent Work OS vision is under construction; do not describe roadmap work as already shipped.
+        Start with a real user problem and the smallest useful outcome. EastGenesis's Agent Work OS vision is under construction; do not describe roadmap work as already shipped.
 
-        请从真实用户问题和最小可用结果开始。CaoGen 的 Agent Work OS 愿景仍在建设中，不要把路线图写成已发布能力。
+        请从真实用户问题和最小可用结果开始。EastGenesis 的 Agent Work OS 愿景仍在建设中，不要把路线图写成已发布能力。
 
   - type: textarea
     id: problem
@@ -20,7 +20,7 @@ body:
     id: current_behavior
     attributes:
       label: Current behavior / 当前行为
-      description: What can CaoGen do today, and where does it stop? / CaoGen 今天能做到哪里，在哪里停止？
+      description: What can EastGenesis do today, and where does it stop? / EastGenesis 今天能做到哪里，在哪里停止？
     validations:
       required: true
 

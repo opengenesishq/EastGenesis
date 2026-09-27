@@ -138,6 +138,12 @@ async function main() {
     check(!/项目|视频|机构|数字员工/.test(onboardingCopy), 'first-launch guide still exposes removed product concepts')
     pass('first-launch copy describes the direct conversation flow')
 
+    await page.click('.first-launch-onboarding .btn-primary')
+    await page.waitForSelector('[data-provider-quick-setup]', { visible: true, timeout: 10_000 })
+    pass('first-launch model setup stays inside the conversation surface')
+    await page.click('.first-launch-onboarding-setup .provider-editor-back')
+    await page.waitForSelector('.first-launch-onboarding-setup', { hidden: true, timeout: 10_000 })
+
     const surface = await page.$eval('[data-simple-workspace]', node => ({
       product: node.closest('[data-product-surface]')?.getAttribute('data-product-surface'),
       input: Boolean(node.querySelector('.welcome-composer-input')),

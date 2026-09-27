@@ -1,4 +1,4 @@
-CaoGen
+EastGenesis
 Copyright (C) 2026 Chaoyu Zhang
 
 The current source tree is licensed under the GNU Affero General Public
@@ -17,5 +17,5 @@ under the SIL Open Font License 1.1. Its complete license and source record are
 included in renderer/fonts/noto-serif/OFL.txt and README.md in built artifacts
 (src/renderer/public/fonts/noto-serif/ in the source tree).
 
-Official website: https://www.caogen.dev
+Product: EastGenesis Desktop
 Commercial licensing: 2900814034@qq.com

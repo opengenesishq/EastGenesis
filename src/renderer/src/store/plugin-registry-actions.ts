@@ -312,7 +312,7 @@ function trustedAndEnabled(item: PluginRegistryItem): boolean {
 function pluginRegistryItemPrompt(item: PluginRegistryItem): string {
   const labels = { plugin: '插件包', skill: 'Skill', agent: 'Agent 定义', mcp: 'MCP 服务' } as const
   const hints = {
-    plugin: '这是一个插件包容器。先查看该目录下的 .caogen-plugin/plugin.json、skills/、agents/、mcp/ 等子资源,再选择最适合当前目标的能力使用。',
+    plugin: '这是一个插件包容器。先查看该目录下的插件清单文件 plugin.json、skills/、agents/、mcp/ 等子资源,再选择最适合当前目标的能力使用。',
     skill: '如果需要细节,先读取该目录下的 SKILL.md,再按其中的触发条件和步骤执行。',
     agent: '如果需要细节,先读取这个 Agent 定义文件,再判断是否应该按它的角色拆分或执行任务。',
     mcp: '先判断当前会话是否已经暴露对应 MCP 工具;如果没有可调用工具,不要假装调用成功,请说明需要启用或配置该 MCP。'

@@ -103,7 +103,7 @@ async function runEvidence() {
     const marks = monotonicMarks()
     const startedAt = marks.next()
     const artifactFileName = 'release-evidence-output.txt'
-    const expectedBytes = Buffer.from(`CaoGen release evidence ${randomUUID()}\n`, 'utf8')
+    const expectedBytes = Buffer.from(`EastGenesis release evidence ${randomUUID()}\n`, 'utf8')
     const prompt = releasePrompt(artifactFileName, expectedBytes.toString('utf8'))
     if (!await manager.send(meta.id, prompt)) fail('send_rejected')
     const sendCompletedAt = marks.next()
@@ -645,7 +645,7 @@ function createElectronStub(userData) {
       getPath: () => userData,
       getAppPath: () => repoRoot,
       getVersion: () => readPackageVersion(),
-      getName: () => 'CaoGen',
+      getName: () => 'EastGenesis',
       isPackaged: false,
       focus() {}
     },

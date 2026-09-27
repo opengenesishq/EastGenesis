@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises";
 import { ALL_FORMATS, FilePathSource, Input } from "mediabunny";
 
-const file = process.argv[2] ?? "out/caogen-website-demo.mp4";
+const file = process.argv[2] ?? "out/eastgenesis-website-demo.mp4";
 const input = new Input({
   formats: ALL_FORMATS,
   source: new FilePathSource(file),

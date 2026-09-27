@@ -95,7 +95,7 @@ export function unsignedWindowsPreviewChecks({
     previewPublicationMetadataDisabled: audit?.config?.publishDisabled === true,
     previewCertificateEnvironmentDisabled: audit?.config?.certificateEnvironmentDisabled === true,
     previewArtifactNameExplicit:
-      audit?.config?.artifactName === 'CaoGen-${version}-windows-x64-unsigned-preview.${ext}'
+      audit?.config?.artifactName === 'EastGenesis-${version}-windows-x64-unsigned-preview.${ext}'
   }
 }
 

@@ -1,5 +1,6 @@
 import { LOCAL_PROFILE_EMOJIS, desktopProfileAvatar, normalizeDesktopPersonalization, type DesktopPersonalizationSettings } from '../../../../shared/desktop-personalization'
 import './desktop-personalization-settings.css'
+import { APP_ICON_URL } from '../../brand'
 
 export default function LocalProfileSettings({ value, language, onChange }: {
   value?: DesktopPersonalizationSettings; language: 'zh' | 'en'; onChange(value: DesktopPersonalizationSettings): void
@@ -11,11 +12,11 @@ export default function LocalProfileSettings({ value, language, onChange }: {
   return <section className="local-profile-settings" aria-label={zh ? '本地个人资料' : 'Local profile'}>
     <h2 className="desktop-preference-heading">{zh ? '本地个人资料' : 'Local profile'}</h2>
     <p className="settings-hint">{zh ? '显示在这台电脑的个人工作区入口，仅保存在本机。' : 'Shown in the personal workspace menu on this computer and stored locally.'}</p>
-    <div className="local-profile-preview"><span aria-hidden="true">{desktopProfileAvatar(profile, language)}</span><div><strong>{profile.displayName || (zh ? '个人工作区' : 'Personal workspace')}</strong><small>{zh ? 'EastGenesis · 本地' : 'EastGenesis · Local'}</small></div></div>
+    <div className="local-profile-preview"><span aria-hidden="true">{profile.avatarStyle === 'initial' && !profile.displayName ? <img className="local-profile-brand-mark" src={APP_ICON_URL} alt="" /> : desktopProfileAvatar(profile, language)}</span><div><strong>{profile.displayName || (zh ? '个人工作区' : 'Personal workspace')}</strong><small>{zh ? 'EastGenesis · 本地' : 'EastGenesis · Local'}</small></div></div>
     <label className="field-label" htmlFor="local-profile-name">{zh ? '显示名' : 'Display name'}</label>
     <input id="local-profile-name" className="input input-block" value={value?.profile.displayName ?? profile.displayName} maxLength={60} placeholder={zh ? '个人工作区' : 'Personal workspace'}
       onChange={event => update({ displayName: event.target.value.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, '') })} />
-    <p className="settings-hint">{zh ? '最多 60 个字符；留空使用默认名称。' : 'Up to 60 characters. Leave empty to use the default name.'}</p>
+    <p className="settings-hint">{zh ? '最多 60 个字符；留空使用默认名称和 EastGenesis 图标。' : 'Up to 60 characters. Leave empty to use the default name and EastGenesis icon.'}</p>
     <fieldset className="profile-avatar-options"><legend>{zh ? '头像' : 'Avatar'}</legend>
       <label><input type="radio" name="local-profile-avatar" checked={profile.avatarStyle === 'initial'} onChange={() => update({ avatarStyle: 'initial' })} />{zh ? '显示名首字' : 'Display name initial'}</label>
       <label><input type="radio" name="local-profile-avatar" checked={profile.avatarStyle === 'emoji'} onChange={() => update({ avatarStyle: 'emoji' })} />{zh ? '内置图标' : 'Built-in icon'}</label>

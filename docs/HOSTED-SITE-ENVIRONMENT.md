@@ -1,6 +1,6 @@
 # Hosted site runtime environment extension
 
-CaoGen's optional `caogen-site-management/1` adapter protocol supports user-owned runtime variables. Existing adapters omit the new capabilities and remain usable for their previous operations. This protocol does not provide a hosted account or DNS service.
+EastGenesis's optional `caogen-site-management/1` adapter protocol supports user-owned runtime variables. Existing adapters omit the new capabilities and remain usable for their previous operations. This protocol does not provide a hosted account or DNS service.
 
 The descriptor advertises `environmentRead`, `environmentSet`, and `environmentRemove`. With reading enabled it returns `environment: [{ name, secret, revision, updatedAt }]` and may return `environmentRequiresRedeploy`. Values, including ordinary variables, are never returned to the desktop. Per-variable revisions must change on replacement, even if the value happens to be equal. Names match `[A-Za-z_][A-Za-z0-9_]{0,127}`. Values accept Unicode/newlines and empty strings, up to 8 KiB, without NUL.
 
@@ -8,8 +8,8 @@ A plan receives either `{ kind: 'environment.set', name, secret, valueRef }` or 
 
 Only the confirmed `apply` request for `environment.set` additionally carries `environmentValue: { name, valueRef, value }` on stdin. Check both name and reference against the plan, validate the value, update the hosting service, and retain an operation receipt without storing the raw request in diagnostic logs. Never take values from command arguments or from earlier operations. The adapter supplies its ordinary `applied`, `not_applied`, or `unknown` receipt; all unrelated environment entries, domain names, access state and deployment identity must be preserved.
 
-CaoGen retains the pending value only in the main process until expiry/execution/discard/window close. It does not store the value in task transcripts, previews, Effect inputs, receipts, or local settings. The UI clears its field when preparing the preview. Structured output is parsed and only protocol metadata is retained; incidental stdout/stderr is discarded. Known value echoes in narrative fields are redacted. Empty or short values do not corrupt numeric versions or identities.
+EastGenesis retains the pending value only in the main process until expiry/execution/discard/window close. It does not store the value in task transcripts, previews, Effect inputs, receipts, or local settings. The UI clears its field when preparing the preview. Structured output is parsed and only protocol metadata is retained; incidental stdout/stderr is discarded. Known value echoes in narrative fields are redacted. Empty or short values do not corrupt numeric versions or identities.
 
 `inspect` never includes the value, including after restart. Reconcile the original `operationId` and `planDigest` using the hosting service and the original adapter receipt. An unknown apply blocks subsequent changes and must not cause a new apply with a replacement value. Losing a pending, unexecuted value requires a new preview; it never becomes an implicit empty string.
 
-By default the UI asks the user to redeploy after an environment change. An adapter may explicitly report `environmentRequiresRedeploy: false` when its service applies the variables immediately. Setting runtime environment variables does not alter CaoGen's own process environment or model credentials.
+By default the UI asks the user to redeploy after an environment change. An adapter may explicitly report `environmentRequiresRedeploy: false` when its service applies the variables immediately. Setting runtime environment variables does not alter EastGenesis's own process environment or model credentials.

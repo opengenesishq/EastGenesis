@@ -112,7 +112,7 @@ async function exportProfile(sender: WebContents) {
   const win = BrowserWindow.fromWebContents(sender) ?? BrowserWindow.getAllWindows()[0]
   const result = await dialog.showSaveDialog(win, {
     title: '导出 Provider Profile（不含密钥）',
-    defaultPath: `caogen-provider-profile-${new Date().toISOString().slice(0, 10)}.json`,
+    defaultPath: `eastgenesis-provider-profile-${new Date().toISOString().slice(0, 10)}.json`,
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })
   if (result.canceled || !result.filePath) return { canceled: true, providerCount: 0 }

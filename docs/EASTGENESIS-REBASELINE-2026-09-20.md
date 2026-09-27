@@ -2,9 +2,9 @@
 
 ## 已确认方向
 
-1. CaoGen 产品更名为 **EastGenesis**。EastGenesis 是产品名；内部迁移期间保留 `caogen` 存储键、协议名和历史文件名，避免破坏已有本地数据。
+1. EastGenesis 是产品名；内部迁移期间保留 `caogen` 存储键、协议名和历史文件名，避免破坏已有本地数据。
 2. Web 启动页、Electron 启动页、侧栏品牌、favicon、桌面图标和安装包显示统一使用 EastGenesis 品牌资源。
-3. CaoGen 源码继续作为主线实现；`2026-9-17-codex-workbuddy-ai/outputs/EastGenesis-Desktop` 作为功能和视觉参考，不直接覆盖主线源码。
+3. EastGenesis 源码继续作为主线实现；`2026-9-17-codex-workbuddy-ai/outputs/EastGenesis-Desktop` 作为功能和视觉参考，不直接覆盖主线源码。
 4. 3D 故宫从当前产品主路径移除。现有场景、角色和 PalaceScene 代码保留为隔离的后续实验资产，不参与默认导航、首屏、任务创建和发布验收。
 5. 当前首要目标是一个真正可用的 EastGenesis 工作台闭环。工作台可用性优先于扩展功能数量和 3D 形态。
 

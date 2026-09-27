@@ -82,10 +82,10 @@ export function artifactSetEntryForPath(reportedFiles, { repoRoot, distDir, arti
 
 export function renderMacUpdateMetadata({ version, distDir, releaseDate }) {
   const assetNames = [
-    `CaoGen-${version}-mac.zip`,
-    `CaoGen-${version}.dmg`,
-    `CaoGen-${version}-arm64-mac.zip`,
-    `CaoGen-${version}-arm64.dmg`
+    `EastGenesis-${version}-mac.zip`,
+    `EastGenesis-${version}.dmg`,
+    `EastGenesis-${version}-arm64-mac.zip`,
+    `EastGenesis-${version}-arm64.dmg`
   ]
   const files = assetNames.map((name) => updateFile(distDir, name))
   const metadata = {
@@ -107,10 +107,10 @@ export function macUpdateMetadataChecks(text, { version, distDir }) {
     version,
     distDir,
     expectedNames: [
-      `CaoGen-${version}-mac.zip`,
-      `CaoGen-${version}.dmg`,
-      `CaoGen-${version}-arm64-mac.zip`,
-      `CaoGen-${version}-arm64.dmg`
+      `EastGenesis-${version}-mac.zip`,
+      `EastGenesis-${version}.dmg`,
+      `EastGenesis-${version}-arm64-mac.zip`,
+      `EastGenesis-${version}-arm64.dmg`
     ],
     expectedFileCountLabel: 'updateMetadataHasFourFiles'
   })
@@ -121,8 +121,8 @@ export function macosX64UpdateMetadataChecks(text, { version, distDir }) {
     version,
     distDir,
     expectedNames: [
-      `CaoGen-${version}-mac.zip`,
-      `CaoGen-${version}.dmg`
+      `EastGenesis-${version}-mac.zip`,
+      `EastGenesis-${version}.dmg`
     ],
     expectedFileCountLabel: 'updateMetadataHasTwoFiles'
   })

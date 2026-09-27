@@ -1,4 +1,4 @@
-name: CaoGen baseline
+name: EastGenesis baseline
 
 on:
   push:
@@ -23,5 +23,5 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: caogen-baseline-reports
+          name: eastgenesis-baseline-reports
           path: test-results/

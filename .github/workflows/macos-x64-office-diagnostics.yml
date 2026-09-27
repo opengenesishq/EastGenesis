@@ -1,4 +1,4 @@
-name: CaoGen macOS Intel Office diagnostics
+name: EastGenesis macOS Intel Office diagnostics
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: caogen-macos-x64-office-${{ inputs.commit }}
+  group: eastgenesis-macos-x64-office-${{ inputs.commit }}
   cancel-in-progress: true
 
 jobs:
@@ -33,7 +33,7 @@ jobs:
           cache: npm
       - name: Install exact dependencies
         run: npm ci
-      - name: Build CaoGen
+      - name: Build EastGenesis
         run: npm run build
       - name: Run Office orchestration E2E
         env:
@@ -43,7 +43,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: caogen-macos-x64-office-${{ inputs.commit }}
+          name: eastgenesis-macos-x64-office-${{ inputs.commit }}
           if-no-files-found: warn
           retention-days: 7
           path: test-results/orchestration-mock-e2e/**

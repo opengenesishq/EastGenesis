@@ -29,6 +29,7 @@ try {
     bundle: true, platform: 'node', format: 'cjs', target: 'node22', packages: 'external',
     define: { 'import.meta.url': JSON.stringify(pathToFileURL(bundle).href) }, alias: { electron: stub } })
   const env = { ...process.env, NODE_PATH: [path.join(fixtureRoot, 'node_modules'), path.join(repoRoot, 'node_modules')].join(path.delimiter) }
+  delete env.ELECTRON_RENDERER_URL
   for (const key of Object.keys(env)) if (/^(?:OPENAI|ANTHROPIC|GEMINI|GOOGLE)_(?:API_KEY|AUTH_TOKEN|BASE_URL)$/.test(key)) delete env[key]
   const output = execFileSync(process.execPath, [bundle, userData], { cwd: repoRoot, encoding: 'utf8', env })
   const result = JSON.parse(output.trim().split('\n').at(-1))

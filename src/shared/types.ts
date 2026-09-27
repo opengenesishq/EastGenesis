@@ -78,6 +78,8 @@ import type { PluginInstallResult, PluginUninstallResult } from './plugin-types'
 import type { TerminalEffectApi } from './terminal-operation-types'
 import type { BrowserNavigationEffectApi, BrowserViewState } from './browser-operation-types'
 import type { ProviderMediaPricing } from './media-types'
+import type { UpdaterApi } from './updater-types'
+export type { UpdaterEvent } from './updater-types'
 import type { SessionEntrypointApi } from './session-entrypoint-types'
 import type { AssistantSearchApi } from './assistant-search-types'
 import type { TaskActivityApi } from './activity-types'
@@ -2534,7 +2536,7 @@ export type MenuCommand =
   | { type: 'select-session'; index: number }
 
 /** 通过 contextBridge 暴露给渲染进程的 API */
-export interface AgentDeskApi extends FeedbackApi, TaskActivityApi, WorkspaceHandoffApi, SideChatApi, VoiceInputApi, TaskWindowApi, TaskEffectRecoveryApi, PreparationPermissionApi, TaskExecutionAuthorityApi, TaskBudgetApi, SessionInputApi, WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi {
+export interface AgentDeskApi extends FeedbackApi, TaskActivityApi, WorkspaceHandoffApi, SideChatApi, VoiceInputApi, TaskWindowApi, TaskEffectRecoveryApi, PreparationPermissionApi, TaskExecutionAuthorityApi, TaskBudgetApi, SessionInputApi, WorkflowLedgerApi, ProjectWorkspaceApi, ProjectPortfolioApi, ProjectTestApi, ProjectDebugApi, ProjectRefactorApi, ModelAttemptRecoveryApi, LearningApi, SupervisorStateApi, ProviderProfileApi, TaskPlanApi, MigrationApi, StudioResultApi, ProjectDataLifecycleApi, TerminalEffectApi, BrowserNavigationEffectApi, SessionEntrypointApi, OfficeRevisionApi, AssistantSearchApi, UpdaterApi {
   inspectLocalRuntimes(): Promise<import('./local-runtime-types').LocalRuntimeStatus>
   listPendingPermissions(sessionId: string): Promise<PermissionRequestInfo[]>
   getTranscript(sessionId: string): Promise<TranscriptEntry[]>

@@ -24,9 +24,9 @@
   "scripts": {
     "dev": "remotion studio",
     "build": "remotion bundle",
-    "render": "remotion render src/index.ts CaoGenWebsiteDemo out/caogen-website-demo.mp4 --codec=h264 --crf=18",
-    "still": "remotion still src/index.ts CaoGenWebsiteDemo out/caogen-website-demo-still.png --frame=450",
-    "validate:video": "node scripts/validate-video.mjs out/caogen-website-demo.mp4",
+    "render": "remotion render src/index.ts EastGenesisWebsiteDemo out/eastgenesis-website-demo.mp4 --codec=h264 --crf=18",
+    "still": "remotion still src/index.ts EastGenesisWebsiteDemo out/eastgenesis-website-demo-still.png --frame=450",
+    "validate:video": "node scripts/validate-video.mjs out/eastgenesis-website-demo.mp4",
     "upgrade": "remotion upgrade",
     "lint": "eslint src && tsc"
   },

@@ -568,26 +568,21 @@ export default function SettingsPage(): React.JSX.Element {
             {tab === 'browser' && <BrowserPreferences />}
             {tab === 'models' && (
               <>
-                <label className="field-label">{t('driveMode')}</label>
-                <select
-                  className="select select-block"
-                  value={draft.driveMode}
-                  onChange={(e) => set('driveMode', e.target.value as CaoGenDriveMode)}
-                >
-                  {DRIVE_MODE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <p className="settings-hint">
-                  {selectedDrive.summary} · ${selectedDrive.budgetUsd}/session · {selectedDrive.toolPolicySummary}
-                </p>
-                <p className="settings-hint">{t('driveModeOrthogonalHint')}</p>
+                <div className="model-settings-intro">
+                  <div>
+                    <h2 className="settings-h2">{t('modelSettingsIntro')}</h2>
+                    <p className="settings-hint">{t('modelSettingsIntroHint')}</p>
+                  </div>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTab('providers')}>
+                    {t('modelSettingsManageProviders')}
+                  </button>
+                </div>
 
+                <div className="model-settings-primary">
                 <label className="field-label">{t('defaultProvider')}</label>
                 <select
                   className="select select-block"
+                  data-settings-field="default-provider"
                   value={draft.defaultProviderId}
                   onChange={(e) => {
                     const defaultProviderId = e.target.value
@@ -605,6 +600,7 @@ export default function SettingsPage(): React.JSX.Element {
                 <label className="field-label">{t('defaultModel')}</label>
                 <select
                   className="select select-block"
+                  data-settings-field="default-model"
                   value={draft.defaultModel}
                   onChange={(e) => set('defaultModel', e.target.value)}
                 >
@@ -620,8 +616,30 @@ export default function SettingsPage(): React.JSX.Element {
                     </option>
                   ))}
                 </select>
+                </div>
 
-                <div className="settings-section">
+                <details className="settings-section model-settings-advanced" data-models-advanced>
+                  <summary className="settings-h3">{t('modelSettingsAdvanced')}</summary>
+                  <p className="settings-hint">{t('modelSettingsAdvancedHint')}</p>
+
+                  <label className="field-label">{t('driveMode')}</label>
+                  <select
+                    className="select select-block"
+                    value={draft.driveMode}
+                    onChange={(e) => set('driveMode', e.target.value as CaoGenDriveMode)}
+                  >
+                    {DRIVE_MODE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="settings-hint">
+                    {selectedDrive.summary} · ${selectedDrive.budgetUsd}/session · {selectedDrive.toolPolicySummary}
+                  </p>
+                  <p className="settings-hint">{t('driveModeOrthogonalHint')}</p>
+
+                <div className="settings-section model-settings-advanced-group">
                   <div className="settings-section-head">
                     <h3 className="settings-h3">{t('modelRolesSection')}</h3>
                   </div>
@@ -773,6 +791,7 @@ export default function SettingsPage(): React.JSX.Element {
                       {t('modelRoleFallback')} · {t('modelRoleProvider')}
                       <select
                         className="select select-block"
+                        data-settings-field="fallback-provider"
                         value={draft.fallbackProviderId}
                         onChange={(e) => patchDraft({ fallbackProviderId: e.target.value })}
                       >
@@ -788,6 +807,7 @@ export default function SettingsPage(): React.JSX.Element {
                       {t('modelRoleFallback')} · {t('modelRoleModel')}
                       <select
                         className="select select-block"
+                        data-settings-field="fallback-model"
                         value={draft.fallbackModel}
                         onChange={(e) => patchDraft({ fallbackModel: e.target.value })}
                       >
@@ -893,6 +913,7 @@ export default function SettingsPage(): React.JSX.Element {
                 <label className="settings-check">
                   <input
                     type="checkbox"
+                    data-settings-field="failover-enabled"
                     checked={draft.failoverEnabled}
                     onChange={(e) => set('failoverEnabled', e.target.checked)}
                   />
@@ -965,6 +986,7 @@ export default function SettingsPage(): React.JSX.Element {
                       onChange={(e) => setProviderCircuitBreaker({ minRequests: Number(e.target.value) })}
                     />
                   </label>
+                </details>
                 </details>
 
               </>
@@ -1393,11 +1415,7 @@ export default function SettingsPage(): React.JSX.Element {
                   state.setView('list')
                   void state.openPluginRegistryPanel()
                 }}>{settings.language === 'zh' ? '管理插件、技能与 MCP' : 'Manage plugins, skills & MCP'}</button>
-                <details className="settings-section"><summary>{settings.language === 'zh' ? '本机安装位置' : 'Local installation paths'}</summary><div className="plugins-paths">
-                  <code>~/.caogen/skills/</code>
-                  <code>~/.caogen/plugins/</code>
-                  <code>.caogen/mcp/mcp.json</code>
-                </div></details>
+                <details className="settings-section"><summary>{settings.language === 'zh' ? '本机安装位置' : 'Local installation paths'}</summary><p className="settings-hint">{settings.language === 'zh' ? 'EastGenesis 会从本机扩展目录读取已批准的技能、插件和 MCP 配置。旧版本目录会继续兼容。' : 'EastGenesis reads approved skills, plugins, and MCP configuration from its local extension directories. Legacy directories remain compatible.'}</p></details>
               </>
             )}
 

@@ -20,12 +20,13 @@ module.exports = {
   publish: null,
   extraMetadata: {
     ...(baseBuild.extraMetadata || {}),
+    eastgenesisReleaseProvenance: releaseProvenance,
     caogenReleaseProvenance: releaseProvenance
   },
   win: {
     ...baseWin,
     target: ['nsis'],
     forceCodeSigning: false,
-    artifactName: 'CaoGen-${version}-windows-x64-unsigned-preview.${ext}'
+    artifactName: 'EastGenesis-${version}-windows-x64-unsigned-preview.${ext}'
   }
 }

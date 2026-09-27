@@ -52,7 +52,7 @@ function writePackFile(name, content) {
 function readmeText() {
   return `# P2 External Required Evidence Pack
 
-This pack is generated from the current CaoGen checkout. It contains templates only.
+This pack is generated from the current EastGenesis checkout. It contains templates only.
 
 ## Steps
 

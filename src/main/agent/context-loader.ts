@@ -125,7 +125,7 @@ export function buildProjectScopedPromptSync(projectPath: string, prompt: string
   if (!projectContext) return userPrompt
   return [
     '# EastGenesis 项目规则',
-    '以下内容来自当前项目的 caogen.md/.caogen.md/README.md。除非用户本轮明确覆盖,必须优先遵守这些项目规则。',
+    '以下内容来自当前项目的 EastGenesis 项目规则文件或 README。除非用户本轮明确覆盖,必须优先遵守这些项目规则。',
     projectContext,
     '# 当前用户请求',
     userPrompt
@@ -170,7 +170,7 @@ export function parseProjectModelDispatchHints(content: string): ProjectModelDis
 }
 
 export function writeProjectContext(projectPath: string, content: string): ProjectContextReadResult {
-  if (typeof content !== 'string') throw new Error('caogen.md 内容必须是字符串')
+  if (typeof content !== 'string') throw new Error('EastGenesis 项目规则内容必须是字符串')
   const projectRoot = resolveProjectRoot(projectPath)
   const target = join(projectRoot, 'caogen.md')
   mkdirSync(projectRoot, { recursive: true })
@@ -391,15 +391,15 @@ function renderProjectContextPrompt(input: {
       '# 项目身份',
       `项目根目录: ${input.projectRoot}`,
       input.source
-        ? `项目规则文件: ${input.source.fileName}`
-        : '项目规则文件: 未找到 caogen.md/.caogen.md;本轮仅使用自动识别的项目栈与用户请求。'
+        ? '项目规则文件: EastGenesis 项目规则'
+        : '项目规则文件: 未找到；本轮仅使用自动识别的项目栈与用户请求。'
     ].join('\n')
   ]
   if (input.content.trim()) {
     parts.push(
       [
         '# 项目永久上下文',
-        `来源: ${input.source?.path ?? '未找到上下文文件'}`,
+        `来源: ${input.source ? 'EastGenesis 项目规则文件' : '未找到上下文文件'}`,
         input.source?.truncated ? `提示: 文件超过 ${MAX_CONTEXT_BYTES} 字节,已截断注入。` : '',
         input.content.trim()
       ]

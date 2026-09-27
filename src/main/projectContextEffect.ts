@@ -38,7 +38,7 @@ export async function executeProjectContextWriteEffect(
 
   const outcome = await runOperation({
     kind: 'file_write',
-    title: '保存 caogen.md 项目规则',
+    title: '保存 EastGenesis 项目规则',
     sourceSessionId: projectContextSourceId(projectRoot),
     cwd: projectRoot,
     toolName: 'write_file',
@@ -53,7 +53,7 @@ export async function executeProjectContextWriteEffect(
         : { ok: false, error: result.error }
     },
     isSuccess: (result) => result.ok,
-    resultSummary: (result) => result.ok === true ? 'caogen.md saved' : result.error
+    resultSummary: (result) => result.ok === true ? 'EastGenesis project rules saved' : result.error
   })
 
   return outcome.status === 'completed'

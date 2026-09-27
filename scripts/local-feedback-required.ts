@@ -18,7 +18,7 @@ async function main(): Promise<void> {
   const meta = { id: 'private-session-id', title: 'PRIVATE_CONVERSATION', cwd: '/private/workspace', model: 'PRIVATE_MODEL', providerId: 'PRIVATE_PROVIDER', status: 'error', taskStrategy: 'execute', engine: 'openai', routingScope: 'global', lastError: 'Bearer sk-sensitive-error-secret' } as SessionMeta
   const run = { status: 'failed', attempt: 2, recoveryCount: 1, error: 'PRIVATE_RUN_ERROR', steps: [{ status: 'failed', requestText: 'PRIVATE_REQUEST', error: 'PRIVATE_STEP_ERROR' }], toolExecutions: [{ status: 'failed', error: 'PRIVATE_TOOL_ERROR' }, { status: 'unknown_outcome' }] } as TaskRunRecord
   const service = new LocalFeedbackService({ now: () => now,
-    appInfo: () => ({ name: 'CaoGen', version: '0.1.9', platform: 'darwin', architecture: 'arm64', build: 'development', electron: '38.0.0', chromium: '140.0.0', node: '22.0.0', env: 'PRIVATE_ENV', logs: 'PRIVATE_LOGS' } as FeedbackAppInfo),
+    appInfo: () => ({ name: 'EastGenesis', version: '0.1.9', platform: 'darwin', architecture: 'arm64', build: 'development', electron: '38.0.0', chromium: '140.0.0', node: '22.0.0', env: 'PRIVATE_ENV', logs: 'PRIVATE_LOGS' } as FeedbackAppInfo),
     session: () => { reads++; return meta }, run: () => { reads++; return run } })
   try {
     await check('default report never reads task data and exports only allowlisted application fields', () => {

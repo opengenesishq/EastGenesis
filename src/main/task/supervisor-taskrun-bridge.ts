@@ -43,6 +43,24 @@ export interface SupervisorTaskRunBridgeOptions {
   costBudgetEnforceable?: boolean
 }
 
+/**
+ * Read-only startup probe for an already persisted snapshot.  Recovery must
+ * be able to decide whether a historical WorkItem can be rebound without
+ * reserving a Supervisor Run or mutating the canonical aggregate.
+ */
+export async function assertSupervisorRunBindingRecoveryReady(
+  meta: Pick<SessionMeta, 'id' | 'workspaceId' | 'goalId' | 'workItemId'>,
+  run: TaskRunRecord,
+  options: SupervisorTaskRunBridgeOptions = {}
+): Promise<void> {
+  assertTaskRunSessionOwnership(meta, run)
+  const { rootDir, store } = resolveSupervisorBindingContext(options)
+  if (!store) return
+  const resolved = await resolveWorkflowRunCanonicalWorkItem(meta, run, rootDir)
+  if (resolved.disposition === 'unscoped') return
+  captureCanonicalWorkItemLease(resolved.workItem)
+}
+
 interface SupervisorBindingContext {
   rootDir?: string
   store?: SupervisorStateStore

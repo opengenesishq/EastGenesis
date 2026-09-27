@@ -11,6 +11,9 @@ module.exports = {
   ...baseBuild,
   extraMetadata: {
     ...(baseBuild.extraMetadata || {}),
+    eastgenesisReleaseProvenance: releaseProvenance,
+    // Keep the legacy key in the packaged manifest so existing update and
+    // evidence readers can inspect an upgraded build during migration.
     caogenReleaseProvenance: releaseProvenance
   },
   mac: {

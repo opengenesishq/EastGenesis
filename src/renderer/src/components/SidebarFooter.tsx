@@ -4,7 +4,8 @@ import { Activity, ChevronDown, Coins, Settings2, UserRound } from 'lucide-react
 import type { AppSettings } from '../../../shared/types'
 import { useT } from '../i18n'
 import { useStore } from '../store'
-import { desktopProfileAvatar, normalizeDesktopPersonalization } from '../../../shared/desktop-personalization'
+import { normalizeDesktopPersonalization } from '../../../shared/desktop-personalization'
+import { APP_ICON_URL } from '../brand'
 
 interface SidebarFooterProps {
   language: 'zh' | 'en'
@@ -24,7 +25,10 @@ export default function SidebarFooter({
   const zh = language === 'zh'
   const profile = normalizeDesktopPersonalization(settings.desktopPersonalization).profile
   const profileName = profile.displayName || (zh ? '个人工作区' : 'Personal workspace')
-  const avatar = desktopProfileAvatar(profile, language)
+  // The application shell always uses the EastGenesis mark. A saved local
+  // profile may still customize its name and settings preview, but it must not
+  // replace the product identity with an old avatar or person glyph.
+  const brandMark = <img className="sidebar-personal-brand-mark" src={APP_ICON_URL} alt="" aria-hidden="true" />
   useEffect(() => {
     if (!open) return
     const dismiss = (event: PointerEvent): void => {
@@ -43,7 +47,7 @@ export default function SidebarFooter({
   return (
     <div className="sidebar-footer sidebar-personal-footer" ref={root}>
       {open && <section className="sidebar-personal-menu" id="sidebar-personal-menu" aria-label={zh ? '个人工作区' : 'Personal workspace'}>
-        <div className="sidebar-personal-identity"><span className="sidebar-personal-avatar" aria-hidden="true">{avatar}</span><span><strong title={profileName}>{profileName}</strong><small>{zh ? 'EastGenesis · 本地' : 'EastGenesis · Local'}</small></span></div>
+        <div className="sidebar-personal-identity">{brandMark}<span><strong title={profileName}>{profileName}</strong><small>{zh ? 'EastGenesis · 本地' : 'EastGenesis · Local'}</small></span></div>
         <button type="button" className="sidebar-nav-item" data-sidebar-action="local-profile" onClick={() => { setOpen(false); useStore.getState().setShowSettings(true, 'profile') }}><UserRound size={16} /><span>{zh ? '编辑本地个人资料' : 'Edit local profile'}</span></button>
         <button type="button" className="sidebar-nav-item" data-sidebar-action="usage" onClick={() => { setOpen(false); useStore.getState().setShowSettings(true, 'usage') }}><Coins size={16} /><span>{zh ? '使用情况与费用' : 'Usage & costs'}</span></button>
         <button type="button" className="sidebar-nav-item" data-sidebar-action="settings" onClick={() => { setOpen(false); onOpenSettings() }}><Settings2 size={16} /><span>{t('settings')}</span><kbd>⌘,</kbd></button>
@@ -59,7 +63,7 @@ export default function SidebarFooter({
         aria-controls={open ? 'sidebar-personal-menu' : undefined}
         onClick={() => setOpen(value => !value)}
       >
-        <span className="sidebar-personal-avatar" aria-hidden="true">{avatar}</span>
+        {brandMark}
         <span title={profileName}>{profileName}</span>
         <ChevronDown size={15} aria-hidden="true" />
       </button>

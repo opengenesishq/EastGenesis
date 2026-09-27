@@ -1,6 +1,6 @@
 # 聊天快照分享适配器
 
-CaoGen 生成静态 HTML，并调用用户在「站点部署」配置的本机程序。分享面板另存一组参数；程序和环境变量来自所选部署目标。CaoGen 不提供托管账号，不把公开链接作为写操作凭据。
+EastGenesis 生成静态 HTML，并调用用户在「站点部署」配置的本机程序。分享面板另存一组参数；程序和环境变量来自所选部署目标。EastGenesis 不提供托管账号，不把公开链接作为写操作凭据。
 
 分享适配器使用 `caogen-chat-share/1`。每次执行从 stdin 读取一行 JSON，将唯一结果写为一行：
 
@@ -81,7 +81,7 @@ CAOGEN_CHAT_SHARE_RESULT {"protocol":"caogen-chat-share/1", ...}
 {"result":"applied","publicState":"active","revision":"remote-revision-1","url":"https://your-host.example/shares/share-uuid/"}
 ```
 
-未发布必须明确确认该资源不存在：`result:not_applied, publicState:absent`。状态无法确认则使用 `result:unknown, publicState:unknown`；CaoGen 不会自动重新发布。
+未发布必须明确确认该资源不存在：`result:not_applied, publicState:absent`。状态无法确认则使用 `result:unknown, publicState:unknown`；EastGenesis 不会自动重新发布。
 
 ## revoke
 
@@ -101,7 +101,7 @@ CAOGEN_CHAT_SHARE_RESULT {"protocol":"caogen-chat-share/1", ...}
 
 只查询原操作的真实状态，不重新发布或撤销。响应回显 `originalAction` 与所有原身份字段，并按照原 action 返回 `applied/not_applied/unknown`。错误 shareId、账号、内容摘要或版本的回执会被拒绝。
 
-CaoGen 在原 Effect 恢复账本与核对回执一致后才更新最终状态。任务关闭/移除不删除分享台账；主工作台可以通过新一次明确的本机授权撤销原分享。
+EastGenesis 在原 Effect 恢复账本与核对回执一致后才更新最终状态。任务关闭/移除不删除分享台账；主工作台可以通过新一次明确的本机授权撤销原分享。
 
 ## 公开内容
 

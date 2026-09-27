@@ -6,16 +6,16 @@ export interface DesktopGitPreferences {
 }
 export interface GitTextTemplateContext { title: string; branch: string; baseBranch: string; summary: string }
 export const DEFAULT_DESKTOP_GIT_PREFERENCES: DesktopGitPreferences = {
-  branchPrefix: 'caogen', commitTemplate: '',
-  pullRequestTitleTemplate: '{branch}: CaoGen worktree changes',
-  pullRequestBodyTemplate: 'Automated pull request for CaoGen managed worktree `{branch}`.\n\nBase branch: `{baseBranch}`\n\n{summary}'
+  branchPrefix: 'eastgenesis', commitTemplate: '',
+  pullRequestTitleTemplate: '{branch}: EastGenesis worktree changes',
+  pullRequestBodyTemplate: 'Automated pull request for EastGenesis managed worktree `{branch}`.\n\nBase branch: `{baseBranch}`\n\n{summary}'
 }
 const placeholders = new Set(['title', 'branch', 'baseBranch', 'summary'])
 export function normalizeGitBranchPrefix(value: unknown): string {
   if (typeof value !== 'string') throw new Error('Git 分支前缀必须是文本。')
   const prefix = value.trim().replace(/\/+$/, '')
   if (!prefix || prefix.length > 80 || prefix.startsWith('-') || /[\s\u0000-\u001f\u007f~^:?*\[\\]/.test(prefix) || prefix.includes('..') || prefix.includes('@{') ||
-    prefix.split('/').some(part => !part || part.startsWith('.') || part.endsWith('.') || part.endsWith('.lock'))) throw new Error('Git 分支前缀无效；请使用 caogen 或 team/feature 这样的名称。')
+    prefix.split('/').some(part => !part || part.startsWith('.') || part.endsWith('.') || part.endsWith('.lock'))) throw new Error('Git 分支前缀无效；请使用 eastgenesis 或 team/feature 这样的名称。')
   return prefix
 }
 function template(value: unknown, limit: number, singleLine: boolean): string {

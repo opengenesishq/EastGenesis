@@ -3,6 +3,7 @@ import { Activity, RefreshCw } from 'lucide-react'
 import type { EngineInfo, ProviderHealthView, SessionMeta } from '../../../../shared/types'
 import type { FeedbackAppInfo } from '../../../../shared/feedback-types'
 import type { ProviderGatewayStatusView } from '../../../../shared/provider-gateway-types'
+import type { UpdaterEvent } from '../../../../shared/updater-types'
 import type { SettingsTab } from '../../store/settings-navigation'
 import { useStore } from '../../store'
 import './desktop-status.css'
@@ -17,6 +18,8 @@ export default function DesktopStatus(): React.JSX.Element {
   const [busy, setBusy] = useState(false)
   const [openingId, setOpeningId] = useState('')
   const [navigationError, setNavigationError] = useState('')
+  const [updateEvent, setUpdateEvent] = useState<UpdaterEvent | undefined>()
+  const [updateBusy, setUpdateBusy] = useState(false)
   const revision = useRef(0)
   const tr = (cn: string, en: string): string => zh ? cn : en
   const refresh = useCallback(async (): Promise<void> => {
@@ -42,6 +45,7 @@ export default function DesktopStatus(): React.JSX.Element {
     window.addEventListener('focus', focus)
     return () => { revision.current++; window.removeEventListener('focus', focus) }
   }, [refresh])
+  useEffect(() => window.agentDesk.onUpdaterEvent(setUpdateEvent), [])
   const open = (tab: SettingsTab): void => useStore.getState().setShowSettings(true, tab)
   const openTask = async (id: string): Promise<void> => {
     if (openingId) return
@@ -60,6 +64,30 @@ export default function DesktopStatus(): React.JSX.Element {
   const date = (value?: number): string => value ? new Date(value).toLocaleString(zh ? 'zh-CN' : 'en') : tr('暂无记录', 'No record')
   const labels: Record<SessionMeta['status'], string> = { starting: tr('启动中', 'Starting'), running: tr('运行中', 'Running'),
     idle: tr('空闲', 'Idle'), error: tr('错误', 'Error'), closed: tr('已关闭', 'Closed') }
+  const updateStatus = updateEvent?.kind === 'available'
+    ? tr(`发现新版本 ${updateEvent.version}`, `Version ${updateEvent.version} is available`)
+    : updateEvent?.kind === 'download-progress'
+      ? tr(`正在下载 ${Math.round(updateEvent.percent)}%`, `Downloading ${Math.round(updateEvent.percent)}%`)
+      : updateEvent?.kind === 'downloaded'
+        ? tr(`已下载 ${updateEvent.version}，可重启安装`, `${updateEvent.version} downloaded; restart to install`)
+        : updateEvent?.kind === 'not-available'
+          ? tr(`已是最新版本（${updateEvent.version}）`, `Up to date (${updateEvent.version})`)
+          : updateEvent?.kind === 'error'
+            ? tr(`更新检查失败：${updateEvent.message}`, `Update check failed: ${updateEvent.message}`)
+            : updateEvent?.kind === 'disabled'
+              ? tr(`更新暂不可用：${updateEvent.reason}`, `Updates unavailable: ${updateEvent.reason}`)
+              : tr('尚未检查更新', 'Not checked yet')
+  const checkUpdates = async (): Promise<void> => {
+    setUpdateBusy(true)
+    try {
+      const enabled = await window.agentDesk.checkForUpdates()
+      if (!enabled) setUpdateEvent({ kind: 'disabled', reason: tr('当前安装包未启用更新通道', 'The current build has no update channel') })
+    } finally { setUpdateBusy(false) }
+  }
+  const download = async (): Promise<void> => {
+    setUpdateBusy(true)
+    try { await window.agentDesk.downloadUpdate() } finally { setUpdateBusy(false) }
+  }
   return <section className="desktop-status" data-desktop-status>
     <header><div><h3><Activity size={18} />{tr('状态', 'Status')}</h3><p className="settings-hint">{tr('本机任务、连接记录与运行环境。', 'Local tasks, connection records, and runtimes.')}</p></div>
       <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void refresh()}><RefreshCw size={14} />{tr('刷新', 'Refresh')}</button></header>
@@ -76,6 +104,14 @@ export default function DesktopStatus(): React.JSX.Element {
       {snapshot?.app && <p>EastGenesis {snapshot.app.version} · {snapshot.app.platform} {snapshot.app.architecture}<br />Electron {snapshot.app.electron} · Chromium {snapshot.app.chromium} · Node {snapshot.app.node}</p>}
       {snapshot?.engines?.map(engine => <p key={engine.kind}>{engine.label} · {engine.available ? tr('本机可用', 'Locally available') : tr('未就绪', 'Not ready')}</p>)}
       <button type="button" className="btn btn-ghost btn-sm" onClick={() => open('environment')}>{tr('管理运行环境', 'Manage runtimes')}</button></article>
+    <article><h4>{tr('EastGenesis 更新', 'EastGenesis updates')}</h4>
+      <p className="settings-hint" role="status">{updateStatus}</p>
+      <div className="desktop-status-actions">
+        <button type="button" className="btn btn-ghost btn-sm" disabled={updateBusy} onClick={() => void checkUpdates()}>{tr('检查更新', 'Check for updates')}</button>
+        {updateEvent?.kind === 'available' && <button type="button" className="btn btn-primary btn-sm" disabled={updateBusy} onClick={() => void download()}>{tr('下载更新', 'Download update')}</button>}
+        {updateEvent?.kind === 'downloaded' && <button type="button" className="btn btn-primary btn-sm" onClick={() => window.agentDesk.quitAndInstall()}>{tr('重启并安装', 'Restart & install')}</button>}
+      </div>
+    </article>
     <article><h4>{tr('厂商与网关', 'Providers & gateway')}</h4><p className="settings-hint">{tr('下面是本机已有记录。刷新不会向厂商发送探测请求。', 'These are stored local observations. Refresh does not probe providers.')}</p>
       {snapshot?.health?.length === 0 && <p>{tr('暂无厂商调用记录。', 'No provider observations yet.')}</p>}
       {snapshot?.health?.map(item => <div className="desktop-status-provider" key={item.providerId}><strong>{providers.find(provider => provider.id === item.providerId)?.name ?? item.providerId}</strong>

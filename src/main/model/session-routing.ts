@@ -38,6 +38,8 @@ export interface SessionRouteInput {
   driveMode?: CaoGenDriveMode
   payload: SendMessagePayload
   strategy: SchedulerStrategy
+  /** Explicit business-line capability requirement; otherwise infer from the prompt. */
+  requiresTools?: boolean
   businessLineStrategy?: SchedulerStrategy
   sessionCostUsd: number
   estimatedContextTokens?: number
@@ -108,7 +110,7 @@ export function resolveSessionModelRoute(input: SessionRouteInput): SessionRoute
     expectedOutputTokens: drive.expectedOutputTokens,
     strategy,
     riskLevel,
-    requiresTools: true
+    requiresTools: input.requiresTools
   })
   const ruleOverride = input.manualOverride ? undefined : customRoutingRuleOverride(input.modelRoutingRules, {
     prompt, taskKinds: inferredTask.taskKinds, riskLevel: inferredTask.riskLevel, strategy: inferredTask.strategy
@@ -138,7 +140,7 @@ export function resolveSessionModelRoute(input: SessionRouteInput): SessionRoute
     })),
     crossValidation: drive.crossValidation,
     riskLevel,
-    requiresTools: true
+    requiresTools: inferredTask.requiresTools
   })
   const selected = decision.selected.profile
   const switchedProvider = selected.providerId !== input.providerId

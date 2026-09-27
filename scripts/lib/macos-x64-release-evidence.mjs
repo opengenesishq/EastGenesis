@@ -1,9 +1,9 @@
 export function expectedMacosX64ReleaseAssets(version) {
   return [
-    `CaoGen-${version}-mac.zip`,
-    `CaoGen-${version}-mac.zip.blockmap`,
-    `CaoGen-${version}.dmg`,
-    `CaoGen-${version}.dmg.blockmap`,
+    `EastGenesis-${version}-mac.zip`,
+    `EastGenesis-${version}-mac.zip.blockmap`,
+    `EastGenesis-${version}.dmg`,
+    `EastGenesis-${version}.dmg.blockmap`,
     'latest-mac.yml'
   ].sort()
 }
@@ -62,7 +62,7 @@ export function macosX64ReleaseEvidenceChecks({
     packagedAppInstallPassed: packagedApp?.installation?.status === 'passed',
     packagedAppReleaseAuditPassed: packagedApp?.releaseAudit?.status === 'passed',
     packagedAppCleanupPassed: packagedApp?.cleanup?.status === 'passed',
-    packagedAppRendererStarted: packagedApp?.target?.type === 'page' && packagedApp?.target?.title === 'CaoGen',
+    packagedAppRendererStarted: packagedApp?.target?.type === 'page' && packagedApp?.target?.title === 'EastGenesis',
     packagedAppArtifactSetMatches: packagedApp?.artifactSetSha256 === artifactSetSha256,
     packagedAppProvenanceMatches: provenanceMatches(
       packagedApp?.buildProvenance,

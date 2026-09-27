@@ -6,7 +6,6 @@ export const SIDEBAR_TRANSLATIONS = {
   noVideoProductions: { zh: '暂无视频制作记录', en: 'No video productions yet' },
   videoShots: { zh: '镜头', en: 'shots' },
   sessions: { zh: '会话', en: 'Sessions' },
-  office3d: { zh: 'EastGenesis 工作台', en: 'EastGenesis Workbench' },
   commandControlRoom: { zh: '打开工作台', en: 'Open Workbench' },
   commandControlRoomHint: { zh: '高级运行状态视图', en: 'Advanced activity view' },
   recoveryCenter: { zh: '恢复中心', en: 'Recovery Center' },

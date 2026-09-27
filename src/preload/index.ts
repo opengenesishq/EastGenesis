@@ -49,6 +49,7 @@ import type {
   TaskDecomposeInput,
   UpdateRoutineInput
 } from '../shared/types'
+import type { UpdaterEvent } from '../shared/updater-types'
 import { resolveTaskDagFinalization } from './task-dag-finalization'
 import { workflowLedgerApi } from './workflow-ledger'
 import { preparationPermissionApi } from './preparation-permission'
@@ -198,6 +199,14 @@ const api: AgentDeskApi = {
   renameHistory: (id: string, title: string) => ipcRenderer.invoke('history:rename', id, title),
   deleteHistory: (id: string) => ipcRenderer.invoke('history:delete', id),
   getSettings: () => ipcRenderer.invoke('settings-domain:get'),
+  checkForUpdates: () => ipcRenderer.invoke('updater:check'),
+  downloadUpdate: () => ipcRenderer.invoke('updater:download'),
+  quitAndInstall: () => { ipcRenderer.send('updater:quit-and-install') },
+  onUpdaterEvent: (cb: (event: UpdaterEvent) => void) => {
+    const listener = (_event: IpcRendererEvent, payload: UpdaterEvent): void => cb(payload)
+    ipcRenderer.on('updater:event', listener)
+    return () => ipcRenderer.removeListener('updater:event', listener)
+  },
   onSettingsChanged: cb => {
     const listener = (): void => cb()
     ipcRenderer.on('settings-domain:changed', listener)

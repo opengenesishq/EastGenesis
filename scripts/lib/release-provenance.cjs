@@ -23,10 +23,11 @@ function readPackagedReleaseProvenanceFromAsar(asarPath) {
   try {
     const { extractFile } = require('@electron/asar')
     const packageJson = JSON.parse(extractFile(asarPath, 'package.json').toString('utf8'))
+    const value = packageJson.eastgenesisReleaseProvenance || packageJson.caogenReleaseProvenance || null
     return {
       asarPath,
-      present: Boolean(packageJson.caogenReleaseProvenance),
-      value: packageJson.caogenReleaseProvenance || null,
+      present: Boolean(value),
+      value,
       error: null
     }
   } catch (error) {

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Opt-in Provider integration probe. The default path is deliberately
- * network-free; only CAOGEN_RUN_REAL_PROVIDER=1 can read the private config.
+ * network-free; only EASTGENESIS_RUN_REAL_PROVIDER=1 can read the private config.
+ * CAOGEN_RUN_REAL_PROVIDER=1 remains accepted as a migration alias.
  * This probe is evidence of connectivity/model discovery, never production
  * availability or release readiness.
  */
@@ -21,9 +22,10 @@ const emit = (report, code = 0) => {
   process.exitCode = code
 }
 
-if (process.env.CAOGEN_RUN_REAL_PROVIDER !== '1') {
+const realOptIn = process.env.EASTGENESIS_RUN_REAL_PROVIDER === '1' || process.env.CAOGEN_RUN_REAL_PROVIDER === '1'
+if (!realOptIn) {
   emit({ schemaVersion: 1, kind: 'caogen.provider-integration-real-report', status: 'blocked', functionalPassed: false,
-    reason: 'opt_in_required', networkRequests: 0, evidence: [], limitations: ['Set CAOGEN_RUN_REAL_PROVIDER=1 to opt in; this command never opts in implicitly.'] }); process.exit(0)
+    reason: 'opt_in_required', networkRequests: 0, evidence: [], limitations: ['Set EASTGENESIS_RUN_REAL_PROVIDER=1 to opt in; CAOGEN_RUN_REAL_PROVIDER=1 remains a migration alias; this command never opts in implicitly.'] }); process.exit(0)
 } else {
   let raw
   try { raw = resolvePrivateProviderConfig().text } catch (error) {

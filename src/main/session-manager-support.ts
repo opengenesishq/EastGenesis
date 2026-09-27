@@ -32,6 +32,7 @@ import {
   recoverWorkflowRunCanonicalBindings
 } from './task/workflow-run-canonical-binding'
 import {
+  assertSupervisorRunBindingRecoveryReady,
   ensureSupervisorRunBinding,
   recoverSupervisorRunBindings
 } from './task/supervisor-taskrun-bridge'
@@ -219,6 +220,37 @@ export class SessionWorkflowRuntime {
     await bindWorkflowRunToCanonicalWorkItem(snapshot.meta, snapshot.run)
   }
 
+  /**
+   * Probe a historical snapshot without reserving a Run.  A stale canonical
+   * execution lease is a recoverability boundary, not a reason to reject the
+   * entire task-snapshot list; callers keep that snapshot for manual review.
+   */
+  async snapshotNeedsReadOnlyRecovery(snapshot: Pick<TaskSnapshotRecord, 'meta' | 'run'>): Promise<boolean> {
+    if (!snapshot.run || !this.userDataRoot || !this.supervisorStore) return false
+    try {
+      await assertSupervisorRunBindingRecoveryReady(snapshot.meta, snapshot.run, {
+        rootDir: this.userDataRoot,
+        store: this.supervisorStore
+      })
+      return false
+    } catch (error) {
+      if (!isHistoricalLeaseBindingError(error)) throw error
+      return true
+    }
+  }
+
+  /** Bind a recovered snapshot, preserving it when its source lease is stale. */
+  async bindSnapshotForRecovery(snapshot: Pick<TaskSnapshotRecord, 'meta' | 'run'>): Promise<boolean> {
+    try {
+      await this.bindSnapshot(snapshot)
+      return true
+    } catch (error) {
+      if (!isHistoricalLeaseBindingError(error)) throw error
+      console.error('[caogen] preserving historical task snapshot; canonical WorkItem execution lease is unavailable')
+      return false
+    }
+  }
+
   async recover(snapshots: readonly TaskSnapshotRecord[]): Promise<Set<string>> {
     const runBindings = this.userDataRoot && this.supervisorStore
       ? await recoverSupervisorRunBindings(snapshots, {
@@ -243,6 +275,10 @@ export class SessionWorkflowRuntime {
       .map((snapshot) => snapshot.sessionId)) this.blockedRecoveries.add(sessionId)
     return new Set(this.blockedRecoveries)
   }
+}
+
+function isHistoricalLeaseBindingError(error: unknown): boolean {
+  return error instanceof Error && /^canonical WorkItem execution lease is missing or expired:/.test(error.message)
 }
 
 export function subagentCwd(

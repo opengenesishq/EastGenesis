@@ -1,4 +1,4 @@
-name: CaoGen community response SLA
+name: EastGenesis community response SLA
 
 on:
   schedule:
@@ -18,7 +18,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: caogen-community-response-sla
+  group: eastgenesis-community-response-sla
   cancel-in-progress: true
 
 jobs:
@@ -44,7 +44,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: caogen-community-response-sla-${{ github.run_id }}
+          name: eastgenesis-community-response-sla-${{ github.run_id }}
           if-no-files-found: error
           retention-days: 30
           path: test-results/community-feedback-audit/**

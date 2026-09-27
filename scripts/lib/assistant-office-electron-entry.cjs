@@ -6,7 +6,7 @@ if (!mainEntry || !path.isAbsolute(mainEntry) || !exportPath || !path.isAbsolute
 const originalSave = dialog.showSaveDialog.bind(dialog)
 dialog.showSaveDialog = async (...args) => {
   const options = args.at(-1)
-  if (options?.title !== '导出 CaoGen 可移植交付包') return originalSave(...args)
+  if (options?.title !== '导出 EastGenesis 可移植交付包') return originalSave(...args)
   if (!options.filters?.some((filter) => filter.extensions.includes('zip'))) throw new Error('Unexpected export dialog format')
   process.stdout.write('[office-ui-fixture] user selected isolated ZIP export destination\n')
   return { canceled: false, filePath: exportPath }

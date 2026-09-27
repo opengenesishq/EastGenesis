@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import type { Engine } from '../src/main/engine'
 import type { SessionMeta, TaskPlanStateView } from '../src/shared/types'
@@ -13,12 +14,15 @@ import { openProjectWorkspaceCommandService } from '../src/main/project-workspac
 import { registerTerminalMutationIpc } from '../src/main/ipc/terminal-mutation-ipc'
 import { registerInteractiveMutationIpc } from '../src/main/ipc/interactive-mutation-handlers'
 import { ipcMain } from 'electron'
+import { assertTrustedWorkflowLedgerSender } from '../src/main/ipc/workflow-ledger-handlers'
 
 const root = process.argv[2]
 const checks: string[] = []
 let providerCalls = 0
 globalThis.fetch = async () => { providerCalls++; throw new Error('network forbidden') }
-const trustedRendererUrl = new URL('../renderer/index.html', pathToFileURL(process.argv[1]).href).href
+// Node resolves __dirname through macOS's /var -> /private/var symlink.
+// Use that same canonical path for the production file-renderer trust check.
+const trustedRendererUrl = new URL('../renderer/index.html', pathToFileURL(realpathSync(process.argv[1])).href).href
 const trustedSender = { id: 9001, isDestroyed: () => false, mainFrame: { url: trustedRendererUrl } }
 ;(globalThis as typeof globalThis & { __caogenTrustedSender?: typeof trustedSender }).__caogenTrustedSender = trustedSender
 const trustedEvent = { sender: trustedSender, senderFrame: trustedSender.mainFrame }
@@ -70,6 +74,8 @@ async function fixture(id: string) {
 }
 
 async function main(): Promise<void> {
+  assertTrustedWorkflowLedgerSender(trustedEvent)
+  assert.throws(() => assertTrustedWorkflowLedgerSender({ ...trustedEvent, senderFrame: { url: trustedRendererUrl } }), /not trusted/)
   const first = await fixture('source-goal')
   const childMeta = { ...first.meta, id: 'source-child', parentSessionId: first.meta.id, workItemId: first.plan.projection!.steps[0].workItemId }
   const child = { meta: childMeta } as Engine

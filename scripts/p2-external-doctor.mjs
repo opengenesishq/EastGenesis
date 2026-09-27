@@ -116,7 +116,7 @@ function jetbrainsNextActions(check) {
   if (compatibility?.compatible === false) {
     actions.push(`Use a JetBrains IDE compatible with the plugin target: ${compatibility.reason}`)
   }
-  actions.push('Install the current CaoGen JetBrains plugin distribution into that IDE.')
+    actions.push('Install the current EastGenesis JetBrains plugin distribution into that IDE.')
   actions.push('Capture real interaction evidence JSON using the template in docs/P2-EXTERNAL-REQUIRED.md.')
   return actions
 }

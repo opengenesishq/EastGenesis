@@ -139,7 +139,7 @@ export const GIT_TOOLS: ToolDefinition[] = [
     function: {
       name: 'git_commit',
       description:
-        '提交已暂存改动。不会自动 git add，不会隐式执行 caogen.md 命令或 Git hooks；需要验证时先显式调用 bash。',
+        '提交已暂存改动。不会自动 git add，不会隐式执行项目规则命令或 Git hooks；需要验证时先显式调用 bash。',
       parameters: {
         type: 'object',
         properties: {

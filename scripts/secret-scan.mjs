@@ -53,6 +53,12 @@ const allowedSecretLine = new RegExp(
     'fixture-api-key',
     'token-for-smoke',
     'secret-for-smoke',
+    // Explicit synthetic fixtures used by redaction and process-boundary tests.
+    // Keep these exact values allowlisted instead of weakening the detector.
+    'short-secret',
+    'sk-sensitive-error-secret',
+    'file:private-key',
+    'a-previous-process-token',
     'smoke-token',
     'wrong-token',
     'aliyun-token-for-smoke',

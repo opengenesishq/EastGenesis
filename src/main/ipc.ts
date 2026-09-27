@@ -148,6 +148,7 @@ import { registerPreparationPermissionIpc } from './ipc/preparation-permission-h
 import { registerTaskExecutionAuthorityIpc } from './ipc/task-execution-authority-handlers'
 import { registerTaskBudgetIpc } from './ipc/task-budget-handlers'
 import { registerSideChatIpc } from './ipc/side-chat-handlers'
+import { registerUpdaterIpc } from './ipc/updater-handlers'
 import type {
   BrowserBounds,
   BrowserPickResult,
@@ -351,6 +352,7 @@ export function registerIpc(): void {
   registerTaskBudgetIpc()
   registerSessionInputIpc()
   registerSideChatIpc()
+  registerUpdaterIpc()
   configureMigrationOperationBackupRoot(migrationBackupRoot())
   for (const register of [registerTaskRecoveryIpc, registerWorkflowLedgerIpc, registerProjectWorkspaceIpc, registerDataRetentionIpc, registerSupervisorIpc, registerInteractiveMutationIpc, registerAppFeatureIpc, registerProviderGatewayIpc, registerFileIntelligenceIpc, registerPermissionGrantIpc]) register()
   // Search adapters are resolved only by an explicit main-process factory. The

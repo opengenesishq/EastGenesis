@@ -23,6 +23,14 @@
   letter-spacing: -.045em;
 }
 
+.caogen-desktop-shell .welcome-simple-shell .welcome-ask-hint {
+  margin: -10px 0 2px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
 .caogen-desktop-shell .welcome-simple-shell .welcome-compose-dock {
   width: min(720px, 100%);
 }
@@ -96,6 +104,24 @@
 .caogen-desktop-shell .welcome-simple-shell .welcome-model-select:focus {
   border-color: var(--accent-strong);
   outline: 2px solid #d6000022;
+}
+
+.caogen-desktop-shell .welcome-simple-shell .welcome-model-select:disabled {
+  color: var(--text-secondary);
+  opacity: .9;
+}
+
+.caogen-desktop-shell .welcome-simple-shell .voice-draft-input .btn-icon-sm {
+  border-color: color-mix(in srgb, var(--text) 12%, transparent);
+  background: color-mix(in srgb, var(--desktop-main) 52%, transparent);
+  color: var(--text-secondary);
+}
+
+.caogen-desktop-shell .welcome-simple-shell .voice-draft-input .btn-icon-sm:hover:not(:disabled),
+.caogen-desktop-shell .welcome-simple-shell .voice-draft-input .btn-icon-sm:focus-visible {
+  border-color: color-mix(in srgb, var(--text) 22%, transparent);
+  background: var(--desktop-hover);
+  color: var(--text);
 }
 
 .caogen-desktop-shell .welcome-simple-shell .welcome-advanced-trigger {

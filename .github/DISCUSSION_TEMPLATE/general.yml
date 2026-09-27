@@ -4,7 +4,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Share what you tried, what worked, and where CaoGen created friction. Do not include API keys, tokens, private repository content, personal information, or sensitive local paths.
+        Share what you tried, what worked, and where EastGenesis created friction. Do not include API keys, tokens, private repository content, personal information, or sensitive local paths.
 
         请说明你尝试了什么、哪些地方有效、哪里遇到阻力。不要包含 API Key、Token、私有仓库内容、个人信息或敏感本机路径。
 
@@ -13,8 +13,8 @@ body:
     attributes:
       label: User context / 使用背景
       options:
-        - First-time CaoGen user / 第一次使用 CaoGen
-        - Returning CaoGen user / 再次使用 CaoGen
+        - First-time EastGenesis user / 第一次使用 EastGenesis
+        - Returning EastGenesis user / 再次使用 EastGenesis
         - Contributor evaluating the project / 正在评估项目的贡献者
         - Other / 其他
     validations:

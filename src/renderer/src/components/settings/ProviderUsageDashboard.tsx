@@ -151,7 +151,7 @@ export default function ProviderUsageDashboard({
       const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }))
       const anchor = document.createElement('a')
       anchor.href = url
-      anchor.download = `caogen-usage-${range}.csv`
+      anchor.download = `eastgenesis-usage-${range}.csv`
       anchor.click()
       URL.revokeObjectURL(url)
     } catch {

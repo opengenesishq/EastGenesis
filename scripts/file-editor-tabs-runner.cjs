@@ -19,7 +19,7 @@ const searchSource = 'export const searchTarget = "needle-e2e"\nexport function 
 fs.writeFileSync(path.join(projectDir, 'src', 'components', 'search.ts'), searchSource)
 fs.writeFileSync(path.join(projectDir, 'src', 'broken.py'), 'def broken():\n    return (\n')
 fs.writeFileSync(path.join(projectDir, 'src', 'semantic.ts'), 'export const total: number = "wrong"\n')
-const jsonFixture = '{\n  "name": "CaoGen",\n  "count": 2,\n  "enabled": true,\n  "optional": null\n}\n'
+const jsonFixture = '{\n  "name": "EastGenesis",\n  "count": 2,\n  "enabled": true,\n  "optional": null\n}\n'
 fs.writeFileSync(path.join(projectDir, 'src', 'config.json'), jsonFixture)
 const consumerDraft = "import { calculateInvoice } from './components/search'\nexport const invoice = calculateInvo(21)\n"
 const consumerCompleted = consumerDraft.replace('calculateInvo(21)', 'calculateInvoice(21)')
@@ -116,7 +116,7 @@ async function run() {
   })()`)
   check('JSON files render through the local Monaco language and Monarch token pipeline',
     jsonRendering.language === 'json'
-      && jsonRendering.text.includes('"name": "CaoGen"')
+      && jsonRendering.text.includes('"name": "EastGenesis"')
       && jsonRendering.text.includes('"count": 2')
       && jsonRendering.text.includes('"enabled": true')
       && jsonRendering.tokenCount >= 8

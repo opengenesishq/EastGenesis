@@ -91,14 +91,20 @@ export function resolveWelcomeComputeSelection(
     )
     : undefined
   if (!provider) return { providerId: '', model: '', routingMode: stored.routingMode }
+  // A global route with exactly one usable Provider has no meaningful
+  // cross-Provider choice and some runtimes reject the AUTO_PROVIDER_ID
+  // sentinel when there is no routing catalog yet. Bind the automatic route
+  // to that sole Provider so a freshly configured first task can run.
+  const usableProviderCount = providers.filter(candidate => candidate.ready && candidate.models.length > 0).length
+  const routingMode = stored.routingMode === 'global' && usableProviderCount === 1 ? 'provider' : stored.routingMode
   return {
     providerId: provider.id,
-    model: stored.routingMode === 'fixed'
+    model: routingMode === 'fixed'
       && stored.model
       && provider.models.includes(stored.model)
       ? stored.model
-      : stored.routingMode === 'fixed' ? '' : AUTO_MODEL,
-    routingMode: stored.routingMode
+      : routingMode === 'fixed' ? '' : AUTO_MODEL,
+    routingMode
   }
 }
 

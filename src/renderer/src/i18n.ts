@@ -163,6 +163,7 @@ const DICT: Dict = {
   welcomeSub: { zh: '多厂商 AI 工作桌面', en: 'Multi-vendor AI work desktop' },
   welcomeCta: { zh: '选择项目目录,开始工作', en: 'Pick a project folder to start' },
   welcomeAsk: { zh: '今天想完成什么？', en: 'What do you want to get done today?' },
+  welcomeAskHint: { zh: '输入一句话，EastGenesis 直接开始工作。', en: 'Write one sentence and EastGenesis will get to work.' },
   welcomeInputPlaceholder: { zh: '描述你希望 EastGenesis 完成的工作', en: 'Describe what you want EastGenesis to do' },
   firstTaskRecommended: { zh: '推荐', en: 'Recommended' },
   firstTaskProgressCompute: { zh: '算力', en: 'Compute' },
@@ -603,7 +604,6 @@ const DICT: Dict = {
   tabPermissions: { zh: '权限', en: 'Permissions' },
   tabProject: { zh: '项目规则', en: 'Project rules' },
   tabPersona: { zh: '通用指令', en: 'Global instructions' },
-  tabOffice: { zh: '3D 故宫 / 外观', en: '3D Palace / Appearance' },
   tabProviders: { zh: '厂商', en: 'Providers' },
   tabNotifications: { zh: '消息', en: 'Messages' },
   tabPlugins: { zh: '插件 / 技能', en: 'Plugins / Skills' },
@@ -667,6 +667,17 @@ const DICT: Dict = {
   },
   defaultProvider: { zh: 'Provider 偏好', en: 'Provider preference' },
   defaultModel: { zh: '模型偏好', en: 'Model preference' },
+  modelSettingsIntro: { zh: '先选一个默认模型', en: 'Choose a default model first' },
+  modelSettingsIntroHint: {
+    zh: '日常使用保持“自动调度”即可。需要新增、测试或删除模型连接时，进入“厂商与模型”。',
+    en: 'Keep Auto routing for everyday work. Open Providers & models when you need to add, test, or remove a connection.'
+  },
+  modelSettingsManageProviders: { zh: '管理厂商与模型', en: 'Manage providers' },
+  modelSettingsAdvanced: { zh: '高级模型策略', en: 'Advanced model strategy' },
+  modelSettingsAdvancedHint: {
+    zh: '角色分工、路由、备用模型和熔断设置只在需要精细控制时使用；普通任务不需要修改。',
+    en: 'Use role mapping, routing, fallback, and circuit settings only when you need fine-grained control.'
+  },
   modelRolesSection: { zh: '模型角色偏好', en: 'Model role preferences' },
   modelRolesHint: {
     zh: '留空时使用默认角色策略:调研优先 Gemini,策划优先 Claude,开发优先 OpenAI,测试优先 DeepSeek,文档优先 Kimi;预算、健康状态和必需能力仍可改变最终选择。',
@@ -815,21 +826,13 @@ const DICT: Dict = {
   guiGrantRevokeAll: { zh: '全部撤销', en: 'Revoke all' },
   personaLabel: { zh: '通用人设 / 系统提示词追加', en: 'Global persona / system prompt append' },
   personaHint: {
-    zh: '追加到所有项目的内置提示词之后;项目专属规则请到“项目规则”页编辑 caogen.md。',
-    en: 'Appended after the built-in prompt for every project; edit per-project caogen.md rules in Project rules.'
+    zh: '追加到所有项目的内置提示词之后；项目专属规则请到“项目规则”页编辑。',
+    en: 'Appended after the built-in prompt for every project; edit per-project rules in Project rules.'
   },
   personaPlaceholder: {
     zh: '例如:你是一位严谨的 Rust 专家,回答简洁,总用中文。',
     en: 'e.g. You are a rigorous Rust expert; be concise; always reply in English.'
   },
-  officeShowBadges: { zh: '显示控制台厂商标识', en: 'Show vendor badge on console' },
-  officeLiveliness: { zh: '动效强度', en: 'Motion intensity' },
-  officeCatEars: { zh: '趣味外观:头像猫耳', en: 'Fun appearance: cat ears' },
-  officeQualityMode: { zh: '3D 画质', en: '3D quality' },
-  officeQualityAuto: { zh: '自动', en: 'Auto' },
-  officeQualityHigh: { zh: '高', en: 'High' },
-  officeQualityBalanced: { zh: '均衡', en: 'Balanced' },
-  officeQualityLow: { zh: '低', en: 'Low' },
   layoutSection: { zh: '工作台布局', en: 'Workbench layout' },
   layoutSidebarCollapsed: { zh: '默认收回侧栏', en: 'Collapse sidebar by default' },
   layoutSidebarWidth: { zh: '侧栏宽度', en: 'Sidebar width' },
@@ -840,8 +843,8 @@ const DICT: Dict = {
   chatDensityComfortable: { zh: '舒展', en: 'Comfortable' },
   chatDensityCompact: { zh: '紧凑', en: 'Compact' },
   pluginsInfo: {
-    zh: '技能、插件、MCP 服务器和子代理从用户及项目的 .caogen 目录加载。外部工具资产需先通过迁移中心导入并批准。',
-    en: 'Skills, plugins, MCP servers, and subagents load from user and project .caogen directories. Import and approve external tool assets in Migration first.'
+    zh: '技能、插件、MCP 服务器和子代理从 EastGenesis 的本机扩展目录加载。外部工具资产需先通过迁移中心导入并批准。',
+    en: 'Skills, plugins, MCP servers, and subagents load from EastGenesis local extension directories. Import and approve external tool assets in Migration first.'
   },
   addProvider: { zh: '+ 添加', en: '+ Add' },
   officialAnthropic: { zh: '未选择 Provider', en: 'No Provider selected' },

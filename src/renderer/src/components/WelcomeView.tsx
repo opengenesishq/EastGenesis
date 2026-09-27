@@ -285,7 +285,7 @@ function buildWelcomeSessionDraft(
 function useWelcomeModelOptions(
   welcome: WelcomeDraftController,
   providers: WelcomeStoreState['providers']
-): { fixedModelOptions: WelcomeModelOptions } {
+): { fixedModelOptions: WelcomeModelOptions; modelOptions: WelcomeModelOptions } {
   const t = useT()
   const modelOptions = useMemo(() => modelOptionsForProvider(
     providers,
@@ -294,7 +294,8 @@ function useWelcomeModelOptions(
     welcome.model
   ), [providers, t, welcome.model, welcome.providerId])
   return {
-    fixedModelOptions: modelOptions.filter((option) => option.value !== AUTO_MODEL)
+    fixedModelOptions: modelOptions.filter((option) => option.value !== AUTO_MODEL),
+    modelOptions
   }
 }
 
@@ -302,6 +303,7 @@ function WelcomeComposerBar({
   actions,
   computeAvailable,
   fixedModelOptions,
+  modelOptions,
   localComputeStatus,
   onOpenSettings,
   providers,
@@ -311,6 +313,7 @@ function WelcomeComposerBar({
   actions: WelcomeStartActions
   computeAvailable: boolean
   fixedModelOptions: WelcomeModelOptions
+  modelOptions: WelcomeModelOptions
   localComputeStatus: ReturnType<typeof useLocalComputeActivation>['localComputeStatus']
   onOpenSettings: () => void
   providers: WelcomeStoreState['providers']
@@ -320,7 +323,16 @@ function WelcomeComposerBar({
   const zh = useStore(state => state.settings.language === 'zh')
   const voiceDraftId = useRef(`draft:${crypto.randomUUID()}`)
   const awaitingModel = !computeAvailable && localComputeStatus !== 'ready'
-  const selectedModel = fixedModelOptions.some(option => option.value === welcome.model) ? welcome.model : ''
+  const hasAutomaticRoute = computeAvailable
+  const hasModelOptions = fixedModelOptions.length > 0 || hasAutomaticRoute
+  // The default is automatic routing. Keep that choice visible in the one
+  // sentence surface instead of rendering an empty select while silently
+  // sending with `auto`.
+  const selectedModel = !hasModelOptions
+    ? ''
+    : welcome.routingMode === 'fixed' && fixedModelOptions.some(option => option.value === welcome.model)
+      ? welcome.model
+      : AUTO_MODEL
   return (
     <div className="welcome-composer-bar">
       <div className="welcome-model-picker" data-welcome-model-picker>
@@ -339,11 +351,18 @@ function WelcomeComposerBar({
             data-welcome-routing-control="model"
             aria-label={zh ? '选择模型' : 'Choose model'}
             value={selectedModel}
-            disabled={!fixedModelOptions.length}
-            onChange={(event) => welcome.update({ computeSelectionSource: 'user', routingMode: 'fixed', model: event.target.value })}
+            disabled={!hasModelOptions}
+            onChange={(event) => {
+              const model = event.target.value
+              welcome.update({
+                computeSelectionSource: 'user',
+                routingMode: model === AUTO_MODEL ? (welcome.providerId ? 'provider' : 'global') : 'fixed',
+                model
+              })
+            }}
           >
-            <option value="" disabled>{fixedModelOptions.length ? (zh ? '选择模型' : 'Choose a model') : (zh ? '先连接模型' : 'Connect a model first')}</option>
-            {fixedModelOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            <option value="" disabled>{hasModelOptions ? (zh ? '选择模型' : 'Choose a model') : (zh ? '先连接模型' : 'Connect a model first')}</option>
+            {hasModelOptions && modelOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
       </div>
       <button type="button" className="welcome-advanced-trigger" aria-label={zh ? '打开模型设置' : 'Open model settings'} title={zh ? '模型与连接设置' : 'Model and connection settings'} onClick={onOpenSettings}><SlidersHorizontal size={15} aria-hidden="true" /></button>
@@ -378,6 +397,7 @@ function WelcomeComposer({
   actions,
   computeAvailable,
   fixedModelOptions,
+  modelOptions,
   localComputeStatus,
   onBrowse,
   onKeyDown,
@@ -390,6 +410,7 @@ function WelcomeComposer({
   actions: WelcomeStartActions
   computeAvailable: boolean
   fixedModelOptions: WelcomeModelOptions
+  modelOptions: WelcomeModelOptions
   localComputeStatus: ReturnType<typeof useLocalComputeActivation>['localComputeStatus']
   onBrowse: () => void
   onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void
@@ -421,6 +442,7 @@ function WelcomeComposer({
           actions={actions}
           computeAvailable={computeAvailable}
           fixedModelOptions={fixedModelOptions}
+          modelOptions={modelOptions}
           localComputeStatus={localComputeStatus}
           onOpenSettings={onOpenSettings}
           providers={providers}
@@ -492,7 +514,7 @@ export default function WelcomeView(): React.JSX.Element {
     startSessionWithPrompt,
     refreshProviders
   })
-  const { fixedModelOptions } = useWelcomeModelOptions(welcome, providers)
+  const { fixedModelOptions, modelOptions } = useWelcomeModelOptions(welcome, providers)
 
   const browse = async (): Promise<void> => {
     const dir = await window.agentDesk.pickDirectory()
@@ -513,10 +535,12 @@ export default function WelcomeView(): React.JSX.Element {
       <div className="welcome-stage">
         <div className="welcome-hero-inner">
           <h1 className="welcome-ask" data-welcome-heading="true">{t('welcomeAsk')}</h1>
+          <p className="welcome-ask-hint">{t('welcomeAskHint')}</p>
         <WelcomeComposer
           actions={actions}
           computeAvailable={computeAvailable}
           fixedModelOptions={fixedModelOptions}
+          modelOptions={modelOptions}
           localComputeStatus={localComputeStatus}
           onBrowse={() => void browse()}
           onKeyDown={onKeyDown}

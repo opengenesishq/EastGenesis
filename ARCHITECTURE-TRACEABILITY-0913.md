@@ -6,7 +6,7 @@
 
 2026-09-15 本轮更新：Recovery 组件行为回归 9/9、UI 派生报告失败回归 36/36、审计事件身份回归 8/8、Mission 生产存储/协调器回归 9/9 与本地规划 Session 注册表兼容回归 12/12 已取得本地报告。修改后的整机 Electron 点击、目录包和完整 `npm test` 正在重新验证；下表先前 UI/打包通过记录均仅作历史证据，不能替代本轮结果。
 
-2026-09-15 使用用户本轮授权的临时测试凭据取得有限真实 Provider 证据：`GET /v1/models` 返回 200、发现 34 个模型；`gpt-5.4-mini` 的 Chat 和 Responses 均返回 400，Responses 明确为 `model_not_found` / `unknown provider`；`gpt-5.6-luna` 的 Responses 返回 200，输出 `OK`，报告 `exactResponseMatched=true`。上游报告 usage 为输入 4391、输出 5、合计 4396 tokens，此数值不作为计费核验证据。总计 4 次请求，报告状态 `partial`；仅有一次成功生成，未覆盖 CaoGen 主流程、四岗位执行、failover、真人任务或发布。证据：`test-results/provider-connection-probe/latest.json`。
+2026-09-15 使用用户本轮授权的临时测试凭据取得有限真实 Provider 证据：`GET /v1/models` 返回 200、发现 34 个模型；`gpt-5.4-mini` 的 Chat 和 Responses 均返回 400，Responses 明确为 `model_not_found` / `unknown provider`；`gpt-5.6-luna` 的 Responses 返回 200，输出 `OK`，报告 `exactResponseMatched=true`。上游报告 usage 为输入 4391、输出 5、合计 4396 tokens，此数值不作为计费核验证据。总计 4 次请求，报告状态 `partial`；仅有一次成功生成，未覆盖 EastGenesis 主流程、四岗位执行、failover、真人任务或发布。证据：`test-results/provider-connection-probe/latest.json`。
 
 ## 交付链
 
@@ -43,7 +43,7 @@
 | PalaceScene manifest / Builder | `src/shared/palace-scene-manifest.ts` 提供声明式 schema/解析和纯运行时 resolver：元数据、Zone、Role/View/Action Binding 与 provenance；`src/main/task/palace-scene-builder.ts` 提供仅数据的编辑会话、layoutVersion、稳定摘要、JSON 导入/导出和历史回滚；`src/main/ipc/palace-scene-builder-handlers.ts` + preload 提供受控本地白名单；`src/renderer/src/components/studio/PalaceSceneBuilder.tsx` 提供声明式 Zone/Role/View/Action 编辑、导入/导出、回滚和显式 2D fallback/3D capability 运行预览；Action 仅允许既有 Workspace CommandId 并要求 Policy id；`resolvePalaceSceneRuntime` 在调用方未声明 3D 能力时生成确定性的 2D fallback projection，并以 `freshness/staleReason` 表示离线或事件延迟；执行代码和网络字段由严格未知字段/禁用键校验阻断；`scripts/palace-scene-packaged-runtime-required.mjs` 对源码与 `out/renderer` 的本地 GLB 和编译 bundle 做 47/47 解析及一致性检查 | `npm run test:palace-scene-manifest:required`、`npm run test:palace-scene-builder:required`、`npm run test:palace-scene-builder-ui:required`、`npm run test:palace-scene-builder:ipc:required`、`npm run test:palace-scene-runtime:required`、`npm run test:palace-scene-runtime-entry:required`、`npm run test:palace-scene-packaged-runtime:required`、各 `test-results/palace-scene-builder*` 报告、`test-results/palace-scene-runtime*.json`、`test-results/palace-scene-packaged-runtime/latest.json` | manifest 10/10、Builder 11/11、Builder UI 10/10、IPC 9/9、runtime fallback 14/14、runtime entry 7/7、packaged runtime 47/47 契约通过；runtime freshness 5/5；真实人工 3D 点击、视觉 fidelity、Provider/网络资产和发布签名未验收 |
 | 黄金用户任务 | `GOLDEN-USER-TASKS/manifest.json`、`scripts/golden-task-session-runner.mjs`、`scripts/golden-task-contract-required.mjs`、`scripts/golden-task-evidence-capture.mjs`、`src/renderer/src/components/studio/GoldenTasksPanel.tsx` | `npm run test:golden-tasks:required`、`npm run test:golden-tasks:session`、`npm run test:golden-task-entry:required`、`npm run test:golden-task-evidence-bridge:required`、`npm run golden-tasks:session -- list` | 契约通过；session runner 提供真实参与者的 list/start/status/mark/finish/cancel/report 入口，Studio 主持桥接可复制 report/status/finish 命令并下载脱敏生命周期状态；采集器提供跨进程 monotonic 计时、脱敏前后摘要和中间态隔离；真实五用户证据仍缺失，门禁保持 blocked |
 | 审计身份与门禁证据 | `workflow-ledger-maintenance.ts` 对需要脱敏的 eventId 使用稳定摘要，同步映射 causationId，避免多次 Recovery 导出碰撞且不关闭聚合校验；`scripts/lib/ui-evidence-gate.mjs` 在 child 启动前替换旧状态，验证本次 runId/时间/fixture 并将子报告保存在各 wrapper 目录的独立 `nested-<id>.json` | `npm run test:workflow-audit-identity:required`、`npm run test:ui-evidence-report:required`、`test-results/workflow-audit-identity/latest.json`、`test-results/ui-evidence-report/latest.json` | 本轮真实存储 fixture 8/8；三个 wrapper 的失败、旧报告拒绝及独立子报告保留回归 36/36；后者为 Node child stub，不是产品 UI 或 Provider 证据 |
-| 打包启动 | `scripts/packaged-preview-policy-required.mjs`、`scripts/packaged-preview-smoke-required.mjs`、`scripts/packaged-ui-click-required.mjs` | `npm run test:packaged-ui-click:required`、`node scripts/packaged-ui-click-required.mjs --artifact dist/mac/CaoGen.app`、`node scripts/packaged-preview-smoke-required.mjs --artifact dist/mac/CaoGen.app --launch` | 历史 preview/release policy、目录包 renderer 点击与启动 smoke 曾通过；本轮代码修改后的 x64 macOS unsigned 目录包及点击/启动 smoke 待重验；签名、公证、发布仍未验证，fixture 不调用 Provider |
+| 打包启动 | `scripts/packaged-preview-policy-required.mjs`、`scripts/packaged-preview-smoke-required.mjs`、`scripts/packaged-ui-click-required.mjs` | `npm run test:packaged-ui-click:required`、`node scripts/packaged-ui-click-required.mjs --artifact dist/mac/EastGenesis.app`、`node scripts/packaged-preview-smoke-required.mjs --artifact dist/mac/EastGenesis.app --launch` | 历史 preview/release policy、目录包 renderer 点击与启动 smoke 曾通过；本轮代码修改后的 x64 macOS unsigned 目录包及点击/启动 smoke 待重验；签名、公证、发布仍未验证，fixture 不调用 Provider |
 
 ## 实施顺序
 
@@ -54,7 +54,7 @@
 
 ## 当前不能宣称
 
-- CaoGen 主流程与四岗位真实 Provider 交付、生产可用性或外部发布；已有的单次 Responses 生成不关闭这些验收。
+- EastGenesis 主流程与四岗位真实 Provider 交付、生产可用性或外部发布；已有的单次 Responses 生成不关闭这些验收。
 - 五用户任务完成、满意度或成功率。
 - 签名、公证、下载地址或正式版本发布。
 - 真实 Provider 换路由、连接身份轮换或跨引擎压缩恢复已经完成。

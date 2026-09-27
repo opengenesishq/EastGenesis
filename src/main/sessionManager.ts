@@ -1944,9 +1944,10 @@ class SessionManager {
           if (this.dagFinalizationCoordinator.hasIncomplete(snapshot.sessionId) || snapshot.dagRuntimes?.some((runtime) => runtime.council)) {
             return reconcileExistingPersistedTaskSnapshot(reconciled.snapshot)
           }
+          if (await this.workflow.snapshotNeedsReadOnlyRecovery(reconciled.snapshot)) return reconciled.snapshot
           const persisted = await reconcileExistingPersistedTaskSnapshot(reconciled.snapshot)
           if (!persisted) return null
-          await this.workflow.bindSnapshot(persisted)
+          if (!await this.workflow.bindSnapshotForRecovery(persisted)) return persisted
           await deleteTaskSnapshot(snapshot.id, undefined, persisted.run)
           return null
         }

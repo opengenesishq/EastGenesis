@@ -139,7 +139,7 @@ async function saveStudioResult(
   const title = snapshot.workItems[0]?.title ?? snapshot.goal?.title ?? snapshot.workspace?.name ?? 'delivery'
   const result = await dialog.showSaveDialog(win, {
     title: '导出 EastGenesis 可移植交付包',
-    defaultPath: `caogen-delivery-${safeFileStem(title)}-${new Date(snapshot.generatedAt).toISOString().slice(0, 10)}.zip`,
+    defaultPath: `eastgenesis-delivery-${safeFileStem(title)}-${new Date(snapshot.generatedAt).toISOString().slice(0, 10)}.zip`,
     filters: [{ name: 'EastGenesis delivery package', extensions: ['zip'] }]
   })
   if (result.canceled || !result.filePath) return { canceled: true }

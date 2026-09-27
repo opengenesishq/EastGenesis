@@ -18,7 +18,7 @@ export async function run(root: string): Promise<void> {
   const server = createServer((_req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end(readFileSync(file)) })
   server.listen(0, '127.0.0.1'); await once(server, 'listening')
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
-  const win = new BrowserWindow({ show: true, title: 'CaoGen local browser style fixture', width: 700, height: 500, webPreferences: { sandbox: true, nodeIntegration: false, contextIsolation: true } })
+  const win = new BrowserWindow({ show: true, title: 'EastGenesis local browser style fixture', width: 700, height: 500, webPreferences: { sandbox: true, nodeIntegration: false, contextIsolation: true } })
   const task = 'style-fixture', notices: string[] = []
   let checks = 0
   const pass = (label: string): void => { checks++; console.log(`PASS ${checks}: ${label}`) }

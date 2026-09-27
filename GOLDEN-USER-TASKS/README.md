@@ -1,6 +1,6 @@
-# 五用户计时黄金任务契约
+# EastGenesis 五用户计时黄金任务契约
 
-本目录只定义 0913 重构方案要求的五个黄金场景和真实用户验收记录格式，不声称已经完成真实用户测试。五个场景来自 `CAOGEN-FLAGSHIP-RESTRUCTURE-2026-09-13.md`：代码变更、研究报告、Office 交付、长程维护、团队协作。
+本目录只定义 EastGenesis 0913 重构方案要求的五个黄金场景和真实用户验收记录格式，不声称已经完成真实用户测试。五个场景来自 `CAOGEN-FLAGSHIP-RESTRUCTURE-2026-09-13.md`：代码变更、研究报告、Office 交付、长程维护、团队协作。
 
 运行 `node scripts/golden-task-contract-required.mjs` 会校验契约，并读取 `evidence/*.json` 中已经由真实用户测试产生的脱敏记录。没有记录时，任务状态是 `blocked`，总体验收状态是 `partial`；脚本不会生成参与者、耗时、成功率或满意度数据来填空。
 
@@ -50,7 +50,7 @@ npm run golden-tasks:session -- status --session golden-<uuid>
 仓库提供的跨进程采集器使用系统 monotonic clock 计算耗时，并把会话中间态放在 `evidence/in-progress/`；中间态不会被黄金任务门禁当作证据。摘要必须先写入脱敏文本文件，采集器会拒绝凭据、邮箱和过长文本。runner 和采集器都要求显式 `--consent true`，参与者只能使用 `redacted-*` 标识。
 
 ```bash
-# 测试开始前：在 CaoGen 中打开实际构建，记录输入边界和版本
+# 测试开始前：在 EastGenesis 中打开实际构建，记录输入边界和版本
 npm run golden-tasks:session -- start \
   --task golden-code-change \
   --participant redacted-participant-001 \

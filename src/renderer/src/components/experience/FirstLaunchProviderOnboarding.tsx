@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Check, KeyRound, Sparkles, WandSparkles } from 'lucide-react'
 import { useStore } from '../../store'
+import ProviderEditor, { type ProviderEditorCloseResult } from '../ProviderEditor'
+import { AUTO_MODEL } from '../../../../shared/types'
 
 export const FIRST_LAUNCH_PROVIDER_ONBOARDING_STORAGE_KEY = 'caogen.first-launch-provider-onboarding.v1'
 
@@ -8,8 +10,10 @@ type OnboardingState = 'opened' | 'dismissed' | 'completed'
 
 function readState(): OnboardingState | null {
   if (typeof window === 'undefined') return null
-  const value = window.localStorage.getItem(FIRST_LAUNCH_PROVIDER_ONBOARDING_STORAGE_KEY)
-  return value === 'opened' || value === 'dismissed' || value === 'completed' ? value : null
+  try {
+    const value = window.localStorage.getItem(FIRST_LAUNCH_PROVIDER_ONBOARDING_STORAGE_KEY)
+    return value === 'opened' || value === 'dismissed' || value === 'completed' ? value : null
+  } catch { return null }
 }
 
 function writeState(value: OnboardingState): void {
@@ -20,26 +24,56 @@ export default function FirstLaunchProviderOnboarding(): React.JSX.Element | nul
   const providersLoaded = useStore((state) => state.providersLoaded)
   const providers = useStore((state) => state.providers)
   const sessionCount = useStore((state) => state.order.length)
-  const setShowSettings = useStore((state) => state.setShowSettings)
-  const [dismissed, setDismissed] = useState(() => readState() !== null)
+  const [dismissed, setDismissed] = useState(() => {
+    const state = readState()
+    return state === 'dismissed' || state === 'completed'
+  })
+  const [configuring, setConfiguring] = useState(false)
   const ready = providers.some((provider) => provider.ready && provider.models.length > 0)
 
   useEffect(() => {
-    if (ready && readState() !== 'completed') writeState('completed')
-  }, [ready])
+    if (ready && !configuring && readState() !== 'completed') writeState('completed')
+  }, [ready, configuring])
 
   // Existing installations should keep their current entry point. This gate
   // only appears on a genuinely empty first run, before a task is created.
-  if (!providersLoaded || ready || sessionCount > 0 || dismissed) return null
+  if (!providersLoaded || (ready && !configuring) || sessionCount > 0 || dismissed) return null
 
   const connect = (): void => {
     writeState('opened')
-    setDismissed(true)
-    setShowSettings(true, 'providers', 'first-launch-provider-onboarding')
+    setConfiguring(true)
   }
   const skip = (): void => {
     writeState('dismissed')
     setDismissed(true)
+  }
+
+  const closeSetup = (result: ProviderEditorCloseResult): void => {
+    if (result.reason === 'cancelled') {
+      setConfiguring(false)
+      return
+    }
+    if (!result.provider.ready || !result.provider.models.length) return
+    const state = useStore.getState()
+    state.updateWelcomeDraft({
+      computeSelectionSource: 'user',
+      providerId: result.provider.id,
+      model: state.welcomeDraft.routingMode === 'fixed' ? result.provider.models[0] : AUTO_MODEL
+    })
+    writeState('completed')
+    setConfiguring(false)
+    setDismissed(true)
+    requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('.welcome-composer-input')?.focus())
+  }
+
+  if (configuring) {
+    return (
+      <div className="first-launch-onboarding" role="dialog" aria-modal="true" aria-label="配置 EastGenesis 模型">
+        <section className="first-launch-onboarding-card first-launch-onboarding-setup">
+          <ProviderEditor provider={null} onClose={closeSetup} />
+        </section>
+      </div>
+    )
   }
 
   return (

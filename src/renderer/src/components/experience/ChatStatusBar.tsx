@@ -20,11 +20,35 @@ export default function ChatStatusBar({
       <span className={`status-dot status-${meta.status}`} />
       <span className="status-text">{t(sessionStatusKey(meta.status))}</span>
       {projection === 'assistant' ? (
-        <span className="status-item" data-assistant-runtime-status>{t('assistantAutoCompute')}</span>
+        <AssistantRuntimeStatus meta={meta} providerName={providerName} effectiveModel={session.effectiveModel} />
       ) : (
         <StudioRuntimeStatus meta={meta} providerName={providerName} effectiveModel={session.effectiveModel} />
       )}
     </footer>
+  )
+}
+
+function AssistantRuntimeStatus({
+  effectiveModel,
+  meta,
+  providerName
+}: {
+  effectiveModel?: string
+  meta: SessionMeta
+  providerName: string
+}): React.JSX.Element {
+  const t = useT()
+  const model = effectiveModel || meta.model || t('routingModeGlobalSummary')
+  return (
+    <>
+      <span className="status-item" data-assistant-runtime-status>{t('assistantAutoCompute')}</span>
+      <span className="status-item" data-assistant-runtime-provider>{t('provider')} {providerName}</span>
+      <span className="status-item" data-assistant-runtime-model>{t('model')} {model}</span>
+      <span className="status-spacer" />
+      <span className="status-item">{t('statusContext')} ~{formatTokens(meta.contextTokens)} tokens</span>
+      <span className="status-item">↑{formatTokens(meta.usage.input + meta.usage.cacheRead + meta.usage.cacheCreation)} ↓{formatTokens(meta.usage.output)}</span>
+      <span className="status-item status-cost" data-assistant-runtime-cost>{t('cost')} {formatCost(meta.costUsd)}</span>
+    </>
   )
 }
 

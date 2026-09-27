@@ -6,7 +6,7 @@ if "%~2"=="" goto :usage
 "%~dp0runtime\node.exe" "%~dp0FIX-000-PACKAGED-SMOKE.mjs" ^
   --assisted-install-only ^
   --owner-authorized ^
-  --artifact "%~dp0CaoGen-0.1.8-windows-x64-unsigned-preview.exe" ^
+  --artifact "%~dp0EastGenesis-0.1.8-windows-x64-unsigned-preview.exe" ^
   --descriptor "%~dp0FIX-000-D0.json" ^
   --evidence-dir "%~1" ^
   --planned-install-dir "%~2"

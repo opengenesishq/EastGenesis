@@ -14,7 +14,7 @@ export default function GitPreferences({ draft, onChange }: { draft: AppSettings
     <p className="desktop-preference-intro">{zh ? '分支前缀用于新建 Worktree。提交和 PR 文案会先填入可编辑草稿，提交时使用你确认的内容。' : 'The prefix applies to new worktrees. Commit and PR templates fill editable drafts before you submit them.'}</p>
     <label className="field-label" htmlFor="git-branch-prefix">{zh ? '新分支前缀' : 'New branch prefix'}</label>
     <input id="git-branch-prefix" className="input input-block" maxLength={80} value={value.branchPrefix} onChange={event => edit('branchPrefix', event.target.value)} />
-    <p className="settings-hint">{zh ? '例如 caogen → caogen/任务标识；现有分支保持原名称。' : 'For example: caogen → caogen/task-id. Existing branches keep their names.'}</p>
+    <p className="settings-hint">{zh ? '例如 eastgenesis → eastgenesis/任务标识；现有分支保持原名称。' : 'For example: eastgenesis → eastgenesis/task-id. Existing branches keep their names.'}</p>
     <p className="settings-hint">{zh ? '文案字段：{title} 任务标题、{branch} 当前分支、{baseBranch} 目标分支、{summary} 变更摘要。只替换文本。' : 'Template fields: {title}, {branch}, {baseBranch}, {summary}. Plain text substitution only.'}</p>
     {([
       ['commitTemplate', zh ? '提交文案模板（可留空）' : 'Commit template (optional)', 2_000, 3],

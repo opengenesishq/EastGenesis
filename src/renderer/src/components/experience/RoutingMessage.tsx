@@ -27,7 +27,7 @@ export function RoutingMessage({ item }: { item: RoutingItem }): React.JSX.Eleme
   const projection = useExperienceProjection()
   const t = useT()
   if (projection === 'assistant') {
-    return <AssistantRouteNotice text={t('assistantRoutingStatus')} kind="route" />
+    return <AssistantRouteNotice text={t('assistantRoutingStatus')} kind="route" item={item} />
   }
   return <StudioRoutingMessage item={item} />
 }
@@ -36,7 +36,7 @@ export function FailoverMessage({ item }: { item: FailoverItem }): React.JSX.Ele
   const projection = useExperienceProjection()
   const t = useT()
   if (projection === 'assistant') {
-    return <AssistantRouteNotice text={t('assistantFailoverStatus')} kind="failover" />
+    return <AssistantRouteNotice text={t('assistantFailoverStatus')} kind="failover" detail={`${item.fromName} → ${item.toName}${item.model ? ` · ${item.model}` : ''}：${item.reason}`} />
   }
   return (
     <div className="routing-note failover-note" title={t('failoverTitle')}>
@@ -56,7 +56,7 @@ export function ProviderKeyFailoverMessage({ item }: { item: KeyFailoverItem }):
   const projection = useExperienceProjection()
   const t = useT()
   if (projection === 'assistant') {
-    return <AssistantRouteNotice text={t('assistantFailoverStatus')} kind="key-failover" />
+    return <AssistantRouteNotice text={t('assistantFailoverStatus')} kind="key-failover" detail={`${item.providerName}：${item.fromKeyLabel} → ${item.toKeyLabel}；${item.reason}`} />
   }
   return (
     <div className="routing-note failover-note key-failover-note" title={t('keyFailoverTitle')}>
@@ -77,7 +77,7 @@ export function ProviderModelFailoverMessage({ item }: { item: ModelFailoverItem
   const projection = useExperienceProjection()
   const t = useT()
   if (projection === 'assistant') {
-    return <AssistantRouteNotice text={t('assistantFailoverStatus')} kind="model-failover" />
+    return <AssistantRouteNotice text={t('assistantFailoverStatus')} kind="model-failover" detail={`${item.providerName}：${item.fromModel} → ${item.toModel}；${item.reason}`} />
   }
   return (
     <div className="routing-note failover-note model-failover-note" title={t('modelFailoverTitle')}>
@@ -98,7 +98,7 @@ export function ProviderProtocolFailoverMessage({ item }: { item: ProtocolFailov
   const projection = useExperienceProjection()
   const t = useT()
   if (projection === 'assistant') {
-    return <AssistantRouteNotice text={t('assistantProtocolFailoverStatus')} kind="protocol-failover" />
+    return <AssistantRouteNotice text={t('assistantProtocolFailoverStatus')} kind="protocol-failover" detail={`${item.providerName} · ${item.model}；${item.reason}`} />
   }
   return (
     <div className="routing-note failover-note protocol-failover-note" title={t('protocolFailoverTitle')}>
@@ -139,11 +139,39 @@ export function ProviderRecoveryExhaustedMessage({ item }: { item: RecoveryExhau
   )
 }
 
-function AssistantRouteNotice({ text, kind }: { text: string; kind: string }): React.JSX.Element {
+function AssistantRouteNotice({
+  detail,
+  item,
+  kind,
+  text
+}: {
+  detail?: string
+  item?: RoutingItem
+  kind: string
+  text: string
+}): React.JSX.Element {
+  const t = useT()
+  const decision = item?.decision
+  const target = item ? `${item.providerName ?? item.providerId} · ${item.model}` : undefined
   return (
     <div className="routing-note assistant-routing-note" data-assistant-routing-status={kind}>
       <span className="routing-icon">*</span>
-      <span className="routing-text">{text}</span>
+      <div className="routing-content">
+        <span className="routing-text">{text}</span>
+        {(target || detail) && (
+          <details className="routing-details assistant-routing-details">
+            <summary>{target ?? t('routingDetails')}</summary>
+            {target && <div className="routing-summary"><strong>{target}</strong></div>}
+            {decision && <div className="routing-metrics">
+              <span>{t('routingStrategy')}</span><strong>{t(routingStrategyKey(decision.strategy))}</strong>
+              {decision.estimatedCostUsd !== undefined && <><span>{t('routingEstimate')}</span><strong>{formatCost(decision.estimatedCostUsd)}</strong></>}
+              {decision.remainingBudgetUsd !== undefined && <><span>{t('routingRemainingBudget')}</span><strong>{formatCost(decision.remainingBudgetUsd)}</strong></>}
+            </div>}
+            <div className="routing-reason">{detail ?? item?.reason}</div>
+            {decision?.selectedReasons && decision.selectedReasons.length > 0 && <div className="routing-reason-list">{decision.selectedReasons.map(reason => <span key={reason}>{reason}</span>)}</div>}
+          </details>
+        )}
+      </div>
     </div>
   )
 }

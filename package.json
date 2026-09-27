@@ -5,8 +5,7 @@
   "license": "AGPL-3.0-only",
   "author": {
     "name": "Chaoyu Zhang",
-    "email": "2900814034@qq.com",
-    "url": "https://www.caogen.dev"
+    "email": "2900814034@qq.com"
   },
   "description": "EastGenesis — 多会话并行、多厂商可调度的桌面 AI 工作台",
   "main": "./out/main/index.js",
@@ -15,7 +14,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
-    "test": "npm run test:baseline && npm run test:fixture && npm run test:fixture:runtime && npm run test:context-pack:required && npm run test:memory-management:required && npm run test:legacy-memory-import:required && npm run test:executor-compatibility:required && npm run test:native-executor-receipt:required && npm run test:provider-identity:required && npm run test:provider-onboarding:required && npm run test:provider-capability-health:required && npm run test:provider-integration:required && npm run test:provider-runtime:required && npm run test:native-recovery-route:required && npm run test:recovery-runtime:required && npm run test:task-effect-recovery:required && npm run test:workflow-audit-identity:required && npm run test:ui-evidence-report:required && npm run test:simple-workspace-ui:required && npm run test:plan-confirmation:required && npm run test:mission-compiler:required && npm run test:mission-task-plan-adapter:required && npm run test:mission-role:required && npm run test:task-plan-form-roundtrip:required && npm run test:mission-task-plan-production:required && npm run test:mission-execution-source:required && npm run test:local-plan-session:required && npm run test:work-inbox:required && npm run test:preparation-permission:required && npm run test:limited-file-execution:required && npm run test:task-execution-authority:required && npm run test:browser-research-source:required && npm run test:preparation-office:required && npm run test:office-local-revision:required && npm run test:preparation-portability:required && npm run test:submission-receipt-portability:required && npm run test:task-local-data-cleanup:required && npm run test:session-input:required && npm run test:project-institutions:required && npm run test:council-runtime:required && npm run test:route-observation:required && npm run test:goal-request-requirements:required && npm run test:work-os-navigation:required && npm run test:change-impact:required && npm run test:change-impact:transaction:required && npm run test:change-impact:report:required && npm run test:source-change-impact:required && npm run test:studio-result-file-changes:required && npm run test:studio-delivery-audit:required && npm run test:studio-result-rerun:required && npm run test:golden-tasks:evidence-harness && npm run test:golden-tasks:session && npm run test:golden-tasks:operational-report && npm run test:packaged-preview:required && npm run test:automatic-task-plan:required && npm run test:layered-memory-portability:required && npm run test:canonical-request-budget:required",
+    "test": "npm run test:baseline && npm run test:eastgenesis-branding:required && npm run test:updater-bridge:required && npm run test:updater-failure:required && npm run test:fixture && npm run test:fixture:runtime && npm run test:context-pack:required && npm run test:memory-management:required && npm run test:legacy-memory-import:required && npm run test:executor-compatibility:required && npm run test:native-executor-receipt:required && npm run test:provider-identity:required && npm run test:provider-onboarding:required && npm run test:provider-capability-health:required && npm run test:provider-integration:required && npm run test:provider-runtime:required && npm run test:native-recovery-route:required && npm run test:recovery-runtime:required && npm run test:task-effect-recovery:required && npm run test:workflow-audit-identity:required && npm run test:ui-evidence-report:required && npm run test:simple-workspace-ui:required && npm run test:plan-confirmation:required && npm run test:mission-compiler:required && npm run test:mission-task-plan-adapter:required && npm run test:mission-role:required && npm run test:task-plan-form-roundtrip:required && npm run test:mission-task-plan-production:required && npm run test:mission-execution-source:required && npm run test:local-plan-session:required && npm run test:work-inbox:required && npm run test:preparation-permission:required && npm run test:limited-file-execution:required && npm run test:task-execution-authority:required && npm run test:browser-research-source:required && npm run test:preparation-office:required && npm run test:office-local-revision:required && npm run test:preparation-portability:required && npm run test:submission-receipt-portability:required && npm run test:task-local-data-cleanup:required && npm run test:session-input:required && npm run test:project-institutions:required && npm run test:council-runtime:required && npm run test:route-observation:required && npm run test:goal-request-requirements:required && npm run test:work-os-navigation:required && npm run test:change-impact:required && npm run test:change-impact:transaction:required && npm run test:change-impact:report:required && npm run test:source-change-impact:required && npm run test:studio-result-file-changes:required && npm run test:studio-delivery-audit:required && npm run test:studio-result-rerun:required && npm run test:golden-tasks:evidence-harness && npm run test:golden-tasks:session && npm run test:golden-tasks:operational-report && npm run test:packaged-preview:required && npm run test:packaged-task-loopback:required && npm run test:packaged-failover-loopback:required && npm run test:task-snapshot-lease-recovery:required && npm run test:automatic-task-plan:required && npm run test:layered-memory-portability:required && npm run test:canonical-request-budget:required",
     "test:baseline": "node scripts/baseline-report.mjs",
     "test:fixture": "node scripts/product-launch-fixture-required.mjs",
     "test:fixture:runtime": "tsx scripts/product-launch-fixture-runtime.ts",
@@ -41,8 +40,14 @@
     "golden-tasks:evidence": "node scripts/golden-task-evidence-capture.mjs",
     "test:packaged-preview:policy": "node scripts/packaged-preview-policy-required.mjs",
     "test:packaged-preview:required": "npm run test:packaged-preview:policy && node scripts/packaged-preview-smoke-required.mjs --source-only",
-    "test:packaged-ui-click:required": "node scripts/packaged-ui-click-required.mjs --source",
+    "test:packaged-ui-click:required": "node scripts/packaged-ui-click-required.mjs",
+    "test:packaged-task-loopback:required": "node scripts/packaged-task-loopback-required.mjs",
+    "test:packaged-failover-loopback:required": "node scripts/packaged-failover-loopback-required.mjs",
+    "test:task-snapshot-lease-recovery:required": "node scripts/task-snapshot-lease-recovery-required.mjs",
     "test:simple-workspace-ui:required": "node scripts/simple-workspace-ui-required.mjs",
+    "test:eastgenesis-branding:required": "node scripts/eastgenesis-branding-required.mjs",
+    "test:updater-bridge:required": "node scripts/updater-bridge-required.mjs",
+    "test:updater-failure:required": "tsx scripts/updater-failure-required.ts",
     "test:plan-confirmation:ui:required": "node scripts/plan-confirmation-ui-required.mjs",
     "test:goal-contract:required": "node scripts/goal-contract-required.mjs",
     "test:plan-confirmation:required": "tsx scripts/plan-confirmation-contract-required.mjs",
@@ -54,8 +59,10 @@
     "dist:mac": "npm run build && npm run prepare:native-build && electron-builder --mac",
     "dist:mac:x64": "npm run build && npm run prepare:native-build -- --arch x64 && electron-builder --mac --x64",
     "dist:mac:unsigned:x64": "npm run dist:mac:x64",
-    "dist:mac:release:x64": "npm run release:mac:preflight:x64 && npm run build && npm run prepare:native-build -- --arch x64 && electron-builder --config electron-builder.release.cjs --mac --x64 --publish never && npm run test:macos-package-size:required -- --arch x64 && npm run test:macos-release-audit:required -- --arch x64 && npm run test:packaged-app:mac:x64",
-    "dist:mac:release:arm64": "npm run release:mac:preflight:arm64 && npm run build && npm run prepare:native-build -- --arch arm64 && electron-builder --config electron-builder.release.cjs --mac --arm64 && npm run test:macos-package-size:required -- --arch arm64 && npm run test:macos-release-audit:required -- --arch arm64 && npm run test:packaged-app:mac:arm64",
+    "release:mac:preflight:x64": "node scripts/release-preflight.mjs --platform mac --arch x64",
+    "release:mac:preflight:arm64": "node scripts/release-preflight.mjs --platform mac --arch arm64",
+    "dist:mac:release:x64": "npm run release:mac:preflight:x64 && npm run build && npm run prepare:native-build -- --arch x64 && electron-builder --config electron-builder.release.cjs --mac --x64 --publish never && npm run test:packaged-ui-click:required -- --artifact dist/mac/EastGenesis.app",
+    "dist:mac:release:arm64": "npm run release:mac:preflight:arm64 && npm run build && npm run prepare:native-build -- --arch arm64 && electron-builder --config electron-builder.release.cjs --mac --arm64 --publish never && npm run test:packaged-ui-click:required -- --artifact dist/mac-arm64/EastGenesis.app",
     "dist:win:release:x64": "npm run test:windows-release-config && npm run build && npm run prepare:native-build && electron-builder --config electron-builder.release.cjs --win --x64 && npm run test:windows-release-audit:required -- --arch x64 && npm run test:packaged-app:win:x64",
     "dist:win:preview:x64": "node scripts/clean-windows-preview-artifacts.mjs && npm run test:windows-preview-config && npm run build && npm run prepare:native-build && electron-builder --config electron-builder.windows-preview.cjs --win --x64 && npm run test:windows-preview-audit:d0 && npm run test:packaged-app:win:preview:d0",
     "dist:dir": "npm run build && npm run prepare:native-build && electron-builder --dir",
@@ -338,8 +345,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "ChaoYuZhang001",
-        "repo": "CaoGen"
+        "owner": "opengenesishq",
+        "repo": "EastGenesis"
       }
     ],
     "win": {
@@ -425,7 +432,7 @@
     "@types/ws": "^8.18.1",
     "@types/yauzl": "^2.10.3",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "41.10.3",
+    "electron": "^44.4.5",
     "electron-builder": "^26.15.3",
     "electron-vite": "^3.0.0",
     "highlight.js": "^11.11.1",

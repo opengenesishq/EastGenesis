@@ -7,9 +7,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Start with the user problem and the smallest useful outcome. CaoGen's long-term Agent Work OS vision is under construction; proposals must distinguish current behavior from roadmap goals.
+        Start with the user problem and the smallest useful outcome. EastGenesis's long-term Agent Work OS vision is under construction; proposals must distinguish current behavior from roadmap goals.
 
-        请从用户问题和最小可用结果开始。CaoGen 的 Agent Work OS 长期愿景仍在建设中，建议必须区分当前行为和路线图目标。
+        请从用户问题和最小可用结果开始。EastGenesis 的 Agent Work OS 长期愿景仍在建设中，建议必须区分当前行为和路线图目标。
 
   - type: textarea
     id: problem
@@ -23,7 +23,7 @@ body:
     id: current_behavior
     attributes:
       label: Current behavior / 当前行为
-      description: Describe what CaoGen can and cannot do today. / 描述 CaoGen 今天能做和不能做什么。
+      description: Describe what EastGenesis can and cannot do today. / 描述 EastGenesis 今天能做和不能做什么。
     validations:
       required: true
 

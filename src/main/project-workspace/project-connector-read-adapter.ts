@@ -104,7 +104,7 @@ async function readGitHub(
   const endpoint = new URL(`https://api.github.com/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repo)}/readme`)
   const response = await boundedFetch(endpoint, {
     Accept: 'application/vnd.github.raw+json',
-    'User-Agent': 'CaoGen-Project-Connector'
+    'User-Agent': 'EastGenesis-Project-Connector'
   }, options, credential)
   const source = `github://${repository.owner}/${repository.repo}/README`
   return createProjectConnectorReadResult(workspace, resource.id, {

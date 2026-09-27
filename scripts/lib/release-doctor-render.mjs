@@ -1,6 +1,6 @@
 export function renderReleaseDoctorMarkdown(value) {
   const lines = [
-    '# CaoGen Work OS Release Doctor',
+    '# EastGenesis Work OS Release Doctor',
     '',
     `Status: ${value.status}`,
     `Run ID: ${value.runId}`,

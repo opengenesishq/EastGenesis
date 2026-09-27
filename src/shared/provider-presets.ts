@@ -50,7 +50,7 @@ function preset(input: PresetInput): ProviderPreset {
  */
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   preset({
-    key: 'caogen-relay', label: 'CaoGen 中转站', vendor: 'CiYuan2API',
+    key: 'caogen-relay', label: 'EastGenesis 中转站', vendor: 'CiYuan2API',
     baseUrl: 'https://ciyuan2api.com', engine: 'openai', openaiProtocol: 'chat',
     category: 'gateway', region: 'china', apiKeyUrl: 'https://ciyuan2api.com/console/token',
     hint: '填写自己的 API Key，自动获取账户可用模型；地址与协议已预填。',

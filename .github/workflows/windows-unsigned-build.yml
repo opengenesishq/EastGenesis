@@ -1,4 +1,4 @@
-name: CaoGen Windows unsigned preview artifact
+name: EastGenesis Windows unsigned preview artifact
 
 run-name: Windows unsigned preview artifact only - ${{ github.sha }}
 
@@ -25,7 +25,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: caogen-windows-unsigned-${{ github.event.pull_request.number || github.ref }}
+  group: eastgenesis-windows-unsigned-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -73,18 +73,18 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path preview-artifacts | Out-Null
-          Copy-Item -LiteralPath "dist/CaoGen Setup ${{ steps.package.outputs.version }}.exe" -Destination "preview-artifacts/CaoGen-${{ steps.package.outputs.version }}-windows-x64-unsigned-preview.exe"
-          Copy-Item -LiteralPath "dist/CaoGen Setup ${{ steps.package.outputs.version }}.exe.blockmap" -Destination "preview-artifacts/CaoGen-${{ steps.package.outputs.version }}-windows-x64-unsigned-preview.exe.blockmap"
+          Copy-Item -LiteralPath "dist/EastGenesis Setup ${{ steps.package.outputs.version }}.exe" -Destination "preview-artifacts/EastGenesis-${{ steps.package.outputs.version }}-windows-x64-unsigned-preview.exe"
+          Copy-Item -LiteralPath "dist/EastGenesis Setup ${{ steps.package.outputs.version }}.exe.blockmap" -Destination "preview-artifacts/EastGenesis-${{ steps.package.outputs.version }}-windows-x64-unsigned-preview.exe.blockmap"
           "Unsigned preview for Actions-only testing. Do not upload these files or latest.yml to a formal GitHub Release." | Set-Content -Encoding utf8 preview-artifacts/UNSIGNED-PREVIEW-NOT-FOR-FORMAL-RELEASE.txt
       - name: Upload unsigned preview and evidence as an Actions artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: caogen-windows-x64-unsigned-preview-artifact-only-${{ github.sha }}
+          name: eastgenesis-windows-x64-unsigned-preview-artifact-only-${{ github.sha }}
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
           path: |
-            preview-artifacts/CaoGen-${{ steps.package.outputs.version }}-windows-x64-unsigned-preview.exe
-            preview-artifacts/CaoGen-${{ steps.package.outputs.version }}-windows-x64-unsigned-preview.exe.blockmap
+            preview-artifacts/EastGenesis-${{ steps.package.outputs.version }}-windows-x64-unsigned-preview.exe
+            preview-artifacts/EastGenesis-${{ steps.package.outputs.version }}-windows-x64-unsigned-preview.exe.blockmap
             preview-artifacts/UNSIGNED-PREVIEW-NOT-FOR-FORMAL-RELEASE.txt
             test-results/packaged-app-smoke/latest-windows-unsigned-x64.json

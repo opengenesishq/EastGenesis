@@ -1,43 +1,31 @@
 import { app } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import type { UpdaterEvent } from '../shared/updater-types'
+import { classifyUpdaterFailure } from './updater-error'
 
 /**
  * 自动更新骨架。
  *
  * 设计取舍:
- * - `electron-updater` 目前 **未** 列入 package.json 依赖,因此本模块 **不能** 静态
- *   `import`(否则 tsc / 打包会因缺模块而失败)。改为运行时 `require` 探测:装了才启用,
- *   没装则整个模块降级为 no-op,主进程照常启动。
+ * - `electron-updater` 已列入正式运行时依赖，但仍通过运行时 `require` 探测，
+ *   让开发环境和裁剪版预览包在缺少依赖时安全降级为 no-op。
  * - 安全:绝不静默下载安装包。查到新版本只 **通知**(emit `update:available` 事件 +
  *   触发系统气泡),下载与安装由用户在 UI 里显式确认后再调用 `downloadUpdate()`。
  *   这里用 autoUpdater.autoDownload = false 强制关闭自动下载。
  *
- * 如何真正启用自动更新:
- *   1) 安装依赖:  npm i -D electron-updater
- *      (electron-updater 是运行时依赖,但因为会被打进 app,通常按项目习惯放 dependencies;
- *       本项目 asar 打包,放 dependencies 更稳妥:  npm i electron-updater)
- *   2) 在 package.json 的 "build" 段加 publish 配置,例如 GitHub:
- *        "build": {
- *          "publish": [{ "provider": "github", "owner": "<org>", "repo": "<repo>" }]
- *        }
- *      或通用 S3 / 静态服务器:
- *        "publish": [{ "provider": "generic", "url": "https://example.com/caogen/" }]
- *      注:package.json 已内置该 generic publish 占位配置,其中的 URL
- *      (https://example.com/caogen/)为**占位符**,发版时须改成真实的更新分发地址。
- *   3) 发版时用 `electron-builder --publish always`(或 CI)上传 latest.yml + 安装包。
- *   4) 本模块探测到 electron-updater 后会自动接管,无需改调用点。
+ * 正式包启用自动更新需要:
+ *   1) 在 package.json 的 "build" 段配置真实 publish 目标。当前正式目标是
+ *      GitHub `opengenesishq/EastGenesis`；只有该仓库存在并且上传了
+ *      latest-mac.yml/安装包后，正式包才会有可用更新通道。若改用通用
+ *      S3 / 静态服务器，应把 provider/url 一起替换为真实分发地址，不要
+ *      把占位 URL 带进发布包。
+ *   2) 发版时用 `electron-builder --publish always`(或 CI)上传 latest.yml + 安装包。
+ *   3) 本模块探测到 electron-updater 后会自动接管,无需改调用点。
  */
 
 /** 更新事件:转发给渲染层用于展示"发现新版本 / 进度 / 报错"。 */
-export type UpdaterEvent =
-  | { kind: 'checking' }
-  | { kind: 'available'; version: string; releaseNotes?: string }
-  | { kind: 'not-available'; version: string }
-  | { kind: 'download-progress'; percent: number; transferred: number; total: number }
-  | { kind: 'downloaded'; version: string }
-  | { kind: 'error'; message: string }
-  | { kind: 'disabled'; reason: string }
+export type { UpdaterEvent } from '../shared/updater-types'
 
 type UpdaterListener = (event: UpdaterEvent) => void
 
@@ -125,24 +113,23 @@ export function initAutoUpdater(): void {
   autoUpdater.on('update-downloaded', (info: { version: string }) =>
     emit({ kind: 'downloaded', version: info.version })
   )
-  autoUpdater.on('error', (err: unknown) =>
-    emit({ kind: 'error', message: err instanceof Error ? err.message : String(err) })
-  )
+  autoUpdater.on('error', (err: unknown) => emitUpdaterFailure(err))
 
   // 只检查,不下载(autoDownload=false 保证)。
   void autoUpdater.checkForUpdates().catch((err: unknown) => {
-    emit({ kind: 'error', message: err instanceof Error ? err.message : String(err) })
+    emitUpdaterFailure(err)
   })
 }
 
 /** 手动触发一次检查(供 UI "检查更新" 按钮);未启用时 no-op 并回 false。 */
 export async function checkForUpdates(): Promise<boolean> {
+  if (!started) initAutoUpdater()
   if (!cachedAutoUpdater) return false
   try {
     await cachedAutoUpdater.checkForUpdates()
     return true
   } catch (err) {
-    emit({ kind: 'error', message: err instanceof Error ? err.message : String(err) })
+    emitUpdaterFailure(err)
     return false
   }
 }
@@ -152,12 +139,13 @@ export async function checkForUpdates(): Promise<boolean> {
  * 下载完成会 emit `downloaded`,UI 可再提供"重启并安装"入口调用 `quitAndInstall()`。
  */
 export async function downloadUpdate(): Promise<boolean> {
+  if (!started) initAutoUpdater()
   if (!cachedAutoUpdater) return false
   try {
     await cachedAutoUpdater.downloadUpdate()
     return true
   } catch (err) {
-    emit({ kind: 'error', message: err instanceof Error ? err.message : String(err) })
+    emitUpdaterFailure(err)
     return false
   }
 }
@@ -172,4 +160,14 @@ export function quitAndInstall(): void {
 function normalizeNotes(notes: unknown): string | undefined {
   if (typeof notes === 'string') return notes
   return undefined
+}
+
+/**
+ * A preview build can contain app-update.yml before the public repository or
+ * release feed exists. Treat that expected 404 as a disabled channel so the
+ * user sees a quiet status message instead of an intimidating stack trace.
+ * Other transport/authentication errors remain actionable error events.
+ */
+function emitUpdaterFailure(error: unknown): void {
+  emit(classifyUpdaterFailure(error))
 }

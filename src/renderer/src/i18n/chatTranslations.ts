@@ -34,6 +34,7 @@ export const CHAT_TRANSLATIONS = {
   unknownProvider: { zh: '未知 Provider', en: 'Unknown provider' },
   provider: { zh: '厂商', en: 'Provider' },
   model: { zh: '模型', en: 'Model' },
+  cost: { zh: '费用', en: 'Cost' },
   statusContext: { zh: '上下文', en: 'Context' },
   thinkingLive: { zh: '思考中…', en: 'Thinking…' },
   agentWorking: { zh: 'Agent 工作中…', en: 'Agent working…' }

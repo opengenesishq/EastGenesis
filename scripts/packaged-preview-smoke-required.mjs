@@ -7,7 +7,7 @@
  *
  * Examples:
  *   node scripts/packaged-preview-smoke-required.mjs --source-only
- *   node scripts/packaged-preview-smoke-required.mjs --artifact dist/mac/CaoGen.app
+ *   node scripts/packaged-preview-smoke-required.mjs --artifact dist/mac/EastGenesis.app
  */
 import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs'
@@ -96,11 +96,11 @@ function resolveArtifact() {
   const distDir = path.join(repoRoot, 'dist')
   if (existsSync(distDir)) {
     for (const candidate of [
-      path.join(distDir, 'mac', `${packageJson.productName || 'CaoGen'}.app`),
-      path.join(distDir, 'mac-arm64', `${packageJson.productName || 'CaoGen'}.app`),
-      path.join(distDir, 'mac-x64', `${packageJson.productName || 'CaoGen'}.app`),
-      path.join(distDir, 'win-unpacked', `${packageJson.productName || 'CaoGen'}.exe`),
-      path.join(distDir, 'linux-unpacked', packageJson.productName || 'CaoGen')
+      path.join(distDir, 'mac', `${packageJson.productName || 'EastGenesis'}.app`),
+      path.join(distDir, 'mac-arm64', `${packageJson.productName || 'EastGenesis'}.app`),
+      path.join(distDir, 'mac-x64', `${packageJson.productName || 'EastGenesis'}.app`),
+      path.join(distDir, 'win-unpacked', `${packageJson.productName || 'EastGenesis'}.exe`),
+      path.join(distDir, 'linux-unpacked', packageJson.productName || 'EastGenesis')
     ]) candidates.push(candidate)
     const names = safeReadDir(distDir)
     for (const name of names) {
@@ -127,10 +127,10 @@ function classifyArtifact(artifactPath) {
   if (stat.isDirectory() && /\.app$/i.test(basename)) return { kind: 'mac-app', path: artifactPath, launchable: true }
   if (stat.isDirectory() && /-unpacked$/i.test(basename)) {
     const executable = process.platform === 'win32'
-      ? path.join(artifactPath, `${packageJson.productName || 'CaoGen'}.exe`)
+      ? path.join(artifactPath, `${packageJson.productName || 'EastGenesis'}.exe`)
       : process.platform === 'darwin'
-        ? path.join(artifactPath, `${packageJson.productName || 'CaoGen'}.app`, 'Contents', 'MacOS', packageJson.productName || 'CaoGen')
-        : path.join(artifactPath, packageJson.productName || 'CaoGen')
+        ? path.join(artifactPath, `${packageJson.productName || 'EastGenesis'}.app`, 'Contents', 'MacOS', packageJson.productName || 'EastGenesis')
+        : path.join(artifactPath, packageJson.productName || 'EastGenesis')
     return { kind: 'unpacked-directory', path: artifactPath, executable, launchable: existsSync(executable) }
   }
   if (/\.exe$/i.test(basename)) return { kind: 'windows-installer-or-executable', path: artifactPath, launchable: false }
@@ -147,7 +147,7 @@ function assertPreviewArtifactIdentity(artifact) {
 }
 
 function appExecutable(artifact) {
-  if (artifact.kind === 'mac-app') return path.join(artifact.path, 'Contents', 'MacOS', packageJson.productName || 'CaoGen')
+  if (artifact.kind === 'mac-app') return path.join(artifact.path, 'Contents', 'MacOS', packageJson.productName || 'EastGenesis')
   return artifact.executable
 }
 

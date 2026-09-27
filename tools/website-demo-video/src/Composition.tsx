@@ -75,7 +75,7 @@ const SCENES: SceneData[] = [
     id: "outro",
     from: 27 * FPS,
     duration: 3 * FPS,
-    step: "CAOGEN / 30 SEC",
+    step: "EASTGENESIS / 30 SEC",
     title: "你的 AI 工作桌面",
     description: "OpenAI-compatible + 原生 Anthropic Messages · BYOK",
     accent: "#fb923c",
@@ -205,7 +205,7 @@ const ScreenFrame: React.FC<{ scene: SceneData; opacity: number; offset: number 
             letterSpacing: 0,
           }}
         >
-          CaoGen · live product evidence
+          EastGenesis · live product evidence
         </span>
       </div>
       <Img
@@ -290,7 +290,7 @@ const Outro: React.FC<{ scene: SceneData; opacity: number; offset: number }> = (
         lineHeight: 1,
       }}
     >
-      CaoGen
+      EastGenesis
     </div>
     <div
       style={{
@@ -326,7 +326,7 @@ const Outro: React.FC<{ scene: SceneData; opacity: number; offset: number }> = (
         letterSpacing: 0,
       }}
     >
-      caogen.dev · macOS Intel x64 v0.1.7
+      EastGenesis Desktop · macOS Intel x64 preview
     </div>
   </AbsoluteFill>
 );
@@ -350,7 +350,7 @@ const BrandBar: React.FC<{ frame: number }> = ({ frame }) => {
     >
       <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
         <Img src={staticFile("caogen-icon.png")} style={{ width: 32, height: 32, borderRadius: 9 }} />
-        <span style={{ color: "#f8fafc", fontSize: 19, fontWeight: 720, letterSpacing: 0 }}>CaoGen</span>
+        <span style={{ color: "#f8fafc", fontSize: 19, fontWeight: 720, letterSpacing: 0 }}>EastGenesis</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
         {SCENES.map((scene, index) => (
@@ -457,7 +457,7 @@ export const DemoVideo: React.FC = () => {
 
 export const VideoComposition: React.FC = () => (
   <Composition
-    id="CaoGenWebsiteDemo"
+    id="EastGenesisWebsiteDemo"
     component={DemoVideo}
     durationInFrames={30 * FPS}
     fps={FPS}

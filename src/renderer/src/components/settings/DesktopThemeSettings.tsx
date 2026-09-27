@@ -40,7 +40,7 @@ export default function DesktopThemeSettings({ value, language, onChange }: {
   const download = (): void => {
     const text = exportJson(); if (!text) return
     const url = URL.createObjectURL(new Blob([text], { type: 'application/json' })), anchor = document.createElement('a')
-    anchor.href = url; anchor.download = 'caogen-theme.json'; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1_000)
+    anchor.href = url; anchor.download = 'eastgenesis-theme.json'; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1_000)
   }
   const resolved = { ...DEFAULT_DESKTOP_PALETTES[mode], ...colors[mode] }
   const tokens = desktopThemeTokens(mode, colors[mode])
@@ -61,7 +61,7 @@ export default function DesktopThemeSettings({ value, language, onChange }: {
     {preview && !validation && <p className="settings-hint" role="status">{zh ? '正在临时预览；离开此页即恢复已保存主题。' : 'Temporary preview. Leaving this page restores the saved theme.'}</p>}
     <details className="theme-sharing" open={showJson} onToggle={event => setShowJson(event.currentTarget.open)}><summary>{zh ? '导入与分享主题 JSON' : 'Import and share theme JSON'}</summary>
       <p className="settings-hint">{zh ? '主题只包含颜色。个人资料、自定义指令和连接配置不会导出。' : 'Themes contain colors only. Profile details, instructions and connection settings are excluded.'}</p>
-      <textarea className="input input-block" rows={8} aria-label={zh ? '主题 JSON' : 'Theme JSON'} maxLength={DESKTOP_THEME_JSON_MAX_LENGTH} value={json} onChange={event => { importRevision.current++; setJson(event.target.value); setError('') }} placeholder={'{ "format": "caogen-theme", "version": 1, "colors": { "light": {}, "dark": {} } }'} />
+      <textarea className="input input-block" rows={8} aria-label={zh ? '主题 JSON' : 'Theme JSON'} maxLength={DESKTOP_THEME_JSON_MAX_LENGTH} value={json} onChange={event => { importRevision.current++; setJson(event.target.value); setError('') }} placeholder={zh ? '粘贴 EastGenesis 主题 JSON（v1）' : 'Paste EastGenesis theme JSON (v1)'} />
       <input hidden ref={picker} type="file" accept=".json,application/json" onChange={event => {
         const file = event.target.files?.[0]; event.target.value = ''; if (!file) return
         const revision = ++importRevision.current

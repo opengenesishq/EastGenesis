@@ -239,29 +239,29 @@ export function releasePlatformArtifactEvidence(repoRoot, version, target) {
 export function releasePlatformArtifactNames(version, target) {
   if (target === 'macos-x64') {
     return [
-      `CaoGen-${version}.dmg`,
-      `CaoGen-${version}.dmg.blockmap`,
-      `CaoGen-${version}-mac.zip`,
-      `CaoGen-${version}-mac.zip.blockmap`
+      `EastGenesis-${version}.dmg`,
+      `EastGenesis-${version}.dmg.blockmap`,
+      `EastGenesis-${version}-mac.zip`,
+      `EastGenesis-${version}-mac.zip.blockmap`
     ]
   }
   if (target === 'macos-arm64') {
     return [
-      `CaoGen-${version}-arm64.dmg`,
-      `CaoGen-${version}-arm64.dmg.blockmap`,
-      `CaoGen-${version}-arm64-mac.zip`,
-      `CaoGen-${version}-arm64-mac.zip.blockmap`
+      `EastGenesis-${version}-arm64.dmg`,
+      `EastGenesis-${version}-arm64.dmg.blockmap`,
+      `EastGenesis-${version}-arm64-mac.zip`,
+      `EastGenesis-${version}-arm64-mac.zip.blockmap`
     ]
   }
   if (target === 'windows-x64') {
     return [
-      `CaoGen Setup ${version}.exe`,
-      `CaoGen Setup ${version}.exe.blockmap`,
+      `EastGenesis Setup ${version}.exe`,
+      `EastGenesis Setup ${version}.exe.blockmap`,
       'latest.yml'
     ]
   }
   if (target === 'windows-preview-x64') {
-    return [`CaoGen-${version}-windows-x64-unsigned-preview.exe`]
+    return [`EastGenesis-${version}-windows-x64-unsigned-preview.exe`]
   }
   return []
 }

@@ -53,8 +53,8 @@ for (const target of targets) {
   copyEvidence(target.id, target.launch)
 }
 copyRequired(
-  path.join(inputRoot, 'macos-x64', 'dist', 'mac', 'CaoGen.app', 'Contents', 'Resources', 'app.asar'),
-  path.join(distDir, 'mac', 'CaoGen.app', 'Contents', 'Resources', 'app.asar'),
+  path.join(inputRoot, 'macos-x64', 'dist', 'mac', 'EastGenesis.app', 'Contents', 'Resources', 'app.asar'),
+  path.join(distDir, 'mac', 'EastGenesis.app', 'Contents', 'Resources', 'app.asar'),
   'macos-x64:app.asar'
 )
 copyEvidence('macos-x64', 'caogen-deep/latest.json')

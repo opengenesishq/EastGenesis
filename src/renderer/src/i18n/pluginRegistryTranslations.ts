@@ -40,8 +40,8 @@ export const PLUGIN_REGISTRY_TRANSLATIONS = {
   pluginRegistrySummary: { zh: '摘要', en: 'Summary' },
   pluginRegistryInstall: { zh: '安装插件', en: 'Install plugin' },
   pluginRegistryInstallHint: {
-    zh: '从本地目录安装（复制到 ~/.caogen/plugins）；市场分发不在本版范围。',
-    en: 'Install from a local directory by copying into ~/.caogen/plugins. Marketplace distribution is not included.'
+    zh: '从本地目录安装到 EastGenesis 扩展目录；旧版目录会继续兼容，市场分发不在本版范围。',
+    en: 'Install from a local directory into the EastGenesis extension directory. Legacy directories remain compatible; marketplace distribution is not included.'
   },
   pluginRegistryProbeMcp: { zh: '探测 MCP 连接', en: 'Probe MCP connections' },
   pluginRegistryProbingMcp: { zh: '探测中…', en: 'Probing…' },
@@ -84,8 +84,8 @@ export const PLUGIN_REGISTRY_TRANSLATIONS = {
   pluginRegistryManifest: { zh: 'Manifest', en: 'Manifest' },
   pluginRegistryUninstall: { zh: '卸载（回收站）', en: 'Uninstall to Trash' },
   pluginRegistryUninstallHint: {
-    zh: '移入 ~/.caogen/plugins/.trash 回收站，可手工恢复。',
-    en: 'Move to ~/.caogen/plugins/.trash so it can be restored manually.'
+    zh: '移入 EastGenesis 扩展目录的回收站，可手工恢复。',
+    en: 'Move to the EastGenesis extension directory trash so it can be restored manually.'
   },
   pluginRegistryUninstallConfirm: {
     zh: '卸载 {name}？它将移入回收站，仍可恢复。',

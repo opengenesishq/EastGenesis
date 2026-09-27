@@ -56,7 +56,7 @@ async function saveAuthorityExport(event: IpcMainInvokeEvent) {
   const window = BrowserWindow.fromWebContents(event.sender) ?? BrowserWindow.getAllWindows()[0]
   const result = await dialog.showSaveDialog(window, {
     title: '导出数据保留策略与 Legal Hold 审计',
-    defaultPath: `caogen-data-retention-${new Date(exported.exportedAt).toISOString().slice(0, 10)}.json`,
+    defaultPath: `eastgenesis-data-retention-${new Date(exported.exportedAt).toISOString().slice(0, 10)}.json`,
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })
   if (result.canceled || !result.filePath) return { canceled: true }

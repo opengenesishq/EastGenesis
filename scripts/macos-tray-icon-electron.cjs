@@ -18,7 +18,7 @@ void app.whenReady().then(() => {
     throw new Error('macOS tray icon did not retain template-image mode')
   }
   const tray = new Tray(image)
-  tray.setToolTip('CaoGen tray icon smoke')
+  tray.setToolTip('EastGenesis tray icon smoke')
   setTimeout(() => {
     const bounds = tray.getBounds()
     if (bounds.height <= 0 || bounds.height > 30) {

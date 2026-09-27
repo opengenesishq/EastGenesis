@@ -1358,7 +1358,12 @@ async function seedCanonicalRun(workspaceApi, workspaceCommands, snapshotApi) {
     projectId,
     title: 'Produce verified Office deliverables',
     objective: 'Generate Word, Excel, PowerPoint, and PDF through the canonical delivery chain',
-    status: 'verifying'
+    status: 'verifying',
+    acceptance: [{
+      id: 'goal-office-delivery',
+      criterion: 'The Office deliverables are generated through the canonical delivery chain.',
+      required: true
+    }]
   })
   let workItem = await commands.createWorkItem({
     id: workItemId,
@@ -1366,7 +1371,12 @@ async function seedCanonicalRun(workspaceApi, workspaceCommands, snapshotApi) {
     goalId,
     title: 'Generate Office deliverables',
     type: 'delivery',
-    status: 'verifying'
+    status: 'verifying',
+    acceptanceSpec: [{
+      id: 'goal-office-delivery',
+      criterion: 'The Office deliverables are generated through the canonical delivery chain.',
+      required: true
+    }]
   })
   const run = {
     schemaVersion: 1,
@@ -1439,9 +1449,9 @@ function officeSpecifications() {
       mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       input: {
         path: 'deliverables/caogen-brief.docx',
-        title: 'CaoGen Office Delivery',
+        title: 'EastGenesis Office Delivery',
         headings: ['Verified output'],
-        paragraphs: ['This Word document was produced through a confirmed CaoGen Effect.'],
+        paragraphs: ['This Word document was produced through a confirmed EastGenesis Effect.'],
         source_refs: ['inputs/source.md']
       }
     },
@@ -1451,7 +1461,7 @@ function officeSpecifications() {
       mediaType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       input: {
         path: 'deliverables/caogen-metrics.xlsx',
-        title: 'CaoGen Metrics',
+        title: 'EastGenesis Metrics',
         sheets: [{
           name: 'Metrics',
           rows: [
@@ -1469,7 +1479,7 @@ function officeSpecifications() {
       mediaType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
       input: {
         path: 'deliverables/caogen-overview.pptx',
-        title: 'CaoGen Overview',
+        title: 'EastGenesis Overview',
         slides: [{
           title: 'Verified Agent Work OS',
           body: 'A vendor-neutral delivery chain.',
@@ -1484,7 +1494,7 @@ function officeSpecifications() {
       mediaType: 'application/pdf',
       input: {
         path: 'deliverables/caogen-summary.pdf',
-        title: 'CaoGen 可验证交付',
+        title: 'EastGenesis 可验证交付',
         sections: [{
           heading: '运行来源',
           paragraphs: ['该 PDF 使用当前 canonical Run 与 Effect 作为来源链，不依赖外部 source_refs。']
@@ -1550,7 +1560,7 @@ async function verifyFormatCanBeParsed(specification, filePath) {
     assertEqual(sheet.views[0]?.state, 'frozen', 'generated XLSX frozen header row')
     assertEqual(sheet.views[0]?.ySplit, 1, 'generated XLSX frozen row count')
     assertEqual(sheet.views[0]?.showGridLines, false, 'generated XLSX explicit visual structure')
-    assert(sheet.headerFooter.oddHeader.includes('CaoGen Metrics'), 'generated XLSX printable title')
+    assert(sheet.headerFooter.oddHeader.includes('EastGenesis Metrics'), 'generated XLSX printable title')
     assertEqual(sheet.getRow(1).font.bold, true, 'generated XLSX header emphasis')
     const formula = sheet.getCell('B3').value
     assert(formula && typeof formula === 'object' && formula.formula === 'SUM(B2:B2)', 'generated XLSX formula')
@@ -1570,7 +1580,7 @@ async function verifyFormatCanBeParsed(specification, filePath) {
   const part = archive.file(requiredPart)
   assert(part, `generated ${specification.kind} must contain ${requiredPart}`)
   const xml = await part.async('string')
-  assert(xml.includes(specification.kind === 'document' ? 'CaoGen Office Delivery' : 'presentation'),
+  assert(xml.includes(specification.kind === 'document' ? 'EastGenesis Office Delivery' : 'presentation'),
     `generated ${specification.kind} primary OOXML part must be readable`)
   if (specification.kind === 'presentation') {
     const slide = archive.file('ppt/slides/slide1.xml')
@@ -1666,12 +1676,14 @@ function compileSources() {
     'src/main/task/workflow-ledger-api.ts',
     'src/main/task/workflow-stage-handoff.ts',
     '--outDir', outDir,
-    '--target', 'ES2022',
-    '--module', 'NodeNext',
-    '--moduleResolution', 'NodeNext',
+    '--target', 'ES2023',
+    '--module', 'CommonJS',
+    '--moduleResolution', 'Node',
+    '--lib', 'ES2023',
     '--types', 'node',
     '--skipLibCheck',
     '--esModuleInterop',
+    '--resolveJsonModule',
     '--strict'
   ], { cwd: repoRoot, stdio: 'inherit' })
 }
@@ -1679,8 +1691,8 @@ function compileSources() {
 function installElectronStub() {
   const electronDir = path.join(outDir, 'node_modules', 'electron')
   mkdirSync(electronDir, { recursive: true })
-  writeFileSync(path.join(electronDir, 'index.js'), `export const app = { getPath: () => ${JSON.stringify(userData)} }\n`)
-  writeFileSync(path.join(electronDir, 'package.json'), '{"type":"module"}\n')
+  writeFileSync(path.join(electronDir, 'index.js'), `module.exports = { app: { getPath: () => ${JSON.stringify(userData)} } }\n`)
+  writeFileSync(path.join(electronDir, 'package.json'), '{"type":"commonjs"}\n')
 }
 
 async function importCompiled(suffix) {

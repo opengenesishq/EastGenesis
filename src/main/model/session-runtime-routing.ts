@@ -10,7 +10,7 @@ import { ModelRouteError } from './model-route-error'
 import { resolveProviderRuntimeTarget } from '../provider/providerRuntimeTarget'
 import { applyBusinessLineCreationPolicy, filterBusinessLineModels } from '../business-line-execution-policy'
 import { nativeBudgetSnapshot } from './native-request-budget'
-import { buildModelProfiles } from './model-profile'
+import { buildModelProfiles, inferTaskProfile } from './model-profile'
 import { captureSessionRouting } from '../routing-service/session-routing-capture'
 import { evaluateRoutingRuleSet } from './routing-policy/routing-policy-evaluator'
 import { readStoredRoutingState } from '../routing-settings/routing-settings-state'
@@ -42,13 +42,20 @@ export function resolveRuntimeSessionRoute(input: {
   const expectedEngine = normalizeSessionExecutorEngine(meta.executorEngine) ?? (input.allowAnyEngine ? undefined : meta.engine)
   if (meta.model !== AUTO_MODEL) return validateFixedBusinessLineModel(meta, payload, scopedProviders, businessLine, expectedEngine)
   if (meta.routingScope === 'fixed') throw new ModelRouteError('ROUTING_MANUAL_TARGET_UNAVAILABLE', '固定模型模式必须指定具体模型。')
+  const attachments = payload.images?.map((image) => ({ mime: image.mime }))
+  // A plain first-run prompt only needs text generation. Tool capability is
+  // inferred from the prompt (or required by the business line) so a freshly
+  // discovered model can answer immediately; file/code tasks still remain
+  // gated on an explicit tool-capable model.
+  const requiresTools = Boolean(businessLine?.requiredCapabilities?.includes('tools')) ||
+    inferTaskProfile({ prompt: payload.text, attachments }).requiresTools
   // Incompatible executors must be excluded before ranking, so a healthy
   // compatible candidate remains selectable rather than failing after choice.
   const providers = scopedProviders.map((provider) => {
     const profiles = buildModelProfiles({ providerId: provider.id, providerName: provider.name,
       models: provider.models, modelProfiles: provider.advancedConfig?.modelProfiles, engine: provider.engine })
     const models = profiles.filter((profile) => evaluateNativeExecutorCompatibility({ provider, profile, expectedEngine,
-      requirements: { requiresTools: true, requiresVision: Boolean(payload.images?.length) || businessLine?.requiredCapabilities?.includes('vision') }
+      requirements: { requiresTools, requiresVision: Boolean(payload.images?.length) || businessLine?.requiredCapabilities?.includes('vision') }
     }).compatible).map((profile) => profile.model)
     return { ...provider, models }
   }).filter((provider) => provider.models.length > 0)
@@ -68,6 +75,7 @@ export function resolveRuntimeSessionRoute(input: {
     // Runtime instances own protocol-specific replay state; cross-engine switching requires a new instance.
     allowAnyEngine: input.allowAnyEngine === true,
     driveMode: meta.driveMode, payload, businessLineStrategy: businessLine?.routingPreference,
+    requiresTools,
     sessionCostUsd: budget.sessionSpentUsd, sessionBudgetUsd: meta.budgetUsd,
     estimatedContextTokens: meta.contextTokens,
     monthlyBudgetRemainingUsd: sharedRemaining.length ? Math.min(...sharedRemaining) : undefined, projectPath: meta.sourceCwd ?? meta.cwd

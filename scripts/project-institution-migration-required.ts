@@ -294,7 +294,7 @@ async function main() {
       ]) await assert.rejects(workspace.previewInstitutionMigration(projectId,
         { scope: 'future_goals', target: DEFAULT_PROJECT_INSTITUTION_TEMPLATE, roleMappings }), /无效|重复|不允许/)
     })
-    await check('palace institutions use durable task generations and approved canonical assignments', async () => {
+    await check('historical task context and execution retain their original template generation', async () => {
       const state = await workspace.getState()
       const persisted = readFileSync(workspace.filePath, 'utf8')
       const defaultRoles = projectInstitutionTemplate(DEFAULT_PROJECT_INSTITUTION_TEMPLATE).roles
@@ -311,21 +311,23 @@ async function main() {
         const plan = plans.get(task.meta.id)
         for (const step of plan.currentVersion!.steps.filter(step => step.institution)) {
           const receipt = plan.projection!.steps.find(receipt => receipt.stepId === step.id)!
-          assert.ok(institutionWorkItems(step.institution!.id, records, [plan]).some(item => item.id === receipt.workItemId))
-          const spoofed = structuredClone(plan)
-          for (const event of spoofed.approvalEvents) if (event.projection) event.projection.workspaceId = 'unrelated-project'
-          const projected = institutionWorkItems(step.institution!.id, records.map(item => ({ ...item, role: undefined })), [spoofed])
-          assert.equal(projected.length, 0)
+          const record = records.find(item => item.id === receipt.workItemId)
+          assert.ok(record, 'approved child remains in the original Goal')
+          assert.equal(record.projectId, projectId)
+          assert.equal(record.goalId, task.goal.id)
+          const dag = approvedTaskPlanToDag(task.meta.id, plan.currentVersion!, plan.projection)
+          const execution = dag.tasks.find(entry => entry.id === step.id)
+          assert.equal(execution?.workItemId, receipt.workItemId)
+          assert.ok(execution?.prompt.includes(step.institution!.id), 'execution retains the recorded responsibility')
         }
       }
       const legacyRoles = projectInstitutionTemplate(LEGACY_PROJECT_INSTITUTION_TEMPLATE).roles
       assert(legacyRoles.some(role => role.id === 'xichang'))
-      assert.equal(new Set(['my-three-departments', 'xichang']).size, 2)
       assert.throws(() => projectInstitutionContext(state, { projectId, goalId: first.goal.id, workItemId: second.parent.id }), /归属/)
       assert.throws(() => projectInstitutionContext(state, { projectId, workItemId: 'missing-task' }), /归属/)
       assert.equal(projectInstitutionContext(state, { projectId, workItemId: first.parent.id }).goalId, first.goal.id)
       assert.equal(projectInstitutionContext(state, { projectId }).goalId, undefined)
-      assert.equal(readFileSync(workspace.filePath, 'utf8'), persisted, 'scene read wrote a migration')
+      assert.equal(readFileSync(workspace.filePath, 'utf8'), persisted, 'historical context read wrote a migration')
     })
     await check('historical template retention does not bypass actual resource or Goal changes', async () => {
       const current = (await workspace.getWorkspace(projectId))!
@@ -350,21 +352,4 @@ async function main() {
   }
 }
 
-function institutionWorkItems(roleId: string, items: readonly import('../src/shared/types').WorkItem[], plans: readonly import('../src/shared/types').TaskPlanStateView[]) {
-  const institutions = new Map<string, string>()
-  for (const plan of plans) {
-    for (const event of plan.approvalEvents) {
-      if (event.kind !== 'approved' || event.projection?.mode !== 'canonical') continue
-      const version = plan.versions.find((entry) => entry.version === event.version && entry.digest === event.digest)
-      if (!version?.institutionTemplate || version.binding.sessionId !== plan.sessionId || event.sessionId !== plan.sessionId ||
-        version.binding.workspaceId !== event.projection.workspaceId || version.binding.goalId !== event.projection.goalId) continue
-      for (const receipt of event.projection.steps) {
-        const institution = version.steps.find((step) => step.id === receipt.stepId)?.institution
-        if (institution) institutions.set(JSON.stringify([event.projection.workspaceId, event.projection.goalId, receipt.workItemId]), institution.id)
-      }
-    }
-  }
-  return items.filter((item) => roleId === 'all' || (institutions.get(JSON.stringify([item.projectId, item.goalId, item.id])) ?? item.role) === roleId)
-    .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
-}
 main().catch(error => { console.error(error); process.exitCode = 1 })

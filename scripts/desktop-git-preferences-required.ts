@@ -4,7 +4,7 @@ import { normalizeDesktopGitPreferences, expandGitTextTemplate, normalizeGitBran
 let passed = 0
 function check(name: string, run: () => void): void { run(); passed++; console.log(`PASS ${name}`) }
 check('Branch defaults preserve existing convention and accepted prefixes are valid Git refs', () => {
-  assert.equal(normalizeDesktopGitPreferences(undefined).branchPrefix, 'caogen')
+  assert.equal(normalizeDesktopGitPreferences(undefined).branchPrefix, 'eastgenesis')
   for (const input of ['caogen', 'team/feature', 'codex/', '任务']) {
     const prefix = normalizeGitBranchPrefix(input)
     execFileSync('git', ['check-ref-format', '--branch', `${prefix}/sample`], { stdio: 'pipe' })

@@ -1,5 +1,5 @@
 name: Bug report / Bug 报告
-description: Report a reproducible problem in a currently available CaoGen capability / 报告当前可用能力中的可复现问题
+description: Report a reproducible problem in a currently available EastGenesis capability / 报告当前可用能力中的可复现问题
 title: "[Bug]: "
 labels:
   - bug
@@ -7,14 +7,14 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve CaoGen. Security vulnerabilities and leaked credentials must be reported privately through SECURITY.md, not here.
+        Thanks for helping improve EastGenesis. Security vulnerabilities and leaked credentials must be reported privately through SECURITY.md, not here.
 
-        感谢帮助改进 CaoGen。安全漏洞和凭据泄露请按 SECURITY.md 私下报告，不要发布在公开 Issue。
+        感谢帮助改进 EastGenesis。安全漏洞和凭据泄露请按 SECURITY.md 私下报告，不要发布在公开 Issue。
 
   - type: input
     id: version
     attributes:
-      label: CaoGen version / CaoGen 版本
+      label: EastGenesis version / EastGenesis 版本
       description: Release tag, commit SHA, or branch name / Release 标签、commit SHA 或分支名
       placeholder: v0.1.6 or 21051cab
     validations:

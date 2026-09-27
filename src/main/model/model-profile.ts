@@ -151,7 +151,13 @@ export function inferTaskProfile(input: TaskProfileInput): TaskProfile {
     requested.add('review')
   }
   if ((input.contextTokens ?? 0) > 96_000 || hasAny(prompt, ['长上下文', 'large context', '全仓'])) requested.add('longContext')
-  if (input.requiresTools || hasAny(prompt, ['tool', 'shell', '文件', '执行', '读取'])) requested.add('toolUse')
+  // Generic task language such as “执行任务” is still ordinary text work.
+  // Require an explicit tool/file/shell intent so automatic routing can send a
+  // first natural-language request through a newly connected chat model.
+  if (input.requiresTools || hasAny(prompt, [
+    'tool', 'shell', 'terminal', '命令行', '执行命令', '执行脚本', '运行命令', '运行脚本',
+    '文件', '读取文件', '写入文件', '编辑文件', 'run command', 'run script'
+  ])) requested.add('toolUse')
 
   const requiresVision = (input.attachments ?? []).some((item) => item.mime.startsWith('image/'))
   if (requiresVision) requested.add('vision')

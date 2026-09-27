@@ -47,7 +47,7 @@
 .sidebar-personal-trigger { display: flex; align-items: center; width: 100%; gap: 9px; min-height: 34px; padding: 3px 5px; border: 0; border-radius: 8px; background: transparent; color: var(--text); text-align: left; cursor: pointer; font-size: 12px; }
 .sidebar-personal-trigger:hover, .sidebar-personal-trigger[aria-expanded='true'] { background: var(--desktop-hover, var(--bg-hover)); }
 .sidebar-personal-trigger > span:nth-child(2) { flex: 1; }
-.sidebar-personal-avatar { display: grid; place-items: center; flex-shrink: 0; width: 23px; height: 23px; border-radius: 50%; background: #a94437; color: #fff4ed; font-size: 10px; }
+.sidebar-personal-brand-mark { display: block; flex: 0 0 23px; width: 23px; height: 23px; border-radius: 7px; object-fit: cover; }
 .sidebar-personal-menu { position: absolute; z-index: 120; left: 8px; right: 8px; bottom: calc(100% - 2px); padding: 8px 5px; border: 1px solid #ffffff18; border-radius: 16px; background: var(--desktop-input, var(--bg-card)); box-shadow: 0 10px 36px #0004; max-height: calc(100dvh - 105px); overflow-y: auto; }
 .sidebar-personal-identity { display: flex; align-items: center; gap: 9px; margin: 0 8px 7px; padding: 4px 0 12px; border-bottom: 1px solid var(--border); }
 .sidebar-personal-identity strong, .sidebar-personal-identity small { display: block; font-size: 12px; font-weight: 400; }
@@ -73,6 +73,9 @@
 .caogen-desktop-shell .welcome { position: relative; overflow: auto; background: radial-gradient(circle at 58% 40%, #d600000d, transparent 38%), var(--desktop-main); }
 .caogen-desktop-shell .first-launch-onboarding { position: absolute; z-index: 30; inset: 0; display: grid; place-items: center; padding: 24px; background: #080808b8; backdrop-filter: blur(7px); }
 .caogen-desktop-shell .first-launch-onboarding-card { width: min(520px, 100%); padding: 25px 27px 21px; border: 1px solid #FFC70066; border-radius: 20px; background: linear-gradient(145deg, #2d2a25, #211f1c); box-shadow: 0 24px 70px #0008, 0 0 0 1px #D6000022; color: #fff; }
+.caogen-desktop-shell .first-launch-onboarding-card.first-launch-onboarding-setup { width: min(760px, 100%); max-height: calc(100% - 24px); padding: 0; overflow: auto; }
+.caogen-desktop-shell .first-launch-onboarding-setup .provider-editor { padding: 22px 24px 20px; }
+.caogen-desktop-shell .first-launch-onboarding-setup .provider-quick-setup { max-width: none; }
 .caogen-desktop-shell .first-launch-onboarding-kicker { display: flex; align-items: center; gap: 7px; color: #FFC700; font-size: 12px; font-weight: 600; letter-spacing: .4px; }
 .caogen-desktop-shell .first-launch-onboarding-card h2 { margin: 13px 0 8px; font-size: clamp(23px, 2.3vw, 29px); line-height: 1.25; letter-spacing: -.5px; }
 .caogen-desktop-shell .first-launch-onboarding-lede { margin: 0; color: #d7d0c8; font-size: 13px; line-height: 1.7; }

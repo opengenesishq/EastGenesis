@@ -1,4 +1,6 @@
-# V2-014 Run Detail Delivery Recovery Gate
+# V2-014 Run Detail Delivery Recovery Gate (历史兼容)
+
+> 这是旧 Studio/Work OS 的历史验证文档。EastGenesis 当前首屏已收敛为一句话对话工作台，旧入口不再出现在主导航；本文仅保留用于读取旧数据和回归底层账本。
 
 V2-014 binds the Studio Run detail surface to one canonical identity across
 Run status, Acceptance, Recovery, and Delivery. The local gate launches the

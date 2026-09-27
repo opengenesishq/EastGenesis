@@ -4,9 +4,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Ask about installation, provider setup, or a current CaoGen workflow. For a reproducible product defect, use the Bug Report issue form instead. Never post API keys or tokens.
+        Ask about installation, provider setup, or a current EastGenesis workflow. For a reproducible product defect, use the Bug Report issue form instead. Never post API keys or tokens.
 
-        可在这里询问安装、Provider 配置或当前 CaoGen 工作流。可稳定复现的产品缺陷请改用 Bug Report Issue 表单。不要发布 API Key 或 Token。
+        可在这里询问安装、Provider 配置或当前 EastGenesis 工作流。可稳定复现的产品缺陷请改用 Bug Report Issue 表单。不要发布 API Key 或 Token。
 
   - type: input
     id: version
