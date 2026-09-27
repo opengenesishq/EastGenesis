@@ -294,6 +294,12 @@ async function main() {
       await page.waitForSelector('[data-studio-result-current-artifacts]', { visible: true, timeout: 20_000 })
       const artifactPanelText = await page.$eval('[data-studio-result-current-artifacts]', node => node.textContent || '')
       check(/办公闭环摘要|eastgenesis-office-loopback\.docx/i.test(artifactPanelText), 'result panel did not show the generated Office artifact')
+      const openArtifact = await page.$('[data-studio-result-current-artifacts] .studio-result-location button')
+      check(openArtifact, 'result panel did not expose an Open action for the generated Office artifact')
+      await openArtifact.click()
+      await page.waitForSelector('.preview-panel', { visible: true, timeout: 20_000 })
+      const previewText = await page.$eval('.preview-panel', node => node.textContent || '')
+      check(/eastgenesis-office-loopback\.docx/i.test(previewText), 'Open action did not load the generated Office artifact in preview')
       report.officeArtifact = {
         path: artifactCandidates[0],
         bytes: artifactBytes.byteLength,

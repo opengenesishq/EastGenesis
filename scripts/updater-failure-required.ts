@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { classifyUpdaterFailure } from '../src/main/updater-error'
+import { classifyUpdaterFailure } from '../src/main/updater-error.js'
 
 const root = path.resolve(process.env.CAOGEN_REPO_ROOT || process.cwd())
 const outputDir = path.join(root, 'test-results', 'updater-failure')
