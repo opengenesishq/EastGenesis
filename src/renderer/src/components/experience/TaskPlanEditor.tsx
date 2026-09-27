@@ -135,8 +135,8 @@ function TaskPlanStepsEditor({ t, form, setForm, canEdit }: EditorSectionProps):
                 onChange={event => updatePlanStep(setForm, index, { role: event.target.value || undefined })}
                 onBlur={event => updatePlanStep(setForm, index, { role: event.target.value.trim() || undefined })} />
             </label>
-            <p>{english ? 'Uses the institution mappings recorded for this goal. Changing this ID does not grant tools, command access or data permissions.'
-              : '使用此目标已记录的机构映射。填写角色 ID 不会授予工具、命令或数据权限。'}</p>
+            <p>{english ? 'Uses the work assignment recorded for this goal. Changing this ID does not grant tools, command access or data permissions.'
+              : '使用此目标记录的工作分配。填写角色 ID 不会授予工具、命令或数据权限。'}</p>
           </details>
         </div>
       ))}
