@@ -7,7 +7,7 @@
 ## 基线
 
 - 当前源码 checkout（历史目录名：`CaoGen-source`）。
-- 当前功能提交：`1cad71a test: include PDF delivery requirements gate`（工作树 clean）。
+- 当前功能提交：`3c59b0c docs: record PDF and Office delivery evidence`（工作树 clean）。
 - 产品版本：`0.1.9`。
 - 运行时：Electron `44.4.5`，TypeScript `5.9.3`。
 - `npm test` 已统一为基线（类型检查/生产构建）、Product Launch Fixture、Context Pack（含 Electron 重启运行时）、Provider 身份/onboarding/首启快速配置、Capability Card/health contract、integration harness 与本地 mock runtime、Recovery Route 与本地 Recovery runtime、空验收 fail-closed、计划确认、Mission Compiler、Mission→TaskPlan 适配、Work Inbox、变更影响事务与 source recall、Golden evidence harness/session runner、Office 交付与 PDF 需求证据、packaged UI/task/failover loopback；各门禁均写入对应 `test-results/*/latest.json` 报告，未把这些报告当作 Provider、真人或签名发布证据。3D/宫苑不在当前产品路径。
