@@ -170,6 +170,11 @@ export function builtinMcpServerTemplates(): Record<string, McpServerConfig> {
       command: 'npx',
       args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
       transport: 'stdio'
+    },
+    // You.com 托管的网页搜索 server；free profile 免 API Key，与本地模板同样开箱即用。
+    youSearch: {
+      url: 'https://api.you.com/mcp?profile=free',
+      transport: 'http'
     }
   }
 }
@@ -194,7 +199,12 @@ function createHttpClient(config: McpServerConfig, timeoutMs: number): McpClient
         const body: JsonRpcRequest = { jsonrpc: '2.0', id: requestId, method, ...(params === undefined ? {} : { params }) }
         const { response } = await requestMcpNetworkUrl(url, {
           method: 'POST',
-          headers: { 'content-type': 'application/json', ...await mcpRuntimeHeaders(config) },
+          headers: {
+            'content-type': 'application/json',
+            // Streamable HTTP 规范要求同时接受 JSON 与 SSE 两种响应类型。
+            accept: 'application/json, text/event-stream',
+            ...await mcpRuntimeHeaders(config)
+          },
           body: JSON.stringify(body),
           signal: controller.signal
         })
@@ -277,7 +287,11 @@ function createSseClient(config: McpServerConfig, timeoutMs: number): McpClient 
         pending.set(requestId, { resolve: resolvePromise, reject: rejectPromise, timer })
         void requestAuthorizedMcpUrl(target as AuthorizedMcpNetworkTarget, endpoint as URL, {
           method: 'POST',
-          headers: { 'content-type': 'application/json', ...headers },
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+            ...headers
+          },
           body: JSON.stringify(payload),
           signal: controller.signal
         }).then(async ({ response }) => {
